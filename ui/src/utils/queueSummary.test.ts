@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { QueueSummaryResponse, ServiceEntry } from "../api/chain";
 import {
+  aggregateQueueBuckets,
   alignQueueBuckets,
   detectQueueBacklogSignals,
   isQueueSummaryStale,
+  queueAggregateMaxBucketTotal,
+  queueNextBucketRefreshAt,
+  queueSingleShareWindowStart,
   queueSummaryMaxBucketTotal,
   queueSummaryTotals,
   splitQueueResults,
@@ -92,6 +96,44 @@ describe("queue summary helpers", () => {
     expect(aligned[2].byServer[serverB.url]?.pending_future).toBe(1);
   });
 
+  it("aggregates aligned bucket windows across selected servers", () => {
+    const a: QueueServerOK = { state: "ok", server: serverA, summary: summary() };
+    const b: QueueServerOK = {
+      state: "ok",
+      server: serverB,
+      summary: summary({
+        buckets: [
+          {
+            start: 1060,
+            end: 1120,
+            submitted: 9,
+            pending_future: 0,
+            overdue_pending: 0,
+            processing: 0,
+            failed: 0,
+            total: 9,
+          },
+          {
+            start: 1120,
+            end: 1180,
+            submitted: 0,
+            pending_future: 1,
+            overdue_pending: 0,
+            processing: 0,
+            failed: 0,
+            total: 1,
+          },
+        ],
+      }),
+    };
+
+    const buckets = aggregateQueueBuckets([a, b]);
+    expect(buckets.map((bucket) => bucket.total)).toEqual([6, 16, 1]);
+    expect(buckets[1].submitted).toBe(11);
+    expect(buckets[1].pending_future).toBe(4);
+    expect(queueAggregateMaxBucketTotal(buckets)).toBe(16);
+  });
+
   it("summarizes totals and chart scale", () => {
     const s = summary();
     expect(queueSummaryTotals(s)).toEqual({
@@ -103,6 +145,13 @@ describe("queue summary helpers", () => {
       total: 13,
     });
     expect(queueSummaryMaxBucketTotal([s])).toBe(7);
+  });
+
+  it("uses the short-round single-share window policy", () => {
+    expect(queueSingleShareWindowStart(1000, 1600)).toBe(1360);
+    expect(queueSingleShareWindowStart(1000, 4600)).toBe(3160);
+    expect(queueSingleShareWindowStart(1000, 8200)).toBe(8128);
+    expect(queueSingleShareWindowStart(1000, 1000)).toBeNull();
   });
 
   it("separates unavailable servers", () => {
@@ -172,5 +221,57 @@ describe("queue summary helpers", () => {
   it("does not flag fresh or stale-free summaries incorrectly", () => {
     expect(isQueueSummaryStale(summary({ generated_at: 1000, bucket_seconds: 60 }), 1201)).toBe(false);
     expect(isQueueSummaryStale(summary({ generated_at: 1000, bucket_seconds: 60 }), 1401)).toBe(true);
+  });
+
+  it("finds the next bucket boundary refresh time", () => {
+    const result: QueueServerOK = {
+      state: "ok",
+      server: serverA,
+      summary: summary({
+        generated_at: 1115,
+        buckets: [
+          {
+            start: 1000,
+            end: 1060,
+            submitted: 1,
+            pending_future: 0,
+            overdue_pending: 0,
+            processing: 0,
+            failed: 0,
+            total: 1,
+          },
+          {
+            start: 1060,
+            end: 1120,
+            submitted: 0,
+            pending_future: 0,
+            overdue_pending: 0,
+            processing: 1,
+            failed: 0,
+            total: 1,
+          },
+          {
+            start: 1120,
+            end: 1180,
+            submitted: 0,
+            pending_future: 1,
+            overdue_pending: 0,
+            processing: 0,
+            failed: 0,
+            total: 1,
+          },
+        ],
+      }),
+    };
+
+    expect(queueNextBucketRefreshAt([result], 1116)).toBe(1120);
+    expect(queueNextBucketRefreshAt([result], 1121)).toBe(1121);
+    expect(
+      queueNextBucketRefreshAt(
+        [{ ...result, summary: { ...result.summary, generated_at: 1121 } }],
+        1121
+      )
+    ).toBe(1180);
+    expect(queueNextBucketRefreshAt([], 1121)).toBeNull();
   });
 });

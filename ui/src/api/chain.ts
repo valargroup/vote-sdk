@@ -576,7 +576,8 @@ export async function getQueueSummaryFromServer(
 ): Promise<QueueSummaryResponse> {
   const base = serverUrl.replace(/\/+$/, "");
   return fetchJsonAtUrl<QueueSummaryResponse>(
-    `${base}/shielded-vote/v1/queue-summary/${encodeURIComponent(roundIdHex)}`
+    `${base}/shielded-vote/v1/queue-summary/${encodeURIComponent(roundIdHex)}`,
+    { cache: "no-store" }
   );
 }
 

@@ -3,29 +3,46 @@ import {
   AlertCircle,
   AlertTriangle,
   Activity,
-  BarChart3,
+  ChevronDown,
+  Clock,
   Loader2,
   RefreshCw,
-  Server,
 } from "lucide-react";
 import * as chainApi from "../api/chain";
-import type { QueueSummaryBucket, ServiceEntry } from "../api/chain";
+import type { ServiceEntry } from "../api/chain";
 import {
   QUEUE_STATE_META,
-  QUEUE_STATE_ORDER,
-  alignQueueBuckets,
+  aggregateQueueBuckets,
   detectQueueBacklogSignals,
   isQueueSummaryStale,
+  queueAggregateMaxBucketTotal,
+  queueNextBucketRefreshAt,
   queueSummaryDomain,
-  queueSummaryMaxBucketTotal,
   queueSummaryTotals,
   splitQueueResults,
+  type AggregatedQueueBucket,
   type QueueBacklogSignal,
   type QueueServerOK,
   type QueueServerResult,
+  type QueueStateKey,
 } from "../utils/queueSummary";
 
-const SERVER_COLORS = ["#4a9a4a", "#3b82f6", "#c4943a", "#a855f7", "#14b8a6", "#ec4899"];
+// Server colors live on a cool/muted palette so they don't collide with the
+// saturated state colors in QUEUE_STATE_META (green / blue / amber / purple /
+// red). Server identity and state identity stay on different hue families,
+// which keeps the histogram readable when bars are stacked by server.
+const SERVER_COLORS = [
+  "#6fa9b3",
+  "#8786c2",
+  "#b787ad",
+  "#5fa890",
+  "#a787c2",
+  "#c2a787",
+];
+const BACKLOG_SIGNAL_STROKE = "#e35d8a";
+const LAST_MINUTE_FILL = "#2a2f3a";
+const LAST_MINUTE_BORDER = "#7a8090";
+const AUTO_REFRESH_INTERVAL_MS = 30_000;
 
 function base64ToHex(b64: string): string {
   try {
@@ -66,6 +83,35 @@ function formatTime(seconds: number): string {
   });
 }
 
+function formatBucketRange(startSeconds: number, endSeconds: number): string {
+  const startDate = new Date(startSeconds * 1000);
+  const endDate = new Date(endSeconds * 1000);
+  const sameDay = startDate.toDateString() === endDate.toDateString();
+  if (sameDay) {
+    const endTime = endDate.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    return `${formatTime(startSeconds)} – ${endTime}`;
+  }
+  return `${formatTime(startSeconds)} – ${formatTime(endSeconds)}`;
+}
+
+function formatCountdown(targetSeconds: number, nowSeconds: number): string {
+  const diff = targetSeconds - nowSeconds;
+  if (!Number.isFinite(diff)) return "";
+  const abs = Math.abs(diff);
+  const days = Math.floor(abs / 86400);
+  const hours = Math.floor((abs % 86400) / 3600);
+  const minutes = Math.floor((abs % 3600) / 60);
+  const parts: string[] = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0 || days > 0) parts.push(`${hours}h`);
+  parts.push(`${minutes}m`);
+  const text = parts.join(" ");
+  return diff >= 0 ? `in ${text}` : `${text} ago`;
+}
+
 function shortUrl(url: string): string {
   return url.replace(/^https?:\/\//, "").replace(/\/+$/, "");
 }
@@ -73,6 +119,18 @@ function shortUrl(url: string): string {
 function serverLabel(server: ServiceEntry): string {
   return server.label || shortUrl(server.url);
 }
+
+// Bottom-to-top stacking order follows the share lifecycle:
+// submitted (already delivered) → future (window not open yet) → in-window
+// (window currently open) → overdue (window passed without delivery) →
+// failed (terminal). Alarm states climb toward the top.
+const STATE_STACK_ORDER: QueueStateKey[] = [
+  "submitted",
+  "pending_future",
+  "processing",
+  "overdue_pending",
+  "failed",
+];
 
 async function fetchQueueSummaries(
   servers: ServiceEntry[],
@@ -94,6 +152,117 @@ async function fetchQueueSummaries(
   );
 }
 
+type BucketHover = {
+  bucket: AggregatedQueueBucket;
+  x: number;
+  y: number;
+  containerWidth: number;
+  containerHeight: number;
+};
+
+function BucketTooltip({
+  bucket,
+  results,
+}: {
+  bucket: AggregatedQueueBucket;
+  results: QueueServerOK[];
+}) {
+  return (
+    <>
+      <div className="mb-2 flex items-baseline justify-between gap-3 border-b border-border-subtle/60 pb-1.5">
+        <span className="text-[10px] font-semibold text-text-primary">
+          {formatBucketRange(bucket.start, bucket.end)}
+        </span>
+        <span className="whitespace-nowrap font-mono text-[10px] text-text-muted">
+          total {bucket.total.toLocaleString()}
+        </span>
+      </div>
+      <div className="space-y-2">
+        {[...STATE_STACK_ORDER]
+          .reverse()
+          .filter((state) => bucket[state] > 0)
+          .map((state) => {
+            const value = bucket[state];
+            const contribs = results
+              .map((result) => {
+                const sb = bucket.byServer[result.server.url];
+                const count = sb ? sb[state] : 0;
+                return count > 0 ? { label: serverLabel(result.server), count } : null;
+              })
+              .filter((c): c is { label: string; count: number } => c !== null);
+            return (
+              <div key={state}>
+                <div className="flex items-baseline gap-2 text-[10px]">
+                  <span
+                    aria-hidden
+                    className="h-2 w-2 shrink-0 translate-y-px rounded-sm"
+                    style={{ backgroundColor: QUEUE_STATE_META[state].color }}
+                  />
+                  <span className="font-semibold text-text-secondary">
+                    {QUEUE_STATE_META[state].label}
+                  </span>
+                  <span className="ml-auto font-mono text-text-primary">
+                    {value.toLocaleString()}
+                  </span>
+                </div>
+                {contribs.length > 0 && (
+                  <div className="mt-1 ml-3.5 space-y-0.5 text-[10px]">
+                    {contribs.map((c) => (
+                      <div key={c.label} className="flex items-baseline gap-2">
+                        <span className="truncate text-text-muted">{c.label}</span>
+                        <span className="ml-auto font-mono text-text-secondary">
+                          {c.count.toLocaleString()}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+      </div>
+    </>
+  );
+}
+
+function BucketHoverOverlay({
+  hover,
+  results,
+}: {
+  hover: BucketHover;
+  results: QueueServerOK[];
+}) {
+  const tooltipMaxWidth = 260;
+  // Rough estimate; the tooltip's actual height varies with content density.
+  // We only use it to decide whether to flip the panel above the cursor,
+  // and being a little off just means a small gap or overlap — never broken.
+  const tooltipEstimatedHeight = 220;
+  const flipLeft =
+    hover.containerWidth > 0 &&
+    hover.x + tooltipMaxWidth + 24 > hover.containerWidth;
+  const flipUp =
+    hover.containerHeight > 0 &&
+    hover.y + tooltipEstimatedHeight + 24 > hover.containerHeight;
+  const transformParts: string[] = [];
+  if (flipLeft) transformParts.push("translateX(-100%)");
+  if (flipUp) transformParts.push("translateY(-100%)");
+  return (
+    <div
+      role="tooltip"
+      className="pointer-events-none absolute z-10 rounded-lg border border-border-subtle bg-surface-3/95 px-3 py-2 shadow-xl backdrop-blur-sm"
+      style={{
+        left: hover.x + (flipLeft ? -12 : 12),
+        top: hover.y + (flipUp ? -12 : 12),
+        transform: transformParts.length > 0 ? transformParts.join(" ") : undefined,
+        minWidth: "200px",
+        maxWidth: `${tooltipMaxWidth}px`,
+      }}
+    >
+      <BucketTooltip bucket={hover.bucket} results={results} />
+    </div>
+  );
+}
+
 function QueueHistogram({
   results,
   backlogSignals,
@@ -103,30 +272,42 @@ function QueueHistogram({
   backlogSignals: QueueBacklogSignal[];
   nowSeconds: number;
 }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [hover, setHover] = useState<BucketHover | null>(null);
   const summaries = results.map((result) => result.summary);
   const domain = queueSummaryDomain(summaries);
-  const aligned = alignQueueBuckets(results);
-  const maxTotal = queueSummaryMaxBucketTotal(summaries);
+  const buckets = aggregateQueueBuckets(results);
+  // Keep ~15% headroom above the tallest bar so chrome (the "now" label, the
+  // last-minute window title) never collides with a bar segment.
+  const maxTotal = Math.max(
+    1,
+    Math.ceil(queueAggregateMaxBucketTotal(buckets) * 1.15)
+  );
   const signalKeys = new Set(
-    backlogSignals.map((signal) => `${signal.serverUrl}:${signal.bucketStart}:${signal.bucketEnd}`)
+    backlogSignals.map((signal) => `${signal.bucketStart}:${signal.bucketEnd}`)
   );
 
   if (!domain || domain.end <= domain.start) return null;
 
   const width = 1080;
   const height = 340;
-  const margin = { top: 20, right: 24, bottom: 46, left: 42 };
+  const margin = { top: 20, right: 36, bottom: 46, left: 42 };
   const plotW = width - margin.left - margin.right;
   const plotH = height - margin.top - margin.bottom;
   const duration = domain.end - domain.start;
   const xForTime = (seconds: number) => margin.left + ((seconds - domain.start) / duration) * plotW;
   const yForValue = (value: number) => margin.top + plotH - (value / maxTotal) * plotH;
-  const serverSlot = (bucket: QueueSummaryBucket) => {
-    const bucketW = Math.max(2, xForTime(bucket.end) - xForTime(bucket.start));
-    return Math.max(2, bucketW / Math.max(results.length, 1));
-  };
 
-  const tickCount = Math.min(6, Math.max(2, aligned.length));
+  const lastMinuteStart =
+    domain.lastMinuteStart && domain.lastMinuteStart > domain.start && domain.lastMinuteStart < domain.end
+      ? domain.lastMinuteStart
+      : null;
+  const lastMinuteX = lastMinuteStart ? xForTime(lastMinuteStart) : null;
+  const lastMinuteWidth = lastMinuteStart
+    ? Math.max(1, xForTime(domain.end) - xForTime(lastMinuteStart))
+    : 0;
+
+  const tickCount = Math.min(6, Math.max(2, buckets.length));
   const ticks = Array.from({ length: tickCount }, (_, i) => {
     const ratio = tickCount === 1 ? 0 : i / (tickCount - 1);
     return Math.round(domain.start + duration * ratio);
@@ -134,51 +315,70 @@ function QueueHistogram({
 
   return (
     <div className="rounded-xl border border-border-subtle bg-surface-1 p-4">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-semibold text-text-primary">Share queue histogram</h2>
-          <p className="text-[10px] text-text-muted">
-            {formatTime(domain.start)} to {formatTime(domain.end)}
-          </p>
-        </div>
-        <div className="flex flex-wrap justify-end gap-2">
-          {QUEUE_STATE_ORDER.slice().reverse().map((state) => (
-            <span key={state} className="inline-flex items-center gap-1.5 text-[10px] text-text-secondary">
-              <span
-                className="h-2 w-2 rounded-sm"
-                style={{ backgroundColor: QUEUE_STATE_META[state].color }}
-              />
-              {QUEUE_STATE_META[state].label}
-            </span>
-          ))}
-        </div>
+      <div className="mb-3">
+        <h2 className="text-sm font-semibold text-text-primary">Shares by submit time</h2>
+        <p className="mt-1.5 text-[10px] text-text-muted">
+          Stacked by state. Hover any bucket for the per-helper breakdown.
+          {lastMinuteStart && (
+            <> Last minute begins {formatTime(lastMinuteStart)}.</>
+          )}
+        </p>
       </div>
 
-      <div className="overflow-x-auto">
+      <div
+        ref={containerRef}
+        className="relative"
+        onMouseLeave={() => setHover(null)}
+      >
+        <div className="overflow-x-auto">
         <svg viewBox={`0 0 ${width} ${height}`} className="min-w-[900px] w-full">
           <rect x={margin.left} y={margin.top} width={plotW} height={plotH} fill="#141414" rx={6} />
+
           {[0, 0.5, 1].map((ratio) => {
             const y = margin.top + plotH * ratio;
             const value = Math.round(maxTotal * (1 - ratio));
             return (
               <g key={ratio}>
                 <line x1={margin.left} x2={margin.left + plotW} y1={y} y2={y} stroke="#2a2a2a" />
-                <text x={margin.left - 8} y={y + 3} textAnchor="end" className="fill-text-muted text-[10px]">
+                <text
+                  x={margin.left - 8}
+                  y={y + 3}
+                  textAnchor="end"
+                  className="fill-text-muted text-[10px]"
+                >
                   {value}
                 </text>
               </g>
             );
           })}
 
-          {domain.lastMinuteStart && domain.lastMinuteStart < domain.end && (
-            <rect
-              x={xForTime(domain.lastMinuteStart)}
-              y={margin.top}
-              width={Math.max(1, xForTime(domain.end) - xForTime(domain.lastMinuteStart))}
-              height={plotH}
-              fill="#c4943a"
-              opacity={0.08}
-            />
+          {lastMinuteX !== null && (
+            <g>
+              <rect
+                x={lastMinuteX}
+                y={margin.top}
+                width={lastMinuteWidth}
+                height={plotH}
+                fill={LAST_MINUTE_FILL}
+                opacity={0.55}
+              />
+              <line
+                x1={lastMinuteX}
+                x2={lastMinuteX}
+                y1={margin.top}
+                y2={margin.top + plotH}
+                stroke={LAST_MINUTE_BORDER}
+                strokeDasharray="3 3"
+                opacity={0.85}
+              />
+              <text
+                x={lastMinuteX + 5}
+                y={margin.top - 6}
+                className="fill-text-secondary text-[10px]"
+              >
+                Last minute window
+              </text>
+            </g>
           )}
 
           {nowSeconds > domain.start && nowSeconds < domain.end && (
@@ -190,141 +390,272 @@ function QueueHistogram({
                 y2={margin.top + plotH}
                 stroke="#e8e0d4"
                 strokeDasharray="4 4"
-                opacity={0.75}
+                opacity={0.85}
               />
-              <text x={xForTime(nowSeconds) + 5} y={margin.top + 12} className="fill-text-secondary text-[10px]">
+              <text
+                x={xForTime(nowSeconds) + 5}
+                y={margin.top + 12}
+                className="fill-text-secondary text-[10px]"
+              >
                 now
               </text>
             </g>
           )}
 
-          {aligned.flatMap((window) =>
-            results.flatMap((result, serverIndex) => {
-              const bucket = window.byServer[result.server.url];
-              if (!bucket || bucket.total <= 0) return [];
-              const slot = serverSlot(bucket);
-              const barW = Math.max(1, Math.min(14, slot - 1));
-              const x = xForTime(bucket.start) + serverIndex * slot + Math.max(0, slot - barW) / 2;
-              let y = margin.top + plotH;
-              const signal = signalKeys.has(`${result.server.url}:${bucket.start}:${bucket.end}`);
+          {buckets.map((bucket) => {
+            if (bucket.total <= 0) return null;
+            // Bars span their full bucket window so adjacent buckets touch,
+            // giving the chart a continuous-timeline feel. The "now" line
+            // then cuts cleanly through whichever bucket contains it
+            // instead of falling into a gap.
+            const x = xForTime(bucket.start);
+            const barW = Math.max(1, xForTime(bucket.end) - x);
+            let y = margin.top + plotH;
+            const signal = signalKeys.has(`${bucket.start}:${bucket.end}`);
 
-              const segments = QUEUE_STATE_ORDER.map((state) => {
-                const value = bucket[state];
-                if (value <= 0) return null;
-                const h = Math.max(1, margin.top + plotH - yForValue(value));
-                y -= h;
-                return (
-                  <rect
-                    key={`${result.server.url}:${bucket.start}:${state}`}
-                    x={x}
-                    y={y}
-                    width={barW}
-                    height={h}
-                    fill={QUEUE_STATE_META[state].color}
-                  />
-                );
+            const segments = STATE_STACK_ORDER.map((state) => {
+              const value = bucket[state];
+              if (value <= 0) return null;
+              const h = Math.max(1, margin.top + plotH - yForValue(value));
+              y -= h;
+              return (
+                <rect
+                  key={`${bucket.start}:${state}`}
+                  x={x}
+                  y={y}
+                  width={barW}
+                  height={h}
+                  fill={QUEUE_STATE_META[state].color}
+                  stroke="rgba(0,0,0,0.35)"
+                  strokeWidth={1}
+                  vectorEffect="non-scaling-stroke"
+                  pointerEvents="none"
+                />
+              );
+            });
+
+            const handleHover = (event: React.MouseEvent) => {
+              const node = containerRef.current;
+              if (!node) return;
+              const rect = node.getBoundingClientRect();
+              setHover({
+                bucket,
+                x: event.clientX - rect.left,
+                y: event.clientY - rect.top,
+                containerWidth: node.clientWidth,
+                containerHeight: node.clientHeight,
               });
+            };
+            const isHovered =
+              hover?.bucket.start === bucket.start &&
+              hover?.bucket.end === bucket.end;
 
-              return [
-                <g key={`${result.server.url}:${bucket.start}:${bucket.end}`}>
-                  {segments}
+            return (
+              <g key={`${bucket.start}:${bucket.end}`}>
+                <rect
+                  x={x}
+                  y={margin.top}
+                  width={barW}
+                  height={plotH}
+                  fill="transparent"
+                  pointerEvents="all"
+                  onMouseEnter={handleHover}
+                  onMouseMove={handleHover}
+                />
+                {isHovered && (
                   <rect
-                    x={x - 0.5}
-                    y={y - 0.5}
-                    width={barW + 1}
-                    height={margin.top + plotH - y + 1}
-                    fill="none"
-                    stroke={signal ? "#c4943a" : SERVER_COLORS[serverIndex % SERVER_COLORS.length]}
-                    strokeWidth={signal ? 2 : 1}
-                    opacity={signal ? 1 : 0.75}
+                    x={x}
+                    y={margin.top}
+                    width={barW}
+                    height={plotH}
+                    fill="rgba(255,255,255,0.07)"
+                    pointerEvents="none"
                   />
-                  <title>
-                    {serverLabel(result.server)} - {formatTime(bucket.start)} - total {bucket.total}
-                  </title>
-                </g>,
-              ];
-            })
-          )}
+                )}
+                {segments}
+                {signal && (
+                  <rect
+                    x={x - 1.5}
+                    y={y - 1.5}
+                    width={barW + 3}
+                    height={margin.top + plotH - y + 3}
+                    fill="none"
+                    stroke={BACKLOG_SIGNAL_STROKE}
+                    strokeWidth={2}
+                    pointerEvents="none"
+                  />
+                )}
+              </g>
+            );
+          })}
 
-          {ticks.map((tick) => (
-            <g key={tick}>
-              <line
-                x1={xForTime(tick)}
-                x2={xForTime(tick)}
-                y1={margin.top + plotH}
-                y2={margin.top + plotH + 5}
-                stroke="#6a6050"
-              />
-              <text
-                x={xForTime(tick)}
-                y={margin.top + plotH + 22}
-                textAnchor="middle"
-                className="fill-text-muted text-[10px]"
-              >
-                {formatTime(tick)}
-              </text>
-            </g>
-          ))}
+          {ticks.map((tick, idx) => {
+            const isFirst = idx === 0;
+            const isLast = idx === ticks.length - 1;
+            const anchor = isFirst ? "start" : isLast ? "end" : "middle";
+            return (
+              <g key={tick}>
+                <line
+                  x1={xForTime(tick)}
+                  x2={xForTime(tick)}
+                  y1={margin.top + plotH}
+                  y2={margin.top + plotH + 5}
+                  stroke="#6a6050"
+                />
+                <text
+                  x={xForTime(tick)}
+                  y={margin.top + plotH + 22}
+                  textAnchor={anchor}
+                  className="fill-text-muted text-[10px]"
+                >
+                  {formatTime(tick)}
+                </text>
+              </g>
+            );
+          })}
         </svg>
+        </div>
+        {hover && <BucketHoverOverlay hover={hover} results={results} />}
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center justify-end gap-x-3 gap-y-1 border-t border-border-subtle pt-3 text-[10px] text-text-secondary">
+        {STATE_STACK_ORDER.map((state) => (
+          <span key={state} className="inline-flex items-center gap-1.5">
+            <span
+              aria-hidden
+              className="h-2 w-2 rounded-sm"
+              style={{ backgroundColor: QUEUE_STATE_META[state].color }}
+            />
+            {QUEUE_STATE_META[state].label}
+          </span>
+        ))}
+        {backlogSignals.length > 0 && (
+          <span className="inline-flex items-center gap-1.5">
+            <span
+              aria-hidden
+              className="h-2 w-2 rounded-sm border-2"
+              style={{ borderColor: BACKLOG_SIGNAL_STROKE }}
+            />
+            Backlog growing
+          </span>
+        )}
       </div>
     </div>
   );
 }
 
-function ServerSummaryCard({
+function ServerChip({
+  server,
+  color,
+  selected,
+  onClick,
+}: {
+  server: ServiceEntry;
+  color: string;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={server.url}
+      className={`flex min-w-0 items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[11px] transition-colors ${
+        selected
+          ? "border-border-subtle bg-surface-1 text-text-primary"
+          : "border-border-subtle/40 bg-surface-2 text-text-muted hover:bg-surface-1"
+      }`}
+    >
+      <span
+        aria-hidden
+        className="h-2.5 w-2.5 shrink-0 rounded-full"
+        style={{
+          backgroundColor: selected ? color : "transparent",
+          boxShadow: selected ? "none" : `inset 0 0 0 1.5px ${color}`,
+        }}
+      />
+      <span className="truncate font-semibold">{serverLabel(server)}</span>
+      <span className="truncate text-[10px] text-text-muted">{shortUrl(server.url)}</span>
+    </button>
+  );
+}
+
+function ServerStatusRow({
   result,
-  index,
+  color,
   nowSeconds,
 }: {
   result: QueueServerResult;
-  index: number;
+  color: string;
   nowSeconds: number;
 }) {
   const label = serverLabel(result.server);
+
   if (result.state === "error") {
     return (
-      <div className="rounded-lg border border-danger/30 bg-danger/10 p-3">
-        <div className="flex items-center gap-2">
-          <AlertCircle size={14} className="text-danger" />
-          <h3 className="text-xs font-semibold text-text-primary">{label}</h3>
-        </div>
-        <p className="mt-1 text-[10px] text-text-muted break-all">{shortUrl(result.server.url)}</p>
-        <p className="mt-2 text-[11px] text-danger">{result.error}</p>
+      <div className="flex flex-wrap items-center gap-3 px-4 py-2 text-[11px]">
+        <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-danger" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-semibold text-text-primary">{label}</span>
+          <span className="block truncate text-[10px] text-text-muted">
+            {shortUrl(result.server.url)}
+          </span>
+        </span>
+        <span className="flex items-center gap-1.5 text-danger">
+          <AlertCircle size={12} className="shrink-0" />
+          <span className="break-all">{result.error}</span>
+        </span>
       </div>
     );
   }
 
   const totals = queueSummaryTotals(result.summary);
   const stale = isQueueSummaryStale(result.summary, nowSeconds);
-  return (
-    <div className="rounded-lg border border-border-subtle bg-surface-1 p-3">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <span
-            className="h-2.5 w-2.5 shrink-0 rounded-full"
-            style={{ backgroundColor: SERVER_COLORS[index % SERVER_COLORS.length] }}
-          />
-          <h3 className="truncate text-xs font-semibold text-text-primary">{label}</h3>
-        </div>
-        {stale && <span className="rounded-full bg-warning/10 px-2 py-0.5 text-[10px] text-warning">stale</span>}
-      </div>
-      <p className="mt-1 truncate text-[10px] text-text-muted" title={result.server.url}>
-        {shortUrl(result.server.url)}
-      </p>
-      <div className="mt-3 grid grid-cols-3 gap-2">
-        <Metric label="total" value={totals.total} />
-        <Metric label="submitted" value={totals.submitted} />
-        <Metric label="overdue" value={totals.overdue_pending + totals.processing} />
-      </div>
-    </div>
-  );
-}
 
-function Metric({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-md bg-surface-2 px-2 py-1.5">
-      <p className="text-[9px] uppercase tracking-wider text-text-muted">{label}</p>
-      <p className="mt-0.5 text-xs font-semibold text-text-primary">{value.toLocaleString()}</p>
+    <div className="flex flex-wrap items-center gap-3 px-4 py-2 text-[11px]">
+      <span
+        aria-hidden
+        className="h-2.5 w-2.5 shrink-0 rounded-full"
+        style={{ backgroundColor: color }}
+      />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-semibold text-text-primary">{label}</span>
+        <span className="block truncate text-[10px] text-text-muted">
+          {shortUrl(result.server.url)}
+        </span>
+      </span>
+      <span className="flex flex-wrap items-center gap-3 font-mono text-text-secondary">
+        <span>
+          <span className="mr-1 font-sans text-text-muted">total</span>
+          {totals.total.toLocaleString()}
+        </span>
+        <span>
+          <span className="mr-1 font-sans text-text-muted">submitted</span>
+          {totals.submitted.toLocaleString()}
+        </span>
+        <span>
+          <span className="mr-1 font-sans text-text-muted">future</span>
+          {totals.pending_future.toLocaleString()}
+        </span>
+        <span>
+          <span className="mr-1 font-sans text-text-muted">in-window</span>
+          {totals.processing.toLocaleString()}
+        </span>
+        <span className={totals.overdue_pending > 0 ? "text-warning" : ""}>
+          <span className="mr-1 font-sans text-text-muted">overdue</span>
+          {totals.overdue_pending.toLocaleString()}
+        </span>
+        <span className={totals.failed > 0 ? "text-danger" : ""}>
+          <span className="mr-1 font-sans text-text-muted">failed</span>
+          {totals.failed.toLocaleString()}
+        </span>
+        {stale && (
+          <span className="rounded-full bg-warning/10 px-2 py-0.5 font-sans text-[10px] text-warning">
+            stale
+          </span>
+        )}
+      </span>
     </div>
   );
 }
@@ -332,10 +663,13 @@ function Metric({ label, value }: { label: string; value: number }) {
 export function QueueMonitorPage() {
   const [rounds, setRounds] = useState<chainApi.ChainRound[]>([]);
   const [voteServers, setVoteServers] = useState<ServiceEntry[]>([]);
+  const [selectedServerUrls, setSelectedServerUrls] = useState<string[]>([]);
   const [selectedRoundId, setSelectedRoundId] = useState("");
   const [results, setResults] = useState<QueueServerResult[]>([]);
   const [backlogSignals, setBacklogSignals] = useState<QueueBacklogSignal[]>([]);
-  const [nowSeconds, setNowSeconds] = useState(0);
+  const [wallClockSeconds, setWallClockSeconds] = useState(() =>
+    Math.floor(Date.now() / 1000)
+  );
   const [loading, setLoading] = useState(false);
   const [metadataLoading, setMetadataLoading] = useState(true);
   const [error, setError] = useState("");
@@ -352,6 +686,40 @@ export function QueueMonitorPage() {
         .filter((round) => isRoundIdHex(round.id)),
     [rounds]
   );
+
+  const selectedServerUrlSet = useMemo(() => new Set(selectedServerUrls), [selectedServerUrls]);
+  const selectedVoteServers = useMemo(
+    () => voteServers.filter((server) => selectedServerUrlSet.has(server.url)),
+    [selectedServerUrlSet, voteServers]
+  );
+  const allServersSelected =
+    voteServers.length > 0 && selectedVoteServers.length === voteServers.length;
+
+  const serverColorMap = useMemo(() => {
+    const map = new Map<string, string>();
+    voteServers.forEach((server, idx) => {
+      map.set(server.url, SERVER_COLORS[idx % SERVER_COLORS.length]);
+    });
+    return map;
+  }, [voteServers]);
+  const serverColor = useCallback(
+    (url: string) => serverColorMap.get(url) ?? "#7a7a7a",
+    [serverColorMap]
+  );
+
+  const selectAllServers = useCallback(() => {
+    setSelectedServerUrls(voteServers.map((server) => server.url));
+  }, [voteServers]);
+
+  const clearSelectedServers = useCallback(() => {
+    setSelectedServerUrls([]);
+  }, []);
+
+  const toggleServer = useCallback((url: string) => {
+    setSelectedServerUrls((current) =>
+      current.includes(url) ? current.filter((item) => item !== url) : [...current, url]
+    );
+  }, []);
 
   const refreshMetadata = useCallback(async () => {
     setMetadataLoading(true);
@@ -378,7 +746,7 @@ export function QueueMonitorPage() {
 
   const refreshSummaries = useCallback(async () => {
     const roundIdHex = selectedRoundId.trim().toLowerCase();
-    if (!isRoundIdHex(roundIdHex) || voteServers.length === 0) {
+    if (!isRoundIdHex(roundIdHex) || selectedVoteServers.length === 0) {
       setResults([]);
       setBacklogSignals([]);
       return;
@@ -387,16 +755,11 @@ export function QueueMonitorPage() {
     setLoading(true);
     setError("");
     try {
-      const nextResults = await fetchQueueSummaries(voteServers, roundIdHex);
+      const nextResults = await fetchQueueSummaries(selectedVoteServers, roundIdHex);
       const split = splitQueueResults(nextResults);
       const previous = previousByRoundRef.current[roundIdHex] ?? [];
       const fetchedAt = Math.floor(Date.now() / 1000);
-      const nextSignals = detectQueueBacklogSignals(
-        previous,
-        split.ok,
-        fetchedAt
-      );
-      setNowSeconds(fetchedAt);
+      const nextSignals = detectQueueBacklogSignals(previous, split.ok, fetchedAt);
       previousByRoundRef.current[roundIdHex] = split.ok;
       setResults(nextResults);
       setBacklogSignals(nextSignals);
@@ -405,19 +768,80 @@ export function QueueMonitorPage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedRoundId, voteServers]);
+  }, [selectedRoundId, selectedVoteServers]);
+
+  const handleRefresh = useCallback(() => {
+    void refreshSummaries();
+    void refreshMetadata();
+  }, [refreshMetadata, refreshSummaries]);
 
   useEffect(() => {
     void refreshMetadata();
   }, [refreshMetadata]);
 
   useEffect(() => {
+    setSelectedServerUrls((current) => {
+      const urls = voteServers.map((server) => server.url);
+      if (urls.length === 0) return [];
+      if (current.length === 0) return urls;
+      const knownUrls = new Set(urls);
+      const kept = current.filter((url) => knownUrls.has(url));
+      return kept.length > 0 ? kept : urls;
+    });
+  }, [voteServers]);
+
+  useEffect(() => {
     void refreshSummaries();
   }, [refreshSummaries]);
 
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setWallClockSeconds(Math.floor(Date.now() / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   const split = splitQueueResults(results);
-  const selectedRound = rounds.find((round) => base64ToHex(round.vote_round_id ?? "") === selectedRoundId);
+  const aggregateBuckets = aggregateQueueBuckets(split.ok);
+  const nextBucketRefreshAt = queueNextBucketRefreshAt(split.ok, wallClockSeconds);
+  const sortedAggregateBuckets = useMemo(
+    () => [...aggregateBuckets].sort((a, b) => a.start - b.start),
+    [aggregateBuckets]
+  );
+  const selectedRound = rounds.find(
+    (round) => base64ToHex(round.vote_round_id ?? "") === selectedRoundId
+  );
   const totalServers = voteServers.length;
+  const voteEndSeconds = selectedRound ? Number(selectedRound.vote_end_time ?? 0) : 0;
+  const roundEnded = voteEndSeconds > 0 && wallClockSeconds > voteEndSeconds;
+  const autoRefreshActive =
+    !metadataLoading &&
+    !roundEnded &&
+    isRoundIdHex(selectedRoundId) &&
+    selectedVoteServers.length > 0;
+
+  useEffect(() => {
+    if (!autoRefreshActive) return;
+    const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      void refreshSummaries();
+    }, AUTO_REFRESH_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [autoRefreshActive, refreshSummaries]);
+
+  useEffect(() => {
+    if (!autoRefreshActive || nextBucketRefreshAt === null) return;
+    const secondsUntilRefresh = nextBucketRefreshAt - Math.floor(Date.now() / 1000);
+    const delayMs =
+      nextBucketRefreshAt <= wallClockSeconds
+        ? 250
+        : Math.max(1_000, secondsUntilRefresh * 1_000 + 1_000);
+    const timeout = window.setTimeout(() => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      void refreshSummaries();
+    }, delayMs);
+    return () => window.clearTimeout(timeout);
+  }, [autoRefreshActive, nextBucketRefreshAt, refreshSummaries, wallClockSeconds]);
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -435,22 +859,26 @@ export function QueueMonitorPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {autoRefreshActive && (
+              <span
+                className="inline-flex items-center gap-1.5 pr-1 text-[10px] text-text-muted"
+                title="Auto-refreshing every 30s while this tab is visible"
+              >
+                <span
+                  aria-hidden
+                  className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent"
+                />
+                Live
+              </span>
+            )}
             <button
               type="button"
-              onClick={() => void refreshMetadata()}
+              onClick={handleRefresh}
               disabled={metadataLoading || loading}
-              className="inline-flex items-center gap-2 rounded-lg bg-surface-2 px-3 py-2 text-[11px] font-semibold text-text-secondary transition-colors hover:bg-surface-3 disabled:opacity-50"
-            >
-              <Server size={13} />
-              Reload config
-            </button>
-            <button
-              type="button"
-              onClick={() => void refreshSummaries()}
-              disabled={metadataLoading || loading || !isRoundIdHex(selectedRoundId)}
+              title="Refresh queue summaries immediately and reload the rounds list and helper config"
               className="inline-flex items-center gap-2 rounded-lg bg-accent/90 px-3 py-2 text-[11px] font-semibold text-surface-0 transition-colors hover:bg-accent disabled:opacity-50"
             >
-              <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+              <RefreshCw size={13} className={metadataLoading || loading ? "animate-spin" : ""} />
               Refresh
             </button>
           </div>
@@ -464,17 +892,25 @@ export function QueueMonitorPage() {
         )}
 
         <section className="mb-5 rounded-xl border border-border-subtle bg-surface-1 p-4">
-          <div className="grid gap-3 lg:grid-cols-[minmax(260px,420px)_minmax(320px,1fr)]">
-            <label className="block">
-              <span className="mb-1 block text-[10px] uppercase tracking-wider text-text-muted">Round</span>
+          <div className="grid gap-3 lg:grid-cols-[minmax(260px,1fr)_33rem]">
+            <label className="block min-w-0">
+              <span className="mb-1 block text-[10px] uppercase tracking-wider text-text-muted">
+                Round
+              </span>
               <select
-                value={roundOptions.some((round) => round.id === selectedRoundId) ? selectedRoundId : ""}
+                value={
+                  roundOptions.some((round) => round.id === selectedRoundId)
+                    ? selectedRoundId
+                    : ""
+                }
                 onChange={(event) => setSelectedRoundId(event.target.value)}
                 disabled={metadataLoading || roundOptions.length === 0}
-                className="w-full rounded-lg border border-border-subtle bg-surface-2 px-3 py-2 text-xs text-text-primary outline-none [color-scheme:dark] disabled:opacity-50"
+                className="w-full truncate rounded-lg border border-border-subtle bg-surface-2 py-2 pl-3 pr-8 text-xs text-text-primary outline-none [color-scheme:dark] disabled:opacity-50"
               >
                 {metadataLoading && <option value="">Loading rounds...</option>}
-                {!metadataLoading && roundOptions.length === 0 && <option value="">No chain rounds found</option>}
+                {!metadataLoading && roundOptions.length === 0 && (
+                  <option value="">No chain rounds found</option>
+                )}
                 {!metadataLoading &&
                   roundOptions.map((round) => (
                     <option key={round.id} value={round.id}>
@@ -485,7 +921,9 @@ export function QueueMonitorPage() {
             </label>
 
             <label className="block">
-              <span className="mb-1 block text-[10px] uppercase tracking-wider text-text-muted">Round ID</span>
+              <span className="mb-1 block text-[10px] uppercase tracking-wider text-text-muted">
+                Round ID
+              </span>
               <input
                 value={selectedRoundId}
                 onChange={(event) => setSelectedRoundId(event.target.value.trim())}
@@ -494,15 +932,76 @@ export function QueueMonitorPage() {
               />
             </label>
           </div>
-          {selectedRound && (
+          {selectedRound && voteEndSeconds > 0 && (
             <p className="mt-2 text-[11px] text-text-muted">
-              {selectedRound.title || selectedRound.description || "Selected round"} - voting ends{" "}
-              {formatTime(Number(selectedRound.vote_end_time ?? 0))}
+              {selectedRound.title || selectedRound.description || "Selected round"} — voting{" "}
+              {roundEnded ? "ended" : "ends"} {formatTime(voteEndSeconds)}
+              <span
+                className={`ml-1 ${roundEnded ? "text-text-muted" : "text-text-secondary"}`}
+              >
+                ({formatCountdown(voteEndSeconds, wallClockSeconds)})
+              </span>
             </p>
+          )}
+          {voteServers.length > 0 && !roundEnded && (
+            <div className="mt-3 rounded-lg border border-border-subtle bg-surface-2 p-3">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[10px] uppercase tracking-wider text-text-muted">
+                  Servers
+                </span>
+                <div className="flex items-center gap-2 text-[10px]">
+                  <span className="text-text-muted">
+                    {selectedVoteServers.length}/{voteServers.length} selected
+                  </span>
+                  <button
+                    type="button"
+                    onClick={selectAllServers}
+                    disabled={allServersSelected}
+                    className="rounded-md bg-surface-3 px-2 py-1 font-semibold text-text-secondary transition-colors hover:bg-surface-1 disabled:opacity-45"
+                  >
+                    All
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearSelectedServers}
+                    disabled={selectedVoteServers.length === 0}
+                    className="rounded-md bg-surface-3 px-2 py-1 font-semibold text-text-secondary transition-colors hover:bg-surface-1 disabled:opacity-45"
+                  >
+                    None
+                  </button>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {voteServers.map((server) => (
+                  <ServerChip
+                    key={server.url}
+                    server={server}
+                    color={serverColor(server.url)}
+                    selected={selectedServerUrlSet.has(server.url)}
+                    onClick={() => toggleServer(server.url)}
+                  />
+                ))}
+              </div>
+            </div>
           )}
         </section>
 
-        {backlogSignals.length > 0 && (
+        {roundEnded && (
+          <div className="mb-5 flex items-start gap-3 rounded-xl border border-border-subtle bg-surface-2 p-5">
+            <Clock size={20} className="mt-0.5 shrink-0 text-text-secondary" />
+            <div>
+              <p className="text-sm font-semibold text-text-primary">
+                Round ended {formatCountdown(voteEndSeconds, wallClockSeconds)}
+              </p>
+              <p className="mt-1 text-[11px] text-text-muted">
+                Helper servers purge share data after a round closes, so there's nothing to
+                display for this round. Pick a different round above to view its queue activity.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {backlogSignals.length > 0 && !roundEnded && (
           <div className="mb-5 rounded-lg border border-warning/30 bg-warning/10 p-3">
             <div className="flex items-start gap-2">
               <AlertTriangle size={15} className="mt-0.5 shrink-0 text-warning" />
@@ -530,91 +1029,136 @@ export function QueueMonitorPage() {
           <div className="rounded-xl border border-border-subtle bg-surface-1 p-6 text-center text-xs text-text-muted">
             No vote servers found in voting-config.
           </div>
+        ) : roundEnded ? null : selectedVoteServers.length === 0 ? (
+          <div className="rounded-xl border border-border-subtle bg-surface-1 p-6 text-center text-xs text-text-muted">
+            Select at least one vote server.
+          </div>
         ) : (
           <div className="space-y-5">
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {results.length === 0 && loading
-                ? voteServers.map((server) => (
-                    <div key={server.url} className="rounded-lg border border-border-subtle bg-surface-1 p-3">
-                      <div className="flex items-center gap-2 text-xs text-text-muted">
-                        <Loader2 size={14} className="animate-spin" />
-                        {serverLabel(server)}
-                      </div>
-                    </div>
-                  ))
-                : results.map((result, index) => (
-                    <ServerSummaryCard
-                      key={result.server.url}
-                      result={result}
-                      index={index}
-                      nowSeconds={nowSeconds}
-                    />
-                  ))}
-            </div>
-
             {split.ok.length > 0 ? (
-              <QueueHistogram results={split.ok} backlogSignals={backlogSignals} nowSeconds={nowSeconds} />
+              <QueueHistogram
+                results={split.ok}
+                backlogSignals={roundEnded ? [] : backlogSignals}
+                nowSeconds={wallClockSeconds}
+              />
             ) : (
               <div className="rounded-xl border border-border-subtle bg-surface-1 p-6 text-center text-xs text-text-muted">
-                No queue summaries available for this round.
+                {loading ? (
+                  <span className="inline-flex items-center gap-2">
+                    <Loader2 size={14} className="animate-spin" />
+                    Loading queue summaries…
+                  </span>
+                ) : roundEnded ? (
+                  "Share data has been purged from helpers since this round closed."
+                ) : (
+                  "No queue summaries available for this round."
+                )}
               </div>
             )}
 
-            {split.unavailable.length > 0 && (
-              <section className="rounded-xl border border-border-subtle bg-surface-1 p-4">
-                <div className="mb-3 flex items-center gap-2">
-                  <AlertCircle size={15} className="text-warning" />
-                  <h2 className="text-sm font-semibold text-text-primary">Unavailable servers</h2>
-                </div>
-                <div className="grid gap-2 md:grid-cols-2">
-                  {split.unavailable.map((result) => (
-                    <div key={result.server.url} className="rounded-lg bg-surface-2 p-3">
-                      <p className="text-xs font-semibold text-text-primary">{serverLabel(result.server)}</p>
-                      <p className="mt-1 break-all text-[10px] text-text-muted">{result.server.url}</p>
-                      <p className="mt-1 text-[11px] text-warning">{result.error}</p>
+            <section className="rounded-xl border border-border-subtle bg-surface-1">
+              <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border-subtle px-4 py-2.5">
+                <h2 className="text-sm font-semibold text-text-primary">Server status</h2>
+                <span className="text-[10px] text-text-muted">
+                  {split.ok.length} reporting · {split.unavailable.length} unavailable
+                </span>
+              </header>
+              <div className="divide-y divide-border-subtle/60">
+                {results.length === 0 && loading ? (
+                  selectedVoteServers.map((server) => (
+                    <div
+                      key={server.url}
+                      className="flex items-center gap-2 px-4 py-2 text-[11px] text-text-muted"
+                    >
+                      <Loader2 size={12} className="animate-spin" />
+                      {serverLabel(server)}
                     </div>
-                  ))}
-                </div>
-              </section>
-            )}
-
-            <section className="rounded-xl border border-border-subtle bg-surface-1 p-4">
-              <div className="mb-3 flex items-center gap-2">
-                <BarChart3 size={15} className="text-text-secondary" />
-                <h2 className="text-sm font-semibold text-text-primary">Aligned buckets</h2>
-              </div>
-              <div className="max-h-80 overflow-auto">
-                <table className="w-full text-[11px]">
-                  <thead className="sticky top-0 bg-surface-1 text-[10px] uppercase tracking-wider text-text-muted">
-                    <tr className="border-b border-border-subtle">
-                      <th className="px-2 py-2 text-left font-medium">Bucket</th>
-                      {split.ok.map((result) => (
-                        <th key={result.server.url} className="px-2 py-2 text-right font-medium">
-                          {serverLabel(result.server)}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {alignQueueBuckets(split.ok).map((bucket) => (
-                      <tr key={`${bucket.start}:${bucket.end}`} className="border-b border-border-subtle/60">
-                        <td className="whitespace-nowrap px-2 py-1.5 text-text-muted">
-                          {formatTime(bucket.start)}
-                        </td>
-                        {split.ok.map((result) => {
-                          const item = bucket.byServer[result.server.url];
-                          return (
-                            <td key={result.server.url} className="px-2 py-1.5 text-right font-mono text-text-secondary">
-                              {item ? item.total.toLocaleString() : "-"}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                  ))
+                ) : (
+                  results.map((result) => (
+                    <ServerStatusRow
+                      key={result.server.url}
+                      result={result}
+                      color={serverColor(result.server.url)}
+                      nowSeconds={wallClockSeconds}
+                    />
+                  ))
+                )}
               </div>
             </section>
+
+            {aggregateBuckets.length > 0 && (
+              <details className="group rounded-xl border border-border-subtle bg-surface-1">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-2.5 [&::-webkit-details-marker]:hidden">
+                  <span className="text-sm font-semibold text-text-primary">Bucket detail</span>
+                  <ChevronDown
+                    size={14}
+                    aria-hidden
+                    className="text-text-muted transition-transform duration-150 group-open:rotate-180"
+                  />
+                </summary>
+                <div className="max-h-80 overflow-auto border-t border-border-subtle">
+                  <table className="w-full text-[11px]">
+                    <thead className="sticky top-0 bg-surface-1 text-[10px] uppercase tracking-wider text-text-muted">
+                      <tr className="border-b border-border-subtle">
+                        <th className="px-3 py-2 text-left font-medium">Bucket</th>
+                        <th className="px-2 py-2 text-right font-medium">Total</th>
+                        <th className="px-2 py-2 text-right font-medium">
+                          {QUEUE_STATE_META.submitted.label}
+                        </th>
+                        <th className="px-2 py-2 text-right font-medium">
+                          {QUEUE_STATE_META.pending_future.label}
+                        </th>
+                        <th className="px-2 py-2 text-right font-medium">
+                          {QUEUE_STATE_META.processing.label}
+                        </th>
+                        <th className="px-2 py-2 text-right font-medium">
+                          {QUEUE_STATE_META.overdue_pending.label}
+                        </th>
+                        <th className="px-2 py-2 text-right font-medium">
+                          {QUEUE_STATE_META.failed.label}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedAggregateBuckets.map((bucket) => {
+                        const backlog = bucket.overdue_pending + bucket.processing;
+                        return (
+                          <tr
+                            key={`${bucket.start}:${bucket.end}`}
+                            className={`border-b border-border-subtle/40 ${
+                              backlog > 0 ? "bg-warning/10" : ""
+                            }`}
+                          >
+                            <td className="whitespace-nowrap px-3 py-1.5 text-text-muted">
+                              {formatTime(bucket.start)} – {formatTime(bucket.end)}
+                            </td>
+                            <td className="px-2 py-1.5 text-right font-mono text-text-primary">
+                              {bucket.total.toLocaleString()}
+                            </td>
+                            <td className="px-2 py-1.5 text-right font-mono text-text-secondary">
+                              {bucket.submitted.toLocaleString()}
+                            </td>
+                            <td className="px-2 py-1.5 text-right font-mono text-text-secondary">
+                              {bucket.pending_future.toLocaleString()}
+                            </td>
+                            <td className="px-2 py-1.5 text-right font-mono text-text-secondary">
+                              {bucket.processing.toLocaleString()}
+                            </td>
+                            <td className="px-2 py-1.5 text-right font-mono text-text-secondary">
+                              {bucket.overdue_pending.toLocaleString()}
+                            </td>
+                            <td className="px-2 py-1.5 text-right font-mono text-text-secondary">
+                              {bucket.failed.toLocaleString()}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            )}
           </div>
         )}
       </div>
