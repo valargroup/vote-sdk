@@ -900,6 +900,20 @@ export function QueueMonitorPage() {
     selectedVoteServers.length > 0;
 
   useEffect(() => {
+    if (typeof document === "undefined") return;
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return;
+      setWallClockSeconds(Math.floor(Date.now() / 1000));
+      void refreshMetadata({ background: true });
+      if (autoRefreshActive) {
+        void refreshSummaries();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [autoRefreshActive, refreshMetadata, refreshSummaries]);
+
+  useEffect(() => {
     if (!autoRefreshActive) return;
     const interval = setInterval(() => {
       if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
