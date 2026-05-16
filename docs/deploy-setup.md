@@ -157,7 +157,9 @@ the REST API port. It is configured in `app.toml` under `[helper]` (written by
 
 The queue summary endpoint reports only per-round bucketed counts across all
 proposals. It omits proposal IDs, vote decisions, share indices, nullifiers,
-tree positions, and exact submit times.
+tree positions, and exact submit times. Failed rows are reported immediately,
+including in open buckets, so operators can detect broken share processing
+without waiting for a bucket to close.
 
 ## Admin UI
 
