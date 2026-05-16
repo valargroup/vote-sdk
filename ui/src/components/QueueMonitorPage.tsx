@@ -122,6 +122,22 @@ function serverLabel(server: ServiceEntry): string {
   return server.label || shortUrl(server.url);
 }
 
+function sameServiceEntries(a: ServiceEntry[], b: ServiceEntry[]): boolean {
+  return a.length === b.length && a.every((entry, idx) => {
+    const other = b[idx];
+    return (
+      other !== undefined &&
+      entry.url === other.url &&
+      entry.label === other.label &&
+      entry.operator_address === other.operator_address
+    );
+  });
+}
+
+function sameStrings(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((value, idx) => value === b[idx]);
+}
+
 // Bottom-to-top stacking order follows the share lifecycle:
 // submitted (already delivered) → future (window not open yet) → in-window
 // (window currently open) → overdue (window passed without delivery) →
@@ -769,7 +785,9 @@ export function QueueMonitorPage() {
       const loadedRounds = roundResp.rounds ?? [];
       const loadedServers = config?.vote_servers ?? [];
       setRounds(loadedRounds);
-      setVoteServers(loadedServers);
+      setVoteServers((current) =>
+        sameServiceEntries(current, loadedServers) ? current : loadedServers
+      );
       setSelectedRoundId((current) => {
         if (isRoundIdHex(current)) return current;
         return defaultRoundId(loadedRounds);
@@ -835,14 +853,23 @@ export function QueueMonitorPage() {
   }, [refreshMetadata]);
 
   useEffect(() => {
-    invalidateSummaries();
     setSelectedServerUrls((current) => {
       const urls = voteServers.map((server) => server.url);
-      if (urls.length === 0) return [];
-      if (current.length === 0) return urls;
+      if (urls.length === 0) {
+        if (current.length === 0) return current;
+        invalidateSummaries();
+        return [];
+      }
+      if (current.length === 0) {
+        invalidateSummaries();
+        return urls;
+      }
       const knownUrls = new Set(urls);
       const kept = current.filter((url) => knownUrls.has(url));
-      return kept.length > 0 ? kept : urls;
+      const next = kept.length > 0 ? kept : urls;
+      if (sameStrings(current, next)) return current;
+      invalidateSummaries();
+      return next;
     });
   }, [invalidateSummaries, voteServers]);
 
