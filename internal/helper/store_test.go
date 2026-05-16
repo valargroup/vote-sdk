@@ -250,7 +250,7 @@ func TestQueueSummaryAggregatesStatesByBucket(t *testing.T) {
 	assert.Equal(t, 1, summary.Buckets[0].Submitted)
 	assert.Equal(t, 1, summary.Buckets[1].Processing)
 	assert.Equal(t, 1, summary.Buckets[1].OverduePending)
-	assert.Equal(t, 1, summary.Buckets[2].Processing)
+	assert.Equal(t, 1, summary.Buckets[2].Submitted)
 	assert.Equal(t, 1, summary.Buckets[4].PendingFuture)
 	assert.Equal(t, 1, summary.Buckets[5].Failed)
 
@@ -261,7 +261,7 @@ func TestQueueSummaryAggregatesStatesByBucket(t *testing.T) {
 	assert.Equal(t, 6, total)
 }
 
-func TestQueueSummaryMasksOpenBuckets(t *testing.T) {
+func TestQueueSummaryReportsCurrentBucketStates(t *testing.T) {
 	const roundID = "2222222222222222222222222222222222222222222222222222222222222222"
 	start := uint64(1700000000)
 	end := start + 10*60
@@ -302,16 +302,16 @@ func TestQueueSummaryMasksOpenBuckets(t *testing.T) {
 	assert.Equal(t, uint64(60), current.BucketSeconds)
 
 	currentBucket := current.Buckets[2]
-	assert.Equal(t, 0, currentBucket.Submitted)
-	assert.Equal(t, 0, currentBucket.PendingFuture)
-	assert.Equal(t, 0, currentBucket.OverduePending)
-	assert.Equal(t, 4, currentBucket.Processing)
+	assert.Equal(t, 1, currentBucket.Submitted)
+	assert.Equal(t, 1, currentBucket.PendingFuture)
+	assert.Equal(t, 1, currentBucket.OverduePending)
+	assert.Equal(t, 1, currentBucket.Processing)
 	assert.Equal(t, 1, currentBucket.Failed)
 	assert.Equal(t, 5, currentBucket.Total)
 
 	futureBucket := current.Buckets[4]
-	assert.Equal(t, 0, futureBucket.Submitted)
-	assert.Equal(t, 1, futureBucket.PendingFuture)
+	assert.Equal(t, 1, futureBucket.Submitted)
+	assert.Equal(t, 0, futureBucket.PendingFuture)
 	assert.Equal(t, 1, futureBucket.Total)
 
 	afterCurrent, err := s.QueueSummary(roundID, time.Unix(int64(start+181), 0))

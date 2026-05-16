@@ -825,23 +825,19 @@ func (s *ShareStore) QueueSummary(roundID string, now time.Time) (QueueSummary, 
 
 		idx := queueSummaryBucketIndex(effectiveTime, info.CreatedAtTime, info.VoteEndTime, bucketSeconds, bucketCount)
 		bucket := &summary.Buckets[idx]
-		shareState := ShareState(state)
-		switch {
-		case shareState == ShareStateFailed:
-			bucket.Failed += count
-		case bucket.End > generatedAt && bucket.Start <= generatedAt:
-			bucket.Processing += count
-		case bucket.Start > generatedAt:
-			bucket.PendingFuture += count
-		default:
-			switch shareState {
-			case ShareStateReceived:
+		switch ShareState(state) {
+		case ShareStateReceived:
+			if effectiveTime <= generatedAt {
 				bucket.OverduePending += count
-			case ShareStateWitnessed:
-				bucket.Processing += count
-			case ShareStateSubmitted:
-				bucket.Submitted += count
+			} else {
+				bucket.PendingFuture += count
 			}
+		case ShareStateWitnessed:
+			bucket.Processing += count
+		case ShareStateSubmitted:
+			bucket.Submitted += count
+		case ShareStateFailed:
+			bucket.Failed += count
 		}
 		bucket.Total += count
 	}
