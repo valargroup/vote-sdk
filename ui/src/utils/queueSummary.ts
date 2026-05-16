@@ -93,15 +93,8 @@ export function queueSingleShareWindowStart(start: number, end: number): number 
   if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
 
   const duration = end - start;
-  let window: number;
-  if (duration <= 60 * 60) {
-    window = Math.max(1, Math.floor(duration * 0.4));
-  } else {
-    window = Math.floor(duration / 100);
-    if (window < 60) window = 60;
-    if (window > 60 * 60) window = 60 * 60;
-    if (window > duration) window = duration;
-  }
+  const maxWindow = 6 * 60 * 60;
+  const window = Math.max(1, Math.floor(Math.min(duration * 0.4, maxWindow)));
 
   return end - window;
 }

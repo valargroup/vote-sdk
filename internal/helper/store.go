@@ -1086,28 +1086,18 @@ func queueSummaryPolicyBucketSeconds(durationSeconds uint64) uint64 {
 }
 
 // queueSummaryLastMinuteStart returns the start of the final public summary
-// window, scaled for short rounds and capped for longer rounds.
+// window. The window is 40% of the round duration, capped at 6 hours.
 func queueSummaryLastMinuteStart(createdAtTime, voteEndTime uint64) uint64 {
 	if voteEndTime <= createdAtTime {
 		return createdAtTime
 	}
 	duration := voteEndTime - createdAtTime
-	if duration <= queueSummaryHour {
-		window := duration * 40 / 100
-		if window < 1 {
-			window = 1
-		}
-		return voteEndTime - window
+	window := duration * 40 / 100
+	if window < 1 {
+		window = 1
 	}
-	window := duration / 100
-	if window < queueSummaryMinute {
-		window = queueSummaryMinute
-	}
-	if window > queueSummaryHour {
-		window = queueSummaryHour
-	}
-	if window > duration {
-		window = duration
+	if window > 6*queueSummaryHour {
+		window = 6 * queueSummaryHour
 	}
 	return voteEndTime - window
 }
