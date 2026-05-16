@@ -930,3 +930,64 @@ func TestImportQueueForceReadyPreservesOriginalSubmitAt(t *testing.T) {
 	require.Len(t, ready, 1)
 	assert.Equal(t, uint64(0), ready[0].Payload.SubmitAt)
 }
+
+func TestImportQueueForceReadyReschedulesDuplicate(t *testing.T) {
+	futureSubmitAt := uint64(time.Now().Add(time.Hour).Unix())
+	payload := testPayload("round1", 0)
+	export := QueueExport{
+		Version: QueueExportVersion,
+		RoundID: "round1",
+		Round: QueueExportRound{
+			CreatedAtTime: futureSubmitAt - oneHourSecs,
+			VoteEndTime:   futureSubmitAt + oneHourSecs,
+		},
+		Rows: []QueueExportRow{
+			{
+				ShareIndex:       payload.EncShare.ShareIndex,
+				SharesHash:       payload.SharesHash,
+				ProposalID:       payload.ProposalID,
+				VoteDecision:     payload.VoteDecision,
+				EncShare:         payload.EncShare,
+				TreePosition:     payload.TreePosition,
+				ShareComms:       payload.ShareComms,
+				PrimaryBlind:     payload.PrimaryBlind,
+				State:            ShareStateReceived,
+				VoteEndTime:      futureSubmitAt + oneHourSecs,
+				SubmitAt:         futureSubmitAt,
+				OriginalSubmitAt: futureSubmitAt,
+				Processable:      true,
+			},
+		},
+	}
+
+	dest := newTestStore(t)
+	result, err := dest.ImportQueue(export, QueueImportOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.Inserted)
+	assert.Empty(t, dest.TakeReady(), "normal import should respect the future submit_at")
+
+	result, err = dest.ImportQueue(export, QueueImportOptions{ForceReady: true})
+	require.NoError(t, err)
+	assert.Equal(t, 0, result.Inserted)
+	assert.Equal(t, 1, result.Duplicates)
+	assert.Equal(t, 0, result.Conflicts)
+
+	var submitAt, originalSubmitAt uint64
+	err = dest.db.QueryRow(
+		"SELECT submit_at, original_submit_at FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
+		"round1", 0, 1, 0,
+	).Scan(&submitAt, &originalSubmitAt)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(0), submitAt)
+	assert.Equal(t, futureSubmitAt, originalSubmitAt)
+
+	ready := dest.TakeReady()
+	require.Len(t, ready, 1)
+	assert.Equal(t, uint64(0), ready[0].Payload.SubmitAt)
+
+	result, err = dest.ImportQueue(export, QueueImportOptions{ForceReady: true})
+	require.NoError(t, err)
+	assert.Equal(t, 0, result.Inserted)
+	assert.Equal(t, 1, result.Duplicates)
+	assert.Equal(t, 0, result.Conflicts)
+}

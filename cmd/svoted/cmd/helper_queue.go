@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -62,17 +63,22 @@ func helperExportQueueCmd(dbPath *string) *cobra.Command {
 				return err
 			}
 
-			f, err := os.OpenFile(outPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+			f, err := os.OpenFile(outPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 			if err != nil {
+				if errors.Is(err, os.ErrExist) {
+					return fmt.Errorf("export file already exists: %s", outPath)
+				}
 				return fmt.Errorf("open export file: %w", err)
 			}
 			enc := json.NewEncoder(f)
 			enc.SetIndent("", "  ")
 			if err := enc.Encode(export); err != nil {
 				f.Close()
+				os.Remove(outPath)
 				return fmt.Errorf("write export file: %w", err)
 			}
 			if err := f.Close(); err != nil {
+				os.Remove(outPath)
 				return fmt.Errorf("close export file: %w", err)
 			}
 

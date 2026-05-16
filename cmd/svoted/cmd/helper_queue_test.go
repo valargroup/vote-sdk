@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -80,15 +81,52 @@ func TestHelperQueueCmdUsesHomeDefaultDBPath(t *testing.T) {
 	assert.Contains(t, output, "exported 1 queue rows")
 }
 
+func TestHelperQueueCmdExportRefusesExistingOutput(t *testing.T) {
+	roundID := strings.Repeat("ef", 32)
+	sourceDB := filepath.Join(t.TempDir(), "source.db")
+	outPath := filepath.Join(t.TempDir(), "queue.json")
+	now := uint64(time.Now().Unix())
+	fetcher := func(roundID string) (helper.RoundInfo, error) {
+		return helper.RoundInfo{CreatedAtTime: now, VoteEndTime: now + 3600}, nil
+	}
+
+	source, err := helper.NewShareStore(sourceDB, fetcher)
+	require.NoError(t, err)
+	result, err := source.Enqueue(queueCmdTestPayload(roundID, 0))
+	require.NoError(t, err)
+	require.Equal(t, helper.EnqueueInserted, result)
+	require.NoError(t, source.Close())
+
+	require.NoError(t, os.WriteFile(outPath, []byte("keep me"), 0o644))
+	_, err = executeHelperQueueCmdErr(t,
+		"--db-path", sourceDB,
+		"export-queue",
+		"--round-id", roundID,
+		"--out", outPath,
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "export file already exists")
+	raw, readErr := os.ReadFile(outPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, "keep me", string(raw))
+}
+
 func executeHelperQueueCmd(t *testing.T, args ...string) string {
+	t.Helper()
+	output, err := executeHelperQueueCmdErr(t, args...)
+	require.NoError(t, err)
+	return output
+}
+
+func executeHelperQueueCmdErr(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 	cmd := helperQueueCmd()
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	cmd.SetArgs(args)
-	require.NoError(t, cmd.Execute())
-	return out.String()
+	err := cmd.Execute()
+	return out.String(), err
 }
 
 func queueCmdTestPayload(roundID string, shareIndex uint32) helper.SharePayload {

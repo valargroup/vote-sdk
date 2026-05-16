@@ -927,12 +927,20 @@ func (s *ShareStore) ImportQueue(export QueueExport, opts QueueImportOptions) (Q
 			continue
 		}
 
-		duplicate, err := importRowMatchesExisting(tx, export.RoundID, row)
+		duplicate, existingState, err := importRowMatchesExisting(tx, export.RoundID, row)
 		if err != nil {
 			return QueueImportResult{}, err
 		}
 		if duplicate {
 			result.Duplicates++
+			if opts.ForceReady && isProcessableShareState(existingState) {
+				if err := forceReadyExistingImportRow(tx, export.RoundID, row, originalSubmitAt); err != nil {
+					return QueueImportResult{}, err
+				}
+				if existingState == ShareStateReceived {
+					schedule[schedKey(export.RoundID, row.ShareIndex, row.ProposalID, row.TreePosition)] = scheduledTime(0)
+				}
+			}
 		} else {
 			result.Conflicts++
 		}
@@ -963,13 +971,39 @@ func scheduledTime(submitAt uint64) time.Time {
 	return time.Unix(int64(submitAt), 0)
 }
 
+// forceReadyExistingImportRow moves an identical existing processable import row
+// into the immediate schedule while preserving the row's original submit time.
+func forceReadyExistingImportRow(tx *sql.Tx, roundID string, row QueueExportRow, originalSubmitAt uint64) error {
+	if _, err := tx.Exec(
+		`UPDATE shares
+		    SET submit_at = 0,
+		        original_submit_at = CASE
+		          WHEN original_submit_at = 0 THEN ?
+		          ELSE original_submit_at
+		        END
+		  WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?
+		    AND state IN (?, ?)`,
+		originalSubmitAt,
+		roundID,
+		row.ShareIndex,
+		row.ProposalID,
+		row.TreePosition,
+		ShareStateReceived,
+		ShareStateWitnessed,
+	); err != nil {
+		return fmt.Errorf("force ready existing share_index %d proposal_id %d tree_position %d: %w", row.ShareIndex, row.ProposalID, row.TreePosition, err)
+	}
+	return nil
+}
+
 // importRowMatchesExisting compares an import row against the existing queue row.
-func importRowMatchesExisting(tx *sql.Tx, roundID string, row QueueExportRow) (bool, error) {
+func importRowMatchesExisting(tx *sql.Tx, roundID string, row QueueExportRow) (bool, ShareState, error) {
 	var existing SharePayload
 	var commsJSON string
+	var state int
 	err := tx.QueryRow(
 		`SELECT shares_hash, vote_decision, enc_share_c1, enc_share_c2,
-		        share_comms, primary_blind
+		        share_comms, primary_blind, state
 		   FROM shares
 		  WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
 		roundID,
@@ -983,18 +1017,18 @@ func importRowMatchesExisting(tx *sql.Tx, roundID string, row QueueExportRow) (b
 		&existing.EncShare.C2,
 		&commsJSON,
 		&existing.PrimaryBlind,
+		&state,
 	)
 	if err != nil {
-		return false, fmt.Errorf("read existing share_index %d proposal_id %d tree_position %d: %w", row.ShareIndex, row.ProposalID, row.TreePosition, err)
+		return false, 0, fmt.Errorf("read existing share_index %d proposal_id %d tree_position %d: %w", row.ShareIndex, row.ProposalID, row.TreePosition, err)
 	}
 	existing.VoteRoundID = roundID
 	existing.ProposalID = row.ProposalID
 	existing.EncShare.ShareIndex = row.ShareIndex
 	existing.TreePosition = row.TreePosition
-	existing.SubmitAt = row.SubmitAt
 	if commsJSON != "" {
 		if err := json.Unmarshal([]byte(commsJSON), &existing.ShareComms); err != nil {
-			return false, fmt.Errorf("decode existing share_comms for share_index %d: %w", row.ShareIndex, err)
+			return false, 0, fmt.Errorf("decode existing share_comms for share_index %d: %w", row.ShareIndex, err)
 		}
 	}
 
@@ -1011,9 +1045,8 @@ func importRowMatchesExisting(tx *sql.Tx, roundID string, row QueueExportRow) (b
 		VoteRoundID:  roundID,
 		ShareComms:   row.ShareComms,
 		PrimaryBlind: row.PrimaryBlind,
-		SubmitAt:     row.SubmitAt,
 	}
-	return payloadEqual(existing, incoming), nil
+	return payloadEqual(existing, incoming), ShareState(state), nil
 }
 
 const (
