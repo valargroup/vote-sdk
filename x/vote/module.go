@@ -703,7 +703,7 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 
 // DefaultVoteManagerAddresses is the default vote-manager set used in DefaultGenesis.
 var DefaultVoteManagerAddresses = []string{
-	"sv1nl64q2u6g4ceue5r829ljs5qyc9t4jadk0fhpq",
+	"sv1wyf8tuys2ussdqwc6ugnvq0x273j8wq8fm3jrj",
 }
 
 // DefaultGenesis returns the default genesis state as raw JSON bytes.
