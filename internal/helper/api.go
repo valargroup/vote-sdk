@@ -314,6 +314,8 @@ func (h *apiHandler) handleQueueStatus(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(store.Status())
 }
 
+// handleQueueSummary writes the public coarse queue histogram for a single
+// round when the helper is configured to expose it.
 func (h *apiHandler) handleQueueSummary(w http.ResponseWriter, r *http.Request) {
 	if h.getExposeQueueSummary == nil || !h.getExposeQueueSummary() {
 		jsonError(w, "not found", http.StatusNotFound)

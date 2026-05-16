@@ -680,6 +680,8 @@ const (
 	queueSummaryDay    uint64 = 24 * queueSummaryHour
 )
 
+// queueSummaryPolicyBucketSeconds chooses the fixed bucket size for a round
+// based on the round's total voting duration.
 func queueSummaryPolicyBucketSeconds(durationSeconds uint64) uint64 {
 	switch {
 	case durationSeconds >= 21*queueSummaryDay:
@@ -695,6 +697,8 @@ func queueSummaryPolicyBucketSeconds(durationSeconds uint64) uint64 {
 	}
 }
 
+// queueSummaryLastMinuteStart returns the start of the final public summary
+// window, scaled for short rounds and capped for longer rounds.
 func queueSummaryLastMinuteStart(createdAtTime, voteEndTime uint64) uint64 {
 	if voteEndTime <= createdAtTime {
 		return createdAtTime
@@ -720,6 +724,8 @@ func queueSummaryLastMinuteStart(createdAtTime, voteEndTime uint64) uint64 {
 	return voteEndTime - window
 }
 
+// queueSummaryBucketIndex maps a timestamp into the bounded bucket range for
+// the round, clamping times outside the voting window to the nearest bucket.
 func queueSummaryBucketIndex(ts, createdAtTime, voteEndTime, bucketSeconds uint64, bucketCount int) int {
 	if bucketCount <= 1 || ts <= createdAtTime {
 		return 0
@@ -1071,8 +1077,13 @@ func payloadEqual(existing, incoming SharePayload) bool {
 func (s *ShareStore) getRoundInfo(roundID string) (RoundInfo, error) {
 	s.mu.Lock()
 	if info, ok := s.roundCache[roundID]; ok {
-		s.mu.Unlock()
-		return info, nil
+		if info.CreatedAtTime != 0 || s.fetchRoundInfo == nil {
+			s.mu.Unlock()
+			return info, nil
+		}
+		// Older helper DBs may have recovered a cache entry that only had
+		// vote_end_time. Refresh from the keeper so queue summaries can use the
+		// full round window.
 	}
 
 	// Check SQLite rounds table.

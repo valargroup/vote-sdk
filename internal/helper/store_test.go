@@ -2,6 +2,7 @@ package helper
 
 import (
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
@@ -582,6 +583,52 @@ func TestGetRoundEndTime_NilFetcher(t *testing.T) {
 	// With nil fetcher and no cache, should return ErrUnknownRound.
 	_, err = s.getRoundEndTime("round1")
 	assert.ErrorIs(t, err, ErrUnknownRound)
+}
+
+func TestQueueSummaryRefreshesLegacyRoundCache(t *testing.T) {
+	dbPath := t.TempDir() + "/legacy_round_cache.db"
+	roundID := strings.Repeat("3", 64)
+	start := uint64(1_700_000_000)
+	end := start + oneHourSecs
+
+	oldDB, err := sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+	_, err = oldDB.Exec(`
+		CREATE TABLE rounds (
+			round_id       TEXT PRIMARY KEY,
+			vote_end_time  INTEGER NOT NULL
+		)
+	`)
+	require.NoError(t, err)
+	_, err = oldDB.Exec("INSERT INTO rounds (round_id, vote_end_time) VALUES (?, ?)", roundID, end)
+	require.NoError(t, err)
+	require.NoError(t, oldDB.Close())
+
+	fetchCalls := 0
+	fetcher := func(gotRoundID string) (RoundInfo, error) {
+		fetchCalls++
+		require.Equal(t, roundID, gotRoundID)
+		return RoundInfo{CreatedAtTime: start, VoteEndTime: end}, nil
+	}
+
+	s, err := NewShareStore(dbPath, fetcher)
+	require.NoError(t, err)
+	defer s.Close()
+
+	summary, err := s.QueueSummary(roundID, time.Unix(int64(start+60), 0))
+	require.NoError(t, err)
+	assert.Equal(t, start, summary.CreatedAtTime)
+	assert.Equal(t, end, summary.VoteEndTime)
+	assert.Equal(t, 1, fetchCalls)
+
+	var cachedCreatedAt uint64
+	err = s.db.QueryRow("SELECT created_at_time FROM rounds WHERE round_id = ?", roundID).Scan(&cachedCreatedAt)
+	require.NoError(t, err)
+	assert.Equal(t, start, cachedCreatedAt)
+
+	_, err = s.QueueSummary(roundID, time.Unix(int64(start+120), 0))
+	require.NoError(t, err)
+	assert.Equal(t, 1, fetchCalls, "refreshed metadata should stay cached")
 }
 
 func TestMigrateOldSchema(t *testing.T) {
