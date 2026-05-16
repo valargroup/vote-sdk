@@ -361,7 +361,8 @@ type VoteRound struct {
 	TallyTimedOut     bool   `protobuf:"varint,27,opt,name=tally_timed_out,json=tallyTimedOut,proto3" json:"tally_timed_out,omitempty"`             // True if round was finalized via timeout (no decrypted results)
 	// DKG contributions (populated during Joint-Feldman DKG; replaces single-dealer fields once wired).
 	DkgContributions []*DKGContribution `protobuf:"bytes,28,rep,name=dkg_contributions,json=dkgContributions,proto3" json:"dkg_contributions,omitempty"`
-	DiscussionUrl    string             `protobuf:"bytes,29,opt,name=discussion_url,json=discussionUrl,proto3" json:"discussion_url,omitempty"` // Overall forum discussion link for the vote round
+	DiscussionUrl    string             `protobuf:"bytes,29,opt,name=discussion_url,json=discussionUrl,proto3" json:"discussion_url,omitempty"`    // Overall forum discussion link for the vote round
+	CreatedAtTime    uint64             `protobuf:"varint,30,opt,name=created_at_time,json=createdAtTime,proto3" json:"created_at_time,omitempty"` // Unix seconds when this round was registered on-chain
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -583,6 +584,13 @@ func (x *VoteRound) GetDiscussionUrl() string {
 		return x.DiscussionUrl
 	}
 	return ""
+}
+
+func (x *VoteRound) GetCreatedAtTime() uint64 {
+	if x != nil {
+		return x.CreatedAtTime
+	}
+	return 0
 }
 
 // VoteManagerSet stores the vote coordinator policy.
@@ -2250,7 +2258,7 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"\aoptions\x18\x04 \x03(\v2\x14.svote.v1.VoteOptionR\aoptions\x12\x1d\n" +
 	"\n" +
 	"zip_number\x18\x05 \x01(\tR\tzipNumber\x12\x1b\n" +
-	"\tforum_url\x18\x06 \x01(\tR\bforumUrl\"\xb3\t\n" +
+	"\tforum_url\x18\x06 \x01(\tR\bforumUrl\"\xdb\t\n" +
 	"\tVoteRound\x12\"\n" +
 	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\x12'\n" +
 	"\x0fsnapshot_height\x18\x02 \x01(\x04R\x0esnapshotHeight\x12-\n" +
@@ -2279,7 +2287,8 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"\x13tally_phase_timeout\x18\x1a \x01(\x04R\x11tallyPhaseTimeout\x12&\n" +
 	"\x0ftally_timed_out\x18\x1b \x01(\bR\rtallyTimedOut\x12F\n" +
 	"\x11dkg_contributions\x18\x1c \x03(\v2\x19.svote.v1.DKGContributionR\x10dkgContributions\x12%\n" +
-	"\x0ediscussion_url\x18\x1d \x01(\tR\rdiscussionUrlJ\x04\b\x11\x10\x12J\x04\b\x13\x10\x14\"L\n" +
+	"\x0ediscussion_url\x18\x1d \x01(\tR\rdiscussionUrl\x12&\n" +
+	"\x0fcreated_at_time\x18\x1e \x01(\x04R\rcreatedAtTimeJ\x04\b\x11\x10\x12J\x04\b\x13\x10\x14\"L\n" +
 	"\x0eVoteManagerSet\x12\x1c\n" +
 	"\taddresses\x18\x01 \x03(\tR\taddresses\x12\x1c\n" +
 	"\tthreshold\x18\x02 \x01(\rR\tthreshold\"\xb4\x02\n" +

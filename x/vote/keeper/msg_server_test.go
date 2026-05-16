@@ -297,6 +297,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 				s.Require().Equal(msg.Creator, round.Creator)
 				s.Require().Equal(msg.SnapshotHeight, round.SnapshotHeight)
 				s.Require().Equal(msg.VoteEndTime, round.VoteEndTime)
+				s.Require().Equal(uint64(s.ctx.BlockTime().Unix()), round.CreatedAtTime)
 				s.Require().Equal(types.SessionStatus_SESSION_STATUS_PENDING, round.Status)
 				s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, round.CeremonyStatus)
 

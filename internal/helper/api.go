@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"cosmossdk.io/log"
 	sentryhttp "github.com/getsentry/sentry-go/http"
@@ -55,19 +56,47 @@ func RegisterRoutesWithGetters(
 	getShareNullifier ShareNullifierCheckerGetter,
 	logger log.Logger,
 ) {
+	RegisterRoutesWithQueueSummaryGetters(
+		router,
+		getStore,
+		getAPIToken,
+		getExposeQueueStatus,
+		func() bool { return true },
+		getTree,
+		getVCHash,
+		getShareNullifier,
+		logger,
+	)
+}
+
+// RegisterRoutesWithQueueSummaryGetters registers helper routes including the
+// public queue summary controls.
+func RegisterRoutesWithQueueSummaryGetters(
+	router *mux.Router,
+	getStore func() *ShareStore,
+	getAPIToken func() string,
+	getExposeQueueStatus func() bool,
+	getExposeQueueSummary func() bool,
+	getTree func() TreeReader,
+	getVCHash func() VCHashFunc,
+	getShareNullifier ShareNullifierCheckerGetter,
+	logger log.Logger,
+) {
 	h := &apiHandler{
-		getStore:             getStore,
-		getAPIToken:          getAPIToken,
-		getExposeQueueStatus: getExposeQueueStatus,
-		getTree:              getTree,
-		getVCHash:            getVCHash,
-		getShareNullifier:    getShareNullifier,
-		logger:               logger,
+		getStore:              getStore,
+		getAPIToken:           getAPIToken,
+		getExposeQueueStatus:  getExposeQueueStatus,
+		getExposeQueueSummary: getExposeQueueSummary,
+		getTree:               getTree,
+		getVCHash:             getVCHash,
+		getShareNullifier:     getShareNullifier,
+		logger:                logger,
 	}
 	recover := sentryhttp.New(sentryhttp.Options{Repanic: false}).Handle
 	router.Handle("/shielded-vote/v1/shares", recover(http.HandlerFunc(h.handleSubmitShare))).Methods("POST")
 	router.Handle("/shielded-vote/v1/share-status/{roundId}/{nullifier}", recover(http.HandlerFunc(h.handleShareStatus))).Methods("GET")
 	router.Handle("/shielded-vote/v1/status", recover(http.HandlerFunc(h.handleStatus))).Methods("GET")
+	router.Handle("/shielded-vote/v1/queue-summary/{roundId}", recover(http.HandlerFunc(h.handleQueueSummary))).Methods("GET")
 	router.Handle("/shielded-vote/v1/queue-status", recover(http.HandlerFunc(h.handleQueueStatus))).Methods("GET")
 }
 
@@ -75,13 +104,14 @@ func RegisterRoutesWithGetters(
 type ShareNullifierCheckerGetter func() ShareNullifierChecker
 
 type apiHandler struct {
-	getStore             func() *ShareStore
-	getAPIToken          func() string
-	getExposeQueueStatus func() bool
-	getTree              func() TreeReader
-	getVCHash            func() VCHashFunc
-	getShareNullifier    ShareNullifierCheckerGetter
-	logger               log.Logger
+	getStore              func() *ShareStore
+	getAPIToken           func() string
+	getExposeQueueStatus  func() bool
+	getExposeQueueSummary func() bool
+	getTree               func() TreeReader
+	getVCHash             func() VCHashFunc
+	getShareNullifier     ShareNullifierCheckerGetter
+	logger                log.Logger
 }
 
 type submitResponse struct {
@@ -282,6 +312,53 @@ func (h *apiHandler) handleQueueStatus(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(store.Status())
+}
+
+// handleQueueSummary writes the public coarse queue histogram for a single
+// round when the helper is configured to expose it.
+func (h *apiHandler) handleQueueSummary(w http.ResponseWriter, r *http.Request) {
+	if h.getExposeQueueSummary == nil || !h.getExposeQueueSummary() {
+		jsonError(w, "not found", http.StatusNotFound)
+		return
+	}
+	store := h.getStore()
+	if store == nil {
+		jsonError(w, "helper unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	roundID := strings.ToLower(strings.TrimSpace(mux.Vars(r)["roundId"]))
+	const roundIDHexLen = 64
+	if len(roundID) != roundIDHexLen {
+		jsonError(w, "roundId must be 64 hex characters", http.StatusBadRequest)
+		return
+	}
+	if _, err := hex.DecodeString(roundID); err != nil {
+		jsonError(w, "invalid roundId hex", http.StatusBadRequest)
+		return
+	}
+
+	summary, err := store.QueueSummary(roundID, time.Now())
+	if err != nil {
+		if errors.Is(err, ErrUnknownRound) {
+			jsonError(w, "round not found", http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, ErrInvalidRoundInfo) {
+			jsonError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		h.logger.Error("queue summary failed", "round_id", roundID, "error", err)
+		CaptureErr(err, map[string]string{
+			"round_id": roundID,
+			"stage":    "queue_summary",
+		})
+		jsonError(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(summary)
 }
 
 func (h *apiHandler) authorizeSubmit(r *http.Request) bool {

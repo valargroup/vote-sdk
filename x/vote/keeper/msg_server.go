@@ -112,6 +112,7 @@ func (ms msgServer) executeCreateVotingSession(goCtx context.Context, msg *types
 		Proposals:       msg.Proposals,
 		Description:     msg.Description,
 		CreatedAtHeight: createdAtHeight,
+		CreatedAtTime:   uint64(ctx.BlockTime().Unix()),
 		Title:           msg.Title,
 		DiscussionUrl:   msg.DiscussionUrl,
 		// Per-round ceremony fields.

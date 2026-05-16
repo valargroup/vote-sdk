@@ -19,6 +19,10 @@ type Config struct {
 	// counts to observers.
 	ExposeQueueStatus bool `mapstructure:"expose_queue_status"`
 
+	// ExposeQueueSummary enables the public, coarse GET
+	// /shielded-vote/v1/queue-summary/{round_id} endpoint.
+	ExposeQueueSummary bool `mapstructure:"expose_queue_summary"`
+
 	// DBPath is the path to the SQLite database file. Use ":memory:" for testing.
 	DBPath string `mapstructure:"db_path"`
 
@@ -46,15 +50,22 @@ func DefaultConfig() Config {
 		Disable:             false,
 		APIToken:            "",
 		ExposeQueueStatus:   false,
+		ExposeQueueSummary:  true,
 		DBPath:              "",
 		ChainAPIPort:        1317,
 		MaxConcurrentProofs: 2,
 	}
 }
 
+// RoundInfo is the helper metadata needed for scheduling and coarse queue
+// summaries. Times are unix seconds.
+type RoundInfo struct {
+	CreatedAtTime uint64
+	VoteEndTime   uint64
+}
+
 // RoundInfoFetcher queries the chain for vote round metadata.
-// Returns vote_end_time (unix seconds) for the given round ID (hex).
-type RoundInfoFetcher func(roundID string) (voteEndTime uint64, err error)
+type RoundInfoFetcher func(roundID string) (RoundInfo, error)
 
 // RoundStatusChecker returns true if the round is still accepting shares
 // (i.e., status == ACTIVE). Used by the processor to skip shares for rounds
@@ -120,6 +131,34 @@ type QueueStatus struct {
 	Pending   int `json:"pending"`
 	Submitted int `json:"submitted"`
 	Failed    int `json:"failed"`
+}
+
+// QueueSummary holds the public, round-level helper queue histogram.
+// It intentionally omits proposal IDs, share indices, vote choices, nullifiers,
+// tree positions, and exact submit times.
+type QueueSummary struct {
+	RoundID         string               `json:"round_id"`
+	BucketSeconds   uint64               `json:"bucket_seconds"`
+	CreatedAtTime   uint64               `json:"created_at_time"`
+	VoteEndTime     uint64               `json:"vote_end_time"`
+	GeneratedAt     uint64               `json:"generated_at"`
+	LastMinuteStart uint64               `json:"last_minute_start"`
+	Buckets         []QueueSummaryBucket `json:"buckets"`
+}
+
+// QueueSummaryBucket is one coarse time interval within a queue summary.
+// Counts are bucketed by submit time and reported by current persisted state.
+// Failed rows are reported immediately so operators can detect broken share
+// processing without waiting for a later summary refresh.
+type QueueSummaryBucket struct {
+	Start          uint64 `json:"start"`
+	End            uint64 `json:"end"`
+	Submitted      int    `json:"submitted"`
+	PendingFuture  int    `json:"pending_future"`
+	OverduePending int    `json:"overdue_pending"`
+	Processing     int    `json:"processing"`
+	Failed         int    `json:"failed"`
+	Total          int    `json:"total"`
 }
 
 // ExpiredRoundSummary holds queue counts for a round whose voting window has

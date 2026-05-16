@@ -21,6 +21,10 @@ var ErrUnknownRound = errors.New("unknown voting round")
 // ErrInvalidSubmitAt is returned when submit_at is after vote end time.
 var ErrInvalidSubmitAt = errors.New("invalid submit_at")
 
+// ErrInvalidRoundInfo is returned when cached round metadata cannot produce a
+// valid queue summary.
+var ErrInvalidRoundInfo = errors.New("invalid voting round metadata")
+
 // ShareStore is a SQLite-backed share queue with ephemeral in-memory scheduling.
 // Payload data and processing state are persisted; client-provided submit_at
 // timestamps control when each share is eligible for proof generation.
@@ -29,7 +33,7 @@ type ShareStore struct {
 	mu              sync.Mutex
 	schedule        map[string]time.Time // key: "round_id:share_index:proposal_id:tree_position"
 	scheduleChanged chan struct{}
-	roundCache      map[string]uint64                // roundID → vote_end_time (unix seconds)
+	roundCache      map[string]RoundInfo             // roundID -> chain round metadata
 	fetchRoundInfo  RoundInfoFetcher                 // queries the chain; may be nil in tests
 	logger          func(msg string, keyvals ...any) // optional error logger
 	logInfo         func(msg string, keyvals ...any) // optional info logger
@@ -75,7 +79,7 @@ func NewShareStore(dbPath string, fetcher RoundInfoFetcher) (*ShareStore, error)
 		db:              db,
 		schedule:        make(map[string]time.Time),
 		scheduleChanged: make(chan struct{}, 1),
-		roundCache:      make(map[string]uint64),
+		roundCache:      make(map[string]RoundInfo),
 		fetchRoundInfo:  fetcher,
 	}
 
@@ -151,11 +155,22 @@ func migrate(db *sql.DB) error {
 
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS rounds (
-			round_id       TEXT PRIMARY KEY,
-			vote_end_time  INTEGER NOT NULL
+			round_id         TEXT PRIMARY KEY,
+			vote_end_time    INTEGER NOT NULL,
+			created_at_time  INTEGER NOT NULL DEFAULT 0
 		)
 	`); err != nil {
 		return fmt.Errorf("create rounds table: %w", err)
+	}
+
+	hasRoundCreatedAtTime, err := tableHasColumn(db, "rounds", "created_at_time")
+	if err != nil {
+		return fmt.Errorf("check rounds schema: %w", err)
+	}
+	if !hasRoundCreatedAtTime {
+		if _, err := db.Exec("ALTER TABLE rounds ADD COLUMN created_at_time INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return fmt.Errorf("add rounds.created_at_time: %w", err)
+		}
 	}
 
 	hasSubmitAt, err := tableHasColumn(db, "shares", "submit_at")
@@ -165,6 +180,16 @@ func migrate(db *sql.DB) error {
 	if !hasSubmitAt {
 		if _, err := db.Exec("ALTER TABLE shares ADD COLUMN submit_at INTEGER NOT NULL DEFAULT 0"); err != nil {
 			return fmt.Errorf("add shares.submit_at: %w", err)
+		}
+	}
+
+	hasReceivedAt, err := tableHasColumn(db, "shares", "received_at")
+	if err != nil {
+		return fmt.Errorf("check shares schema: %w", err)
+	}
+	if !hasReceivedAt {
+		if _, err := db.Exec("ALTER TABLE shares ADD COLUMN received_at INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return fmt.Errorf("add shares.received_at: %w", err)
 		}
 	}
 
@@ -321,24 +346,25 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 		return EnqueueConflict, fmt.Errorf("marshal share_comms: %w", err)
 	}
 
-	// Fetch round end time before acquiring the lock (direct keeper KV read).
-	voteEndTime, err := s.getRoundEndTime(payload.VoteRoundID)
+	// Fetch round metadata before acquiring the lock (direct keeper KV read).
+	roundInfo, err := s.getRoundInfo(payload.VoteRoundID)
 	if err != nil {
 		return EnqueueConflict, err
 	}
 
 	// Validate submit_at: must not exceed vote end time.
-	if payload.SubmitAt > voteEndTime {
-		return EnqueueConflict, fmt.Errorf("%w: submit_at (%d) > vote_end_time (%d)", ErrInvalidSubmitAt, payload.SubmitAt, voteEndTime)
+	if payload.SubmitAt > roundInfo.VoteEndTime {
+		return EnqueueConflict, fmt.Errorf("%w: submit_at (%d) > vote_end_time (%d)", ErrInvalidSubmitAt, payload.SubmitAt, roundInfo.VoteEndTime)
 	}
+	receivedAt := uint64(time.Now().Unix())
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	res, err := s.db.Exec(
 		`INSERT INTO shares
 		 (round_id, share_index, shares_hash, proposal_id, vote_decision,
-		  enc_share_c1, enc_share_c2, tree_position, share_comms, primary_blind, state, attempts, vote_end_time, submit_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)
+		  enc_share_c1, enc_share_c2, tree_position, share_comms, primary_blind, state, attempts, vote_end_time, submit_at, received_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)
 		 ON CONFLICT(round_id, share_index, proposal_id, tree_position) DO NOTHING`,
 		payload.VoteRoundID,
 		payload.EncShare.ShareIndex,
@@ -350,8 +376,9 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 		payload.TreePosition,
 		string(commsJSON),
 		payload.PrimaryBlind,
-		voteEndTime,
+		roundInfo.VoteEndTime,
 		payload.SubmitAt,
+		receivedAt,
 	)
 	if err != nil {
 		return EnqueueConflict, fmt.Errorf("insert share: %w", err)
@@ -647,6 +674,180 @@ func (s *ShareStore) Status() map[string]QueueStatus {
 	return result
 }
 
+const (
+	queueSummaryMinute uint64 = 60
+	queueSummaryHour   uint64 = 60 * queueSummaryMinute
+	queueSummaryDay    uint64 = 24 * queueSummaryHour
+
+	// maxQueueSummaryBuckets bounds public response size and allocation. The
+	// longest rounds use 6 hour buckets, so 4096 buckets covers 24,576 hours,
+	// 1,024 days, or about 2.8 years of voting duration.
+	maxQueueSummaryBuckets = 4096
+)
+
+// queueSummaryPolicyBucketSeconds chooses the fixed bucket size for a round
+// based on the round's total voting duration.
+func queueSummaryPolicyBucketSeconds(durationSeconds uint64) uint64 {
+	switch {
+	case durationSeconds >= 21*queueSummaryDay:
+		return 6 * queueSummaryHour
+	case durationSeconds >= 7*queueSummaryDay:
+		return 3 * queueSummaryHour
+	case durationSeconds >= queueSummaryDay:
+		return queueSummaryHour
+	case durationSeconds >= queueSummaryHour:
+		return 15 * queueSummaryMinute
+	default:
+		return queueSummaryMinute
+	}
+}
+
+// queueSummaryLastMinuteStart returns the start of the final public summary
+// window, scaled for short rounds and capped for longer rounds.
+func queueSummaryLastMinuteStart(createdAtTime, voteEndTime uint64) uint64 {
+	if voteEndTime <= createdAtTime {
+		return createdAtTime
+	}
+	duration := voteEndTime - createdAtTime
+	if duration <= queueSummaryHour {
+		window := duration * 40 / 100
+		if window < 1 {
+			window = 1
+		}
+		return voteEndTime - window
+	}
+	window := duration / 100
+	if window < queueSummaryMinute {
+		window = queueSummaryMinute
+	}
+	if window > queueSummaryHour {
+		window = queueSummaryHour
+	}
+	if window > duration {
+		window = duration
+	}
+	return voteEndTime - window
+}
+
+// queueSummaryBucketIndex maps a timestamp into the bounded bucket range for
+// the round, clamping times outside the voting window to the nearest bucket.
+func queueSummaryBucketIndex(ts, createdAtTime, voteEndTime, bucketSeconds uint64, bucketCount int) int {
+	if bucketCount <= 1 || ts <= createdAtTime {
+		return 0
+	}
+	if ts >= voteEndTime {
+		return bucketCount - 1
+	}
+	idx := int((ts - createdAtTime) / bucketSeconds)
+	if idx >= bucketCount {
+		return bucketCount - 1
+	}
+	return idx
+}
+
+// QueueSummary returns a public, coarse histogram for one round across all
+// proposals handled by this helper.
+func (s *ShareStore) QueueSummary(roundID string, now time.Time) (QueueSummary, error) {
+	info, err := s.getRoundInfo(roundID)
+	if err != nil {
+		return QueueSummary{}, err
+	}
+	if info.CreatedAtTime == 0 {
+		return QueueSummary{}, fmt.Errorf("%w: missing created_at_time for round %s", ErrInvalidRoundInfo, roundID)
+	}
+	if info.VoteEndTime <= info.CreatedAtTime {
+		return QueueSummary{}, fmt.Errorf("%w: vote_end_time must be after created_at_time for round %s", ErrInvalidRoundInfo, roundID)
+	}
+
+	generatedAt := uint64(now.Unix())
+	duration := info.VoteEndTime - info.CreatedAtTime
+	bucketSeconds := queueSummaryPolicyBucketSeconds(duration)
+	bucketCount64 := duration / bucketSeconds
+	if duration%bucketSeconds != 0 {
+		bucketCount64++
+	}
+	if bucketCount64 == 0 || bucketCount64 > maxQueueSummaryBuckets {
+		return QueueSummary{}, fmt.Errorf("%w: queue summary bucket count out of range for round %s", ErrInvalidRoundInfo, roundID)
+	}
+	bucketCount := int(bucketCount64)
+
+	summary := QueueSummary{
+		RoundID:         roundID,
+		BucketSeconds:   bucketSeconds,
+		CreatedAtTime:   info.CreatedAtTime,
+		VoteEndTime:     info.VoteEndTime,
+		GeneratedAt:     generatedAt,
+		LastMinuteStart: queueSummaryLastMinuteStart(info.CreatedAtTime, info.VoteEndTime),
+		Buckets:         make([]QueueSummaryBucket, bucketCount),
+	}
+	for i := range summary.Buckets {
+		start := info.CreatedAtTime + uint64(i)*bucketSeconds
+		end := start + bucketSeconds
+		if end > info.VoteEndTime {
+			end = info.VoteEndTime
+		}
+		summary.Buckets[i] = QueueSummaryBucket{
+			Start: start,
+			End:   end,
+		}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rows, err := s.db.Query(
+		`SELECT state, submit_at, received_at, COUNT(*)
+		   FROM shares
+		  WHERE round_id = ?
+		  GROUP BY state, submit_at, received_at`,
+		roundID,
+	)
+	if err != nil {
+		return QueueSummary{}, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var state int
+		var submitAt, receivedAt uint64
+		var count int
+		if err := rows.Scan(&state, &submitAt, &receivedAt, &count); err != nil {
+			return QueueSummary{}, err
+		}
+
+		effectiveTime := submitAt
+		if effectiveTime == 0 {
+			effectiveTime = receivedAt
+		}
+		if effectiveTime == 0 {
+			effectiveTime = info.CreatedAtTime
+		}
+
+		idx := queueSummaryBucketIndex(effectiveTime, info.CreatedAtTime, info.VoteEndTime, bucketSeconds, bucketCount)
+		bucket := &summary.Buckets[idx]
+		switch ShareState(state) {
+		case ShareStateReceived:
+			if effectiveTime <= generatedAt {
+				bucket.OverduePending += count
+			} else {
+				bucket.PendingFuture += count
+			}
+		case ShareStateWitnessed:
+			bucket.Processing += count
+		case ShareStateSubmitted:
+			bucket.Submitted += count
+		case ShareStateFailed:
+			bucket.Failed += count
+		}
+		bucket.Total += count
+	}
+	if err := rows.Err(); err != nil {
+		return QueueSummary{}, err
+	}
+
+	return summary, nil
+}
+
 // ExpiredRoundSummaries returns per-round queue counts for rounds whose voting
 // window has ended. Call this before PurgeExpiredRounds so unsubmitted share
 // alerts can be emitted without retaining witness data.
@@ -735,8 +936,8 @@ func (s *ShareStore) PurgeExpiredRounds() int64 {
 	}
 
 	// Prune in-memory caches for expired rounds.
-	for roundID, vet := range s.roundCache {
-		if vet > 0 && vet < uint64(now) {
+	for roundID, info := range s.roundCache {
+		if info.VoteEndTime > 0 && info.VoteEndTime < uint64(now) {
 			delete(s.roundCache, roundID)
 		}
 	}
@@ -772,18 +973,18 @@ func (s *ShareStore) recover() error {
 	}
 
 	// Repopulate round cache from rounds table.
-	roundRows, err := s.db.Query("SELECT round_id, vote_end_time FROM rounds")
+	roundRows, err := s.db.Query("SELECT round_id, vote_end_time, created_at_time FROM rounds")
 	if err != nil {
 		return fmt.Errorf("query rounds cache: %w", err)
 	}
 	defer roundRows.Close()
 	for roundRows.Next() {
 		var roundID string
-		var vet uint64
-		if err := roundRows.Scan(&roundID, &vet); err != nil {
+		var info RoundInfo
+		if err := roundRows.Scan(&roundID, &info.VoteEndTime, &info.CreatedAtTime); err != nil {
 			continue
 		}
-		s.roundCache[roundID] = vet
+		s.roundCache[roundID] = info
 	}
 
 	// Load all non-terminal shares with their submit_at times.
@@ -876,44 +1077,70 @@ func payloadEqual(existing, incoming SharePayload) bool {
 	return true
 }
 
-// getRoundEndTime returns the cached vote_end_time for a round, fetching from
-// SQLite or the keeper if not in memory. Returns an error if the round is
-// unknown (the share should be rejected).
-func (s *ShareStore) getRoundEndTime(roundID string) (voteEndTime uint64, err error) {
+// getRoundInfo returns cached round metadata, fetching from SQLite or the
+// keeper if not in memory. Returns an error if the round is unknown.
+func (s *ShareStore) getRoundInfo(roundID string) (RoundInfo, error) {
 	s.mu.Lock()
-	if vet, ok := s.roundCache[roundID]; ok {
-		s.mu.Unlock()
-		return vet, nil
+	if info, ok := s.roundCache[roundID]; ok {
+		if info.CreatedAtTime != 0 || s.fetchRoundInfo == nil {
+			s.mu.Unlock()
+			return info, nil
+		}
+		// Older helper DBs may have recovered a cache entry that only had
+		// vote_end_time. Refresh from the keeper so queue summaries can use the
+		// full round window.
 	}
 
 	// Check SQLite rounds table.
-	var vet uint64
-	err = s.db.QueryRow("SELECT vote_end_time FROM rounds WHERE round_id = ?", roundID).Scan(&vet)
+	var info RoundInfo
+	err := s.db.QueryRow(
+		"SELECT vote_end_time, created_at_time FROM rounds WHERE round_id = ?",
+		roundID,
+	).Scan(&info.VoteEndTime, &info.CreatedAtTime)
 	if err == nil {
-		s.roundCache[roundID] = vet
-		s.mu.Unlock()
-		return vet, nil
+		if info.CreatedAtTime != 0 || s.fetchRoundInfo == nil {
+			s.roundCache[roundID] = info
+			s.mu.Unlock()
+			return info, nil
+		}
+		// Older helper DBs may have only vote_end_time cached. Refresh from the
+		// keeper so the public summary can cover the full round window.
 	}
 	s.mu.Unlock()
 
 	// Fetch from keeper (outside lock — direct KV read).
 	if s.fetchRoundInfo == nil {
-		return 0, fmt.Errorf("%w: no round fetcher configured", ErrUnknownRound)
+		return RoundInfo{}, fmt.Errorf("%w: no round fetcher configured", ErrUnknownRound)
 	}
-	vet, err = s.fetchRoundInfo(roundID)
+	info, err = s.fetchRoundInfo(roundID)
 	if err != nil {
-		return 0, err
+		return RoundInfo{}, err
 	}
 
 	// Cache in both memory and SQLite.
 	s.mu.Lock()
-	s.roundCache[roundID] = vet
+	s.roundCache[roundID] = info
 	s.mu.Unlock()
 
 	_, _ = s.db.Exec(
-		"INSERT OR IGNORE INTO rounds (round_id, vote_end_time) VALUES (?, ?)",
-		roundID, vet,
+		`INSERT INTO rounds (round_id, vote_end_time, created_at_time)
+		 VALUES (?, ?, ?)
+		 ON CONFLICT(round_id) DO UPDATE SET
+		   vote_end_time = excluded.vote_end_time,
+		   created_at_time = excluded.created_at_time`,
+		roundID,
+		info.VoteEndTime,
+		info.CreatedAtTime,
 	)
 
-	return vet, nil
+	return info, nil
+}
+
+// getRoundEndTime is kept for call sites that only need scheduling validation.
+func (s *ShareStore) getRoundEndTime(roundID string) (uint64, error) {
+	info, err := s.getRoundInfo(roundID)
+	if err != nil {
+		return 0, err
+	}
+	return info.VoteEndTime, nil
 }

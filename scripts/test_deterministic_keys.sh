@@ -145,6 +145,7 @@ cat >> "$APP_TOML" <<HELPERCFG
 [helper]
 disable = false
 api_token = ""
+expose_queue_summary = true
 db_path = ""
 chain_api_port = 1419
 max_concurrent_proofs = 2

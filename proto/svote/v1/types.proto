@@ -74,6 +74,7 @@ message VoteRound {
   repeated DKGContribution dkg_contributions = 28;
 
   string discussion_url = 29; // Overall forum discussion link for the vote round
+  uint64 created_at_time = 30; // Unix seconds when this round was registered on-chain
 }
 
 // CoordinatorActionStatus is the lifecycle of a proposed coordinator action.

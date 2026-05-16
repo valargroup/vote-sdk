@@ -189,6 +189,7 @@ rm -f "${APP_TOML}.bak"
 # via environment variables before invoking this script.
 HELPER_API_TOKEN="${SVOTE_HELPER_API_TOKEN:-}"
 HELPER_EXPOSE_QUEUE_STATUS="${SVOTE_HELPER_EXPOSE_QUEUE_STATUS:-false}"
+HELPER_EXPOSE_QUEUE_SUMMARY="${SVOTE_HELPER_EXPOSE_QUEUE_SUMMARY:-true}"
 HELPER_MAX_CONCURRENT_PROOFS="${SVOTE_HELPER_MAX_CONCURRENT_PROOFS:-8}"
 HELPER_SENTRY_DSN="${SVOTE_HELPER_SENTRY_DSN:-}"
 
@@ -211,6 +212,10 @@ api_token = "$HELPER_API_TOKEN"
 # Benchmark-only queue metrics endpoint. Keep disabled by default to avoid
 # exposing per-round share activity to unauthenticated observers.
 expose_queue_status = $HELPER_EXPOSE_QUEUE_STATUS
+
+# Public coarse round-level queue histogram endpoint. The helper controls the
+# bucket size; callers cannot request more granular data.
+expose_queue_summary = $HELPER_EXPOSE_QUEUE_SUMMARY
 
 # Path to the SQLite database file. Empty = default ($HOME/.svoted/helper.db).
 db_path = ""

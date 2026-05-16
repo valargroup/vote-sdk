@@ -165,9 +165,14 @@ The primary validator serves the admin UI [here](https://svote.valargroup.org/vo
 |-----|---------|-------------|
 | `disable` | `false` | Set `true` to disable the helper server. |
 | `api_token` | `""` | Optional bearer for `POST /shielded-vote/v1/shares` (sent as `X-Helper-Token`). |
+| `expose_queue_summary` | `true` | Enables public coarse round-level queue summaries at `/shielded-vote/v1/queue-summary/{round_id}`. |
 | `db_path` | `""` (= `~/.svoted/helper.db`) | SQLite path for queued shares. |
 | `chain_api_port` | `1317` | REST port the helper submits `MsgRevealShare` to. |
 | `max_concurrent_proofs` | `8` | Parallel proof goroutines (~500 MB each). |
+
+Queue summaries omit proposal IDs, vote decisions, share indices, nullifiers,
+tree positions, and exact submit times. Failed rows are reported immediately,
+including in open buckets, so operators can detect broken share processing.
 
 The production reference is [deploy-setup.md § Helper server configuration](../deploy-setup.md#helper-server-configuration). `[admin]` and the admin UI are disabled for joining validators; only the primary runs them.
 

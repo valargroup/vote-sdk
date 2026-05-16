@@ -1025,6 +1025,9 @@ disable = false
 # Empty disables token auth.
 api_token = ""
 
+# Public coarse round-level queue histogram endpoint.
+expose_queue_summary = true
+
 # Path to the SQLite database file. Empty = default (\$HOME/.svoted/helper.db).
 db_path = ""
 

@@ -15,6 +15,7 @@ type Helper struct {
 	Processor             *Processor
 	APIToken              string
 	ExposeQueueStatus     bool
+	ExposeQueueSummary    bool
 	VCHash                VCHashFunc
 	ShareNullifierChecker ShareNullifierChecker
 	Logger                log.Logger
@@ -89,6 +90,7 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundI
 		Processor:             processor,
 		APIToken:              cfg.APIToken,
 		ExposeQueueStatus:     cfg.ExposeQueueStatus,
+		ExposeQueueSummary:    cfg.ExposeQueueSummary,
 		VCHash:                vcHash,
 		ShareNullifierChecker: shareNF,
 		Logger:                logger,
@@ -97,11 +99,12 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundI
 
 // RegisterRoutes registers the helper's HTTP routes on the given router.
 func (h *Helper) RegisterRoutes(router *mux.Router) {
-	RegisterRoutesWithGetters(
+	RegisterRoutesWithQueueSummaryGetters(
 		router,
 		func() *ShareStore { return h.Store },
 		func() string { return h.APIToken },
 		func() bool { return h.ExposeQueueStatus },
+		func() bool { return h.ExposeQueueSummary },
 		func() TreeReader { return h.Processor.tree },
 		func() VCHashFunc { return h.VCHash },
 		func() ShareNullifierChecker { return h.ShareNullifierChecker },
