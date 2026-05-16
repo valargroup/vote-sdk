@@ -234,6 +234,11 @@ ADMIN_DISABLE="${SVOTE_ADMIN_DISABLE:-true}"
 sed -i.bak "s/^disable = true\$/disable = ${ADMIN_DISABLE}/" "$APP_TOML"
 rm -f "${APP_TOML}.bak"
 
+if [ -n "${SVOTE_CONFIG_URL:-}" ]; then
+    sed -i.bak "s#^config_url = .*\$#config_url = \"${SVOTE_CONFIG_URL}\"#" "$APP_TOML"
+    rm -f "${APP_TOML}.bak"
+fi
+
 # Append [ui] section.
 cat >> "$APP_TOML" <<UICFG
 

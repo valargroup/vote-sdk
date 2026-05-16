@@ -3,6 +3,8 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/server"
@@ -99,6 +101,9 @@ func readAdminConfig(v *viper.Viper) admin.Config {
 	}
 	if v.IsSet("admin.config_url") {
 		cfg.ConfigURL = v.GetString("admin.config_url")
+	}
+	if envConfigURL := strings.TrimSpace(os.Getenv("SVOTE_CONFIG_URL")); envConfigURL != "" {
+		cfg.ConfigURL = envConfigURL
 	}
 	if v.IsSet("admin.db_path") {
 		cfg.DBPath = v.GetString("admin.db_path")

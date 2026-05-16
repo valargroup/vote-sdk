@@ -52,6 +52,7 @@ func New(cfg Config, homeDir string, checkValidatorExists ValidatorChecker, chec
 	if configURL == "" {
 		configURL = DefaultConfig().ConfigURL
 	}
+	configURL = configURLForFile(configURL, dynamicConfigName)
 	cfg = applyConfigPREnvDefaults(cfg)
 
 	dbPath := cfg.DBPath

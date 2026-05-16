@@ -34,6 +34,7 @@ Set these in both environments unless noted:
 | `DEPLOY_USER` | deploy, reset | SSH user for fleet hosts. |
 | `SSH_PRIVATE_KEY` | deploy, reset | SSH key for fleet access. |
 | `SENTRY_DSN` | deploy, reset | Written to `/etc/default/svoted`. |
+| `SENTRY_AUTH_TOKEN` | deploy, reset | Optional Sentry token for `sentry-cli` deploy markers. If omitted, deploys skip marker creation. |
 | `CONFIG_PR_GITHUB_TOKEN` | deploy, reset | Optional token written to the primary's `svoted` environment. |
 | `VM_PRIVKEYS` | staging reset | Comma-separated vote-manager private keys for genesis. Production `zvote-1` resets use the default vote-manager address encoded in `x/vote/module.go` unless `SVOTE_USE_DEFAULT_GENESIS_VOTE_MANAGERS=false` is explicitly set. |
 | `SVOTE_EXPECTED_PRODUCTION_VOTE_MANAGER` | production reset | Optional safety override for the expected production default vote manager. Defaults to `sv1wyf8tuys2ussdqwc6ugnvq0x273j8wq8fm3jrj`; `scripts/init.sh` refuses a production reset if the release binary's Go default does not match. |
@@ -42,6 +43,40 @@ Set these in both environments unless noted:
 | `DO_ACCESS_KEY` | release, reset | Spaces access key. Release still uses repository-level secrets. |
 | `DO_SECRET_KEY` | release, reset | Spaces secret key. Release still uses repository-level secrets. |
 | `SLACK_WEBHOOK_URL` | deploy, reset | Failure notifications. |
+
+## Sentry setup
+
+Use `sentry-cli` with an explicit org because local developer machines may not
+have a default org configured:
+
+```bash
+sentry-cli info
+sentry-cli projects list --org valar-group
+```
+
+The chain fleet uses the `svote-helper-vm` project. Keep `SENTRY_DSN` scoped to
+the GitHub Environment. The workflows derive the host-side
+`SENTRY_ENVIRONMENT` from `target_environment` and write it to
+`/etc/default/svoted`. If you rotate DSNs, update the selected GitHub
+Environment secret, then run **Deploy SDK** for that environment so
+`/etc/default/svoted` is rewritten on every host.
+
+After a deploy, record or verify the Sentry deploy marker with the same tag and
+environment:
+
+```bash
+sentry-cli deploys new --org valar-group --project svote-helper-vm --release "$TAG" -e staging
+sentry-cli deploys new --org valar-group --project svote-helper-vm --release "$TAG" -e production
+```
+
+Verification order:
+
+1. Deploy or reset staging first, then search Sentry for
+   `project:svote-helper-vm environment:staging`.
+2. Deploy production only after staging events are tagged correctly, then search
+   for `project:svote-helper-vm environment:production`.
+3. Do not use a production reset as a Sentry test; production resets are
+   destructive and require a separate operator decision.
 
 ## Manual Operations
 

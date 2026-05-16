@@ -46,6 +46,7 @@ jobs:
       dns_prefix: ${{ steps.resolve.outputs.dns_prefix }}
       has_secondary: ${{ steps.resolve.outputs.has_secondary }}
       release_base_url: ${{ steps.resolve.outputs.release_base_url }}
+      voting_config_url: ${{ steps.resolve.outputs.voting_config_url }}
     steps:
       - name: Resolve GitHub Environment variables
         id: resolve
@@ -56,24 +57,29 @@ jobs:
           HAS_SECONDARY: ${{ vars.HAS_SECONDARY }}
           DO_SPACES_BASE: ${{ vars.DO_SPACES_BASE }}
           RELEASE_BASE_URL: ${{ vars.RELEASE_BASE_URL }}
+          VOTING_CONFIG_URL: ${{ vars.VOTING_CONFIG_URL }}
         run: |
           set -euo pipefail
           if [ "$TARGET_ENVIRONMENT" = "production" ]; then
             default_chain_id="zvote-1"
             default_dns_prefix="prod."
             default_has_secondary="false"
+            default_voting_config_url="https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/prod/"
           else
             default_chain_id="svote-1"
             default_dns_prefix="stage."
             default_has_secondary="true"
+            default_voting_config_url="https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/stage/"
           fi
           do_spaces_base="${DO_SPACES_BASE:-https://vote.fra1.digitaloceanspaces.com}"
           release_base_url="${RELEASE_BASE_URL:-${do_spaces_base}/binaries/vote-sdk}"
+          voting_config_url="${VOTING_CONFIG_URL:-$default_voting_config_url}"
           {
             echo "chain_id=${CHAIN_ID:-$default_chain_id}"
             echo "dns_prefix=${DNS_PREFIX:-$default_dns_prefix}"
             echo "has_secondary=${HAS_SECONDARY:-$default_has_secondary}"
             echo "release_base_url=${release_base_url}"
+            echo "voting_config_url=${voting_config_url}"
           } >> "$GITHUB_OUTPUT"
 
   deploy-primary:
@@ -83,6 +89,8 @@ jobs:
     environment: ${{ inputs.target_environment }}
     env:
       RELEASE_BASE_URL: ${{ needs.resolve-environment.outputs.release_base_url }}
+      SENTRY_ENVIRONMENT: ${{ inputs.target_environment }}
+      SVOTE_CONFIG_URL: ${{ needs.resolve-environment.outputs.voting_config_url }}
     steps:
       - name: Deploy to primary Droplet
         uses: appleboy/ssh-action@v1.0.3
@@ -90,13 +98,21 @@ jobs:
           host: ${{ secrets.PRIMARY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: SENTRY_DSN,SVOTE_CONFIG_PR_GITHUB_TOKEN
+          envs: SENTRY_DSN,SENTRY_ENVIRONMENT,SVOTE_CONFIG_PR_GITHUB_TOKEN,SVOTE_CONFIG_URL
           script: |
             sed -i '/^SENTRY_DSN=/d' /etc/default/svoted
             echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
+            sed -i '/^SENTRY_ENVIRONMENT=/d' /etc/default/svoted
+            echo "SENTRY_ENVIRONMENT=$SENTRY_ENVIRONMENT" >> /etc/default/svoted
+            sed -i '/^SVOTE_CONFIG_URL=/d' /etc/default/svoted
+            echo "SVOTE_CONFIG_URL=$SVOTE_CONFIG_URL" >> /etc/default/svoted
             sed -i '/^SVOTE_CONFIG_PR_GITHUB_TOKEN=/d' /etc/default/svoted
             if [ -n "${SVOTE_CONFIG_PR_GITHUB_TOKEN:-}" ]; then
               echo "SVOTE_CONFIG_PR_GITHUB_TOKEN=$SVOTE_CONFIG_PR_GITHUB_TOKEN" >> /etc/default/svoted
+            fi
+            if [ -f /opt/shielded-vote/.svoted/config/app.toml ]; then
+              sed -i.bak "s#^config_url = .*\$#config_url = \"${SVOTE_CONFIG_URL}\"#" /opt/shielded-vote/.svoted/config/app.toml
+              rm -f /opt/shielded-vote/.svoted/config/app.toml.bak
             fi
             /opt/shielded-vote/install-release.sh --tag "${{ env.TAG }}" --base "${{ env.RELEASE_BASE_URL }}"
         env:
@@ -129,6 +145,7 @@ jobs:
     environment: ${{ inputs.target_environment }}
     env:
       RELEASE_BASE_URL: ${{ needs.resolve-environment.outputs.release_base_url }}
+      SENTRY_ENVIRONMENT: ${{ inputs.target_environment }}
     steps:
       - name: Deploy to secondary Droplet
         uses: appleboy/ssh-action@v1.0.3
@@ -136,10 +153,12 @@ jobs:
           host: ${{ secrets.SECONDARY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: SENTRY_DSN
+          envs: SENTRY_DSN,SENTRY_ENVIRONMENT
           script: |
             sed -i '/^SENTRY_DSN=/d' /etc/default/svoted
             echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
+            sed -i '/^SENTRY_ENVIRONMENT=/d' /etc/default/svoted
+            echo "SENTRY_ENVIRONMENT=$SENTRY_ENVIRONMENT" >> /etc/default/svoted
             /opt/shielded-vote/install-release.sh --tag "${{ env.TAG }}" --base "${{ env.RELEASE_BASE_URL }}"
         env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
@@ -170,6 +189,7 @@ jobs:
     env:
       CHAIN_ID: ${{ needs.resolve-environment.outputs.chain_id }}
       DNS_PREFIX: ${{ needs.resolve-environment.outputs.dns_prefix }}
+      SENTRY_ENVIRONMENT: ${{ inputs.target_environment }}
     steps:
       - name: Deploy to explorer Droplet
         uses: appleboy/ssh-action@v1.0.3
@@ -177,11 +197,13 @@ jobs:
           host: ${{ needs.resolve-environment.outputs.dns_prefix }}explorer.${{ secrets.DOMAIN }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: SENTRY_DSN,TAG,CHAIN_ID,DNS_PREFIX,DOMAIN
+          envs: SENTRY_DSN,SENTRY_ENVIRONMENT,TAG,CHAIN_ID,DNS_PREFIX,DOMAIN
           script: |
             set -euo pipefail
             sed -i '/^SENTRY_DSN=/d' /etc/default/svoted
             echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
+            sed -i '/^SENTRY_ENVIRONMENT=/d' /etc/default/svoted
+            echo "SENTRY_ENVIRONMENT=$SENTRY_ENVIRONMENT" >> /etc/default/svoted
 
             # On first deploy (before sdk-chain-reset.yml runs reset-archive),
             # .svoted/config/genesis.json doesn't exist yet — svoted can't
@@ -251,6 +273,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: resolve-environment
     environment: ${{ inputs.target_environment }}
+    env:
+      SENTRY_ENVIRONMENT: ${{ inputs.target_environment }}
     steps:
       - name: Deploy to snapshot Droplet
         uses: appleboy/ssh-action@v1.0.3
@@ -258,11 +282,13 @@ jobs:
           host: ${{ needs.resolve-environment.outputs.dns_prefix }}snapshots.${{ secrets.DOMAIN }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: SENTRY_DSN,TAG
+          envs: SENTRY_DSN,SENTRY_ENVIRONMENT,TAG
           script: |
             set -euo pipefail
             sed -i '/^SENTRY_DSN=/d' /etc/default/svoted
             echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
+            sed -i '/^SENTRY_ENVIRONMENT=/d' /etc/default/svoted
+            echo "SENTRY_ENVIRONMENT=$SENTRY_ENVIRONMENT" >> /etc/default/svoted
 
             # On first deploy (before sdk-chain-reset.yml runs reset-snapshot),
             # .svoted/config/genesis.json does not exist yet, so svoted cannot
@@ -330,3 +356,33 @@ jobs:
                 }
               ]
             }
+
+  record-sentry-deploy:
+    name: Record Sentry deploy
+    if: |
+      always() &&
+      needs.deploy-primary.result == 'success' &&
+      (needs.deploy-secondary.result == 'success' || needs.deploy-secondary.result == 'skipped') &&
+      needs.deploy-explorer.result == 'success' &&
+      needs.deploy-snapshot.result == 'success'
+    needs: [resolve-environment, deploy-primary, deploy-secondary, deploy-explorer, deploy-snapshot]
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.target_environment }}
+    env:
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      SENTRY_ENVIRONMENT: ${{ inputs.target_environment }}
+    steps:
+      - name: Record deploy marker
+        run: |
+          set -euo pipefail
+          if [ -z "${SENTRY_AUTH_TOKEN:-}" ]; then
+            echo "SENTRY_AUTH_TOKEN is not configured; skipping Sentry deploy marker."
+            exit 0
+          fi
+          curl -sL https://sentry.io/get-cli/ | bash
+          sentry-cli releases new --org valar-group --project svote-helper-vm "${TAG}" || true
+          sentry-cli deploys new \
+            --org valar-group \
+            --project svote-helper-vm \
+            --release "${TAG}" \
+            -e "${SENTRY_ENVIRONMENT}"
