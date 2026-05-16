@@ -51,11 +51,15 @@ SNAPSHOT_BASE_URL="${SVOTE_SNAPSHOT_BASE_URL:-}"
 # staging mirrors or fork testing; see github.com/valargroup/token-holder-voting-config.
 VOTING_CONFIG_URL="${VOTING_CONFIG_URL:-https://voting.valargroup.org/prod/dynamic-voting-config.json}"
 # Admin API base — used once for POST /api/register-validator during setup.
-# Override via SVOTE_ADMIN_URL when joining a non-default deployment.
-DEFAULT_ADMIN_API_BASE="${DEFAULT_ADMIN_API_BASE:-https://prod.vote-chain-primary.valargroup.org}"
-if [ -z "${SVOTE_ADMIN_URL+x}" ]; then
-  SVOTE_ADMIN_URL="${DEFAULT_ADMIN_API_BASE}"
+# Override via SVOTE_ADMIN_URL when joining a non-default deployment. An explicit
+# empty value disables registration. DEFAULT_ADMIN_API_BASE is a legacy override.
+SVOTE_ADMIN_URL_WAS_SET=0
+if [ -n "${SVOTE_ADMIN_URL+x}" ]; then
+  SVOTE_ADMIN_URL_WAS_SET=1
+else
+  SVOTE_ADMIN_URL=""
 fi
+DEFAULT_ADMIN_API_BASE="${DEFAULT_ADMIN_API_BASE:-}"
 
 # Parse TLS selection flags. Interactive installs must choose a mode; unattended
 # installs can pass --tls-mode/SVOTE_TLS_MODE or the legacy SVOTE_SKIP_CADDY=1.
@@ -99,6 +103,14 @@ while [ $# -gt 0 ]; do
     *) shift ;;
   esac
 done
+
+default_admin_url_for_chain() {
+  case "$1" in
+    zvote-1) echo "https://prod.svote.valargroup.org" ;;
+    svote-1) echo "https://stage.svote.valargroup.org" ;;
+    *)       echo "" ;;
+  esac
+}
 
 # ─── Preflight ────────────────────────────────────────────────────────────────
 
@@ -723,11 +735,6 @@ if [ -z "$SEED_URL" ] || [ "$SEED_URL" = "null" ]; then
 fi
 
 echo "Seed node: ${SEED_URL}"
-if [ -n "$SVOTE_ADMIN_URL" ]; then
-  echo "Admin / join API base: ${SVOTE_ADMIN_URL}"
-else
-  echo "Admin / join API base: disabled"
-fi
 
 # Fetch the node's P2P identity and active app version. The app version, not
 # the latest published release marker, is the binary version that can replay
@@ -759,6 +766,14 @@ if [ -n "$CHAIN_ID" ] && [ "$CHAIN_ID" != "$NODE_CHAIN_ID" ]; then
   exit 1
 fi
 CHAIN_ID="$NODE_CHAIN_ID"
+
+if [ "$SVOTE_ADMIN_URL_WAS_SET" != "1" ]; then
+  if [ -n "$DEFAULT_ADMIN_API_BASE" ]; then
+    SVOTE_ADMIN_URL="$DEFAULT_ADMIN_API_BASE"
+  else
+    SVOTE_ADMIN_URL="$(default_admin_url_for_chain "$CHAIN_ID")"
+  fi
+fi
 
 if [ -z "$SNAPSHOT_BASE_URL" ]; then
   case "$CHAIN_ID" in
@@ -794,6 +809,11 @@ PERSISTENT_PEERS="${NODE_ID}@${SEED_HOST}:${P2P_PORT}"
 echo "Chain ID: ${CHAIN_ID}"
 echo "Chain binary version: ${CHAIN_BINARY_VERSION}"
 echo "Snapshot metadata base: ${SNAPSHOT_BASE_URL}"
+if [ -n "$SVOTE_ADMIN_URL" ]; then
+  echo "Admin / join API base: ${SVOTE_ADMIN_URL}"
+else
+  echo "Admin / join API base: disabled"
+fi
 echo "Peers: ${PERSISTENT_PEERS}"
 
 # ─── Acquire binaries ────────────────────────────────────────────────────────
