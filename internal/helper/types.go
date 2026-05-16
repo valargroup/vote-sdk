@@ -175,6 +175,7 @@ func (s ExpiredRoundSummary) Unsubmitted() int {
 	return s.Pending + s.Failed
 }
 
+// QueueExportVersion is the current JSON schema version for queue rescue artifacts.
 const QueueExportVersion = 1
 
 // QueueExport is the local rescue artifact for one round's helper queue.
@@ -188,6 +189,7 @@ type QueueExport struct {
 	Rows       []QueueExportRow `json:"rows"`
 }
 
+// QueueExportRound is the round metadata needed to preserve scheduling context.
 type QueueExportRound struct {
 	CreatedAtTime uint64 `json:"created_at_time"`
 	VoteEndTime   uint64 `json:"vote_end_time"`
@@ -213,10 +215,12 @@ type QueueExportRow struct {
 	Processable      bool               `json:"processable"`
 }
 
+// QueueImportOptions controls how processable rows from a rescue artifact are scheduled.
 type QueueImportOptions struct {
 	ForceReady bool
 }
 
+// QueueImportResult reports how an import handled each row in the rescue artifact.
 type QueueImportResult struct {
 	Inserted        int `json:"inserted"`
 	Duplicates      int `json:"duplicates"`
