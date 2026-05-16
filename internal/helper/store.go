@@ -678,6 +678,11 @@ const (
 	queueSummaryMinute uint64 = 60
 	queueSummaryHour   uint64 = 60 * queueSummaryMinute
 	queueSummaryDay    uint64 = 24 * queueSummaryHour
+
+	// maxQueueSummaryBuckets bounds public response size and allocation. The
+	// longest rounds use 6 hour buckets, so 4096 buckets covers 24,576 hours,
+	// 1,024 days, or about 2.8 years of voting duration.
+	maxQueueSummaryBuckets = 4096
 )
 
 // queueSummaryPolicyBucketSeconds chooses the fixed bucket size for a round
@@ -757,10 +762,14 @@ func (s *ShareStore) QueueSummary(roundID string, now time.Time) (QueueSummary, 
 	generatedAt := uint64(now.Unix())
 	duration := info.VoteEndTime - info.CreatedAtTime
 	bucketSeconds := queueSummaryPolicyBucketSeconds(duration)
-	bucketCount := int((duration + bucketSeconds - 1) / bucketSeconds)
-	if bucketCount < 1 {
-		bucketCount = 1
+	bucketCount64 := duration / bucketSeconds
+	if duration%bucketSeconds != 0 {
+		bucketCount64++
 	}
+	if bucketCount64 == 0 || bucketCount64 > maxQueueSummaryBuckets {
+		return QueueSummary{}, fmt.Errorf("%w: queue summary bucket count out of range for round %s", ErrInvalidRoundInfo, roundID)
+	}
+	bucketCount := int(bucketCount64)
 
 	summary := QueueSummary{
 		RoundID:         roundID,

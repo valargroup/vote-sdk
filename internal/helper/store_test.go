@@ -172,6 +172,22 @@ func TestQueueSummaryBucketPolicy(t *testing.T) {
 	assert.Equal(t, uint64(60), queueSummaryPolicyBucketSeconds(10*60))
 }
 
+func TestQueueSummaryRejectsTooManyBuckets(t *testing.T) {
+	const roundID = "4444444444444444444444444444444444444444444444444444444444444444"
+	start := uint64(1700000000)
+	end := start + uint64(maxQueueSummaryBuckets+1)*6*queueSummaryHour
+
+	fetcher := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: start, VoteEndTime: end}, nil
+	}
+	s, err := NewShareStore(":memory:", fetcher)
+	require.NoError(t, err)
+	defer s.Close()
+
+	_, err = s.QueueSummary(roundID, time.Unix(int64(start), 0))
+	require.ErrorIs(t, err, ErrInvalidRoundInfo)
+}
+
 func TestQueueSummaryLastMinuteStartPolicy(t *testing.T) {
 	start := uint64(1700000000)
 	assert.Equal(t, start+6*60, queueSummaryLastMinuteStart(start, start+10*60))
