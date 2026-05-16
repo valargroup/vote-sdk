@@ -35,7 +35,8 @@ Set these in both environments unless noted:
 | `SSH_PRIVATE_KEY` | deploy, reset | SSH key for fleet access. |
 | `SENTRY_DSN` | deploy, reset | Written to `/etc/default/svoted`. |
 | `CONFIG_PR_GITHUB_TOKEN` | deploy, reset | Optional token written to the primary's `svoted` environment. |
-| `VM_PRIVKEYS` | reset | Comma-separated vote-manager private keys for genesis. |
+| `VM_PRIVKEYS` | staging reset | Comma-separated vote-manager private keys for genesis. Production `zvote-1` resets use the default vote-manager address encoded in `x/vote/module.go` unless `SVOTE_USE_DEFAULT_GENESIS_VOTE_MANAGERS=false` is explicitly set. |
+| `SVOTE_EXPECTED_PRODUCTION_VOTE_MANAGER` | production reset | Optional safety override for the expected production default vote manager. Defaults to `sv1wyf8tuys2ussdqwc6ugnvq0x273j8wq8fm3jrj`; `scripts/init.sh` refuses a production reset if the release binary's Go default does not match. |
 | `PRIMARY_VAL_PRIVKEY` | reset | Deterministic primary validator key. |
 | `SECONDARY_VAL_PRIVKEY` | staging reset | Omit in production when `HAS_SECONDARY=false`. |
 | `DO_ACCESS_KEY` | release, reset | Spaces access key. Release still uses repository-level secrets. |
