@@ -3,9 +3,14 @@ import {
   getActiveRoundsFromList,
   getPrimaryActiveRoundFromList,
   getPublishedSnapshotManifestUrl,
+  inferDefaultPirUrlFromHost,
   isActiveRoundStatus,
+  LOCAL_PIR_URL,
+  resolveDefaultPirUrl,
+  shouldMigrateNullifierUrl,
   type ChainRound,
   type PublishedSnapshotManifest,
+  type VotingConfig,
   validatePublishedSnapshotManifestShape,
 } from "./chain";
 
@@ -25,6 +30,57 @@ function manifest(patch: Partial<PublishedSnapshotManifest> = {}): PublishedSnap
     ...patch,
   };
 }
+
+describe("default PIR URL resolution", () => {
+  const stageConfig: VotingConfig = {
+    version: 1,
+    vote_servers: [],
+    pir_endpoints: [
+      { url: "https://stage.pir.valargroup.org", label: "PIR primary" },
+      { url: "https://stage.pir-backup.valargroup.org", label: "PIR backup" },
+    ],
+  };
+
+  it("prefers the first pir_endpoints entry from voting-config", () => {
+    expect(resolveDefaultPirUrl(stageConfig, [])).toBe("https://stage.pir.valargroup.org");
+  });
+
+  it("infers staging from stage.* hostnames", () => {
+    expect(inferDefaultPirUrlFromHost("https://stage.vote-chain-primary.valargroup.org")).toBe(
+      "https://stage.pir.valargroup.org",
+    );
+  });
+
+  it("infers production from prod.* hostnames", () => {
+    expect(inferDefaultPirUrlFromHost("prod.vote-chain-primary.valargroup.org")).toBe(
+      "https://prod.pir.valargroup.org",
+    );
+  });
+
+  it("uses local PIR on localhost", () => {
+    expect(inferDefaultPirUrlFromHost("http://localhost:5173")).toBe(LOCAL_PIR_URL);
+    expect(resolveDefaultPirUrl(null, ["http://localhost:5173"])).toBe(LOCAL_PIR_URL);
+  });
+
+  it("returns null when config and host are unknown", () => {
+    expect(resolveDefaultPirUrl(null, [])).toBeNull();
+  });
+
+  it("migrates away from deprecated fleet URLs once config resolves", () => {
+    expect(
+      shouldMigrateNullifierUrl(
+        "https://pir.valargroup.org",
+        "https://prod.pir.valargroup.org",
+      ),
+    ).toBe(true);
+    expect(
+      shouldMigrateNullifierUrl(
+        "https://prod.pir.valargroup.org",
+        "https://prod.pir.valargroup.org",
+      ),
+    ).toBe(false);
+  });
+});
 
 describe("published snapshot validation", () => {
   it("builds canonical manifest URLs from the bucket base", () => {

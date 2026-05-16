@@ -42,6 +42,10 @@ export function UIConfigProvider({ children }: { children: ReactNode }) {
 
   const refreshPublishedConfig = useCallback(async () => {
     const cfg = await chainApi.getVotingConfig();
+    if (cfg) {
+      const resolved = chainApi.resolveDefaultPirUrl(cfg);
+      if (resolved) chainApi.setResolvedDefaultPirUrl(resolved);
+    }
     setPublishedConfig(cfg);
     setPublishedConfigLoaded(true);
   }, []);
@@ -52,6 +56,10 @@ export function UIConfigProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     chainApi.getVotingConfig().then((cfg) => {
       if (cancelled) return;
+      if (cfg) {
+        const resolved = chainApi.resolveDefaultPirUrl(cfg);
+        if (resolved) chainApi.setResolvedDefaultPirUrl(resolved);
+      }
       setPublishedConfig(cfg);
       setPublishedConfigLoaded(true);
     });

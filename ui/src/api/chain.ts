@@ -48,31 +48,99 @@ export function getApiBase(): string {
 const NULLIFIER_URL_KEY = "shielded-vote-nullifier-url";
 
 export const LOCAL_PIR_URL = "/nullifier";
-export const DEFAULT_PIR_URL = "https://pir.valargroup.org";
+
+const STAGE_PIR_URL = "https://stage.pir.valargroup.org";
+const PROD_PIR_URL = "https://prod.pir.valargroup.org";
+
+const DEPRECATED_NULLIFIER_URLS = new Set([
+  "https://pir.valargroup.org",
+]);
+
+let resolvedDefaultPirUrl: string | null = null;
+
+/** Called when /api/voting-config loads so sync getters match the fleet. */
+export function setResolvedDefaultPirUrl(url: string): void {
+  resolvedDefaultPirUrl = url;
+}
+
+export function inferDefaultPirUrlFromHost(hostOrUrl: string): string | null {
+  if (!hostOrUrl) return null;
+  try {
+    const host = hostOrUrl.includes("://")
+      ? new URL(hostOrUrl).hostname
+      : hostOrUrl.split("/")[0] ?? "";
+    if (host === "localhost" || host === "127.0.0.1") return LOCAL_PIR_URL;
+    if (host.includes("stage.")) return STAGE_PIR_URL;
+    if (host.includes("prod.")) return PROD_PIR_URL;
+  } catch {
+    // ignore malformed URLs
+  }
+  return null;
+}
+
+function defaultHostHints(): string[] {
+  if (typeof window === "undefined") return [];
+  const hints = [window.location.origin];
+  const chain = getChainUrl();
+  if (chain) hints.push(chain);
+  return hints;
+}
+
+/** Primary PIR URL from voting-config or host hints; null when unknown. */
+export function resolveDefaultPirUrl(
+  config?: VotingConfig | null,
+  hostHints: string[] = defaultHostHints(),
+): string | null {
+  const fromConfig = config?.pir_endpoints?.[0]?.url?.trim();
+  if (fromConfig) return fromConfig;
+  for (const hint of hostHints) {
+    const inferred = inferDefaultPirUrlFromHost(hint);
+    if (inferred) return inferred;
+  }
+  return null;
+}
+
+export function isDeprecatedNullifierUrl(url: string): boolean {
+  return DEPRECATED_NULLIFIER_URLS.has(url);
+}
+
+export function getDefaultPirUrl(): string | null {
+  if (resolvedDefaultPirUrl) return resolvedDefaultPirUrl;
+  return resolveDefaultPirUrl(null, defaultHostHints());
+}
 
 function storedNullifierUrl(): string {
   if (typeof window === "undefined") return "";
-  return localStorage.getItem(NULLIFIER_URL_KEY) || "";
+  const stored = localStorage.getItem(NULLIFIER_URL_KEY) || "";
+  if (isDeprecatedNullifierUrl(stored)) return "";
+  if (resolvedDefaultPirUrl && stored === resolvedDefaultPirUrl) return "";
+  return stored;
 }
 
-export function getNullifierUrl(): string {
-  return storedNullifierUrl() || DEFAULT_PIR_URL;
+export function getNullifierUrl(): string | null {
+  return storedNullifierUrl() || getDefaultPirUrl();
 }
 
 export function setNullifierUrl(url: string) {
-  if (url && url !== DEFAULT_PIR_URL) {
+  const defaultUrl = getDefaultPirUrl();
+  if (url && url !== defaultUrl && !isDeprecatedNullifierUrl(url)) {
     localStorage.setItem(NULLIFIER_URL_KEY, url);
   } else {
     localStorage.removeItem(NULLIFIER_URL_KEY);
   }
 }
 
-function nullifierBase(): string {
+/** Snap selection to the environment default after voting-config loads. */
+export function shouldMigrateNullifierUrl(current: string, defaultUrl: string | null): boolean {
+  return defaultUrl != null && isDeprecatedNullifierUrl(current) && current !== defaultUrl;
+}
+
+function nullifierBase(): string | null {
   return getNullifierUrl();
 }
 
-/** Resolved nullifier API base for direct fetch calls (always returns a usable value). */
-export function getNullifierApiBase(): string {
+/** Resolved nullifier API base for direct fetch calls, or null if unset. */
+export function getNullifierApiBase(): string | null {
   return getNullifierUrl();
 }
 
@@ -143,7 +211,9 @@ async function fetchReadOnlyNullifierJson<T>(
   path: "/root" | "/snapshot/status",
   validate: (value: unknown) => asserts value is T
 ): Promise<T> {
-  return fetchNullifierJsonAtBase(getNullifierApiBase(), path, validate);
+  const base = getNullifierApiBase();
+  if (!base) throw new Error("No PIR server configured");
+  return fetchNullifierJsonAtBase(base, path, validate);
 }
 
 async function fetchNullifierJsonAtBase<T>(

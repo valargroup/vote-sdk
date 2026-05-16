@@ -1600,7 +1600,9 @@ function CoordinatorActionsPage({ wallet }: { wallet: UseWallet }) {
 function SettingsPage({ wallet }: { wallet: UseWallet }) {
   const [rpcUrl, setRpcUrl] = useState(getStoredRpc);
   const chain = useChainInfo();
-  const [selectedNullifierUrl, setSelectedNullifierUrl] = useState(chainApi.getNullifierUrl);
+  const [selectedNullifierUrl, setSelectedNullifierUrl] = useState(
+    () => chainApi.getNullifierUrl() ?? "",
+  );
   const nullifier = useNullifierStatus(selectedNullifierUrl);
   const isCustom = !LIGHTWALLETD_ENDPOINTS.some((e) => e.url === rpcUrl);
 
@@ -1609,15 +1611,32 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
   const [configLoaded, setConfigLoaded] = useState(false);
   const pirEndpoints = votingConfig?.pir_endpoints ?? [];
   const voteServers = votingConfig?.vote_servers ?? [];
+  const defaultPirUrl = configLoaded
+    ? chainApi.resolveDefaultPirUrl(votingConfig)
+    : chainApi.getDefaultPirUrl();
   const isKnownNullifier =
-    selectedNullifierUrl === chainApi.DEFAULT_PIR_URL ||
+    selectedNullifierUrl === defaultPirUrl ||
     selectedNullifierUrl === chainApi.LOCAL_PIR_URL ||
+    chainApi.isDeprecatedNullifierUrl(selectedNullifierUrl) ||
     pirEndpoints.some((e) => e.url === selectedNullifierUrl);
   const isCustomNullifier = configLoaded && !isKnownNullifier;
 
   useEffect(() => {
     chainApi.getVotingConfig().then((cfg) => {
-      if (cfg) setVotingConfig(cfg);
+      if (cfg) {
+        setVotingConfig(cfg);
+        const resolved = chainApi.resolveDefaultPirUrl(cfg);
+        if (resolved) {
+          chainApi.setResolvedDefaultPirUrl(resolved);
+          setSelectedNullifierUrl((current) => {
+            if (!current || chainApi.shouldMigrateNullifierUrl(current, resolved)) {
+              chainApi.setNullifierUrl(resolved);
+              return resolved;
+            }
+            return current;
+          });
+        }
+      }
       setConfigLoaded(true);
     });
   }, []);
@@ -1812,11 +1831,13 @@ function SettingsPage({ wallet }: { wallet: UseWallet }) {
               }}
               className="w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary focus:outline-none focus:border-accent/50 cursor-pointer [color-scheme:dark]"
             >
-              <option value={chainApi.DEFAULT_PIR_URL}>
-                PIR primary (default) — {chainApi.DEFAULT_PIR_URL}
-              </option>
+              {defaultPirUrl && (
+                <option value={defaultPirUrl}>
+                  PIR primary (default) — {defaultPirUrl}
+                </option>
+              )}
               {pirEndpoints
-                .filter((ep) => ep.url !== chainApi.DEFAULT_PIR_URL && ep.url !== chainApi.LOCAL_PIR_URL)
+                .filter((ep) => ep.url !== defaultPirUrl && ep.url !== chainApi.LOCAL_PIR_URL)
                 .map((ep) => (
                 <option key={ep.url} value={ep.url}>
                   {ep.label} — {ep.url}
