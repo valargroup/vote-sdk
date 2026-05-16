@@ -1542,6 +1542,8 @@ if [ "$OS_NAME" = "Darwin" ]; then
         <string>${VALIDATOR_VALOPER}</string>
         <key>MONIKER</key>
         <string>${MONIKER}</string>
+        <key>SVOTE_CHAIN_ID</key>
+        <string>${CHAIN_ID}</string>
         <key>SVOTE_INSTALL_DIR</key>
         <string>${INSTALL_DIR}</string>
         <key>SVOTED_BIN</key>
@@ -1624,6 +1626,7 @@ else
   SYSTEMD_ADDR=$(systemd_env_quote "VALIDATOR_ADDR=${VALIDATOR_ADDR}")
   SYSTEMD_VALOPER=$(systemd_env_quote "VALIDATOR_VALOPER=${VALIDATOR_VALOPER}")
   SYSTEMD_MONIKER=$(systemd_env_quote "MONIKER=${MONIKER}")
+  SYSTEMD_CHAIN_ID=$(systemd_env_quote "SVOTE_CHAIN_ID=${CHAIN_ID}")
   SYSTEMD_INSTALL=$(systemd_env_quote "SVOTE_INSTALL_DIR=${INSTALL_DIR}")
   SYSTEMD_SVOTED=$(systemd_env_quote "SVOTED_BIN=${SVOTED_BIN}")
 
@@ -1635,7 +1638,7 @@ After=network.target
 [Service]
 Type=simple
 User=$(whoami)
-Environment=${SYSTEMD_PATH} ${SYSTEMD_HOME} ${SYSTEMD_ADDR} ${SYSTEMD_VALOPER} ${SYSTEMD_MONIKER} ${SYSTEMD_INSTALL} ${SYSTEMD_SVOTED}
+Environment=${SYSTEMD_PATH} ${SYSTEMD_HOME} ${SYSTEMD_ADDR} ${SYSTEMD_VALOPER} ${SYSTEMD_MONIKER} ${SYSTEMD_CHAIN_ID} ${SYSTEMD_INSTALL} ${SYSTEMD_SVOTED}
 ExecStart=${WRAPPER_BIN}
 Restart=on-failure
 RestartSec=5

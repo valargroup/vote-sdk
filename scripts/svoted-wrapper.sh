@@ -80,6 +80,15 @@ derive_valoper() {
     --home "${SVOTE_HOME}" 2>/dev/null
 }
 
+derive_chain_id() {
+  if [ -n "${SVOTE_CHAIN_ID:-}" ]; then
+    echo "${SVOTE_CHAIN_ID}"
+    return 0
+  fi
+
+  jq -r '.chain_id // empty' "${SVOTE_HOME}/config/genesis.json" 2>/dev/null
+}
+
 is_synced() {
   local status catching_up height
   status=$("${SVOTED_BIN}" status --home "${SVOTE_HOME}" --node "${SVOTE_RPC_URL}" 2>/dev/null || echo "")
@@ -166,6 +175,12 @@ if [ -f "${JOIN_COMPLETE_FILE}" ]; then
   log "join-complete marker exists but validator is not bonded; continuing join automation"
 fi
 
+SVOTE_CHAIN_ID="$(derive_chain_id || echo "")"
+if [ -z "${SVOTE_CHAIN_ID}" ]; then
+  log "chain ID unavailable; skipping join automation"
+  exit_with_child_status
+fi
+
 while true; do
   if is_bonded "${VALIDATOR_VALOPER}"; then
     mark_join_complete
@@ -185,6 +200,7 @@ while true; do
       --moniker "${MONIKER}" \
       --amount "${JOIN_STAKE_USVOTE}usvote" \
       --home "${SVOTE_HOME}" \
+      --chain-id "${SVOTE_CHAIN_ID}" \
       --rpc-url "${SVOTE_RPC_URL}" || true
     sleep_checked "${POST_TX_SLEEP_SECONDS}"
   else
