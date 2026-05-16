@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -109,6 +110,63 @@ func TestHelperQueueCmdExportRefusesExistingOutput(t *testing.T) {
 	raw, readErr := os.ReadFile(outPath)
 	require.NoError(t, readErr)
 	assert.Equal(t, "keep me", string(raw))
+}
+
+func TestHelperQueueCmdImportConflictMessage(t *testing.T) {
+	roundID := strings.Repeat("12", 32)
+	destDB := filepath.Join(t.TempDir(), "dest.db")
+	inPath := filepath.Join(t.TempDir(), "queue.json")
+	now := uint64(time.Now().Unix())
+	fetcher := func(roundID string) (helper.RoundInfo, error) {
+		return helper.RoundInfo{CreatedAtTime: now, VoteEndTime: now + 3600}, nil
+	}
+
+	store, err := helper.NewShareStore(destDB, fetcher)
+	require.NoError(t, err)
+	existing := queueCmdTestPayload(roundID, 0)
+	result, err := store.Enqueue(existing)
+	require.NoError(t, err)
+	require.Equal(t, helper.EnqueueInserted, result)
+	require.NoError(t, store.Close())
+
+	incoming := existing
+	incoming.PrimaryBlind = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="
+	export := helper.QueueExport{
+		Version: helper.QueueExportVersion,
+		RoundID: roundID,
+		Round: helper.QueueExportRound{
+			CreatedAtTime: now,
+			VoteEndTime:   now + 3600,
+		},
+		Rows: []helper.QueueExportRow{
+			{
+				ShareIndex:   incoming.EncShare.ShareIndex,
+				SharesHash:   incoming.SharesHash,
+				ProposalID:   incoming.ProposalID,
+				VoteDecision: incoming.VoteDecision,
+				EncShare:     incoming.EncShare,
+				TreePosition: incoming.TreePosition,
+				ShareComms:   incoming.ShareComms,
+				PrimaryBlind: incoming.PrimaryBlind,
+				State:        helper.ShareStateReceived,
+				VoteEndTime:  now + 3600,
+				Processable:  true,
+			},
+		},
+	}
+	raw, err := json.Marshal(export)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(inPath, raw, 0o600))
+
+	output, err := executeHelperQueueCmdErr(t,
+		"--db-path", destDB,
+		"import-queue",
+		"--in", inPath,
+	)
+	require.Error(t, err)
+	assert.Contains(t, output, "inserted=0")
+	assert.Contains(t, output, "conflicts=1")
+	assert.Contains(t, err.Error(), "import inserted 0 rows but found 1 conflicting rows")
 }
 
 func executeHelperQueueCmd(t *testing.T, args ...string) string {

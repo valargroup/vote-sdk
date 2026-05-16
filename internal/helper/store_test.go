@@ -884,6 +884,73 @@ func TestImportQueueSkipsTerminalAndRoundTripsProcessableRows(t *testing.T) {
 	assert.Equal(t, 1, result.SkippedTerminal)
 }
 
+func TestImportQueueRejectsUnsupportedVersion(t *testing.T) {
+	dest := newTestStore(t)
+
+	_, err := dest.ImportQueue(QueueExport{
+		Version: QueueExportVersion + 1,
+		RoundID: "round1",
+	}, QueueImportOptions{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported queue export version")
+}
+
+func TestImportQueueRejectsMissingRoundID(t *testing.T) {
+	dest := newTestStore(t)
+
+	_, err := dest.ImportQueue(QueueExport{
+		Version: QueueExportVersion,
+	}, QueueImportOptions{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "queue export missing round_id")
+}
+
+func TestImportQueueRejectsSubmitAtAfterVoteEndTime(t *testing.T) {
+	submitAt := uint64(time.Now().Add(2 * time.Hour).Unix())
+	voteEndTime := submitAt - 60
+	payload := testPayload("round1", 0)
+	payload.SubmitAt = submitAt
+	export := QueueExport{
+		Version: QueueExportVersion,
+		RoundID: "round1",
+		Round: QueueExportRound{
+			CreatedAtTime: voteEndTime - oneHourSecs,
+			VoteEndTime:   voteEndTime,
+		},
+		Rows: []QueueExportRow{
+			queueExportRowFromPayload(payload, ShareStateReceived, voteEndTime),
+		},
+	}
+
+	dest := newTestStore(t)
+	_, err := dest.ImportQueue(export, QueueImportOptions{})
+	require.ErrorIs(t, err, ErrInvalidSubmitAt)
+	assert.Contains(t, err.Error(), "imported submit_at")
+}
+
+func TestImportQueueReportsConflicts(t *testing.T) {
+	dest := newTestStore(t)
+	existing := testPayload("round1", 0)
+	enqueueAndRequireInserted(t, dest, existing)
+
+	incoming := existing
+	incoming.PrimaryBlind = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="
+	export := QueueExport{
+		Version: QueueExportVersion,
+		RoundID: "round1",
+		Rows: []QueueExportRow{
+			queueExportRowFromPayload(incoming, ShareStateReceived, uint64(time.Now().Add(time.Hour).Unix())),
+		},
+	}
+
+	result, err := dest.ImportQueue(export, QueueImportOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 0, result.Inserted)
+	assert.Equal(t, 0, result.Duplicates)
+	assert.Equal(t, 1, result.Conflicts)
+	assert.Equal(t, 0, result.SkippedTerminal)
+}
+
 func TestImportQueueForceReadyPreservesOriginalSubmitAt(t *testing.T) {
 	futureSubmitAt := uint64(time.Now().Add(time.Hour).Unix())
 	export := QueueExport{
@@ -990,4 +1057,22 @@ func TestImportQueueForceReadyReschedulesDuplicate(t *testing.T) {
 	assert.Equal(t, 0, result.Inserted)
 	assert.Equal(t, 1, result.Duplicates)
 	assert.Equal(t, 0, result.Conflicts)
+}
+
+func queueExportRowFromPayload(payload SharePayload, state ShareState, voteEndTime uint64) QueueExportRow {
+	return QueueExportRow{
+		ShareIndex:       payload.EncShare.ShareIndex,
+		SharesHash:       payload.SharesHash,
+		ProposalID:       payload.ProposalID,
+		VoteDecision:     payload.VoteDecision,
+		EncShare:         payload.EncShare,
+		TreePosition:     payload.TreePosition,
+		ShareComms:       payload.ShareComms,
+		PrimaryBlind:     payload.PrimaryBlind,
+		State:            state,
+		VoteEndTime:      voteEndTime,
+		SubmitAt:         payload.SubmitAt,
+		OriginalSubmitAt: payload.SubmitAt,
+		Processable:      isProcessableShareState(state),
+	}
 }

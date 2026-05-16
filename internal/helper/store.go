@@ -889,6 +889,9 @@ func (s *ShareStore) ImportQueue(export QueueExport, opts QueueImportOptions) (Q
 		if voteEndTime == 0 {
 			voteEndTime = export.Round.VoteEndTime
 		}
+		if !opts.ForceReady && submitAt > voteEndTime {
+			return QueueImportResult{}, fmt.Errorf("%w: imported submit_at (%d) > vote_end_time (%d) for share_index %d proposal_id %d tree_position %d", ErrInvalidSubmitAt, submitAt, voteEndTime, row.ShareIndex, row.ProposalID, row.TreePosition)
+		}
 		commsJSON, err := json.Marshal(row.ShareComms)
 		if err != nil {
 			return QueueImportResult{}, fmt.Errorf("marshal share_comms for share_index %d: %w", row.ShareIndex, err)

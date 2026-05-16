@@ -137,7 +137,11 @@ func helperImportQueueCmd(dbPath *string) *cobra.Command {
 				result.SkippedTerminal,
 			)
 			if result.Conflicts > 0 {
-				return fmt.Errorf("import completed with %d conflicting rows", result.Conflicts)
+				return fmt.Errorf(
+					"import inserted %d rows but found %d conflicting rows; investigate before relying on this helper",
+					result.Inserted,
+					result.Conflicts,
+				)
 			}
 			return nil
 		},
