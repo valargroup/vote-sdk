@@ -43,6 +43,7 @@ const BACKLOG_SIGNAL_STROKE = "#e35d8a";
 const LAST_MINUTE_FILL = "#2a2f3a";
 const LAST_MINUTE_BORDER = "#7a8090";
 const AUTO_REFRESH_INTERVAL_MS = 30_000;
+const QUEUE_SUMMARY_TIMEOUT_MS = 12_000;
 
 function base64ToHex(b64: string): string {
   try {
@@ -138,15 +139,30 @@ async function fetchQueueSummaries(
 ): Promise<QueueServerResult[]> {
   return Promise.all(
     servers.map(async (server): Promise<QueueServerResult> => {
+      const controller = new AbortController();
+      let timedOut = false;
+      const timeout = window.setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, QUEUE_SUMMARY_TIMEOUT_MS);
       try {
-        const summary = await chainApi.getQueueSummaryFromServer(server.url, roundIdHex);
+        const summary = await chainApi.getQueueSummaryFromServer(server.url, roundIdHex, {
+          signal: controller.signal,
+        });
         return { state: "ok", server, summary };
       } catch (err) {
         return {
           state: "error",
           server,
-          error: err instanceof Error ? err.message : String(err),
+          error:
+            timedOut
+              ? `Timed out after ${Math.round(QUEUE_SUMMARY_TIMEOUT_MS / 1000)}s`
+              : err instanceof Error
+                ? err.message
+                : String(err),
         };
+      } finally {
+        window.clearTimeout(timeout);
       }
     })
   );
@@ -674,6 +690,14 @@ export function QueueMonitorPage() {
   const [metadataLoading, setMetadataLoading] = useState(true);
   const [error, setError] = useState("");
   const previousByRoundRef = useRef<Record<string, QueueServerOK[]>>({});
+  const summaryRefreshIdRef = useRef(0);
+
+  const invalidateSummaries = useCallback(() => {
+    summaryRefreshIdRef.current += 1;
+    setResults([]);
+    setBacklogSignals([]);
+    setLoading(false);
+  }, []);
 
   const roundOptions = useMemo(
     () =>
@@ -708,18 +732,21 @@ export function QueueMonitorPage() {
   );
 
   const selectAllServers = useCallback(() => {
+    invalidateSummaries();
     setSelectedServerUrls(voteServers.map((server) => server.url));
-  }, [voteServers]);
+  }, [invalidateSummaries, voteServers]);
 
   const clearSelectedServers = useCallback(() => {
+    invalidateSummaries();
     setSelectedServerUrls([]);
-  }, []);
+  }, [invalidateSummaries]);
 
   const toggleServer = useCallback((url: string) => {
+    invalidateSummaries();
     setSelectedServerUrls((current) =>
       current.includes(url) ? current.filter((item) => item !== url) : [...current, url]
     );
-  }, []);
+  }, [invalidateSummaries]);
 
   const refreshMetadata = useCallback(async () => {
     setMetadataLoading(true);
@@ -745,10 +772,12 @@ export function QueueMonitorPage() {
   }, []);
 
   const refreshSummaries = useCallback(async () => {
+    const refreshId = ++summaryRefreshIdRef.current;
     const roundIdHex = selectedRoundId.trim().toLowerCase();
     if (!isRoundIdHex(roundIdHex) || selectedVoteServers.length === 0) {
       setResults([]);
       setBacklogSignals([]);
+      setLoading(false);
       return;
     }
 
@@ -756,6 +785,7 @@ export function QueueMonitorPage() {
     setError("");
     try {
       const nextResults = await fetchQueueSummaries(selectedVoteServers, roundIdHex);
+      if (refreshId !== summaryRefreshIdRef.current) return;
       const split = splitQueueResults(nextResults);
       const previous = previousByRoundRef.current[roundIdHex] ?? [];
       const fetchedAt = Math.floor(Date.now() / 1000);
@@ -764,9 +794,12 @@ export function QueueMonitorPage() {
       setResults(nextResults);
       setBacklogSignals(nextSignals);
     } catch (err) {
+      if (refreshId !== summaryRefreshIdRef.current) return;
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setLoading(false);
+      if (refreshId === summaryRefreshIdRef.current) {
+        setLoading(false);
+      }
     }
   }, [selectedRoundId, selectedVoteServers]);
 
@@ -780,6 +813,7 @@ export function QueueMonitorPage() {
   }, [refreshMetadata]);
 
   useEffect(() => {
+    invalidateSummaries();
     setSelectedServerUrls((current) => {
       const urls = voteServers.map((server) => server.url);
       if (urls.length === 0) return [];
@@ -788,7 +822,7 @@ export function QueueMonitorPage() {
       const kept = current.filter((url) => knownUrls.has(url));
       return kept.length > 0 ? kept : urls;
     });
-  }, [voteServers]);
+  }, [invalidateSummaries, voteServers]);
 
   useEffect(() => {
     void refreshSummaries();
@@ -903,7 +937,10 @@ export function QueueMonitorPage() {
                     ? selectedRoundId
                     : ""
                 }
-                onChange={(event) => setSelectedRoundId(event.target.value)}
+                onChange={(event) => {
+                  invalidateSummaries();
+                  setSelectedRoundId(event.target.value);
+                }}
                 disabled={metadataLoading || roundOptions.length === 0}
                 className="w-full truncate rounded-lg border border-border-subtle bg-surface-2 py-2 pl-3 pr-8 text-xs text-text-primary outline-none [color-scheme:dark] disabled:opacity-50"
               >
@@ -926,7 +963,10 @@ export function QueueMonitorPage() {
               </span>
               <input
                 value={selectedRoundId}
-                onChange={(event) => setSelectedRoundId(event.target.value.trim())}
+                onChange={(event) => {
+                  invalidateSummaries();
+                  setSelectedRoundId(event.target.value.trim());
+                }}
                 placeholder="64 character round id"
                 className="w-full rounded-lg border border-border-subtle bg-surface-2 px-3 py-2 font-mono text-xs text-text-primary outline-none placeholder:text-text-muted"
               />

@@ -572,12 +572,13 @@ export async function getVoteSummary(
 
 export async function getQueueSummaryFromServer(
   serverUrl: string,
-  roundIdHex: string
+  roundIdHex: string,
+  init?: RequestInit
 ): Promise<QueueSummaryResponse> {
   const base = serverUrl.replace(/\/+$/, "");
   return fetchJsonAtUrl<QueueSummaryResponse>(
     `${base}/shielded-vote/v1/queue-summary/${encodeURIComponent(roundIdHex)}`,
-    { cache: "no-store" }
+    { ...init, cache: "no-store" }
   );
 }
 
