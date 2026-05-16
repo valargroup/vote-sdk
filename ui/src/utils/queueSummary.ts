@@ -19,7 +19,7 @@ export const QUEUE_STATE_META: Record<QueueStateKey, { label: string; color: str
   submitted: { label: "Submitted", color: "#4a9a4a" },
   pending_future: { label: "Future", color: "#3b82f6" },
   overdue_pending: { label: "Overdue", color: "#c4943a" },
-  processing: { label: "In-window", color: "#a855f7" },
+  processing: { label: "Processing", color: "#a855f7" },
   failed: { label: "Failed", color: "#c44a4a" },
 };
 

@@ -139,8 +139,8 @@ function sameStrings(a: string[], b: string[]): boolean {
 }
 
 // Bottom-to-top stacking order follows the share lifecycle:
-// submitted (already delivered) → future (window not open yet) → in-window
-// (window currently open) → overdue (window passed without delivery) →
+// submitted (already delivered) → future (window not open yet) → processing
+// (helper has started work) → overdue (window passed without delivery) →
 // failed (terminal). Alarm states climb toward the top.
 const STATE_STACK_ORDER: QueueStateKey[] = [
   "submitted",
@@ -672,7 +672,7 @@ function ServerStatusRow({
           {totals.pending_future.toLocaleString()}
         </span>
         <span>
-          <span className="mr-1 font-sans text-text-muted">in-window</span>
+          <span className="mr-1 font-sans text-text-muted">processing</span>
           {totals.processing.toLocaleString()}
         </span>
         <span className={totals.overdue_pending > 0 ? "text-warning" : ""}>
