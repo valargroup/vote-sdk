@@ -226,6 +226,16 @@ func (ms msgServer) executeUpdateVoteManagers(goCtx context.Context, msg *types.
 		return nil, fmt.Errorf("new_vote_manager_policy: %w", err)
 	}
 
+	for _, addr := range normalized {
+		accAddr, err := sdk.AccAddressFromBech32(addr)
+		if err != nil {
+			return nil, fmt.Errorf("new_vote_manager_policy: address %q is not a valid bech32 address: %w", addr, err)
+		}
+		if err := ms.k.ensureAccountExists(goCtx, accAddr); err != nil {
+			return nil, err
+		}
+	}
+
 	kvStore := ms.k.OpenKVStore(ctx)
 	if err := ms.k.SetVoteManagers(kvStore, &types.VoteManagerSet{Addresses: normalized, Threshold: threshold}); err != nil {
 		return nil, err
