@@ -107,6 +107,7 @@ func NewShareStore(dbPath string, fetcher RoundInfoFetcher) (*ShareStore, error)
 	return s, nil
 }
 
+// acquireShareStoreLock takes a process-wide advisory lock for a helper DB file.
 func acquireShareStoreLock(dbPath string) (*os.File, error) {
 	if dbPath == "" || dbPath == ":memory:" || strings.Contains(dbPath, "mode=memory") {
 		return nil, nil
@@ -127,6 +128,7 @@ func acquireShareStoreLock(dbPath string) (*os.File, error) {
 	return lockFile, nil
 }
 
+// releaseShareStoreLock releases and closes a lock file returned by acquireShareStoreLock.
 func releaseShareStoreLock(lockFile *os.File) error {
 	if lockFile == nil {
 		return nil
@@ -735,6 +737,7 @@ func (s *ShareStore) Status() map[string]QueueStatus {
 	return result
 }
 
+// isProcessableShareState reports whether a queue row can still be submitted.
 func isProcessableShareState(state ShareState) bool {
 	return state == ShareStateReceived || state == ShareStateWitnessed
 }
@@ -952,6 +955,7 @@ func (s *ShareStore) ImportQueue(export QueueExport, opts QueueImportOptions) (Q
 	return result, nil
 }
 
+// scheduledTime converts a submit_at unix timestamp into an in-memory schedule time.
 func scheduledTime(submitAt uint64) time.Time {
 	if submitAt == 0 {
 		return time.Now()
@@ -959,6 +963,7 @@ func scheduledTime(submitAt uint64) time.Time {
 	return time.Unix(int64(submitAt), 0)
 }
 
+// importRowMatchesExisting compares an import row against the existing queue row.
 func importRowMatchesExisting(tx *sql.Tx, roundID string, row QueueExportRow) (bool, error) {
 	var existing SharePayload
 	var commsJSON string

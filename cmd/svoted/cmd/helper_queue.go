@@ -16,6 +16,7 @@ import (
 	"github.com/valargroup/vote-sdk/internal/helper"
 )
 
+// helperQueueCmd builds local helper queue rescue subcommands.
 func helperQueueCmd() *cobra.Command {
 	var dbPath string
 
@@ -33,6 +34,7 @@ func helperQueueCmd() *cobra.Command {
 	return cmd
 }
 
+// helperExportQueueCmd builds the command that exports one round's helper queue.
 func helperExportQueueCmd(dbPath *string) *cobra.Command {
 	var roundID string
 	var outPath string
@@ -83,6 +85,7 @@ func helperExportQueueCmd(dbPath *string) *cobra.Command {
 	return cmd
 }
 
+// helperImportQueueCmd builds the command that imports processable queue rows.
 func helperImportQueueCmd(dbPath *string) *cobra.Command {
 	var inPath string
 	var forceReady bool
@@ -138,6 +141,7 @@ func helperImportQueueCmd(dbPath *string) *cobra.Command {
 	return cmd
 }
 
+// normalizeRoundID validates a 32-byte hex round ID and returns lowercase hex.
 func normalizeRoundID(roundID string) (string, error) {
 	roundID = strings.ToLower(strings.TrimSpace(roundID))
 	decoded, err := hex.DecodeString(roundID)
@@ -147,6 +151,7 @@ func normalizeRoundID(roundID string) (string, error) {
 	return roundID, nil
 }
 
+// resolveHelperDBPath returns the explicit DB path or the helper DB under home.
 func resolveHelperDBPath(cmd *cobra.Command, dbPath string) string {
 	if strings.TrimSpace(dbPath) != "" {
 		return dbPath
