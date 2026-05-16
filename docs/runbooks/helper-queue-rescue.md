@@ -28,8 +28,8 @@ svoted helper export-queue \
 systemctl start svoted
 ```
 
-By default the command reads `<home>/helper.db`. Use `--db-path` if the helper
-uses a non-default `[helper].db_path`.
+By default the command reads `[helper].db_path` from app.toml when set, then
+falls back to `<home>/helper.db`. Use `--db-path` to override both.
 
 The export includes every row for the round. `received` and `witnessed` rows
 include full processable payloads. `submitted` and permanently `failed` rows are

@@ -167,6 +167,9 @@ func resolveHelperDBPath(cmd *cobra.Command, dbPath string) string {
 	if strings.TrimSpace(dbPath) != "" {
 		return dbPath
 	}
+	if configuredDBPath := strings.TrimSpace(viper.GetString("helper.db_path")); configuredDBPath != "" {
+		return configuredDBPath
+	}
 
 	homeDir := ""
 	if homeFlag := cmd.Flags().Lookup(flags.FlagHome); homeFlag != nil && homeFlag.Changed {

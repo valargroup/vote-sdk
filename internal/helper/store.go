@@ -847,21 +847,9 @@ func (s *ShareStore) ImportQueue(export QueueExport, opts QueueImportOptions) (Q
 	}
 	defer tx.Rollback()
 
-	var importedRoundInfo *RoundInfo
+	var exportedRoundInfo *RoundInfo
 	if export.Round.CreatedAtTime != 0 || export.Round.VoteEndTime != 0 {
-		if _, err := tx.Exec(
-			`INSERT INTO rounds (round_id, vote_end_time, created_at_time)
-			 VALUES (?, ?, ?)
-			 ON CONFLICT(round_id) DO UPDATE SET
-			   vote_end_time = excluded.vote_end_time,
-			   created_at_time = excluded.created_at_time`,
-			export.RoundID,
-			export.Round.VoteEndTime,
-			export.Round.CreatedAtTime,
-		); err != nil {
-			return QueueImportResult{}, fmt.Errorf("cache round metadata: %w", err)
-		}
-		importedRoundInfo = &RoundInfo{
+		exportedRoundInfo = &RoundInfo{
 			CreatedAtTime: export.Round.CreatedAtTime,
 			VoteEndTime:   export.Round.VoteEndTime,
 		}
@@ -947,6 +935,23 @@ func (s *ShareStore) ImportQueue(export QueueExport, opts QueueImportOptions) (Q
 		} else {
 			result.Conflicts++
 		}
+	}
+
+	var importedRoundInfo *RoundInfo
+	if exportedRoundInfo != nil && result.Inserted+result.Duplicates > 0 {
+		if _, err := tx.Exec(
+			`INSERT INTO rounds (round_id, vote_end_time, created_at_time)
+			 VALUES (?, ?, ?)
+			 ON CONFLICT(round_id) DO UPDATE SET
+			   vote_end_time = excluded.vote_end_time,
+			   created_at_time = excluded.created_at_time`,
+			export.RoundID,
+			exportedRoundInfo.VoteEndTime,
+			exportedRoundInfo.CreatedAtTime,
+		); err != nil {
+			return QueueImportResult{}, fmt.Errorf("cache round metadata: %w", err)
+		}
+		importedRoundInfo = exportedRoundInfo
 	}
 
 	if err := tx.Commit(); err != nil {

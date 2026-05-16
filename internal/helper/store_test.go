@@ -951,6 +951,45 @@ func TestImportQueueReportsConflicts(t *testing.T) {
 	assert.Equal(t, 0, result.SkippedTerminal)
 }
 
+func TestImportQueueSkipsRoundMetadataForTerminalOnlyExport(t *testing.T) {
+	dest := newTestStore(t)
+	_, err := dest.db.Exec(
+		"INSERT INTO rounds (round_id, vote_end_time, created_at_time) VALUES (?, ?, ?)",
+		"round1", uint64(2000), uint64(1000),
+	)
+	require.NoError(t, err)
+	dest.roundCache["round1"] = RoundInfo{CreatedAtTime: 1000, VoteEndTime: 2000}
+
+	payload := testPayload("round1", 0)
+	export := QueueExport{
+		Version: QueueExportVersion,
+		RoundID: "round1",
+		Round: QueueExportRound{
+			CreatedAtTime: 9000,
+			VoteEndTime:   10000,
+		},
+		Rows: []QueueExportRow{
+			queueExportRowFromPayload(payload, ShareStateSubmitted, 10000),
+		},
+	}
+
+	result, err := dest.ImportQueue(export, QueueImportOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 0, result.Inserted)
+	assert.Equal(t, 0, result.Duplicates)
+	assert.Equal(t, 1, result.SkippedTerminal)
+
+	var cachedCreatedAt, cachedVoteEndTime uint64
+	err = dest.db.QueryRow(
+		"SELECT created_at_time, vote_end_time FROM rounds WHERE round_id = ?",
+		"round1",
+	).Scan(&cachedCreatedAt, &cachedVoteEndTime)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(1000), cachedCreatedAt)
+	assert.Equal(t, uint64(2000), cachedVoteEndTime)
+	assert.Equal(t, RoundInfo{CreatedAtTime: 1000, VoteEndTime: 2000}, dest.roundCache["round1"])
+}
+
 func TestImportQueueForceReadyPreservesOriginalSubmitAt(t *testing.T) {
 	futureSubmitAt := uint64(time.Now().Add(time.Hour).Unix())
 	export := QueueExport{
@@ -992,6 +1031,15 @@ func TestImportQueueForceReadyPreservesOriginalSubmitAt(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, uint64(0), submitAt)
 	assert.Equal(t, futureSubmitAt, originalSubmitAt)
+
+	var cachedCreatedAt, cachedVoteEndTime uint64
+	err = dest.db.QueryRow(
+		"SELECT created_at_time, vote_end_time FROM rounds WHERE round_id = ?",
+		"round1",
+	).Scan(&cachedCreatedAt, &cachedVoteEndTime)
+	require.NoError(t, err)
+	assert.Equal(t, futureSubmitAt-oneHourSecs, cachedCreatedAt)
+	assert.Equal(t, futureSubmitAt+oneHourSecs, cachedVoteEndTime)
 
 	ready := dest.TakeReady()
 	require.Len(t, ready, 1)

@@ -111,6 +111,34 @@ func TestHelperQueueCmdUsesConfiguredHomeDefaultDBPath(t *testing.T) {
 	assert.Contains(t, output, "exported 1 queue rows")
 }
 
+func TestHelperQueueCmdUsesConfiguredDBPath(t *testing.T) {
+	roundID := strings.Repeat("56", 32)
+	homeDir := t.TempDir()
+	dbPath := filepath.Join(t.TempDir(), "configured-helper.db")
+	setViperHome(t, homeDir)
+	setViperString(t, "helper.db_path", dbPath)
+	outPath := filepath.Join(t.TempDir(), "queue.json")
+	now := uint64(time.Now().Unix())
+	fetcher := func(roundID string) (helper.RoundInfo, error) {
+		return helper.RoundInfo{CreatedAtTime: now, VoteEndTime: now + 3600}, nil
+	}
+
+	store, err := helper.NewShareStore(dbPath, fetcher)
+	require.NoError(t, err)
+	result, err := store.Enqueue(queueCmdTestPayload(roundID, 0))
+	require.NoError(t, err)
+	require.Equal(t, helper.EnqueueInserted, result)
+	require.NoError(t, store.Close())
+
+	output := executeHelperQueueCmd(t,
+		"export-queue",
+		"--round-id", roundID,
+		"--out", outPath,
+	)
+	assert.Contains(t, output, "exported 1 queue rows")
+	assert.NoFileExists(t, filepath.Join(homeDir, "helper.db"))
+}
+
 func TestHelperQueueCmdExportRefusesExistingOutput(t *testing.T) {
 	roundID := strings.Repeat("ef", 32)
 	sourceDB := filepath.Join(t.TempDir(), "source.db")
@@ -218,10 +246,15 @@ func executeHelperQueueCmdErr(t *testing.T, args ...string) (string, error) {
 
 func setViperHome(t *testing.T, homeDir string) {
 	t.Helper()
-	previousHome := viper.GetString(flags.FlagHome)
-	viper.Set(flags.FlagHome, homeDir)
+	setViperString(t, flags.FlagHome, homeDir)
+}
+
+func setViperString(t *testing.T, key string, value string) {
+	t.Helper()
+	previousValue := viper.GetString(key)
+	viper.Set(key, value)
 	t.Cleanup(func() {
-		viper.Set(flags.FlagHome, previousHome)
+		viper.Set(key, previousValue)
 	})
 }
 
