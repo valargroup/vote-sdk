@@ -3,10 +3,12 @@
 #
 # Binary-only (no repo):
 #   curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | bash
+#   curl -fsSL https://setup.valargroup.org/ | bash -s -- --env stage --tls-mode auto
 #
 # Source developer (has repo + mise):
 #   mise run build:install   # builds svoted + create-val-tx → $HOME/go/bin
 #   SVOTE_LOCAL_BINARIES=1 ./join.sh   # uses local binaries, skips download
+#   SVOTE_ENV=stage SVOTE_LOCAL_BINARIES=1 ./join.sh
 #
 # What it does:
 #   1. Fetches voting-config from the GitHub Pages CDN (canonical source; same one wallets use)
@@ -20,6 +22,8 @@
 #
 # Optional: SVOTE_WRAPPER_SCRIPT=/path/to/svoted-wrapper.sh when join.sh is piped from curl and
 # svoted-wrapper.sh is not beside join.sh (see vote-sdk/scripts/svoted-wrapper.sh).
+# Optional: --env prod|stage or SVOTE_ENV=prod|stage selects the public network.
+# Defaults to prod when omitted.
 #
 # Requirements: curl. jq and lz4 are installed automatically when missing (apt/dnf/yum/apk/Homebrew).
 # Dependency (binary path): release.yml must have run to upload binaries to DO Spaces.
@@ -49,7 +53,13 @@ DO_BASE="https://vote.fra1.digitaloceanspaces.com"
 SNAPSHOT_BASE_URL="${SVOTE_SNAPSHOT_BASE_URL:-}"
 # Canonical dynamic voting-config (same payload wallets fetch). Override for
 # staging mirrors or fork testing; see github.com/valargroup/token-holder-voting-config.
-VOTING_CONFIG_URL="${VOTING_CONFIG_URL:-https://voting.valargroup.org/prod/dynamic-voting-config.json}"
+SVOTE_ENV="${SVOTE_ENV:-prod}"
+VOTING_CONFIG_URL_WAS_SET=0
+if [ -n "${VOTING_CONFIG_URL:-}" ]; then
+  VOTING_CONFIG_URL_WAS_SET=1
+else
+  VOTING_CONFIG_URL=""
+fi
 # Admin API base — used once for POST /api/register-validator during setup.
 # Override via SVOTE_ADMIN_URL when joining a non-default deployment. An explicit
 # empty value disables registration. DEFAULT_ADMIN_API_BASE is a legacy override.
@@ -100,9 +110,33 @@ while [ $# -gt 0 ]; do
       fi
       shift
       ;;
+    --env)
+      if [ $# -lt 2 ]; then
+        echo "ERROR: --env requires one of: prod, stage."
+        exit 1
+      fi
+      SVOTE_ENV="$2"
+      shift 2
+      ;;
+    --env=*)
+      SVOTE_ENV="${1#--env=}"
+      if [ -z "${SVOTE_ENV}" ]; then
+        echo "ERROR: --env requires one of: prod, stage."
+        exit 1
+      fi
+      shift
+      ;;
     *) shift ;;
   esac
 done
+
+default_voting_config_url_for_env() {
+  case "$1" in
+    prod)  echo "https://voting.valargroup.org/prod/dynamic-voting-config.json" ;;
+    stage) echo "https://voting.valargroup.org/stage/dynamic-voting-config.json" ;;
+    *)     echo "" ;;
+  esac
+}
 
 default_admin_url_for_chain() {
   case "$1" in
@@ -111,6 +145,19 @@ default_admin_url_for_chain() {
     *)       echo "" ;;
   esac
 }
+
+case "$SVOTE_ENV" in
+  prod|stage) ;;
+  *)
+    echo "ERROR: Unsupported SVOTE_ENV/--env: ${SVOTE_ENV}"
+    echo "  Expected one of: prod, stage."
+    exit 1
+    ;;
+esac
+
+if [ "$VOTING_CONFIG_URL_WAS_SET" != "1" ]; then
+  VOTING_CONFIG_URL="$(default_voting_config_url_for_env "$SVOTE_ENV")"
+fi
 
 # ─── Preflight ────────────────────────────────────────────────────────────────
 
@@ -993,37 +1040,52 @@ if ! INIT_ERR=$(svoted init "${MONIKER}" --chain-id "${CHAIN_ID}" --home "${HOME
 fi
 
 # ─── Fetch genesis ───────────────────────────────────────────────────────────
-# sdk-chain-reset.yml's upload-genesis job writes the canonical genesis to
-# s3://vote/genesis.json after every reset. As a guard against a stale bucket
-# object during manual ops, also compare it with the live seed's genesis endpoint
-# and prefer the live seed copy if they differ.
+# Prefer the live seed genesis after chain discovery. Spaces objects are
+# fallbacks for transient seed API failures or older environments.
 
-GENESIS_URL="${DO_BASE}/genesis.json"
 LIVE_GENESIS_URL="${SEED_URL%/}/shielded-vote/v1/genesis"
-echo "Fetching genesis.json from ${GENESIS_URL}..."
+CHAIN_GENESIS_URL="${DO_BASE}/genesis/${CHAIN_ID}/genesis.json"
+LEGACY_GENESIS_URL="${DO_BASE}/genesis.json"
+echo "Fetching genesis.json from ${LIVE_GENESIS_URL}..."
 GENESIS_TMP=$(mktemp)
-LIVE_GENESIS_TMP=$(mktemp)
 cleanup_genesis_tmp() {
-  rm -f "${GENESIS_TMP}" "${LIVE_GENESIS_TMP}"
+  rm -f "${GENESIS_TMP}"
 }
 trap cleanup_genesis_tmp EXIT
 
-curl -fsSL -o "${GENESIS_TMP}" "${GENESIS_URL}"
-if curl -fsSL -o "${LIVE_GENESIS_TMP}" "${LIVE_GENESIS_URL}" 2>/dev/null; then
-  if ! cmp -s "${GENESIS_TMP}" "${LIVE_GENESIS_TMP}"; then
-    echo "WARNING: ${GENESIS_URL} does not match live seed genesis."
-    echo "  Using live seed genesis from ${LIVE_GENESIS_URL}."
-    cp "${LIVE_GENESIS_TMP}" "${GENESIS_TMP}"
-  fi
+GENESIS_SOURCE=""
+if curl -fsSL -o "${GENESIS_TMP}" "${LIVE_GENESIS_URL}" 2>/dev/null; then
+  GENESIS_SOURCE="${LIVE_GENESIS_URL}"
 else
-  echo "WARNING: Could not fetch live seed genesis from ${LIVE_GENESIS_URL}; using ${GENESIS_URL}."
+  echo "WARNING: Could not fetch live seed genesis from ${LIVE_GENESIS_URL}."
+  echo "Fetching genesis.json from ${CHAIN_GENESIS_URL}..."
+  if curl -fsSL -o "${GENESIS_TMP}" "${CHAIN_GENESIS_URL}" 2>/dev/null; then
+    GENESIS_SOURCE="${CHAIN_GENESIS_URL}"
+  else
+    echo "WARNING: Could not fetch chain-scoped genesis from ${CHAIN_GENESIS_URL}."
+    echo "Fetching genesis.json from ${LEGACY_GENESIS_URL}..."
+    if curl -fsSL -o "${GENESIS_TMP}" "${LEGACY_GENESIS_URL}"; then
+      GENESIS_SOURCE="${LEGACY_GENESIS_URL}"
+    else
+      echo "ERROR: Could not fetch genesis.json from live seed or Spaces fallbacks."
+      exit 1
+    fi
+  fi
 fi
+
+GENESIS_CHAIN_ID=$(jq -r '.chain_id // empty' "${GENESIS_TMP}" 2>/dev/null || true)
+if [ "${GENESIS_CHAIN_ID}" != "${CHAIN_ID}" ]; then
+  echo "ERROR: genesis.json chain_id mismatch. Expected ${CHAIN_ID}, got ${GENESIS_CHAIN_ID:-<empty>}."
+  echo "  Source: ${GENESIS_SOURCE:-unknown}"
+  exit 1
+fi
+
 cp "${GENESIS_TMP}" "${HOME_DIR}/config/genesis.json"
 if ! svoted genesis validate-genesis --home "${HOME_DIR}"; then
   echo "ERROR: genesis.json failed validation against this svoted build."
   exit 1
 fi
-echo "Genesis validated."
+echo "Genesis validated (${GENESIS_SOURCE})."
 cleanup_genesis_tmp
 trap - EXIT
 

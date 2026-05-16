@@ -180,3 +180,34 @@ jobs:
             echo "=== CHECKS FAILED ==="
             exit 1
           fi
+
+      - name: Run join.sh staging smoke test
+        if: matrix.label == 'linux/amd64'
+        env:
+          SVOTE_ENV: stage
+          SVOTE_HOME: ${{ runner.temp }}/svoted-stage
+          SVOTE_MONIKER: ci-stage-test
+          SVOTE_SKIP_SERVICE: "1"
+          SVOTE_SKIP_CADDY: "1"
+          SVOTE_ADMIN_URL: http://127.0.0.1:9
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash join.sh 2>&1 | tee join-stage-output.log
+          if grep -Eq 'Mnemonic:|Write down the mnemonic' join-stage-output.log; then
+            echo "join.sh printed validator mnemonic material"
+            exit 1
+          fi
+
+          if [ "$(jq -r '.chain_id' "${SVOTE_HOME}/config/genesis.json")" != "svote-1" ]; then
+            echo "staging smoke used the wrong genesis chain_id"
+            jq -r '.chain_id' "${SVOTE_HOME}/config/genesis.json"
+            exit 1
+          fi
+
+          if grep -q 'stage.vote-chain-primary.valargroup.org' "${SVOTE_HOME}/config/config.toml"; then
+            echo "  OK  staging persistent peer host set"
+          else
+            echo "  FAIL  staging persistent peer host missing"
+            exit 1
+          fi
