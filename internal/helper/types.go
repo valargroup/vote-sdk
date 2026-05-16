@@ -147,6 +147,8 @@ type QueueSummary struct {
 }
 
 // QueueSummaryBucket is one coarse time interval within a queue summary.
+// Buckets that have not ended yet mask nonfailed rows as pending or processing
+// so polling the public endpoint cannot reveal exact submit or processing times.
 type QueueSummaryBucket struct {
 	Start          uint64 `json:"start"`
 	End            uint64 `json:"end"`

@@ -700,6 +700,13 @@ func queueSummaryLastMinuteStart(createdAtTime, voteEndTime uint64) uint64 {
 		return createdAtTime
 	}
 	duration := voteEndTime - createdAtTime
+	if duration <= queueSummaryHour {
+		window := duration * 40 / 100
+		if window < 1 {
+			window = 1
+		}
+		return voteEndTime - window
+	}
 	window := duration / 100
 	if window < queueSummaryMinute {
 		window = queueSummaryMinute
@@ -803,19 +810,23 @@ func (s *ShareStore) QueueSummary(roundID string, now time.Time) (QueueSummary, 
 
 		idx := queueSummaryBucketIndex(effectiveTime, info.CreatedAtTime, info.VoteEndTime, bucketSeconds, bucketCount)
 		bucket := &summary.Buckets[idx]
-		switch ShareState(state) {
-		case ShareStateReceived:
-			if effectiveTime <= generatedAt {
-				bucket.OverduePending += count
-			} else {
-				bucket.PendingFuture += count
-			}
-		case ShareStateWitnessed:
-			bucket.Processing += count
-		case ShareStateSubmitted:
-			bucket.Submitted += count
-		case ShareStateFailed:
+		shareState := ShareState(state)
+		switch {
+		case shareState == ShareStateFailed:
 			bucket.Failed += count
+		case bucket.End > generatedAt && bucket.Start <= generatedAt:
+			bucket.Processing += count
+		case bucket.Start > generatedAt:
+			bucket.PendingFuture += count
+		default:
+			switch shareState {
+			case ShareStateReceived:
+				bucket.OverduePending += count
+			case ShareStateWitnessed:
+				bucket.Processing += count
+			case ShareStateSubmitted:
+				bucket.Submitted += count
+			}
 		}
 		bucket.Total += count
 	}

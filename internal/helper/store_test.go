@@ -171,6 +171,14 @@ func TestQueueSummaryBucketPolicy(t *testing.T) {
 	assert.Equal(t, uint64(60), queueSummaryPolicyBucketSeconds(10*60))
 }
 
+func TestQueueSummaryLastMinuteStartPolicy(t *testing.T) {
+	start := uint64(1700000000)
+	assert.Equal(t, start+6*60, queueSummaryLastMinuteStart(start, start+10*60))
+	assert.Equal(t, start+36*60, queueSummaryLastMinuteStart(start, start+60*60))
+	assert.Equal(t, start+2*3600-72, queueSummaryLastMinuteStart(start, start+2*3600))
+	assert.Equal(t, start, queueSummaryLastMinuteStart(start, start))
+}
+
 func TestQueueSummaryAggregatesStatesByBucket(t *testing.T) {
 	const roundID = "1111111111111111111111111111111111111111111111111111111111111111"
 	start := uint64(1700000000)
@@ -225,7 +233,7 @@ func TestQueueSummaryAggregatesStatesByBucket(t *testing.T) {
 	assert.Equal(t, 1, summary.Buckets[0].Submitted)
 	assert.Equal(t, 1, summary.Buckets[1].Processing)
 	assert.Equal(t, 1, summary.Buckets[1].OverduePending)
-	assert.Equal(t, 1, summary.Buckets[2].Submitted)
+	assert.Equal(t, 1, summary.Buckets[2].Processing)
 	assert.Equal(t, 1, summary.Buckets[4].PendingFuture)
 	assert.Equal(t, 1, summary.Buckets[5].Failed)
 
@@ -234,6 +242,75 @@ func TestQueueSummaryAggregatesStatesByBucket(t *testing.T) {
 		total += bucket.Total
 	}
 	assert.Equal(t, 6, total)
+}
+
+func TestQueueSummaryMasksOpenBuckets(t *testing.T) {
+	const roundID = "2222222222222222222222222222222222222222222222222222222222222222"
+	start := uint64(1700000000)
+	end := start + 10*60
+
+	fetcher := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: start, VoteEndTime: end}, nil
+	}
+	s, err := NewShareStore(":memory:", fetcher)
+	require.NoError(t, err)
+	defer s.Close()
+
+	insert := func(shareIndex uint32, submitAt uint64) {
+		p := testPayload(roundID, shareIndex)
+		p.TreePosition = uint64(shareIndex)
+		p.SubmitAt = submitAt
+		enqueueAndRequireInserted(t, s, p)
+	}
+	setState := func(shareIndex uint32, state ShareState) {
+		_, err := s.db.Exec("UPDATE shares SET state = ? WHERE share_index = ?", int(state), shareIndex)
+		require.NoError(t, err)
+	}
+
+	insert(0, start+130)
+	insert(1, start+140)
+	insert(2, start+150)
+	insert(3, start+170)
+	insert(4, start+160)
+	insert(5, start+250)
+
+	setState(0, ShareStateSubmitted)
+	setState(1, ShareStateWitnessed)
+	setState(4, ShareStateFailed)
+	setState(5, ShareStateSubmitted)
+
+	current, err := s.QueueSummary(roundID, time.Unix(int64(start+150), 0))
+	require.NoError(t, err)
+	require.Len(t, current.Buckets, 10)
+	assert.Equal(t, uint64(60), current.BucketSeconds)
+
+	currentBucket := current.Buckets[2]
+	assert.Equal(t, 0, currentBucket.Submitted)
+	assert.Equal(t, 0, currentBucket.PendingFuture)
+	assert.Equal(t, 0, currentBucket.OverduePending)
+	assert.Equal(t, 4, currentBucket.Processing)
+	assert.Equal(t, 1, currentBucket.Failed)
+	assert.Equal(t, 5, currentBucket.Total)
+
+	futureBucket := current.Buckets[4]
+	assert.Equal(t, 0, futureBucket.Submitted)
+	assert.Equal(t, 1, futureBucket.PendingFuture)
+	assert.Equal(t, 1, futureBucket.Total)
+
+	afterCurrent, err := s.QueueSummary(roundID, time.Unix(int64(start+181), 0))
+	require.NoError(t, err)
+	elapsedBucket := afterCurrent.Buckets[2]
+	assert.Equal(t, 1, elapsedBucket.Submitted)
+	assert.Equal(t, 0, elapsedBucket.PendingFuture)
+	assert.Equal(t, 2, elapsedBucket.OverduePending)
+	assert.Equal(t, 1, elapsedBucket.Processing)
+	assert.Equal(t, 1, elapsedBucket.Failed)
+	assert.Equal(t, 5, elapsedBucket.Total)
+
+	afterFuture, err := s.QueueSummary(roundID, time.Unix(int64(start+301), 0))
+	require.NoError(t, err)
+	assert.Equal(t, 1, afterFuture.Buckets[4].Submitted)
+	assert.Equal(t, 0, afterFuture.Buckets[4].PendingFuture)
 }
 
 func TestDuplicateEnqueue(t *testing.T) {
