@@ -43,6 +43,7 @@ const BACKLOG_SIGNAL_STROKE = "#e35d8a";
 const LAST_MINUTE_FILL = "#2a2f3a";
 const LAST_MINUTE_BORDER = "#7a8090";
 const AUTO_REFRESH_INTERVAL_MS = 30_000;
+const METADATA_REFRESH_INTERVAL_MS = 30_000;
 const QUEUE_SUMMARY_TIMEOUT_MS = 12_000;
 
 function base64ToHex(b64: string): string {
@@ -691,6 +692,8 @@ export function QueueMonitorPage() {
   const [error, setError] = useState("");
   const previousByRoundRef = useRef<Record<string, QueueServerOK[]>>({});
   const summaryRefreshIdRef = useRef(0);
+  const metadataRefreshIdRef = useRef(0);
+  const metadataForegroundInFlightRef = useRef(false);
 
   const invalidateSummaries = useCallback(() => {
     summaryRefreshIdRef.current += 1;
@@ -748,14 +751,21 @@ export function QueueMonitorPage() {
     );
   }, [invalidateSummaries]);
 
-  const refreshMetadata = useCallback(async () => {
-    setMetadataLoading(true);
-    setError("");
+  const refreshMetadata = useCallback(async (options?: { background?: boolean }) => {
+    const background = options?.background ?? false;
+    if (background && metadataForegroundInFlightRef.current) return;
+    const refreshId = ++metadataRefreshIdRef.current;
+    if (!background) {
+      metadataForegroundInFlightRef.current = true;
+      setMetadataLoading(true);
+      setError("");
+    }
     try {
       const [roundResp, config] = await Promise.all([
         chainApi.listRounds(),
         chainApi.getVotingConfig(),
       ]);
+      if (refreshId !== metadataRefreshIdRef.current) return;
       const loadedRounds = roundResp.rounds ?? [];
       const loadedServers = config?.vote_servers ?? [];
       setRounds(loadedRounds);
@@ -765,9 +775,13 @@ export function QueueMonitorPage() {
         return defaultRoundId(loadedRounds);
       });
     } catch (err) {
+      if (refreshId !== metadataRefreshIdRef.current || background) return;
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setMetadataLoading(false);
+      if (!background) {
+        metadataForegroundInFlightRef.current = false;
+        setMetadataLoading(false);
+      }
     }
   }, []);
 
@@ -813,6 +827,14 @@ export function QueueMonitorPage() {
   }, [refreshMetadata]);
 
   useEffect(() => {
+    const interval = window.setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      void refreshMetadata({ background: true });
+    }, METADATA_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(interval);
+  }, [refreshMetadata]);
+
+  useEffect(() => {
     invalidateSummaries();
     setSelectedServerUrls((current) => {
       const urls = voteServers.map((server) => server.url);
@@ -835,13 +857,9 @@ export function QueueMonitorPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const split = splitQueueResults(results);
-  const aggregateBuckets = aggregateQueueBuckets(split.ok);
+  const split = useMemo(() => splitQueueResults(results), [results]);
+  const aggregateBuckets = useMemo(() => aggregateQueueBuckets(split.ok), [split.ok]);
   const nextBucketRefreshAt = queueNextBucketRefreshAt(split.ok, wallClockSeconds);
-  const sortedAggregateBuckets = useMemo(
-    () => [...aggregateBuckets].sort((a, b) => a.start - b.start),
-    [aggregateBuckets]
-  );
   const selectedRound = rounds.find(
     (round) => base64ToHex(round.vote_round_id ?? "") === selectedRoundId
   );
@@ -865,9 +883,10 @@ export function QueueMonitorPage() {
 
   useEffect(() => {
     if (!autoRefreshActive || nextBucketRefreshAt === null) return;
-    const secondsUntilRefresh = nextBucketRefreshAt - Math.floor(Date.now() / 1000);
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const secondsUntilRefresh = nextBucketRefreshAt - nowSeconds;
     const delayMs =
-      nextBucketRefreshAt <= wallClockSeconds
+      nextBucketRefreshAt <= nowSeconds
         ? 250
         : Math.max(1_000, secondsUntilRefresh * 1_000 + 1_000);
     const timeout = window.setTimeout(() => {
@@ -875,7 +894,7 @@ export function QueueMonitorPage() {
       void refreshSummaries();
     }, delayMs);
     return () => window.clearTimeout(timeout);
-  }, [autoRefreshActive, nextBucketRefreshAt, refreshSummaries, wallClockSeconds]);
+  }, [autoRefreshActive, nextBucketRefreshAt, refreshSummaries]);
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -1161,7 +1180,7 @@ export function QueueMonitorPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {sortedAggregateBuckets.map((bucket) => {
+                      {aggregateBuckets.map((bucket) => {
                         const backlog = bucket.overdue_pending + bucket.processing;
                         return (
                           <tr
