@@ -139,6 +139,41 @@ func TestHelperQueueCmdUsesConfiguredDBPath(t *testing.T) {
 	assert.NoFileExists(t, filepath.Join(homeDir, "helper.db"))
 }
 
+func TestHelperQueueCmdReadsDBPathFromAppToml(t *testing.T) {
+	roundID := strings.Repeat("78", 32)
+	homeDir := t.TempDir()
+	configDir := filepath.Join(homeDir, "config")
+	require.NoError(t, os.MkdirAll(configDir, 0o755))
+	dbPath := filepath.Join(t.TempDir(), "configured-helper.db")
+	setViperString(t, "helper.db_path", "")
+	outPath := filepath.Join(t.TempDir(), "queue.json")
+	now := uint64(time.Now().Unix())
+	fetcher := func(roundID string) (helper.RoundInfo, error) {
+		return helper.RoundInfo{CreatedAtTime: now, VoteEndTime: now + 3600}, nil
+	}
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(configDir, "app.toml"),
+		[]byte("[helper]\ndb_path = \""+dbPath+"\"\n"),
+		0o600,
+	))
+	store, err := helper.NewShareStore(dbPath, fetcher)
+	require.NoError(t, err)
+	result, err := store.Enqueue(queueCmdTestPayload(roundID, 0))
+	require.NoError(t, err)
+	require.Equal(t, helper.EnqueueInserted, result)
+	require.NoError(t, store.Close())
+
+	output := executeHelperQueueCmd(t,
+		"--home", homeDir,
+		"export-queue",
+		"--round-id", roundID,
+		"--out", outPath,
+	)
+	assert.Contains(t, output, "exported 1 queue rows")
+	assert.NoFileExists(t, filepath.Join(homeDir, "helper.db"))
+}
+
 func TestHelperQueueCmdExportRefusesExistingOutput(t *testing.T) {
 	roundID := strings.Repeat("ef", 32)
 	sourceDB := filepath.Join(t.TempDir(), "source.db")

@@ -53,7 +53,11 @@ func helperExportQueueCmd(dbPath *string) *cobra.Command {
 				return fmt.Errorf("--out is required")
 			}
 
-			store, err := helper.NewShareStore(resolveHelperDBPath(cmd, *dbPath), nil)
+			resolvedDBPath, err := resolveHelperDBPath(cmd, *dbPath)
+			if err != nil {
+				return err
+			}
+			store, err := helper.NewShareStore(resolvedDBPath, nil)
 			if err != nil {
 				return err
 			}
@@ -119,7 +123,11 @@ func helperImportQueueCmd(dbPath *string) *cobra.Command {
 			}
 			export.RoundID = normalizedRoundID
 
-			store, err := helper.NewShareStore(resolveHelperDBPath(cmd, *dbPath), nil)
+			resolvedDBPath, err := resolveHelperDBPath(cmd, *dbPath)
+			if err != nil {
+				return err
+			}
+			store, err := helper.NewShareStore(resolvedDBPath, nil)
 			if err != nil {
 				return err
 			}
@@ -162,13 +170,11 @@ func normalizeRoundID(roundID string) (string, error) {
 	return roundID, nil
 }
 
-// resolveHelperDBPath returns the explicit DB path or the helper DB under home.
-func resolveHelperDBPath(cmd *cobra.Command, dbPath string) string {
+// resolveHelperDBPath returns the explicit DB path, configured helper DB path,
+// or the helper DB under home.
+func resolveHelperDBPath(cmd *cobra.Command, dbPath string) (string, error) {
 	if strings.TrimSpace(dbPath) != "" {
-		return dbPath
-	}
-	if configuredDBPath := strings.TrimSpace(viper.GetString("helper.db_path")); configuredDBPath != "" {
-		return configuredDBPath
+		return dbPath, nil
 	}
 
 	homeDir := ""
@@ -188,5 +194,37 @@ func resolveHelperDBPath(cmd *cobra.Command, dbPath string) string {
 	if strings.TrimSpace(homeDir) == "" {
 		homeDir = app.DefaultNodeHome
 	}
-	return filepath.Join(homeDir, "helper.db")
+
+	if configuredDBPath := strings.TrimSpace(viper.GetString("helper.db_path")); configuredDBPath != "" {
+		return configuredDBPath, nil
+	}
+	configuredDBPath, err := configuredHelperDBPath(homeDir)
+	if err != nil {
+		return "", err
+	}
+	if configuredDBPath != "" {
+		return configuredDBPath, nil
+	}
+	return filepath.Join(homeDir, "helper.db"), nil
+}
+
+// configuredHelperDBPath reads helper.db_path directly from app.toml when the
+// root command has not populated Viper for a helper maintenance subcommand.
+func configuredHelperDBPath(homeDir string) (string, error) {
+	if strings.TrimSpace(homeDir) == "" {
+		return "", nil
+	}
+	configPath := filepath.Join(homeDir, "config", "app.toml")
+	if _, err := os.Stat(configPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return "", fmt.Errorf("stat app config %s: %w", configPath, err)
+	}
+	config := viper.New()
+	config.SetConfigFile(configPath)
+	if err := config.ReadInConfig(); err != nil {
+		return "", fmt.Errorf("read app config %s: %w", configPath, err)
+	}
+	return strings.TrimSpace(config.GetString("helper.db_path")), nil
 }
