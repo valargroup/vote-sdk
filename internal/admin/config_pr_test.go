@@ -34,27 +34,37 @@ func TestHandleCreateConfigPRTokenMissing(t *testing.T) {
 	}
 }
 
-func TestNewAdminUsesConfigBaseURL(t *testing.T) {
+func TestNewAdminFollowsStaticConfigDynamicURL(t *testing.T) {
 	t.Parallel()
 
-	var sawDynamicFetch bool
-	cdn := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/prod/dynamic-voting-config.json" {
-			http.Error(w, "unexpected path: "+r.URL.Path, http.StatusNotFound)
+	var sawStaticFetch, sawDynamicFetch bool
+	var cdn *httptest.Server
+	cdn = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/prod/static-voting-config.json":
+			sawStaticFetch = true
+			writeJSON(t, w, map[string]any{
+				"static_config_version": 1,
+				"dynamic_config_url":    cdn.URL + "/prod/dynamic-voting-config.json",
+			})
 			return
+		case "/prod/dynamic-voting-config.json":
+			sawDynamicFetch = true
+			writeJSON(t, w, VotingConfig{
+				Version: 1,
+				VoteServers: []ServiceEntry{{
+					URL:   "https://prod.vote-chain-primary.example",
+					Label: "primary",
+				}},
+				PIRServers: []ServiceEntry{{
+					URL:   "https://prod.pir.example",
+					Label: "pir",
+				}},
+			})
+			return
+		default:
+			http.Error(w, "unexpected path: "+r.URL.Path, http.StatusNotFound)
 		}
-		sawDynamicFetch = true
-		writeJSON(t, w, VotingConfig{
-			Version: 1,
-			VoteServers: []ServiceEntry{{
-				URL:   "https://prod.vote-chain-primary.example",
-				Label: "primary",
-			}},
-			PIRServers: []ServiceEntry{{
-				URL:   "https://prod.pir.example",
-				Label: "pir",
-			}},
-		})
 	}))
 	defer cdn.Close()
 
@@ -66,10 +76,10 @@ func TestNewAdminUsesConfigBaseURL(t *testing.T) {
 	}
 	defer a.Close()
 
-	if !sawDynamicFetch {
-		t.Fatalf("expected dynamic config fetch")
+	if !sawStaticFetch || !sawDynamicFetch {
+		t.Fatalf("expected static and dynamic config fetches, got static=%v dynamic=%v", sawStaticFetch, sawDynamicFetch)
 	}
-	if a.configURL != cdn.URL+"/prod/dynamic-voting-config.json" {
+	if a.configURL != cdn.URL+"/prod/static-voting-config.json" {
 		t.Fatalf("unexpected resolved config URL: %q", a.configURL)
 	}
 	if got := a.configPR.dynamicConfigPath(); got != "prod/dynamic-voting-config.json" {

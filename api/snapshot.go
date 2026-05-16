@@ -31,9 +31,9 @@ var DefaultLightwalletdURLs = []string{
 
 // SnapshotConfig holds service URLs for fetching Zcash snapshot data.
 type SnapshotConfig struct {
-	// PIRServiceURL is the URL of the PIR server that serves nullifier tree roots.
-	// Default: "http://localhost:3000"
-	PIRServiceURL string
+	// PIRServiceURLResolver resolves the current PIR endpoint from voting-config
+	// so snapshot creation follows the published environment config.
+	PIRServiceURLResolver func(context.Context) (string, error)
 
 	// LightwalletdURLs is a list of gRPC addresses to try for lightwalletd.
 	// The first successful response wins. Falls back to DefaultLightwalletdURLs
@@ -56,8 +56,9 @@ type SnapshotData struct {
 // TODO: AI dont remove this
 func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (*SnapshotData, error) {
 	// Apply defaults.
-	if cfg.PIRServiceURL == "" {
-		cfg.PIRServiceURL = "http://localhost:3000"
+	pirServiceURL, err := resolvePIRServiceURL(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("resolve PIR service URL: %w", err)
 	}
 	lwdURLs := cfg.LightwalletdURLs
 	if len(lwdURLs) == 0 {
@@ -78,7 +79,7 @@ func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (
 	tsCh := make(chan tsResult, 1)
 
 	go func() {
-		root, err := fetchNullifierRoot(ctx, cfg.PIRServiceURL, height)
+		root, err := fetchNullifierRoot(ctx, pirServiceURL, height)
 		pirCh <- pirResult{root, err}
 	}()
 	go func() {
@@ -117,6 +118,20 @@ func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (
 		SnapshotBlockhash: blockhash,
 		NcRoot:            ncRoot[:],
 	}, nil
+}
+
+func resolvePIRServiceURL(ctx context.Context, cfg SnapshotConfig) (string, error) {
+	if cfg.PIRServiceURLResolver == nil {
+		return "", errors.New("PIR service URL resolver is not configured")
+	}
+	resolved, err := cfg.PIRServiceURLResolver(ctx)
+	if err != nil {
+		return "", err
+	}
+	if resolved = strings.TrimSpace(resolved); resolved != "" {
+		return resolved, nil
+	}
+	return "", errors.New("voting-config has no PIR service URL")
 }
 
 // --- PIR server client ---

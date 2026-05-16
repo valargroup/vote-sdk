@@ -101,9 +101,9 @@ const adminConfigTemplate = `
 # entries in existing app.toml files are silently ignored.
 disable = true
 
-# Voting-config base URL. The admin appends dynamic-voting-config.json for
-# GET /api/voting-config and uses the same base for static-voting-config.json
-# when validating config PRs.
+# Voting-config base URL. The admin fetches static-voting-config.json,
+# follows dynamic_config_url for GET /api/voting-config, and uses the same
+# base when validating config PRs.
 config_url = "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/prod/"
 
 # SQLite database path for pending validator join requests (empty = $HOME/.svoted/admin.db).

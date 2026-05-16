@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -52,7 +53,7 @@ func New(cfg Config, homeDir string, checkValidatorExists ValidatorChecker, chec
 	if configURL == "" {
 		configURL = DefaultConfig().ConfigURL
 	}
-	configURL = configURLForFile(configURL, dynamicConfigName)
+	configURL = configURLForFile(configURL, staticConfigName)
 	cfg = applyConfigPREnvDefaults(cfg)
 
 	dbPath := cfg.DBPath
@@ -174,20 +175,27 @@ func RunConfigRefresher(ctx context.Context, a *Admin, interval time.Duration, l
 
 func (a *Admin) refresh() error {
 	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(a.configURL)
+	body, err := fetchConfigBody(client, a.configURL)
 	if err != nil {
-		return fmt.Errorf("fetch config: %w", err)
+		return err
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("fetch config: HTTP %d – %s", resp.StatusCode, string(body))
+	var static struct {
+		DynamicConfigURL string `json:"dynamic_config_url"`
+	}
+	if err := json.Unmarshal(body, &static); err != nil {
+		return fmt.Errorf("decode config: %w", err)
+	}
+	if dynamicURL := strings.TrimSpace(static.DynamicConfigURL); dynamicURL != "" {
+		body, err = fetchConfigBody(client, dynamicURL)
+		if err != nil {
+			return fmt.Errorf("fetch dynamic config: %w", err)
+		}
 	}
 
 	var cfg VotingConfig
-	if err := json.NewDecoder(resp.Body).Decode(&cfg); err != nil {
-		return fmt.Errorf("decode config: %w", err)
+	if err := json.Unmarshal(body, &cfg); err != nil {
+		return fmt.Errorf("decode dynamic config: %w", err)
 	}
 
 	a.mu.Lock()
@@ -196,4 +204,24 @@ func (a *Admin) refresh() error {
 
 	a.logger.Info("voting config loaded", "vote_servers", len(cfg.VoteServers), "pir_endpoints", len(cfg.PIRServers))
 	return nil
+}
+
+func fetchConfigBody(client *http.Client, url string) ([]byte, error) {
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("fetch config: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, readErr := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		if readErr != nil {
+			return nil, fmt.Errorf("fetch config: HTTP %d (body unreadable: %v)", resp.StatusCode, readErr)
+		}
+		return nil, fmt.Errorf("fetch config: HTTP %d – %s", resp.StatusCode, string(body))
+	}
+	if readErr != nil {
+		return nil, fmt.Errorf("read config: %w", readErr)
+	}
+	return body, nil
 }

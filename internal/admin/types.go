@@ -13,8 +13,9 @@ const PendingRegistrationTTL = 7 * 24 * time.Hour
 // are deleted (not configurable).
 const PendingEvictionSweepInterval = time.Hour
 
-// VotingConfigRefreshInterval is how often the admin re-fetches voting-config
-// from ConfigURL so the cached GET /api/voting-config response stays warm.
+// VotingConfigRefreshInterval is how often the admin re-fetches static
+// voting-config from ConfigURL and follows it to the dynamic config, so the
+// cached GET /api/voting-config response stays warm.
 // Not configurable — the CDN is small, this is purely a freshness window.
 const VotingConfigRefreshInterval = time.Minute
 
@@ -23,9 +24,9 @@ type Config struct {
 	// Disable turns off the admin server entirely.
 	Disable bool `mapstructure:"disable"`
 
-	// ConfigURL is the voting-config base URL. The admin appends
-	// dynamic-voting-config.json for the cached GET /api/voting-config endpoint,
-	// and the config PR automation uses the same base for static-voting-config.json.
+	// ConfigURL is the voting-config base or static-config URL. The admin
+	// fetches static-voting-config.json, follows dynamic_config_url for
+	// GET /api/voting-config, and uses the same base for config PR automation.
 	// Override for staging mirrors or fork testing.
 	ConfigURL string `mapstructure:"config_url"`
 

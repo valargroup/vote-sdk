@@ -1,6 +1,8 @@
 package app
 
 import (
+	"context"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -332,8 +334,8 @@ func (app *SvoteApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIC
 	voteHandler := voteapi.NewHandler(voteapi.HandlerConfig{
 		CometRPCEndpoint: cometRPC,
 		Snapshot: voteapi.SnapshotConfig{
-			PIRServiceURL:    os.Getenv("SVOTE_PIR_URL"),
-			LightwalletdURLs: voteapi.ParseLightwalletdURLs(os.Getenv("SVOTE_LWD_URLS")),
+			PIRServiceURLResolver: app.resolveAdminPIRServiceURL,
+			LightwalletdURLs:      voteapi.ParseLightwalletdURLs(os.Getenv("SVOTE_LWD_URLS")),
 		},
 		CryptoReadiness: app.CryptoWarmupStatus,
 	})
@@ -407,6 +409,21 @@ func (app *SvoteApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIC
 	ui.RegisterRoutes(apiSvr.Router, func() string {
 		return app.uiDistPath
 	}, app.Logger().With("module", "ui"))
+}
+
+func (app *SvoteApp) resolveAdminPIRServiceURL(_ context.Context) (string, error) {
+	a := app.GetAdmin()
+	if a == nil {
+		return "", fmt.Errorf("admin server not initialized")
+	}
+	cfg, err := a.GetVotingConfig()
+	if err != nil {
+		return "", fmt.Errorf("voting-config: %w", err)
+	}
+	if cfg == nil || len(cfg.PIRServers) == 0 || strings.TrimSpace(cfg.PIRServers[0].URL) == "" {
+		return "", fmt.Errorf("voting-config has no pir_endpoints")
+	}
+	return cfg.PIRServers[0].URL, nil
 }
 
 // SetHelper publishes the helper instance for concurrent readers.
