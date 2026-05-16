@@ -16,6 +16,18 @@ MONIKER="valarg-genesis"
 HOME_DIR="${SVOTED_HOME:-$HOME/.svoted}"
 BINARY="svoted"
 DENOM="usvote"
+# Production (`zvote-1`) should use the vote-manager set baked into the
+# x/vote module's DefaultGenesis. Staging/local chains keep the VM_PRIVKEYS
+# override so test coordinators can be generated from deploy secrets.
+USE_DEFAULT_GENESIS_VOTE_MANAGERS="${SVOTE_USE_DEFAULT_GENESIS_VOTE_MANAGERS:-}"
+EXPECTED_PRODUCTION_VOTE_MANAGER="${SVOTE_EXPECTED_PRODUCTION_VOTE_MANAGER:-sv1wyf8tuys2ussdqwc6ugnvq0x273j8wq8fm3jrj}"
+if [ -z "$USE_DEFAULT_GENESIS_VOTE_MANAGERS" ]; then
+    if [ "$CHAIN_ID" = "zvote-1" ]; then
+        USE_DEFAULT_GENESIS_VOTE_MANAGERS=true
+    else
+        USE_DEFAULT_GENESIS_VOTE_MANAGERS=false
+    fi
+fi
 
 echo "=== Initializing Shielded-Vote Chain ==="
 
@@ -28,6 +40,7 @@ fi
 
 # Init chain
 $BINARY init "$MONIKER" --chain-id "$CHAIN_ID" --home "$HOME_DIR"
+GENESIS="$HOME_DIR/config/genesis.json"
 
 # Import or generate the validator key. When VAL_PRIVKEY is set (CI/production),
 # import the deterministic key so the address is known ahead of time. Otherwise
@@ -43,26 +56,51 @@ VALIDATOR_VALOPER=$($BINARY keys show validator --bech val -a --keyring-backend 
 echo "Validator address: $VALIDATOR_ADDR"
 echo "Validator valoper: $VALIDATOR_VALOPER"
 
-# Import the bootstrap vote-manager keys. VM_PRIVKEYS is a comma-separated list
-# of 64-char hex secp256k1 private keys; every derived address becomes a vote
-# manager at genesis (any-of-N). The stake pool is split evenly across the set.
-# shellcheck source=scripts/_vote_manager_keys_lib.sh
-. "$(dirname "$0")/_vote_manager_keys_lib.sh"
-parse_vm_privkeys
-
 # Total stake pool divided evenly across vote managers (preserves total supply).
 TOTAL_VOTE_MANAGER_POOL=1000000000
 VOTE_MANAGER_ADDRS=()
-NUM_VOTE_MANAGERS=${#VM_PRIVKEY_LIST[@]}
+
+if [ "$USE_DEFAULT_GENESIS_VOTE_MANAGERS" = "true" ]; then
+    echo "Using default vote-manager addresses from svoted genesis."
+    while IFS= read -r addr; do
+        [ -n "$addr" ] && VOTE_MANAGER_ADDRS+=("$addr")
+    done < <(jq -r '.app_state.vote.vote_manager_addresses[]?' "$GENESIS")
+    if [ ${#VOTE_MANAGER_ADDRS[@]} -eq 0 ]; then
+        echo "ERROR: default genesis contains no vote_manager_addresses."
+        exit 1
+    fi
+    if [ "$CHAIN_ID" = "zvote-1" ]; then
+        if [ ${#VOTE_MANAGER_ADDRS[@]} -ne 1 ] || [ "${VOTE_MANAGER_ADDRS[0]}" != "$EXPECTED_PRODUCTION_VOTE_MANAGER" ]; then
+            echo "ERROR: production default vote-manager mismatch."
+            echo "  Expected: $EXPECTED_PRODUCTION_VOTE_MANAGER"
+            echo "  Actual:   ${VOTE_MANAGER_ADDRS[*]}"
+            echo "  Rebuild/release svoted with the intended x/vote DefaultGenesis before resetting production."
+            exit 1
+        fi
+    fi
+else
+    # Import the bootstrap vote-manager keys. VM_PRIVKEYS is a comma-separated
+    # list of 64-char hex secp256k1 private keys; every derived address becomes
+    # a vote manager at genesis (any-of-N).
+    # shellcheck source=scripts/_vote_manager_keys_lib.sh
+    . "$(dirname "$0")/_vote_manager_keys_lib.sh"
+    parse_vm_privkeys
+    for i in "${!VM_PRIVKEY_LIST[@]}"; do
+        key="${VM_PRIVKEY_LIST[$i]}"
+        name="vote-manager-$((i + 1))"
+        $BINARY keys import-hex "$name" "$key" --keyring-backend test --home "$HOME_DIR"
+        addr=$($BINARY keys show "$name" -a --keyring-backend test --home "$HOME_DIR")
+        VOTE_MANAGER_ADDRS+=("$addr")
+    done
+fi
+
+NUM_VOTE_MANAGERS=${#VOTE_MANAGER_ADDRS[@]}
 PER_VOTE_MANAGER_STAKE=$((TOTAL_VOTE_MANAGER_POOL / NUM_VOTE_MANAGERS))
 REMAINDER=$((TOTAL_VOTE_MANAGER_POOL - PER_VOTE_MANAGER_STAKE * NUM_VOTE_MANAGERS))
 
-for i in "${!VM_PRIVKEY_LIST[@]}"; do
-    key="${VM_PRIVKEY_LIST[$i]}"
+for i in "${!VOTE_MANAGER_ADDRS[@]}"; do
+    addr="${VOTE_MANAGER_ADDRS[$i]}"
     name="vote-manager-$((i + 1))"
-    $BINARY keys import-hex "$name" "$key" --keyring-backend test --home "$HOME_DIR"
-    addr=$($BINARY keys show "$name" -a --keyring-backend test --home "$HOME_DIR")
-    VOTE_MANAGER_ADDRS+=("$addr")
     # Vote manager 1 receives any remainder from the integer division.
     if [ "$i" -eq 0 ]; then
         stake=$((PER_VOTE_MANAGER_STAKE + REMAINDER))
@@ -96,12 +134,11 @@ PALLAS_PK_B64=$(base64 < "$HOME_DIR/pallas.pk" | tr -d '\n')
 # Build the vote_manager_addresses JSON array for the genesis patch.
 VOTE_MANAGER_JSON=$(printf '%s\n' "${VOTE_MANAGER_ADDRS[@]}" | jq -R . | jq -s .)
 
-# Patch genesis: set vote_manager_addresses to the imported keys' addresses,
-# register the genesis validator's Pallas key for EA ceremonies,
+# Patch genesis: preserve the selected vote-manager set, register the genesis
+# validator's Pallas key for EA ceremonies,
 # disable staking historical-info retention, configure downtime jailing, and
 # zero out slashing slash fractions (no token burn). The signed block window
 # mirrors Osmosis's wall-clock window adjusted for svoted's observed block time.
-GENESIS="$HOME_DIR/config/genesis.json"
 jq --argjson vms "$VOTE_MANAGER_JSON" \
   --arg validator "$VALIDATOR_VALOPER" \
   --arg pallasPk "$PALLAS_PK_B64" '
