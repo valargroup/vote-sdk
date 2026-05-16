@@ -27,20 +27,35 @@
 set -euo pipefail
 
 main() {
-CHAIN_ID="svote-1"
+if [ -z "${HOME:-}" ]; then
+  if command -v getent > /dev/null 2>&1; then
+    HOME="$(getent passwd "$(id -u)" | cut -d: -f6)"
+  else
+    HOME="$(eval echo "~$(id -un)")"
+  fi
+  if [ -z "${HOME}" ] || [ "${HOME}" = "~$(id -un)" ]; then
+    echo "ERROR: HOME is not set and could not be resolved for user $(id -un)."
+    exit 1
+  fi
+  export HOME
+fi
+
+CHAIN_ID="${SVOTE_CHAIN_ID:-}"
 INSTALL_DIR="${SVOTE_INSTALL_DIR:-$HOME/.local/bin}"
 HOME_DIR="${SVOTE_HOME:-$HOME/.svoted}"
 ORIGINAL_PATH="${PATH}"
 PATH_REFRESH_COMMAND=""
 DO_BASE="https://vote.fra1.digitaloceanspaces.com"
-SNAPSHOT_BASE_URL="${SVOTE_SNAPSHOT_BASE_URL:-https://snapshots.valargroup.org}"
+SNAPSHOT_BASE_URL="${SVOTE_SNAPSHOT_BASE_URL:-}"
 # Canonical dynamic voting-config (same payload wallets fetch). Override for
 # staging mirrors or fork testing; see github.com/valargroup/token-holder-voting-config.
-VOTING_CONFIG_URL="${VOTING_CONFIG_URL:-https://voting.valargroup.org/dynamic-voting-config.json}"
+VOTING_CONFIG_URL="${VOTING_CONFIG_URL:-https://voting.valargroup.org/prod/dynamic-voting-config.json}"
 # Admin API base — used once for POST /api/register-validator during setup.
 # Override via SVOTE_ADMIN_URL when joining a non-default deployment.
-DEFAULT_ADMIN_API_BASE="${DEFAULT_ADMIN_API_BASE:-https://vote-chain-primary.valargroup.org}"
-SVOTE_ADMIN_URL="${SVOTE_ADMIN_URL:-${DEFAULT_ADMIN_API_BASE}}"
+DEFAULT_ADMIN_API_BASE="${DEFAULT_ADMIN_API_BASE:-https://prod.vote-chain-primary.valargroup.org}"
+if [ -z "${SVOTE_ADMIN_URL+x}" ]; then
+  SVOTE_ADMIN_URL="${DEFAULT_ADMIN_API_BASE}"
+fi
 
 # Parse TLS selection flags. Interactive installs must choose a mode; unattended
 # installs can pass --tls-mode/SVOTE_TLS_MODE or the legacy SVOTE_SKIP_CADDY=1.
@@ -708,7 +723,11 @@ if [ -z "$SEED_URL" ] || [ "$SEED_URL" = "null" ]; then
 fi
 
 echo "Seed node: ${SEED_URL}"
-echo "Admin / join API base: ${SVOTE_ADMIN_URL}"
+if [ -n "$SVOTE_ADMIN_URL" ]; then
+  echo "Admin / join API base: ${SVOTE_ADMIN_URL}"
+else
+  echo "Admin / join API base: disabled"
+fi
 
 # Fetch the node's P2P identity and active app version. The app version, not
 # the latest published release marker, is the binary version that can replay
@@ -722,10 +741,30 @@ fi
 NODE_ID=$(echo "$NODE_INFO" | jq -r '.default_node_info.default_node_id // .default_node_info.id // empty')
 LISTEN_ADDR=$(echo "$NODE_INFO" | jq -r '.default_node_info.listen_addr // empty')
 CHAIN_BINARY_VERSION=$(echo "$NODE_INFO" | jq -r '.application_version.version // empty')
+NODE_CHAIN_ID=$(echo "$NODE_INFO" | jq -r '.default_node_info.network // empty')
 
 if [ -z "$NODE_ID" ]; then
   echo "ERROR: Could not fetch node_id from ${SEED_URL}"
   exit 1
+fi
+
+if [ -z "$NODE_CHAIN_ID" ]; then
+  echo "ERROR: Could not fetch chain ID from ${SEED_URL}"
+  exit 1
+fi
+
+if [ -n "$CHAIN_ID" ] && [ "$CHAIN_ID" != "$NODE_CHAIN_ID" ]; then
+  echo "ERROR: Seed node chain ID mismatch. Expected ${CHAIN_ID}, got ${NODE_CHAIN_ID}."
+  echo "  Unset SVOTE_CHAIN_ID or point VOTING_CONFIG_URL at the intended network."
+  exit 1
+fi
+CHAIN_ID="$NODE_CHAIN_ID"
+
+if [ -z "$SNAPSHOT_BASE_URL" ]; then
+  case "$CHAIN_ID" in
+    svote-1) SNAPSHOT_BASE_URL="https://stage.snapshots.valargroup.org" ;;
+    *)       SNAPSHOT_BASE_URL="https://snapshots.valargroup.org" ;;
+  esac
 fi
 
 if [ -n "${SVOTE_RELEASE_VERSION:-}" ]; then
@@ -752,7 +791,9 @@ SEED_HOST=$(echo "$SEED_URL" | sed -E 's|^https?://||; s|:[0-9]+$||; s|/.*||')
 P2P_PORT=$(echo "$LISTEN_ADDR" | sed -E 's|.*:([0-9]+)$|\1|')
 P2P_PORT="${P2P_PORT:-26656}"
 PERSISTENT_PEERS="${NODE_ID}@${SEED_HOST}:${P2P_PORT}"
+echo "Chain ID: ${CHAIN_ID}"
 echo "Chain binary version: ${CHAIN_BINARY_VERSION}"
+echo "Snapshot metadata base: ${SNAPSHOT_BASE_URL}"
 echo "Peers: ${PERSISTENT_PEERS}"
 
 # ─── Acquire binaries ────────────────────────────────────────────────────────
