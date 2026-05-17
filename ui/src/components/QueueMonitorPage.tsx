@@ -7,6 +7,8 @@ import {
   Clock,
   Loader2,
   RefreshCw,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import * as chainApi from "../api/chain";
 import type { ServiceEntry } from "../api/chain";
@@ -45,6 +47,11 @@ const LAST_MINUTE_BORDER = "#7a8090";
 const AUTO_REFRESH_INTERVAL_MS = 30_000;
 const METADATA_REFRESH_INTERVAL_MS = 30_000;
 const QUEUE_SUMMARY_TIMEOUT_MS = 12_000;
+const HISTOGRAM_BASE_WIDTH = 1080;
+const HISTOGRAM_MIN_WIDTH = 900;
+const HISTOGRAM_MAX_ZOOM = 4;
+const HISTOGRAM_ZOOM_STEP = 1;
+const HISTOGRAM_TICK_SPACING_PX = 180;
 
 function base64ToHex(b64: string): string {
   try {
@@ -306,7 +313,9 @@ function QueueHistogram({
   nowSeconds: number;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<BucketHover | null>(null);
+  const [zoomLevel, setZoomLevel] = useState(1);
   const summaries = results.map((result) => result.summary);
   const domain = queueSummaryDomain(summaries);
   const buckets = aggregateQueueBuckets(results);
@@ -322,9 +331,11 @@ function QueueHistogram({
 
   if (!domain || domain.end <= domain.start) return null;
 
-  const width = 1080;
+  const width = Math.round(HISTOGRAM_BASE_WIDTH * zoomLevel);
   const height = 340;
-  const margin = { top: 20, right: 36, bottom: 46, left: 42 };
+  // Y-axis labels render in a sticky HTML column outside the SVG, so the SVG
+  // itself only needs a small left margin for visual breathing room.
+  const margin = { top: 20, right: 36, bottom: 46, left: 8 };
   const plotW = width - margin.left - margin.right;
   const plotH = height - margin.top - margin.bottom;
   const duration = domain.end - domain.start;
@@ -340,48 +351,116 @@ function QueueHistogram({
     ? Math.max(1, xForTime(domain.end) - xForTime(lastMinuteStart))
     : 0;
 
-  const tickCount = Math.min(6, Math.max(2, buckets.length));
+  const tickCount = Math.min(
+    32,
+    Math.max(2, Math.ceil(plotW / HISTOGRAM_TICK_SPACING_PX))
+  );
   const ticks = Array.from({ length: tickCount }, (_, i) => {
     const ratio = tickCount === 1 ? 0 : i / (tickCount - 1);
     return Math.round(domain.start + duration * ratio);
   });
 
+  const clampZoom = (value: number) =>
+    Math.min(HISTOGRAM_MAX_ZOOM, Math.max(1, Math.round(value)));
+
+  const updateZoom = (nextZoom: number) => {
+    const next = clampZoom(nextZoom);
+    if (next === zoomLevel) return;
+    const scroller = scrollerRef.current;
+    const centerRatio =
+      scroller && scroller.scrollWidth > 0
+        ? (scroller.scrollLeft + scroller.clientWidth / 2) / scroller.scrollWidth
+        : null;
+
+    setHover(null);
+    setZoomLevel(next);
+
+    if (scroller && centerRatio !== null) {
+      window.requestAnimationFrame(() => {
+        const targetLeft = centerRatio * scroller.scrollWidth - scroller.clientWidth / 2;
+        scroller.scrollLeft = Math.max(0, targetLeft);
+      });
+    }
+  };
+
   return (
     <div className="rounded-xl border border-border-subtle bg-surface-1 p-4">
-      <div className="mb-3">
-        <h2 className="text-sm font-semibold text-text-primary">Shares by submit time</h2>
-        <p className="mt-1.5 text-[10px] text-text-muted">
-          Stacked by state. Hover any bucket for the per-helper breakdown.
-          {lastMinuteStart && (
-            <> Last minute begins {formatTime(lastMinuteStart)}.</>
-          )}
-        </p>
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold text-text-primary">Shares by submit time</h2>
+          <p className="mt-1.5 text-[10px] text-text-muted">
+            Stacked by state. Hover any bucket for the per-helper breakdown.
+            {lastMinuteStart && (
+              <> Last minute begins {formatTime(lastMinuteStart)}.</>
+            )}
+          </p>
+        </div>
+        <div className="flex items-center gap-1 rounded-lg border border-border-subtle bg-surface-2 p-0.5">
+          <button
+            type="button"
+            aria-label="Zoom out"
+            title="Zoom out"
+            onClick={() => updateZoom(zoomLevel - HISTOGRAM_ZOOM_STEP)}
+            disabled={zoomLevel <= 1}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-3 hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent"
+          >
+            <ZoomOut size={14} />
+          </button>
+          <button
+            type="button"
+            aria-label="Zoom in"
+            title="Zoom in"
+            onClick={() => updateZoom(zoomLevel + HISTOGRAM_ZOOM_STEP)}
+            disabled={zoomLevel >= HISTOGRAM_MAX_ZOOM}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-surface-3 hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent"
+          >
+            <ZoomIn size={14} />
+          </button>
+        </div>
       </div>
 
       <div
         ref={containerRef}
-        className="relative"
+        className="relative flex gap-2"
         onMouseLeave={() => setHover(null)}
       >
-        <div className="overflow-x-auto">
-        <svg viewBox={`0 0 ${width} ${height}`} className="min-w-[900px] w-full">
+        <div className="relative w-11 shrink-0">
+          {[
+            { ratio: margin.top / height, value: maxTotal },
+            { ratio: (margin.top + plotH / 2) / height, value: Math.round(maxTotal / 2) },
+            { ratio: (margin.top + plotH) / height, value: 0 },
+          ].map(({ ratio, value }) => (
+            <span
+              key={ratio}
+              className="absolute right-0 -translate-y-1/2 font-mono text-[10px] text-text-muted"
+              style={{ top: `${ratio * 100}%` }}
+            >
+              {value.toLocaleString()}
+            </span>
+          ))}
+        </div>
+        <div ref={scrollerRef} className="min-w-0 flex-1 overflow-x-auto">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          className="block max-w-none"
+          style={{
+            width: `${zoomLevel * 100}%`,
+            minWidth: `${Math.round(HISTOGRAM_MIN_WIDTH * zoomLevel)}px`,
+          }}
+        >
           <rect x={margin.left} y={margin.top} width={plotW} height={plotH} fill="#141414" rx={6} />
 
           {[0, 0.5, 1].map((ratio) => {
             const y = margin.top + plotH * ratio;
-            const value = Math.round(maxTotal * (1 - ratio));
             return (
-              <g key={ratio}>
-                <line x1={margin.left} x2={margin.left + plotW} y1={y} y2={y} stroke="#2a2a2a" />
-                <text
-                  x={margin.left - 8}
-                  y={y + 3}
-                  textAnchor="end"
-                  className="fill-text-muted text-[10px]"
-                >
-                  {value}
-                </text>
-              </g>
+              <line
+                key={ratio}
+                x1={margin.left}
+                x2={margin.left + plotW}
+                y1={y}
+                y2={y}
+                stroke="#2a2a2a"
+              />
             );
           })}
 
