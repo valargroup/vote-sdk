@@ -1449,7 +1449,8 @@ func (*MsgSubmitPartialDecryptionResponse) Descriptor() ([]byte, []int) {
 
 // MsgUpdateVoteManagers atomically replaces the coordinator set and threshold.
 // It is executed through coordinator action approval. It does NOT move balances
-// — each coordinator holds their own funds. Validation:
+// — each coordinator holds their own funds. The handler creates auth accounts
+// for new managers when needed so they can sign future transactions. Validation:
 // new_vote_managers must be non-empty, each entry a valid bech32 address, and no
 // duplicates (addresses normalized before compare).
 type MsgUpdateVoteManagers struct {

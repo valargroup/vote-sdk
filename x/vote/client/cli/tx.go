@@ -328,7 +328,8 @@ Flags:
            list replaces the existing set atomically.
 
 The --from signer must be a current coordinator. Balances are not moved — each
-coordinator holds their own funds.`,
+coordinator holds their own funds. New coordinator auth accounts are initialized
+when needed so they can sign future transactions.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			clientCtx, err := client.GetClientTxContext(cmd)

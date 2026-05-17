@@ -49,6 +49,7 @@ func (s *MsgServerTestSuite) SetupTest() {
 	s.ctx = testCtx.Ctx.WithBlockTime(time.Unix(1_000_000, 0).UTC())
 	storeService := runtime.NewKVStoreService(key)
 	s.keeper = keeper.NewKeeper(storeService, svtest.TestAuthority, log.NewNopLogger(), nil, nil)
+	s.keeper.SetAccountKeeper(newFakeAccountKeeper())
 	s.msgServer = keeper.NewMsgServerImpl(s.keeper)
 }
 
@@ -896,6 +897,67 @@ func (s *MsgServerTestSuite) TestUpdateVoteManagers_DoesNotTouchBalances() {
 	})
 	s.Require().NoError(err)
 	s.Require().Empty(bk.sendCalls, "UpdateVoteManagers must not call SendCoins")
+}
+
+func (s *MsgServerTestSuite) TestUpdateVoteManagers_InitializesAuthAccounts() {
+	s.SetupTest()
+	vmA := testAccAddr(30)
+	vmB := testAccAddr(31)
+	vmC := testAccAddr(32)
+	accounts := newFakeAccountKeeper()
+	accounts.seedAccount(vmA)
+	s.keeper.SetAccountKeeper(accounts)
+	s.seedVoteManagers(vmA)
+
+	_, err := s.proposeCoordinatorAction(s.ctx, vmA, &types.MsgUpdateVoteManagers{
+		Creator:         vmA,
+		NewVoteManagers: []string{vmA, vmB, vmC},
+		NewThreshold:    2,
+	})
+	s.Require().NoError(err)
+	s.Require().Equal([]string{vmB, vmC}, accounts.created)
+
+	for _, addr := range []string{vmA, vmB, vmC} {
+		accAddr, err := sdk.AccAddressFromBech32(addr)
+		s.Require().NoError(err)
+		s.Require().NotNil(accounts.GetAccount(s.ctx, accAddr))
+	}
+}
+
+func (s *MsgServerTestSuite) TestUpdateVoteManagers_InvalidPolicyDoesNotCreateAccounts() {
+	s.SetupTest()
+	vmA := testAccAddr(33)
+	vmB := testAccAddr(34)
+	accounts := newFakeAccountKeeper()
+	s.keeper.SetAccountKeeper(accounts)
+	s.seedVoteManagers(vmA)
+
+	_, err := s.proposeCoordinatorAction(s.ctx, vmA, &types.MsgUpdateVoteManagers{
+		Creator:         vmA,
+		NewVoteManagers: []string{vmB, vmB},
+	})
+	s.Require().ErrorIs(err, types.ErrDuplicateVoteManager)
+	s.Require().Empty(accounts.created)
+}
+
+func (s *MsgServerTestSuite) TestUpdateVoteManagers_RequiresAccountKeeperBeforeReplace() {
+	s.SetupTest()
+	vmA := testAccAddr(35)
+	vmB := testAccAddr(36)
+	s.keeper.SetAccountKeeper(nil)
+	s.seedVoteManagers(vmA)
+
+	_, err := s.proposeCoordinatorAction(s.ctx, vmA, &types.MsgUpdateVoteManagers{
+		Creator:         vmA,
+		NewVoteManagers: []string{vmB},
+	})
+	s.Require().ErrorIs(err, types.ErrInvalidField)
+	s.Require().Contains(err.Error(), "account keeper is not configured")
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	set, err := s.keeper.GetVoteManagers(kv)
+	s.Require().NoError(err)
+	s.Require().Equal([]string{vmA}, set.Addresses)
 }
 
 func (s *MsgServerTestSuite) TestUpdateVoteManagers_CreatorRemovingSelfAllowed() {

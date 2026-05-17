@@ -110,7 +110,8 @@ class ProtoWriter {
 // }
 // Atomically replaces the vote-manager set and threshold when executed through
 // coordinator action approval. The new set must be non-empty and contain only
-// valid bech32 addresses with no duplicates. Balances are not touched.
+// valid bech32 addresses with no duplicates. Balances are not touched; missing
+// auth accounts are initialized by the chain handler.
 const MsgUpdateVoteManagersProto = {
   encode(
     message: { creator: string; newVoteManagers: string[]; newThreshold: number },
@@ -791,7 +792,8 @@ export async function approveCoordinatorAction(
  *
  * Atomically replaces the vote-manager set with `newVoteManagers`. The
  * `creator` field is derived from the signer and the payload executes after
- * coordinator threshold approval. Balances are not moved.
+ * coordinator threshold approval. Balances are not moved; missing auth
+ * accounts are initialized by the chain handler.
  */
 export async function updateVoteManagers(
   apiBase: string,
