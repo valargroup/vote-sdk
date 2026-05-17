@@ -59,6 +59,7 @@ var (
 		{Account: authtypes.FeeCollectorName},
 		{Account: stakingtypes.BondedPoolName, Permissions: []string{authtypes.Burner, stakingtypes.ModuleName}},
 		{Account: stakingtypes.NotBondedPoolName, Permissions: []string{authtypes.Burner, stakingtypes.ModuleName}},
+		{Account: votetypes.VoteFundingModuleName},
 	}
 
 	// Blocked account addresses (cannot receive funds).
@@ -66,6 +67,7 @@ var (
 		authtypes.FeeCollectorName,
 		stakingtypes.BondedPoolName,
 		stakingtypes.NotBondedPoolName,
+		votetypes.VoteFundingModuleName,
 	}
 
 	// ModuleConfig is the module configuration for the Shielded-Vote chain.

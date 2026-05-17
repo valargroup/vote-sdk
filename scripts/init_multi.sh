@@ -24,6 +24,8 @@ if [ -f "$REPO_ROOT/.env" ]; then
     . "$REPO_ROOT/.env"
     set +a
 fi
+# shellcheck source=scripts/_genesis_accounts_lib.sh
+. "$SCRIPT_DIR/_genesis_accounts_lib.sh"
 
 # ---------------------------------------------------------------------------
 # Parse flags
@@ -45,6 +47,8 @@ CHAIN_ID="svote-1"
 BINARY="svoted"
 DENOM="usvote"
 NUM_VALIDATORS=3
+VOTE_FUNDING_MODULE_NAME="vote_funding"
+VOTE_FUNDING_BALANCE="1000000000${DENOM}"
 
 # Home directories.
 HOME_VAL1="$HOME/.svoted-val1"
@@ -76,8 +80,6 @@ SELF_DELEGATION="10000000${DENOM}"
 
 # Validator genesis balance (covers the 10M self-delegation).
 GENESIS_BALANCE="10000000${DENOM}"
-# Bootstrap vote-manager pool (enough to fund up to 100 validators at 10M each).
-VOTE_MANAGER_BALANCE="1000000000${DENOM}"
 
 # ---------------------------------------------------------------------------
 # Cleanup
@@ -318,26 +320,18 @@ done
 # Save val1 address too.
 echo "$VAL1_ADDR" > "$HOME_VAL1/validator_address.txt"
 
-# Add genesis accounts for all 3 validators and every vote manager. The
-# vote-manager stake pool (VOTE_MANAGER_BALANCE) is split evenly across vote
-# managers to preserve total supply regardless of N.
+# Add genesis accounts for all 3 validators and auth-only accounts for every
+# vote manager. The shared funding pool lives in the vote_funding module.
 $BINARY genesis add-genesis-account "$VAL1_ADDR" "$VAL1_SELF_DELEGATION" \
     --keyring-backend test --home "$HOME_VAL1"
 
-VOTE_MANAGER_POOL_INT=${VOTE_MANAGER_BALANCE%"${DENOM}"}
-NUM_VOTE_MANAGERS=${#VOTE_MANAGER_ADDRS[@]}
-PER_VOTE_MANAGER_STAKE=$((VOTE_MANAGER_POOL_INT / NUM_VOTE_MANAGERS))
-REMAINDER=$((VOTE_MANAGER_POOL_INT - PER_VOTE_MANAGER_STAKE * NUM_VOTE_MANAGERS))
+GENESIS="$HOME_VAL1/config/genesis.json"
 for i in "${!VOTE_MANAGER_ADDRS[@]}"; do
     addr="${VOTE_MANAGER_ADDRS[$i]}"
-    if [ "$i" -eq 0 ]; then
-        stake=$((PER_VOTE_MANAGER_STAKE + REMAINDER))
-    else
-        stake=$PER_VOTE_MANAGER_STAKE
-    fi
-    $BINARY genesis add-genesis-account "$addr" "${stake}${DENOM}" \
-        --keyring-backend test --home "$HOME_VAL1"
+    echo "Vote-manager $((i + 1)): $addr (auth account only)"
+    genesis_add_auth_base_account "$GENESIS" "$addr"
 done
+genesis_add_module_funding_account "$GENESIS" "$VOTE_FUNDING_MODULE_NAME" "$DENOM" "$VOTE_FUNDING_BALANCE"
 
 for i in 2 3; do
     idx=$((i - 1))
@@ -369,7 +363,6 @@ VOTE_MANAGER_JSON=$(printf '%s\n' "${VOTE_MANAGER_ADDRS[@]}" | jq -R . | jq -s .
 # disable staking historical-info retention, configure downtime jailing, and
 # zero out slashing slash fractions (no token burn). The signed block window
 # mirrors Osmosis's wall-clock window adjusted for svoted's observed block time.
-GENESIS="$HOME_VAL1/config/genesis.json"
 jq --argjson vms "$VOTE_MANAGER_JSON" \
   --arg validator "$VAL1_VALOPER" \
   --arg pallasPk "$VAL1_PALLAS_PK_B64" '

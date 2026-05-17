@@ -143,7 +143,7 @@ fi
 # ─── Step 5: Fund the joiner account ─────────────────────────────────────────
 
 echo "Funding joiner account..."
-svoted tx vote authorized-send "$JOINER_ADDR" 200000 usvote \
+svoted tx vote authorized-send "$JOINER_ADDR" 200000 \
     --from vote-manager-1 --home "$VAL1_HOME" --keyring-backend test --chain-id "$CHAIN_ID" -y
 
 # Wait for the transfer to commit.

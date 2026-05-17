@@ -341,7 +341,7 @@ jobs:
 
             echo "Funding secondary address: ${SECONDARY_ADDR}"
 
-            svoted tx vote authorized-send "${SECONDARY_ADDR}" 100000000 usvote \
+            svoted tx vote authorized-send "${SECONDARY_ADDR}" 100000000 \
               --from vote-manager-1 \
               --keyring-backend test \
               --home "$HOME_DIR" \

@@ -224,7 +224,7 @@ func (ms msgServer) currentCoordinatorApprovalCount(goCtx context.Context, appro
 // validateCoordinatorPayload checks that the proposed payload is one of the
 // coordinator controlled actions and that it is valid before an action ID is
 // allocated. For creator based messages, the embedded creator must match the
-// proposer. For sends, the source account must be a current coordinator.
+// proposer.
 func (ms msgServer) validateCoordinatorPayload(goCtx context.Context, payload *anypb.Any, proposer string) error {
 	switch coordinatorPayloadType(payload) {
 	case coordinatorActionPayloadTypes.createVotingSession:
@@ -277,18 +277,10 @@ func (ms msgServer) validateCoordinatorPayload(goCtx context.Context, payload *a
 		if err := unmarshalAnyPayload(payload, msg); err != nil {
 			return err
 		}
-		fromAddr, _, _, err := validateAuthorizedSendFields(msg)
-		if err != nil {
+		if _, _, _, err := validateAuthorizedSendFields(msg); err != nil {
 			return err
 		}
-		senderIsVoteManager, err := ms.k.IsVoteManager(goCtx, fromAddr.String())
-		if err != nil {
-			return err
-		}
-		if !senderIsVoteManager {
-			return fmt.Errorf("%w: coordinator-funded sends must originate from a vote manager", types.ErrUnauthorizedSend)
-		}
-		return nil
+		return validatePayloadCreator(msg.Creator, proposer)
 	default:
 		return fmt.Errorf("%w: %s", types.ErrUnsupportedCoordinatorAction, payload.GetTypeUrl())
 	}
@@ -296,9 +288,7 @@ func (ms msgServer) validateCoordinatorPayload(goCtx context.Context, payload *a
 
 // executeCoordinatorPayload runs the already approved payload. Callers must
 // perform proposer, expiry, and threshold checks before reaching this helper.
-// The approvals argument is the current coordinator approvals that counted
-// toward execution; sends use it to require source account approval.
-func (ms msgServer) executeCoordinatorPayload(goCtx context.Context, payload *anypb.Any, approvals []string) error {
+func (ms msgServer) executeCoordinatorPayload(goCtx context.Context, payload *anypb.Any, _ []string) error {
 	switch coordinatorPayloadType(payload) {
 	case coordinatorActionPayloadTypes.createVotingSession:
 		msg := &types.MsgCreateVotingSession{}
@@ -340,7 +330,7 @@ func (ms msgServer) executeCoordinatorPayload(goCtx context.Context, payload *an
 		if err := unmarshalAnyPayload(payload, msg); err != nil {
 			return err
 		}
-		_, err := ms.executeAuthorizedSend(goCtx, msg, approvals)
+		_, err := ms.executeAuthorizedSend(goCtx, msg)
 		return err
 	default:
 		return fmt.Errorf("%w: %s", types.ErrUnsupportedCoordinatorAction, payload.GetTypeUrl())

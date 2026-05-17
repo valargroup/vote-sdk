@@ -7,11 +7,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	sdkmath "cosmossdk.io/math"
 	"cosmossdk.io/x/upgrade/types"
 	abci "github.com/cometbft/cometbft/abci/types"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/cosmos/cosmos-sdk/client/flags"
 	"github.com/cosmos/cosmos-sdk/testutil/sims"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 
@@ -30,6 +32,21 @@ func TestSetupTestApp_WiresUpgradeKeeper(t *testing.T) {
 	res, err := ta.SvoteApp.UpgradeKeeper.Authority(ctx, &types.QueryAuthorityRequest{})
 	require.NoError(t, err)
 	require.Equal(t, authtypes.NewModuleAddress(votetypes.ModuleName).String(), res.Address)
+}
+
+func TestSetupTestApp_FundsVoteFundingModuleAccount(t *testing.T) {
+	ta := testutil.SetupTestApp(t)
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+
+	moduleAddr := authtypes.NewModuleAddress(votetypes.VoteFundingModuleName)
+	account := ta.SvoteApp.AccountKeeper.GetAccount(ctx, moduleAddr)
+	require.NotNil(t, account)
+	_, isModuleAccount := account.(sdk.ModuleAccountI)
+	require.True(t, isModuleAccount)
+	require.Equal(t, moduleAddr.String(), account.GetAddress().String())
+
+	balance := ta.SvoteApp.BankKeeper.GetBalance(ctx, account.GetAddress(), sdk.DefaultBondDenom)
+	require.Equal(t, sdkmath.NewInt(1_000_000_000), balance.Amount)
 }
 
 func TestVoteManagerScheduleUpgradeStoresPlan(t *testing.T) {

@@ -897,6 +897,13 @@ func genesisStateWithAccountOperator(
 	genAccs []authtypes.GenesisAccount,
 	balances ...banktypes.Balance,
 ) (map[string]json.RawMessage, error) {
+	voteFundingAccount := authtypes.NewEmptyModuleAccount(types.VoteFundingModuleName)
+	genAccs = append(genAccs, voteFundingAccount)
+	balances = append(balances, banktypes.Balance{
+		Address: voteFundingAccount.GetAddress().String(),
+		Coins:   sdk.Coins{sdk.NewCoin(sdk.DefaultBondDenom, sdkmath.NewInt(1_000_000_000))},
+	})
+
 	authGenesis := authtypes.NewGenesisState(authtypes.DefaultParams(), genAccs)
 	genesisState[authtypes.ModuleName] = cdc.MustMarshalJSON(authGenesis)
 

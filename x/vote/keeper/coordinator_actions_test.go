@@ -222,7 +222,7 @@ func (s *MsgServerTestSuite) TestCoordinatorAction_ApprovalRejectsExpiredAction(
 	s.Require().Equal(types.CoordinatorActionStatus_COORDINATOR_ACTION_STATUS_EXPIRED, action.Status)
 }
 
-func (s *MsgServerTestSuite) TestCoordinatorAction_AuthorizedSendRequiresSourceApproval() {
+func (s *MsgServerTestSuite) TestCoordinatorAction_AuthorizedSendExecutesFromModuleAtThreshold() {
 	manager1 := svtest.TestAccAddr(0x61)
 	manager2 := svtest.TestAccAddr(0x62)
 	recipient := svtest.TestAccAddr(0x63)
@@ -235,15 +235,17 @@ func (s *MsgServerTestSuite) TestCoordinatorAction_AuthorizedSendRequiresSourceA
 	s.setupWithMockBankKeeper(bk)
 
 	payload := coordinatorPayload(s.T(), "/svote.v1.MsgAuthorizedSend", &types.MsgAuthorizedSend{
-		FromAddress: manager2,
-		ToAddress:   recipient,
-		Amount:      "10",
-		Denom:       "usvote",
+		Creator:   manager1,
+		ToAddress: recipient,
+		Amount:    "10",
 	})
-	_, err := s.msgServer.ProposeCoordinatorAction(s.ctx, &types.MsgProposeCoordinatorAction{
+	resp, err := s.msgServer.ProposeCoordinatorAction(s.ctx, &types.MsgProposeCoordinatorAction{
 		Creator: manager1,
 		Payload: payload,
 	})
-	s.Require().ErrorIs(err, types.ErrNotAuthorized)
-	s.Require().Empty(bk.sendCalls)
+	s.Require().NoError(err)
+	s.Require().True(resp.Executed)
+	s.Require().Len(bk.moduleSendCalls, 1)
+	s.Require().Equal(types.VoteFundingModuleName, bk.moduleSendCalls[0].Module)
+	s.Require().Equal(recipient, bk.moduleSendCalls[0].To.String())
 }

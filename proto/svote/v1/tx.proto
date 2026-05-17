@@ -191,9 +191,9 @@ message PartialDecryptionEntry {
 message MsgSubmitPartialDecryptionResponse {}
 
 // MsgUpdateVoteManagers atomically replaces the coordinator set and threshold.
-// It is executed through coordinator action approval. It does NOT move balances
-// — each coordinator holds their own funds. The handler creates auth accounts
-// for new managers when needed so they can sign future transactions. Validation:
+// It is executed through coordinator action approval. It does not fund the
+// coordinators. The handler creates auth accounts for new managers when needed
+// so they can sign future transactions. Validation:
 // new_vote_managers must be non-empty, each entry a valid bech32 address, and no
 // duplicates (addresses normalized before compare).
 message MsgUpdateVoteManagers {
@@ -210,14 +210,14 @@ message MsgUpdateVoteManagersResponse {}
 // stake to create a validator, bypassing the controlled validator set.
 //
 // Authorization rules:
-//   - Coordinator-funded sends must be approved as coordinator actions.
+//   - Funding sends must be approved as coordinator actions.
 //   - MsgAuthorizedSend is a coordinator action payload, not a public Msg RPC.
-//   - The source account must be a current coordinator that approved the action.
+//   - The creator must match the coordinator action proposer.
+//   - Funds always come from the vote_funding module account.
 message MsgAuthorizedSend {
-  string from_address = 1;
-  string to_address   = 2;
-  string amount       = 3; // Integer string, e.g. "1000000"
-  string denom        = 4; // e.g. "usvote"
+  string creator    = 1;
+  string to_address = 2;
+  string amount     = 3; // Native usvote integer string, e.g. "1000000"
 }
 
 message MsgAuthorizedSendResponse {}

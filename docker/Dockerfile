@@ -33,8 +33,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=go-builder /svoted /usr/local/bin/svoted
 COPY --from=go-builder /create-val-tx /usr/local/bin/create-val-tx
+RUN mkdir -p /usr/local/share/svoted
+COPY scripts/_genesis_accounts_lib.sh /usr/local/share/svoted/genesis_accounts_lib.sh
 COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN chmod +x /entrypoint.sh /usr/local/share/svoted/genesis_accounts_lib.sh
 
 EXPOSE 26656 26657 1317 9090
 

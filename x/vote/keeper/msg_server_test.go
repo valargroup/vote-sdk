@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"cosmossdk.io/log"
-	sdkmath "cosmossdk.io/math"
 	storetypes "cosmossdk.io/store/types"
 	upgradetypes "cosmossdk.io/x/upgrade/types"
 
@@ -182,28 +181,25 @@ func (s *MsgServerTestSuite) setupWithMockStakingKeeper(sk keeper.StakingKeeper)
 
 // mockBankKeeper implements keeper.BankKeeper for tests.
 type mockBankKeeper struct {
-	balances  map[string]sdk.Coin // addr -> balance
-	sendCalls []sendCall          // recorded SendCoins calls
+	moduleSendErr   error
+	moduleSendCalls []moduleSendCall // recorded SendCoinsFromModuleToAccount calls
 }
 
-type sendCall struct {
-	From, To sdk.AccAddress
-	Amt      sdk.Coins
+type moduleSendCall struct {
+	Module string
+	To     sdk.AccAddress
+	Amt    sdk.Coins
 }
 
 func newMockBankKeeper() *mockBankKeeper {
-	return &mockBankKeeper{balances: make(map[string]sdk.Coin)}
+	return &mockBankKeeper{}
 }
 
-func (mk *mockBankKeeper) GetBalance(_ context.Context, addr sdk.AccAddress, denom string) sdk.Coin {
-	if c, ok := mk.balances[addr.String()]; ok && c.Denom == denom {
-		return c
+func (mk *mockBankKeeper) SendCoinsFromModuleToAccount(_ context.Context, senderModule string, to sdk.AccAddress, amt sdk.Coins) error {
+	if mk.moduleSendErr != nil {
+		return mk.moduleSendErr
 	}
-	return sdk.NewCoin(denom, sdkmath.ZeroInt())
-}
-
-func (mk *mockBankKeeper) SendCoins(_ context.Context, from, to sdk.AccAddress, amt sdk.Coins) error {
-	mk.sendCalls = append(mk.sendCalls, sendCall{From: from, To: to, Amt: amt})
+	mk.moduleSendCalls = append(mk.moduleSendCalls, moduleSendCall{Module: senderModule, To: to, Amt: amt})
 	return nil
 }
 
@@ -896,7 +892,7 @@ func (s *MsgServerTestSuite) TestUpdateVoteManagers_DoesNotTouchBalances() {
 		NewVoteManagers: []string{vmB},
 	})
 	s.Require().NoError(err)
-	s.Require().Empty(bk.sendCalls, "UpdateVoteManagers must not call SendCoins")
+	s.Require().Empty(bk.moduleSendCalls, "UpdateVoteManagers must not send funds")
 }
 
 func (s *MsgServerTestSuite) TestUpdateVoteManagers_InitializesAuthAccounts() {

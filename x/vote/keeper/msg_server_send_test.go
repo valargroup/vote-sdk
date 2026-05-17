@@ -1,10 +1,15 @@
 package keeper_test
 
 import (
+	"fmt"
+
+	sdk "github.com/cosmos/cosmos-sdk/types"
+	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
+
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
-func (s *MsgServerTestSuite) TestCoordinatorAction_AuthorizedSendVoteManagerCanFundProspectiveValidator() {
+func (s *MsgServerTestSuite) TestCoordinatorAction_AuthorizedSendUsesVoteFundingModule() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
@@ -14,10 +19,9 @@ func (s *MsgServerTestSuite) TestCoordinatorAction_AuthorizedSendVoteManagerCanF
 	s.seedVoteManagers(vm)
 
 	payload := coordinatorPayload(s.T(), "/svote.v1.MsgAuthorizedSend", &types.MsgAuthorizedSend{
-		FromAddress: vm,
-		ToAddress:   prospectiveValidator,
-		Amount:      "500",
-		Denom:       "usvote",
+		Creator:   vm,
+		ToAddress: prospectiveValidator,
+		Amount:    "500",
 	})
 	resp, err := s.msgServer.ProposeCoordinatorAction(s.ctx, &types.MsgProposeCoordinatorAction{
 		Creator: vm,
@@ -25,36 +29,39 @@ func (s *MsgServerTestSuite) TestCoordinatorAction_AuthorizedSendVoteManagerCanF
 	})
 	s.Require().NoError(err)
 	s.Require().True(resp.Executed)
-	s.Require().Len(bk.sendCalls, 1)
+	s.Require().Len(bk.moduleSendCalls, 1)
+	s.Require().Equal(types.VoteFundingModuleName, bk.moduleSendCalls[0].Module)
+	s.Require().Equal(prospectiveValidator, bk.moduleSendCalls[0].To.String())
+	s.Require().Equal(sdk.NewCoins(sdk.NewInt64Coin(sdk.DefaultBondDenom, 500)), bk.moduleSendCalls[0].Amt)
 }
 
-func (s *MsgServerTestSuite) TestCoordinatorAction_AuthorizedSendRejectsNonCoordinatorSource() {
+func (s *MsgServerTestSuite) TestCoordinatorAction_AuthorizedSendRejectsCreatorMismatch() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
 
 	vm := testAccAddr(1)
-	vm2 := testAccAddr(3)
-	nonCoordinator := testAccAddr(2)
+	otherManager := testAccAddr(2)
 	recipient := testAccAddr(10)
 	kv := s.keeper.OpenKVStore(s.ctx)
 	s.Require().NoError(s.keeper.SetVoteManagers(kv, &types.VoteManagerSet{
-		Addresses: []string{vm, vm2},
-		Threshold: 2,
+		Addresses: []string{vm, otherManager},
+		Threshold: 1,
 	}))
 
 	payload := coordinatorPayload(s.T(), "/svote.v1.MsgAuthorizedSend", &types.MsgAuthorizedSend{
-		FromAddress: nonCoordinator,
-		ToAddress:   recipient,
-		Amount:      "500",
-		Denom:       "usvote",
+		Creator:   otherManager,
+		ToAddress: recipient,
+		Amount:    "500",
 	})
 	_, err := s.msgServer.ProposeCoordinatorAction(s.ctx, &types.MsgProposeCoordinatorAction{
 		Creator: vm,
 		Payload: payload,
 	})
-	s.Require().ErrorIs(err, types.ErrUnauthorizedSend)
-	s.Require().Empty(bk.sendCalls)
+	s.Require().ErrorIs(err, types.ErrInvalidCoordinatorAction)
+	s.Require().Contains(err.Error(), "must match proposer")
+	s.Require().Empty(bk.moduleSendCalls)
+
 	var pending []*types.CoordinatorAction
 	s.Require().NoError(s.keeper.IteratePendingCoordinatorActions(kv, func(action *types.CoordinatorAction) bool {
 		pending = append(pending, action)
@@ -63,7 +70,7 @@ func (s *MsgServerTestSuite) TestCoordinatorAction_AuthorizedSendRejectsNonCoord
 	s.Require().Empty(pending)
 }
 
-func (s *MsgServerTestSuite) TestAuthorizedSend_InvalidFromAddress() {
+func (s *MsgServerTestSuite) TestAuthorizedSend_InvalidCreatorAddress() {
 	s.SetupTest()
 	bk := newMockBankKeeper()
 	s.setupWithMockBankKeeper(bk)
@@ -71,14 +78,13 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_InvalidFromAddress() {
 	s.seedVoteManagers(vm)
 
 	_, err := s.proposeCoordinatorAction(s.ctx, vm, &types.MsgAuthorizedSend{
-		FromAddress: "not_valid",
-		ToAddress:   testAccAddr(2),
-		Amount:      "100",
-		Denom:       "usvote",
+		Creator:   "not_valid",
+		ToAddress: testAccAddr(2),
+		Amount:    "100",
 	})
 	s.Require().Error(err)
-	s.Require().Contains(err.Error(), "invalid from_address")
-	s.Require().Empty(bk.sendCalls)
+	s.Require().Contains(err.Error(), "creator")
+	s.Require().Empty(bk.moduleSendCalls)
 }
 
 func (s *MsgServerTestSuite) TestAuthorizedSend_InvalidToAddress() {
@@ -89,10 +95,9 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_InvalidToAddress() {
 
 	vm := testAccAddr(1)
 	_, err := s.proposeCoordinatorAction(s.ctx, vm, &types.MsgAuthorizedSend{
-		FromAddress: testAccAddr(1),
-		ToAddress:   "bad_addr",
-		Amount:      "100",
-		Denom:       "usvote",
+		Creator:   vm,
+		ToAddress: "bad_addr",
+		Amount:    "100",
 	})
 	s.Require().Error(err)
 	s.Require().Contains(err.Error(), "invalid to_address")
@@ -106,10 +111,9 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_ZeroAmount() {
 
 	vm := testAccAddr(1)
 	_, err := s.proposeCoordinatorAction(s.ctx, vm, &types.MsgAuthorizedSend{
-		FromAddress: testAccAddr(1),
-		ToAddress:   testAccAddr(2),
-		Amount:      "0",
-		Denom:       "usvote",
+		Creator:   vm,
+		ToAddress: testAccAddr(2),
+		Amount:    "0",
 	})
 	s.Require().Error(err)
 	s.Require().Contains(err.Error(), "amount must be a positive integer string")
@@ -123,48 +127,12 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_NegativeAmount() {
 
 	vm := testAccAddr(1)
 	_, err := s.proposeCoordinatorAction(s.ctx, vm, &types.MsgAuthorizedSend{
-		FromAddress: testAccAddr(1),
-		ToAddress:   testAccAddr(2),
-		Amount:      "-500",
-		Denom:       "usvote",
+		Creator:   vm,
+		ToAddress: testAccAddr(2),
+		Amount:    "-500",
 	})
 	s.Require().Error(err)
 	s.Require().Contains(err.Error(), "amount must be a positive integer string")
-}
-
-func (s *MsgServerTestSuite) TestAuthorizedSend_EmptyDenom() {
-	s.SetupTest()
-	bk := newMockBankKeeper()
-	s.setupWithMockBankKeeper(bk)
-	s.seedVoteManagers(testAccAddr(1))
-
-	vm := testAccAddr(1)
-	_, err := s.proposeCoordinatorAction(s.ctx, vm, &types.MsgAuthorizedSend{
-		FromAddress: testAccAddr(1),
-		ToAddress:   testAccAddr(2),
-		Amount:      "100",
-		Denom:       "",
-	})
-	s.Require().Error(err)
-	s.Require().Contains(err.Error(), "denom cannot be empty")
-}
-
-func (s *MsgServerTestSuite) TestAuthorizedSend_InvalidDenom() {
-	s.SetupTest()
-	bk := newMockBankKeeper()
-	s.setupWithMockBankKeeper(bk)
-	s.seedVoteManagers(testAccAddr(1))
-
-	vm := testAccAddr(1)
-	_, err := s.proposeCoordinatorAction(s.ctx, vm, &types.MsgAuthorizedSend{
-		FromAddress: testAccAddr(1),
-		ToAddress:   testAccAddr(2),
-		Amount:      "100",
-		Denom:       "!!!",
-	})
-	s.Require().ErrorIs(err, types.ErrInvalidField)
-	s.Require().Contains(err.Error(), "invalid denom")
-	s.Require().Empty(bk.sendCalls)
 }
 
 func (s *MsgServerTestSuite) TestAuthorizedSend_NonNumericAmount() {
@@ -175,13 +143,35 @@ func (s *MsgServerTestSuite) TestAuthorizedSend_NonNumericAmount() {
 
 	vm := testAccAddr(1)
 	_, err := s.proposeCoordinatorAction(s.ctx, vm, &types.MsgAuthorizedSend{
-		FromAddress: testAccAddr(1),
-		ToAddress:   testAccAddr(2),
-		Amount:      "abc",
-		Denom:       "usvote",
+		Creator:   vm,
+		ToAddress: testAccAddr(2),
+		Amount:    "abc",
 	})
 	s.Require().Error(err)
 	s.Require().Contains(err.Error(), "amount must be a positive integer string")
+}
+
+func (s *MsgServerTestSuite) TestCoordinatorAction_AuthorizedSendReturnsBankError() {
+	s.SetupTest()
+	bk := newMockBankKeeper()
+	bk.moduleSendErr = fmt.Errorf("insufficient funds")
+	s.setupWithMockBankKeeper(bk)
+
+	vm := testAccAddr(1)
+	recipient := testAccAddr(10)
+	s.seedVoteManagers(vm)
+
+	payload := coordinatorPayload(s.T(), "/svote.v1.MsgAuthorizedSend", &types.MsgAuthorizedSend{
+		Creator:   vm,
+		ToAddress: recipient,
+		Amount:    "42",
+	})
+	_, err := s.msgServer.ProposeCoordinatorAction(s.ctx, &types.MsgProposeCoordinatorAction{
+		Creator: vm,
+		Payload: payload,
+	})
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "send from vote_funding module failed")
 }
 
 func (s *MsgServerTestSuite) TestCoordinatorAction_AuthorizedSendEmitsEvent() {
@@ -194,10 +184,9 @@ func (s *MsgServerTestSuite) TestCoordinatorAction_AuthorizedSendEmitsEvent() {
 	s.seedVoteManagers(vm)
 
 	payload := coordinatorPayload(s.T(), "/svote.v1.MsgAuthorizedSend", &types.MsgAuthorizedSend{
-		FromAddress: vm,
-		ToAddress:   recipient,
-		Amount:      "42",
-		Denom:       "usvote",
+		Creator:   vm,
+		ToAddress: recipient,
+		Amount:    "42",
 	})
 	_, err := s.msgServer.ProposeCoordinatorAction(s.ctx, &types.MsgProposeCoordinatorAction{
 		Creator: vm,
@@ -205,70 +194,24 @@ func (s *MsgServerTestSuite) TestCoordinatorAction_AuthorizedSendEmitsEvent() {
 	})
 	s.Require().NoError(err)
 
+	moduleAddr := authtypes.NewModuleAddress(types.VoteFundingModuleName).String()
 	var found bool
 	for _, e := range s.ctx.EventManager().Events() {
 		if e.Type == types.EventTypeAuthorizedSend {
 			found = true
 			for _, attr := range e.Attributes {
 				switch attr.Key {
-				case types.AttributeKeySender:
+				case types.AttributeKeyCreator:
 					s.Require().Equal(vm, attr.Value)
+				case types.AttributeKeySender:
+					s.Require().Equal(moduleAddr, attr.Value)
 				case types.AttributeKeyRecipient:
 					s.Require().Equal(recipient, attr.Value)
+				case types.AttributeKeyAmount:
+					s.Require().Equal("42usvote", attr.Value)
 				}
 			}
 		}
 	}
 	s.Require().True(found, "expected %s event", types.EventTypeAuthorizedSend)
-}
-
-func (s *MsgServerTestSuite) TestCoordinatorAction_AuthorizedSendRevokedVoteManagerCannotFund() {
-	s.SetupTest()
-	bk := newMockBankKeeper()
-	s.setupWithMockBankKeeper(bk)
-
-	vm := testAccAddr(1)
-	revoked := testAccAddr(2)
-	s.seedVoteManagers(vm)
-
-	payload := coordinatorPayload(s.T(), "/svote.v1.MsgAuthorizedSend", &types.MsgAuthorizedSend{
-		FromAddress: revoked,
-		ToAddress:   testAccAddr(10),
-		Amount:      "1",
-		Denom:       "usvote",
-	})
-	_, err := s.msgServer.ProposeCoordinatorAction(s.ctx, &types.MsgProposeCoordinatorAction{
-		Creator: vm,
-		Payload: payload,
-	})
-	s.Require().ErrorIs(err, types.ErrUnauthorizedSend)
-	s.Require().Empty(bk.sendCalls)
-}
-
-func (s *MsgServerTestSuite) TestCoordinatorAction_AuthorizedSendInvalidDenomRejectedAtProposal() {
-	s.SetupTest()
-	bk := newMockBankKeeper()
-	s.setupWithMockBankKeeper(bk)
-
-	vm1 := testAccAddr(1)
-	vm2 := testAccAddr(2)
-	kv := s.keeper.OpenKVStore(s.ctx)
-	s.Require().NoError(s.keeper.SetVoteManagers(kv, &types.VoteManagerSet{
-		Addresses: []string{vm1, vm2},
-		Threshold: 2,
-	}))
-
-	payload := coordinatorPayload(s.T(), "/svote.v1.MsgAuthorizedSend", &types.MsgAuthorizedSend{
-		FromAddress: vm1,
-		ToAddress:   testAccAddr(10),
-		Amount:      "1",
-		Denom:       "!!!",
-	})
-	_, err := s.msgServer.ProposeCoordinatorAction(s.ctx, &types.MsgProposeCoordinatorAction{
-		Creator: vm1,
-		Payload: payload,
-	})
-	s.Require().ErrorIs(err, types.ErrInvalidField)
-	s.Require().Contains(err.Error(), "invalid denom")
-	s.Require().Empty(bk.sendCalls)
 }

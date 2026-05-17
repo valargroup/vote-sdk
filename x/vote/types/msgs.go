@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	sdkmath "cosmossdk.io/math"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
@@ -266,6 +267,24 @@ func (msg *MsgUpdateVoteManagers) ValidateBasic() error {
 	}
 	if _, _, err := ValidateAndNormalizeVoteManagerPolicy(msg.NewVoteManagers, msg.NewThreshold); err != nil {
 		return err
+	}
+	return nil
+}
+
+// ValidateBasic performs stateless validation for MsgAuthorizedSend.
+func (msg *MsgAuthorizedSend) ValidateBasic() error {
+	if msg.Creator == "" {
+		return fmt.Errorf("%w: creator cannot be empty", ErrInvalidField)
+	}
+	if _, err := sdk.AccAddressFromBech32(msg.Creator); err != nil {
+		return fmt.Errorf("%w: creator %q is not a valid bech32 address: %v", ErrInvalidField, msg.Creator, err)
+	}
+	if _, err := sdk.AccAddressFromBech32(msg.ToAddress); err != nil {
+		return fmt.Errorf("%w: invalid to_address: %v", ErrInvalidField, err)
+	}
+	amt, ok := sdkmath.NewIntFromString(msg.Amount)
+	if !ok || !amt.IsPositive() {
+		return fmt.Errorf("%w: amount must be a positive integer string", ErrInvalidField)
 	}
 	return nil
 }

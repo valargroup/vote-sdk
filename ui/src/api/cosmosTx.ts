@@ -472,31 +472,28 @@ const MsgUnjailProto = {
 // MsgAuthorizedSend only as coordinator action payloads.
 //
 // message MsgAuthorizedSend {
-//   string from_address = 1; string to_address = 2;
-//   string amount = 3; string denom = 4;
+//   string creator = 1; string to_address = 2; string amount = 3;
 // }
 const MsgAuthorizedSendProto = {
   encode(
-    message: { fromAddress: string; toAddress: string; amount: string; denom: string },
+    message: { creator: string; toAddress: string; amount: string },
     writer: ProtoWriter = ProtoWriter.create(),
   ): ProtoWriter {
-    if (message.fromAddress !== "") writer.uint32(10).string(message.fromAddress); // field 1
-    if (message.toAddress !== "")   writer.uint32(18).string(message.toAddress);   // field 2
-    if (message.amount !== "")      writer.uint32(26).string(message.amount);      // field 3
-    if (message.denom !== "")       writer.uint32(34).string(message.denom);       // field 4
+    if (message.creator !== "")   writer.uint32(10).string(message.creator);   // field 1
+    if (message.toAddress !== "") writer.uint32(18).string(message.toAddress); // field 2
+    if (message.amount !== "")    writer.uint32(26).string(message.amount);    // field 3
     return writer;
   },
-  decode(): { fromAddress: string; toAddress: string; amount: string; denom: string } {
+  decode(): { creator: string; toAddress: string; amount: string } {
     throw new Error("decode not implemented");
   },
   fromPartial(
-    object: Partial<{ fromAddress: string; toAddress: string; amount: string; denom: string }>,
-  ): { fromAddress: string; toAddress: string; amount: string; denom: string } {
+    object: Partial<{ creator: string; toAddress: string; amount: string }>,
+  ): { creator: string; toAddress: string; amount: string } {
     return {
-      fromAddress: object.fromAddress ?? "",
+      creator: object.creator ?? "",
       toAddress: object.toAddress ?? "",
       amount: object.amount ?? "",
-      denom: object.denom ?? "",
     };
   },
 };
@@ -979,8 +976,8 @@ export async function createVotingSession(
 /**
  * Propose an svote.v1.MsgAuthorizedSend coordinator action.
  *
- * Used to transfer stake tokens from a coordinator account to a validator
- * address. The source account must be one of the approving coordinators.
+ * Used to transfer stake tokens from the vote_funding module account to a
+ * validator address after coordinator approval.
  *
  * @param amountUsvote - amount in micro-tokens (usvote), e.g. "1000000" for 1 SVOTE
  */
@@ -996,10 +993,9 @@ export async function fundValidator(
     signer,
     "/svote.v1.MsgAuthorizedSend",
     encodePayload(MsgAuthorizedSendProto, {
-      fromAddress: account.address,
+      creator: account.address,
       toAddress,
       amount: amountUsvote,
-      denom: "usvote",
     }),
   );
 }
