@@ -1283,7 +1283,7 @@ pub fn build_share_reveal_test_data() -> (
             all_c2_y[i],
         )
     });
-    let shares_hash_fp = voting_circuits::shares_hash::shares_hash_from_comms(share_comms);
+    let shares_hash_fp = voting_circuits::shares_hash_from_comms(share_comms);
 
     // Compute vote_commitment.
     let voting_round_id = Option::from(pallas::Base::from_repr(round_id))

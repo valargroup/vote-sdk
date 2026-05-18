@@ -8,6 +8,7 @@
 use crate::payloads::{DelegationBundlePayload, SetupRoundFields};
 use blake2b_simd::Params as Blake2bParams;
 use ff::{Field, PrimeField};
+use group::GroupEncoding;
 use incrementalmerkletree::{Hashable, Level};
 use orchard::{
     keys::{FullViewingKey, Scope, SpendAuthorizingKey, SpendingKey},
@@ -16,12 +17,12 @@ use orchard::{
     value::NoteValue,
     NOTE_COMMITMENT_TREE_DEPTH,
 };
+use pasta_curves::arithmetic::CurveAffine;
 use pasta_curves::pallas;
 use rand::rngs::OsRng;
 use voting_circuits::delegation::{
-    builder::{build_delegation_bundle, RealNoteInput},
-    imt::{ImtProvider, SpacedLeafImtProvider},
-    prove::{create_delegation_proof, verify_delegation_proof},
+    build_delegation_bundle, create_delegation_proof, verify_delegation_proof, ImtProofData,
+    ImtProvider, RealNoteInput, SpacedLeafImtProvider,
 };
 
 /// Far-future vote_end_time (Jan 1 2100 UTC). Since vote_end_time is hashed
@@ -129,7 +130,7 @@ fn build_delegation_payload(
     let ask = SpendAuthorizingKey::from(&sk);
     let rsk = ask.randomize(&alpha);
 
-    let rk_bytes: [u8; 32] = bundle.instance.rk.clone().into();
+    let rk_bytes = rk_bytes_from_instance(&bundle.instance);
     let nf_signed_bytes = bundle.instance.nf_signed.to_bytes();
     let cmx_new_bytes = bundle.instance.cmx_new.to_repr();
     let van_cmx_bytes = bundle.instance.van_comm.to_repr();
@@ -177,6 +178,15 @@ fn build_delegation_payload(
     };
 
     Ok((payload, vote_proof_data))
+}
+
+fn rk_bytes_from_instance(instance: &voting_circuits::delegation::Instance) -> [u8; 32] {
+    let rk_affine = Option::<pallas::Affine>::from(pallas::Affine::from_xy(
+        instance.rk_x,
+        instance.rk_y,
+    ))
+    .expect("delegation instance rk coordinates must be on-curve");
+    rk_affine.to_bytes().into()
 }
 
 /// Prepare delegation inputs and session fields for the E2E test.
@@ -426,8 +436,8 @@ struct DelegationInput {
     int_pos: u32,
     auth_path_ext: [MerkleHashOrchard; NOTE_COMMITMENT_TREE_DEPTH],
     auth_path_int: [MerkleHashOrchard; NOTE_COMMITMENT_TREE_DEPTH],
-    imt_proof_ext: voting_circuits::delegation::imt::ImtProofData,
-    imt_proof_int: voting_circuits::delegation::imt::ImtProofData,
+    imt_proof_ext: ImtProofData,
+    imt_proof_int: ImtProofData,
 }
 
 /// Prepared multi-delegation witness data sharing a common note commitment root.
@@ -654,7 +664,7 @@ fn build_multi_delegation_payloads(
                 // RedPallas signature
                 let ask = SpendAuthorizingKey::from(&input.sk);
                 let rsk = ask.randomize(&alpha);
-                let rk_bytes: [u8; 32] = bundle.instance.rk.clone().into();
+                let rk_bytes = rk_bytes_from_instance(&bundle.instance);
                 let sighash = {
                     let h = Blake2bParams::new()
                         .hash_length(32)

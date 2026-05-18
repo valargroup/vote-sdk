@@ -17,12 +17,24 @@ pub mod votetree;
 
 /// Re-export the delegation circuit's prove/verify API from the `voting-circuits` crate.
 pub mod delegation {
-    pub use voting_circuits::delegation::builder;
-    pub use voting_circuits::delegation::imt;
     pub use voting_circuits::delegation::{
         create_delegation_proof, delegation_params, delegation_proving_key,
         Circuit, Instance, K,
     };
+
+    pub mod builder {
+        pub use voting_circuits::delegation::{
+            build_delegation_bundle, DelegationBuildError, DelegationBundle, PaddedNoteData,
+            PrecomputedRandomness, RealNoteInput,
+        };
+    }
+
+    pub mod imt {
+        pub use voting_circuits::delegation::{
+            build_sentinel_list, derive_nullifier_domain, ImtError, ImtProofData, ImtProvider,
+            SpacedLeafImtProvider, IMT_DEPTH,
+        };
+    }
 }
 
 /// Re-export the vote proof circuit's prove/verify API from the `voting-circuits` crate.
@@ -35,10 +47,13 @@ pub mod vote_proof {
 
 /// Re-export the share reveal circuit's prove/verify API from the `voting-circuits` crate.
 pub mod share_reveal {
-    pub use voting_circuits::share_reveal::builder;
     pub use voting_circuits::share_reveal::{
         create_share_reveal_proof, domain_tag_share_spend, share_nullifier_hash,
         share_reveal_cached_keys, share_reveal_params, share_reveal_proving_key,
         Circuit, Instance, K,
     };
+
+    pub mod builder {
+        pub use voting_circuits::share_reveal::{build_share_reveal, ShareRevealBundle};
+    }
 }
