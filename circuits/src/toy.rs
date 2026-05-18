@@ -29,17 +29,9 @@ pub const K: u32 = 4;
 trait NumericInstructions<F: Field>: Chip<F> {
     type Num;
 
-    fn load_private(
-        &self,
-        layouter: impl Layouter<F>,
-        a: Value<F>,
-    ) -> Result<Self::Num, Error>;
+    fn load_private(&self, layouter: impl Layouter<F>, a: Value<F>) -> Result<Self::Num, Error>;
 
-    fn load_constant(
-        &self,
-        layouter: impl Layouter<F>,
-        constant: F,
-    ) -> Result<Self::Num, Error>;
+    fn load_constant(&self, layouter: impl Layouter<F>, constant: F) -> Result<Self::Num, Error>;
 
     fn mul(
         &self,
@@ -150,12 +142,7 @@ impl<F: Field> NumericInstructions<F> for FieldChip<F> {
             || "load constant",
             |mut region| {
                 region
-                    .assign_advice_from_constant(
-                        || "constant value",
-                        config.advice[0],
-                        0,
-                        constant,
-                    )
+                    .assign_advice_from_constant(|| "constant value", config.advice[0], 0, constant)
                     .map(Number)
             },
         )
@@ -319,11 +306,16 @@ pub fn verify_toy(proof: &[u8], public_input: &Fp) -> Result<(), String> {
     let public_inputs = vec![*public_input];
 
     let strategy = SingleVerifier::new(&params);
-    let mut transcript =
-        Blake2bRead::<_, EqAffine, Challenge255<_>>::init(proof);
+    let mut transcript = Blake2bRead::<_, EqAffine, Challenge255<_>>::init(proof);
 
-    verify_proof(&params, &vk, strategy, &[&[&public_inputs]], &mut transcript)
-        .map_err(|e| format!("verification failed: {:?}", e))
+    verify_proof(
+        &params,
+        &vk,
+        strategy,
+        &[&[&public_inputs]],
+        &mut transcript,
+    )
+    .map_err(|e| format!("verification failed: {:?}", e))
 }
 
 // ---------------------------------------------------------------------------
