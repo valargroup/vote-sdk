@@ -341,21 +341,30 @@ fn generate_share_reveal_fixtures() {
 
     fs::create_dir_all(&testdata_dir).expect("failed to create testdata directory");
 
-    let (merkle_path, share_comms, primary_blind, enc_c1_compressed, enc_c2_compressed,
-         enc_share, share_index, proposal_id, vote_decision, round_id) =
-        build_share_reveal_test_data();
+    let (
+        merkle_path,
+        share_comms,
+        primary_blind,
+        enc_c1_compressed,
+        enc_c2_compressed,
+        enc_share,
+        share_index,
+        proposal_id,
+        vote_decision,
+        round_id,
+    ) = build_share_reveal_test_data();
 
     let mut fixture: Vec<u8> = Vec::with_capacity(1488);
-    fixture.extend_from_slice(&merkle_path);                  // 772 bytes
-    fixture.extend_from_slice(&share_comms);                  // 512 bytes
-    fixture.extend_from_slice(&primary_blind);                // 32 bytes
-    fixture.extend_from_slice(&enc_c1_compressed);            // 32 bytes
-    fixture.extend_from_slice(&enc_c2_compressed);            // 32 bytes
-    fixture.extend_from_slice(&share_index.to_le_bytes());   // 4 bytes
-    fixture.extend_from_slice(&proposal_id.to_le_bytes());   // 4 bytes
+    fixture.extend_from_slice(&merkle_path); // 772 bytes
+    fixture.extend_from_slice(&share_comms); // 512 bytes
+    fixture.extend_from_slice(&primary_blind); // 32 bytes
+    fixture.extend_from_slice(&enc_c1_compressed); // 32 bytes
+    fixture.extend_from_slice(&enc_c2_compressed); // 32 bytes
+    fixture.extend_from_slice(&share_index.to_le_bytes()); // 4 bytes
+    fixture.extend_from_slice(&proposal_id.to_le_bytes()); // 4 bytes
     fixture.extend_from_slice(&vote_decision.to_le_bytes()); // 4 bytes
-    fixture.extend_from_slice(&round_id);                    // 32 bytes
-    fixture.extend_from_slice(&enc_share);                   // 64 bytes
+    fixture.extend_from_slice(&round_id); // 32 bytes
+    fixture.extend_from_slice(&enc_share); // 64 bytes
     assert_eq!(fixture.len(), 1488);
 
     let fixture_path = testdata_dir.join("share_reveal_inputs.bin");

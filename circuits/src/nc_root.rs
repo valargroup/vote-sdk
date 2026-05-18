@@ -22,8 +22,7 @@ const DEPTH: u8 = 32;
 /// This is equivalent to `zcash_client_backend`'s
 /// `TreeState::orchard_tree().root()` but without pulling in that crate.
 pub fn compute_nc_root(orchard_tree_hex: &str) -> Result<[u8; 32], String> {
-    let bytes = hex::decode(orchard_tree_hex)
-        .map_err(|e| format!("hex decode: {e}"))?;
+    let bytes = hex::decode(orchard_tree_hex).map_err(|e| format!("hex decode: {e}"))?;
 
     let (left, right, parents) = parse_commitment_tree(&bytes)?;
     let root = commitment_tree_root(left, right, &parents);
@@ -78,7 +77,14 @@ fn commitment_tree_root(
 /// Parse a serialized CommitmentTree into its parts: (left, right, parents).
 fn parse_commitment_tree(
     mut data: &[u8],
-) -> Result<(Option<MerkleHashOrchard>, Option<MerkleHashOrchard>, Vec<Option<MerkleHashOrchard>>), String> {
+) -> Result<
+    (
+        Option<MerkleHashOrchard>,
+        Option<MerkleHashOrchard>,
+        Vec<Option<MerkleHashOrchard>>,
+    ),
+    String,
+> {
     let left = read_optional_node(&mut data)?;
     let right = read_optional_node(&mut data)?;
 
@@ -90,10 +96,7 @@ fn parse_commitment_tree(
 
     let mut parents = Vec::with_capacity(parent_count);
     for i in 0..parent_count {
-        parents.push(
-            read_optional_node(&mut data)
-                .map_err(|e| format!("parent[{i}]: {e}"))?,
-        );
+        parents.push(read_optional_node(&mut data).map_err(|e| format!("parent[{i}]: {e}"))?);
     }
 
     Ok((left, right, parents))
@@ -101,9 +104,7 @@ fn parse_commitment_tree(
 
 /// Read an `Option<MerkleHashOrchard>` from the wire format:
 /// 1 byte flag (0=None, 1=Some), then 32 bytes if Some.
-fn read_optional_node(
-    data: &mut &[u8],
-) -> Result<Option<MerkleHashOrchard>, String> {
+fn read_optional_node(data: &mut &[u8]) -> Result<Option<MerkleHashOrchard>, String> {
     if data.is_empty() {
         return Err("unexpected end of data reading flag byte".into());
     }
@@ -154,10 +155,10 @@ mod tests {
 
         // Encode: flag=1 + 32-byte leaf, flag=0 (no right), count=0
         let mut encoded = Vec::new();
-        encoded.push(1);          // left present
+        encoded.push(1); // left present
         encoded.extend_from_slice(&leaf);
-        encoded.push(0);          // right absent
-        encoded.push(0);          // 0 parents
+        encoded.push(0); // right absent
+        encoded.push(0); // 0 parents
 
         let hex_str = hex::encode(&encoded);
         let root = compute_nc_root(&hex_str).unwrap();

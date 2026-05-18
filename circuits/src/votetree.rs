@@ -9,9 +9,9 @@
 
 use pasta_curves::group::ff::PrimeField;
 use pasta_curves::Fp;
+pub use vote_commitment_tree::kv_shard_store::KvCallbacks;
 pub use vote_commitment_tree::MERKLE_PATH_BYTES;
 use vote_commitment_tree::{MemoryTreeServer, TreeServer};
-pub use vote_commitment_tree::kv_shard_store::KvCallbacks;
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -59,9 +59,11 @@ unsafe fn deserialize_leaves(ptr: *const u8, leaf_count: usize) -> Result<Vec<Fp
 fn build_tree(leaves: &[Fp]) -> MemoryTreeServer {
     let mut tree = MemoryTreeServer::empty();
     for &leaf in leaves {
-        tree.append(leaf).expect("append to in-memory tree must succeed");
+        tree.append(leaf)
+            .expect("append to in-memory tree must succeed");
     }
-    tree.checkpoint(1).expect("checkpoint of in-memory tree must succeed");
+    tree.checkpoint(1)
+        .expect("checkpoint of in-memory tree must succeed");
     tree
 }
 
@@ -151,7 +153,11 @@ impl TreeHandle {
     ///
     /// # Safety
     /// `ptr` must be valid for `count * 32` bytes.
-    pub unsafe fn append_batch_raw(&mut self, ptr: *const u8, count: usize) -> Result<(), FfiError> {
+    pub unsafe fn append_batch_raw(
+        &mut self,
+        ptr: *const u8,
+        count: usize,
+    ) -> Result<(), FfiError> {
         if count == 0 {
             return Ok(());
         }
@@ -178,9 +184,7 @@ impl TreeHandle {
 
     /// Snapshot the current tree state at `height` (block height).
     pub fn checkpoint(&mut self, height: u32) -> Result<(), FfiError> {
-        self.tree
-            .checkpoint(height)
-            .map_err(|_| FfiError::Storage)
+        self.tree.checkpoint(height).map_err(|_| FfiError::Storage)
     }
 
     /// Return the 32-byte Merkle root at the latest checkpoint.
@@ -273,8 +277,7 @@ mod tests {
             t.checkpoint(1).unwrap();
             t.root().to_repr()
         };
-        let root_bytes =
-            unsafe { compute_root_from_raw(std::ptr::null(), 0) }.unwrap();
+        let root_bytes = unsafe { compute_root_from_raw(std::ptr::null(), 0) }.unwrap();
         assert_eq!(root_bytes, empty_tree_root);
     }
 

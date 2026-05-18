@@ -380,7 +380,9 @@ pub unsafe extern "C" fn sv_verify_delegation_proof(
         let nf_signed = match deserialize_fp(chunk(0)) {
             Some(f) => f,
             None => {
-                set_ffi_error("delegation: slot 0 (nf_signed) is not a canonical Pallas Fp element");
+                set_ffi_error(
+                    "delegation: slot 0 (nf_signed) is not a canonical Pallas Fp element",
+                );
                 return -3;
             }
         };
@@ -442,48 +444,62 @@ pub unsafe extern "C" fn sv_verify_delegation_proof(
         let nf_imt_root = match deserialize_fp(chunk(6)) {
             Some(f) => f,
             None => {
-                set_ffi_error("delegation: slot 6 (nf_imt_root) is not a canonical Pallas Fp element");
+                set_ffi_error(
+                    "delegation: slot 6 (nf_imt_root) is not a canonical Pallas Fp element",
+                );
                 return -3;
             }
         };
         let gov_null_1 = match deserialize_fp(chunk(7)) {
             Some(f) => f,
             None => {
-                set_ffi_error("delegation: slot 7 (gov_null_1) is not a canonical Pallas Fp element");
+                set_ffi_error(
+                    "delegation: slot 7 (gov_null_1) is not a canonical Pallas Fp element",
+                );
                 return -3;
             }
         };
         let gov_null_2 = match deserialize_fp(chunk(8)) {
             Some(f) => f,
             None => {
-                set_ffi_error("delegation: slot 8 (gov_null_2) is not a canonical Pallas Fp element");
+                set_ffi_error(
+                    "delegation: slot 8 (gov_null_2) is not a canonical Pallas Fp element",
+                );
                 return -3;
             }
         };
         let gov_null_3 = match deserialize_fp(chunk(9)) {
             Some(f) => f,
             None => {
-                set_ffi_error("delegation: slot 9 (gov_null_3) is not a canonical Pallas Fp element");
+                set_ffi_error(
+                    "delegation: slot 9 (gov_null_3) is not a canonical Pallas Fp element",
+                );
                 return -3;
             }
         };
         let gov_null_4 = match deserialize_fp(chunk(10)) {
             Some(f) => f,
             None => {
-                set_ffi_error("delegation: slot 10 (gov_null_4) is not a canonical Pallas Fp element");
+                set_ffi_error(
+                    "delegation: slot 10 (gov_null_4) is not a canonical Pallas Fp element",
+                );
                 return -3;
             }
         };
         let gov_null_5 = match deserialize_fp(chunk(11)) {
             Some(f) => f,
             None => {
-                set_ffi_error("delegation: slot 11 (gov_null_5) is not a canonical Pallas Fp element");
+                set_ffi_error(
+                    "delegation: slot 11 (gov_null_5) is not a canonical Pallas Fp element",
+                );
                 return -3;
             }
         };
 
         let dom = {
-            use halo2_gadgets::poseidon::primitives::{self as poseidon, ConstantLength, P128Pow5T3};
+            use halo2_gadgets::poseidon::primitives::{
+                self as poseidon, ConstantLength, P128Pow5T3,
+            };
             let mut tag_bytes = [0u8; 32];
             tag_bytes[..24].copy_from_slice(b"governance authorization");
             let tag = pallas::Base::from_repr(tag_bytes).unwrap();
@@ -492,17 +508,37 @@ pub unsafe extern "C" fn sv_verify_delegation_proof(
         };
 
         let public_inputs = vec![
-            nf_signed, rk_x, rk_y, cmx_new, van_comm, vote_round_id, nc_root,
-            nf_imt_root, gov_null_1, gov_null_2, gov_null_3, gov_null_4, gov_null_5, dom,
+            nf_signed,
+            rk_x,
+            rk_y,
+            cmx_new,
+            van_comm,
+            vote_round_id,
+            nc_root,
+            nf_imt_root,
+            gov_null_1,
+            gov_null_2,
+            gov_null_3,
+            gov_null_4,
+            gov_null_5,
+            dom,
         ];
 
         let (params, vk) = delegation_vk_cached();
         let strategy = halo2_proofs::plonk::SingleVerifier::new(params);
         let mut transcript = halo2_proofs::transcript::Blake2bRead::<
-            _, halo2_proofs::pasta::EqAffine, halo2_proofs::transcript::Challenge255<_>,
+            _,
+            halo2_proofs::pasta::EqAffine,
+            halo2_proofs::transcript::Challenge255<_>,
         >::init(proof);
 
-        match halo2_proofs::plonk::verify_proof(params, vk, strategy, &[&[&public_inputs]], &mut transcript) {
+        match halo2_proofs::plonk::verify_proof(
+            params,
+            vk,
+            strategy,
+            &[&[&public_inputs]],
+            &mut transcript,
+        ) {
             Ok(()) => 0,
             Err(e) => {
                 set_ffi_error(format!("delegation: verify_proof failed: {:?}", e));
@@ -593,17 +629,63 @@ pub unsafe extern "C" fn sv_verify_vote_proof(
         let deserialize_fp =
             |bytes: [u8; 32]| -> Option<pallas::Base> { pallas::Base::from_repr(bytes).into() };
 
-        let van_nullifier = match deserialize_fp(chunk(0)) { Some(f) => f, None => { set_ffi_error("vote: slot 0 (van_nullifier) is not a canonical Pallas Fp element"); return -3; } };
+        let van_nullifier = match deserialize_fp(chunk(0)) {
+            Some(f) => f,
+            None => {
+                set_ffi_error("vote: slot 0 (van_nullifier) is not a canonical Pallas Fp element");
+                return -3;
+            }
+        };
         let r_vpk_bytes = chunk(1);
-        let r_vpk_point: pallas::Point = match pallas::Point::from_bytes(&r_vpk_bytes).into() { Some(p) => p, None => { set_ffi_error(format!("vote: slot 1 (r_vpk) is not a valid compressed Pallas point: {:02x?}", &r_vpk_bytes[..4])); return -3; } };
+        let r_vpk_point: pallas::Point = match pallas::Point::from_bytes(&r_vpk_bytes).into() {
+            Some(p) => p,
+            None => {
+                set_ffi_error(format!(
+                    "vote: slot 1 (r_vpk) is not a valid compressed Pallas point: {:02x?}",
+                    &r_vpk_bytes[..4]
+                ));
+                return -3;
+            }
+        };
         let r_vpk_affine = r_vpk_point.to_affine();
-        let r_vpk_coords: Option<pasta_curves::arithmetic::Coordinates<pallas::Affine>> = r_vpk_affine.coordinates().into();
-        let r_vpk_coords = match r_vpk_coords { Some(c) => c, None => { set_ffi_error("vote: slot 1 (r_vpk) decompressed to the identity point"); return -3; } };
+        let r_vpk_coords: Option<pasta_curves::arithmetic::Coordinates<pallas::Affine>> =
+            r_vpk_affine.coordinates().into();
+        let r_vpk_coords = match r_vpk_coords {
+            Some(c) => c,
+            None => {
+                set_ffi_error("vote: slot 1 (r_vpk) decompressed to the identity point");
+                return -3;
+            }
+        };
         let r_vpk_x: pallas::Base = *r_vpk_coords.x();
         let r_vpk_y: pallas::Base = *r_vpk_coords.y();
-        let vote_authority_note_new = match deserialize_fp(chunk(2)) { Some(f) => f, None => { set_ffi_error("vote: slot 2 (vote_authority_note_new) is not a canonical Pallas Fp element"); return -3; } };
-        let vote_commitment = match deserialize_fp(chunk(3)) { Some(f) => f, None => { set_ffi_error("vote: slot 3 (vote_commitment) is not a canonical Pallas Fp element"); return -3; } };
-        let vote_comm_tree_root = match deserialize_fp(chunk(4)) { Some(f) => f, None => { set_ffi_error("vote: slot 4 (vote_comm_tree_root) is not a canonical Pallas Fp element"); return -3; } };
+        let vote_authority_note_new = match deserialize_fp(chunk(2)) {
+            Some(f) => f,
+            None => {
+                set_ffi_error(
+                    "vote: slot 2 (vote_authority_note_new) is not a canonical Pallas Fp element",
+                );
+                return -3;
+            }
+        };
+        let vote_commitment = match deserialize_fp(chunk(3)) {
+            Some(f) => f,
+            None => {
+                set_ffi_error(
+                    "vote: slot 3 (vote_commitment) is not a canonical Pallas Fp element",
+                );
+                return -3;
+            }
+        };
+        let vote_comm_tree_root = match deserialize_fp(chunk(4)) {
+            Some(f) => f,
+            None => {
+                set_ffi_error(
+                    "vote: slot 4 (vote_comm_tree_root) is not a canonical Pallas Fp element",
+                );
+                return -3;
+            }
+        };
 
         let anchor_height_bytes = chunk(5);
         let anchor_height_u64 = u64::from_le_bytes(anchor_height_bytes[..8].try_into().unwrap());
@@ -613,31 +695,74 @@ pub unsafe extern "C" fn sv_verify_vote_proof(
         let proposal_id_u32 = u32::from_le_bytes(proposal_id_bytes[..4].try_into().unwrap());
         let proposal_id = pallas::Base::from(u64::from(proposal_id_u32));
 
-        let voting_round_id = match deserialize_fp(chunk(7)) { Some(f) => f, None => { set_ffi_error("vote: slot 7 (voting_round_id) is not a canonical Pallas Fp element"); return -3; } };
+        let voting_round_id = match deserialize_fp(chunk(7)) {
+            Some(f) => f,
+            None => {
+                set_ffi_error(
+                    "vote: slot 7 (voting_round_id) is not a canonical Pallas Fp element",
+                );
+                return -3;
+            }
+        };
 
         let ea_pk_bytes = chunk(8);
-        let ea_pk_point: pallas::Point = match pallas::Point::from_bytes(&ea_pk_bytes).into() { Some(p) => p, None => { set_ffi_error(format!("vote: slot 8 (ea_pk) is not a valid compressed Pallas point: {:02x?}", &ea_pk_bytes[..4])); return -3; } };
+        let ea_pk_point: pallas::Point = match pallas::Point::from_bytes(&ea_pk_bytes).into() {
+            Some(p) => p,
+            None => {
+                set_ffi_error(format!(
+                    "vote: slot 8 (ea_pk) is not a valid compressed Pallas point: {:02x?}",
+                    &ea_pk_bytes[..4]
+                ));
+                return -3;
+            }
+        };
         let ea_pk_affine = ea_pk_point.to_affine();
-        let ea_pk_coords: Option<pasta_curves::arithmetic::Coordinates<pallas::Affine>> = ea_pk_affine.coordinates().into();
-        let ea_pk_coords = match ea_pk_coords { Some(c) => c, None => { set_ffi_error("vote: slot 8 (ea_pk) decompressed to the identity point"); return -3; } };
+        let ea_pk_coords: Option<pasta_curves::arithmetic::Coordinates<pallas::Affine>> =
+            ea_pk_affine.coordinates().into();
+        let ea_pk_coords = match ea_pk_coords {
+            Some(c) => c,
+            None => {
+                set_ffi_error("vote: slot 8 (ea_pk) decompressed to the identity point");
+                return -3;
+            }
+        };
         let ea_pk_x: pallas::Base = *ea_pk_coords.x();
         let ea_pk_y: pallas::Base = *ea_pk_coords.y();
 
         let public_inputs = vec![
-            van_nullifier, r_vpk_x, r_vpk_y, vote_authority_note_new, vote_commitment,
-            vote_comm_tree_root, vote_comm_tree_anchor_height, proposal_id, voting_round_id,
-            ea_pk_x, ea_pk_y,
+            van_nullifier,
+            r_vpk_x,
+            r_vpk_y,
+            vote_authority_note_new,
+            vote_commitment,
+            vote_comm_tree_root,
+            vote_comm_tree_anchor_height,
+            proposal_id,
+            voting_round_id,
+            ea_pk_x,
+            ea_pk_y,
         ];
 
         let (params, vk) = vote_proof_vk_cached();
         let strategy = halo2_proofs::plonk::SingleVerifier::new(params);
         let mut transcript = halo2_proofs::transcript::Blake2bRead::<
-            _, halo2_proofs::pasta::EqAffine, halo2_proofs::transcript::Challenge255<_>,
+            _,
+            halo2_proofs::pasta::EqAffine,
+            halo2_proofs::transcript::Challenge255<_>,
         >::init(proof);
 
-        match halo2_proofs::plonk::verify_proof(params, vk, strategy, &[&[&public_inputs]], &mut transcript) {
+        match halo2_proofs::plonk::verify_proof(
+            params,
+            vk,
+            strategy,
+            &[&[&public_inputs]],
+            &mut transcript,
+        ) {
             Ok(()) => 0,
-            Err(e) => { set_ffi_error(format!("vote: verify_proof failed: {:?}", e)); -2 }
+            Err(e) => {
+                set_ffi_error(format!("vote: verify_proof failed: {:?}", e));
+                -2
+            }
         }
     }));
     match result {
@@ -678,15 +803,24 @@ fn share_reveal_vk_cached() -> (&'static Params<EqAffine>, &'static VerifyingKey
 pub extern "C" fn sv_warm_verifier_caches() -> i32 {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let handles = [
-            ("delegation", std::thread::spawn(|| {
-                let _ = delegation_vk_cached();
-            })),
-            ("vote", std::thread::spawn(|| {
-                let _ = vote_proof_vk_cached();
-            })),
-            ("share_reveal", std::thread::spawn(|| {
-                let _ = share_reveal::share_reveal_cached_keys();
-            })),
+            (
+                "delegation",
+                std::thread::spawn(|| {
+                    let _ = delegation_vk_cached();
+                }),
+            ),
+            (
+                "vote",
+                std::thread::spawn(|| {
+                    let _ = vote_proof_vk_cached();
+                }),
+            ),
+            (
+                "share_reveal",
+                std::thread::spawn(|| {
+                    let _ = share_reveal::share_reveal_cached_keys();
+                }),
+            ),
         ];
 
         let mut failed_cache = None;
@@ -696,7 +830,9 @@ pub extern "C" fn sv_warm_verifier_caches() -> i32 {
             }
         }
         if let Some(name) = failed_cache {
-            set_ffi_error(format!("sv_warm_verifier_caches: {name} cache warm-up panicked"));
+            set_ffi_error(format!(
+                "sv_warm_verifier_caches: {name} cache warm-up panicked"
+            ));
             return -6;
         }
         0
@@ -772,8 +908,14 @@ pub unsafe extern "C" fn sv_verify_share_reveal_proof(
             |bytes: [u8; 32]| -> Option<pallas::Base> { pallas::Base::from_repr(bytes).into() };
 
         const SLOT_NAMES: [&str; 9] = [
-            "share_nullifier", "enc_share_c1_x", "enc_share_c1_y", "enc_share_c2_x",
-            "enc_share_c2_y", "proposal_id", "vote_decision", "vote_comm_tree_root",
+            "share_nullifier",
+            "enc_share_c1_x",
+            "enc_share_c1_y",
+            "enc_share_c2_x",
+            "enc_share_c2_y",
+            "proposal_id",
+            "vote_decision",
+            "vote_comm_tree_root",
             "voting_round_id",
         ];
 
@@ -794,12 +936,23 @@ pub unsafe extern "C" fn sv_verify_share_reveal_proof(
         let (params, vk) = share_reveal_vk_cached();
         let strategy = halo2_proofs::plonk::SingleVerifier::new(params);
         let mut transcript = halo2_proofs::transcript::Blake2bRead::<
-            _, halo2_proofs::pasta::EqAffine, halo2_proofs::transcript::Challenge255<_>,
+            _,
+            halo2_proofs::pasta::EqAffine,
+            halo2_proofs::transcript::Challenge255<_>,
         >::init(proof);
 
-        match halo2_proofs::plonk::verify_proof(params, vk, strategy, &[&[&public_inputs]], &mut transcript) {
+        match halo2_proofs::plonk::verify_proof(
+            params,
+            vk,
+            strategy,
+            &[&[&public_inputs]],
+            &mut transcript,
+        ) {
             Ok(()) => 0,
-            Err(e) => { set_ffi_error(format!("share_reveal: verify_proof failed: {:?}", e)); -2 }
+            Err(e) => {
+                set_ffi_error(format!("share_reveal: verify_proof failed: {:?}", e));
+                -2
+            }
         }
     }));
     match result {
@@ -904,7 +1057,10 @@ pub unsafe extern "C" fn sv_generate_share_reveal(
         let merkle_path_raw = std::slice::from_raw_parts(merkle_path_ptr, merkle_path_len);
 
         let position = u32::from_le_bytes([
-            merkle_path_raw[0], merkle_path_raw[1], merkle_path_raw[2], merkle_path_raw[3],
+            merkle_path_raw[0],
+            merkle_path_raw[1],
+            merkle_path_raw[2],
+            merkle_path_raw[3],
         ]);
 
         const TREE_DEPTH: usize = vote_commitment_tree::TREE_DEPTH;
@@ -947,13 +1103,20 @@ pub unsafe extern "C" fn sv_generate_share_reveal(
         c1_bytes.copy_from_slice(c1_raw);
         let c1_point: pallas::Point = match pallas::Point::from_bytes(&c1_bytes).into() {
             Some(p) => p,
-            None => { set_ffi_error("share_reveal_gen: enc_c1 is not a valid compressed Pallas point"); return -3; }
+            None => {
+                set_ffi_error("share_reveal_gen: enc_c1 is not a valid compressed Pallas point");
+                return -3;
+            }
         };
         let c1_affine = c1_point.to_affine();
-        let c1_coords: Option<pasta_curves::arithmetic::Coordinates<pallas::Affine>> = c1_affine.coordinates().into();
+        let c1_coords: Option<pasta_curves::arithmetic::Coordinates<pallas::Affine>> =
+            c1_affine.coordinates().into();
         let c1_coords = match c1_coords {
             Some(c) => c,
-            None => { set_ffi_error("share_reveal_gen: enc_c1 decompressed to the identity point"); return -3; }
+            None => {
+                set_ffi_error("share_reveal_gen: enc_c1 decompressed to the identity point");
+                return -3;
+            }
         };
         let enc_c1_x: pallas::Base = *c1_coords.x();
         let enc_c1_y: pallas::Base = *c1_coords.y();
@@ -963,13 +1126,20 @@ pub unsafe extern "C" fn sv_generate_share_reveal(
         c2_bytes.copy_from_slice(c2_raw);
         let c2_point: pallas::Point = match pallas::Point::from_bytes(&c2_bytes).into() {
             Some(p) => p,
-            None => { set_ffi_error("share_reveal_gen: enc_c2 is not a valid compressed Pallas point"); return -3; }
+            None => {
+                set_ffi_error("share_reveal_gen: enc_c2 is not a valid compressed Pallas point");
+                return -3;
+            }
         };
         let c2_affine = c2_point.to_affine();
-        let c2_coords: Option<pasta_curves::arithmetic::Coordinates<pallas::Affine>> = c2_affine.coordinates().into();
+        let c2_coords: Option<pasta_curves::arithmetic::Coordinates<pallas::Affine>> =
+            c2_affine.coordinates().into();
         let c2_coords = match c2_coords {
             Some(c) => c,
-            None => { set_ffi_error("share_reveal_gen: enc_c2 decompressed to the identity point"); return -3; }
+            None => {
+                set_ffi_error("share_reveal_gen: enc_c2 decompressed to the identity point");
+                return -3;
+            }
         };
         let enc_c2_x: pallas::Base = *c2_coords.x();
         let enc_c2_y: pallas::Base = *c2_coords.y();
@@ -988,9 +1158,18 @@ pub unsafe extern "C" fn sv_generate_share_reveal(
         let vote_decision_fp = pallas::Base::from(u64::from(vote_decision));
 
         let bundle = share_reveal::builder::build_share_reveal(
-            auth_path, position, share_comms, primary_blind,
-            enc_c1_x, enc_c2_x, enc_c1_y, enc_c2_y,
-            share_index, proposal_id_fp, vote_decision_fp, voting_round_id,
+            auth_path,
+            position,
+            share_comms,
+            primary_blind,
+            enc_c1_x,
+            enc_c2_x,
+            enc_c1_y,
+            enc_c2_y,
+            share_index,
+            proposal_id_fp,
+            vote_decision_fp,
+            voting_round_id,
         );
 
         let share_nullifier = bundle.instance.share_nullifier;
@@ -1598,7 +1777,10 @@ pub unsafe extern "C" fn sv_vote_commitment_hash(
         let vote_decision_fp = Fp::from(u64::from(vote_decision));
 
         let commitment = vote_commitment_tree::vote_commitment_hash(
-            round_id_fp, shares_hash_fp, proposal_id_fp, vote_decision_fp,
+            round_id_fp,
+            shares_hash_fp,
+            proposal_id_fp,
+            vote_decision_fp,
         );
 
         let bytes = commitment.to_repr();
