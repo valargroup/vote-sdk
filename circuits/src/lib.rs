@@ -28,7 +28,7 @@ pub mod delegation {
 /// Re-export the vote proof circuit's prove/verify API from the `voting-circuits` crate.
 pub mod vote_proof {
     pub use voting_circuits::vote_proof::{
-        verify_vote_proof, verify_vote_proof_raw, vote_proof_params, vote_proof_proving_key,
+        verify_vote_proof, vote_proof_params, vote_proof_proving_key,
         Circuit, Instance, K,
     };
 }
