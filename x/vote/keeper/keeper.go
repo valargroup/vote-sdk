@@ -34,11 +34,11 @@ type SlashingKeeper interface {
 }
 
 // BankKeeper defines the bank module interface needed by the vote module.
-// Used by MsgAuthorizedSend to move coins; standard bank.MsgSend is blocked
-// at the ante handler so all transfers flow through this path.
+// Used by MsgAuthorizedSend to move native coins from the vote_funding module
+// account. Standard bank.MsgSend is blocked at the ante handler so privileged
+// transfers flow through this path.
 type BankKeeper interface {
-	GetBalance(ctx context.Context, addr sdk.AccAddress, denom string) sdk.Coin
-	SendCoins(ctx context.Context, fromAddr, toAddr sdk.AccAddress, amt sdk.Coins) error
+	SendCoinsFromModuleToAccount(ctx context.Context, senderModule string, recipientAddr sdk.AccAddress, amt sdk.Coins) error
 }
 
 // AccountKeeper defines the auth module interface needed by the vote module.

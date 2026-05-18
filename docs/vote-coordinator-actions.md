@@ -62,26 +62,19 @@ These actions must go through the coordinator action flow:
 - schedule a software upgrade,
 - cancel a software upgrade,
 - set, rotate, or clear an endorser mapping,
-- send funds from a coordinator account, including funding validator setup.
+- send funds from the shared `vote_funding` module account, including funding
+  validator setup.
 
 These coordinator-owned actions are payloads, not public `Msg` RPCs. The
 external transaction path is `propose coordinator action` and `approve
 coordinator action`.
 
-## Coordinator-Funded Sends
+## Module-Funded Sends
 
-Coordinator-funded sends have one extra rule:
-
-The source funding account must be one of the coordinators that approved the
-action.
-
-For example, if an action sends funds from `sv1alice...`, then `sv1alice...`
-must approve that action. It is not enough for other coordinators to approve a
-send from Alice's account.
-
-`MsgAuthorizedSend` is only a coordinator action payload. Funding is intended
-to flow from a coordinator account to the prospective validator account that
-will bond it.
+`MsgAuthorizedSend` is only a coordinator action payload. It has no caller
+chosen source account or denom. The payload creator must match the coordinator
+who proposes the action, and once the coordinator threshold is met the native
+`usvote` funds are sent from the `vote_funding` module account to the recipient.
 
 ## Actions Outside Coordinator Multisig
 

@@ -10,12 +10,16 @@ if [ -f "$REPO_ROOT/.env" ]; then
     . "$REPO_ROOT/.env"
     set +a
 fi
+# shellcheck source=scripts/_genesis_accounts_lib.sh
+. "$SCRIPT_DIR/_genesis_accounts_lib.sh"
 
 CHAIN_ID="${CHAIN_ID:-svote-1}"
 MONIKER="${MONIKER:-valarg-genesis}"
 HOME_DIR="${SVOTED_HOME:-$HOME/.svoted}"
 BINARY="svoted"
 DENOM="usvote"
+VOTE_FUNDING_MODULE_NAME="vote_funding"
+VOTE_FUNDING_BALANCE="1000000000${DENOM}"
 # Production (`zvote-1`) should use the vote-manager set baked into the
 # x/vote module's DefaultGenesis. Staging/local chains keep the VM_PRIVKEYS
 # override so test coordinators can be generated from deploy secrets.
@@ -56,8 +60,6 @@ VALIDATOR_VALOPER=$($BINARY keys show validator --bech val -a --keyring-backend 
 echo "Validator address: $VALIDATOR_ADDR"
 echo "Validator valoper: $VALIDATOR_VALOPER"
 
-# Total stake pool divided evenly across vote managers (preserves total supply).
-TOTAL_VOTE_MANAGER_POOL=1000000000
 VOTE_MANAGER_ADDRS=()
 
 if [ "$USE_DEFAULT_GENESIS_VOTE_MANAGERS" = "true" ]; then
@@ -94,27 +96,18 @@ else
     done
 fi
 
-NUM_VOTE_MANAGERS=${#VOTE_MANAGER_ADDRS[@]}
-PER_VOTE_MANAGER_STAKE=$((TOTAL_VOTE_MANAGER_POOL / NUM_VOTE_MANAGERS))
-REMAINDER=$((TOTAL_VOTE_MANAGER_POOL - PER_VOTE_MANAGER_STAKE * NUM_VOTE_MANAGERS))
-
 for i in "${!VOTE_MANAGER_ADDRS[@]}"; do
     addr="${VOTE_MANAGER_ADDRS[$i]}"
     name="vote-manager-$((i + 1))"
-    # Vote manager 1 receives any remainder from the integer division.
-    if [ "$i" -eq 0 ]; then
-        stake=$((PER_VOTE_MANAGER_STAKE + REMAINDER))
-    else
-        stake=$PER_VOTE_MANAGER_STAKE
-    fi
-    echo "Vote-manager ${name}:     $addr (balance: ${stake}${DENOM})"
-    $BINARY genesis add-genesis-account "$addr" "${stake}${DENOM}" \
-        --keyring-backend test --home "$HOME_DIR"
+    echo "Vote-manager ${name}:     $addr (auth account only)"
+    genesis_add_auth_base_account "$GENESIS" "$addr"
 done
 
 # Add validator's genesis account (needed for self-delegation).
 $BINARY genesis add-genesis-account "$VALIDATOR_ADDR" "10000000${DENOM}" \
     --keyring-backend test --home "$HOME_DIR"
+
+genesis_add_module_funding_account "$GENESIS" "$VOTE_FUNDING_MODULE_NAME" "$DENOM" "$VOTE_FUNDING_BALANCE"
 
 # Create genesis transaction (self-delegation)
 $BINARY genesis gentx validator "10000000${DENOM}" \

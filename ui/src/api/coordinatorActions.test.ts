@@ -116,17 +116,16 @@ describe("describeCoordinatorActionPayload", () => {
 
   it("shows coordinator send details before approval", () => {
     const description = describeCoordinatorActionPayload(action("svote.v1.MsgAuthorizedSend", concat([
-      stringField(1, "svote1from"),
+      stringField(1, "svote1creator"),
       stringField(2, "svote1to"),
       stringField(3, "1000000"),
-      stringField(4, "usvote"),
     ])));
 
     expect(description.canApprove).toBe(true);
-    expect(valueFor(description, "From")).toBe("svote1from");
+    expect(valueFor(description, "Creator")).toBe("svote1creator");
+    expect(valueFor(description, "Funding source")).toBe("vote_funding");
     expect(valueFor(description, "To")).toBe("svote1to");
-    expect(valueFor(description, "Amount")).toBe("1000000");
-    expect(valueFor(description, "Denom")).toBe("usvote");
+    expect(valueFor(description, "Amount")).toBe("1000000 usvote");
   });
 
   it("blocks approval for unsupported action payloads", () => {

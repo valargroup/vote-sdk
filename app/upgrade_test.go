@@ -7,14 +7,17 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	sdkmath "cosmossdk.io/math"
 	"cosmossdk.io/x/upgrade/types"
 	abci "github.com/cometbft/cometbft/abci/types"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/cosmos/cosmos-sdk/client/flags"
 	"github.com/cosmos/cosmos-sdk/testutil/sims"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 
+	svoteapp "github.com/valargroup/vote-sdk/app"
 	"github.com/valargroup/vote-sdk/testutil"
 	votetypes "github.com/valargroup/vote-sdk/x/vote/types"
 )
@@ -30,6 +33,65 @@ func TestSetupTestApp_WiresUpgradeKeeper(t *testing.T) {
 	res, err := ta.SvoteApp.UpgradeKeeper.Authority(ctx, &types.QueryAuthorityRequest{})
 	require.NoError(t, err)
 	require.Equal(t, authtypes.NewModuleAddress(votetypes.ModuleName).String(), res.Address)
+}
+
+func TestSetupTestApp_FundsVoteFundingModuleAccount(t *testing.T) {
+	ta := testutil.SetupTestApp(t)
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+
+	moduleAddr := authtypes.NewModuleAddress(votetypes.VoteFundingModuleName)
+	account := ta.SvoteApp.AccountKeeper.GetAccount(ctx, moduleAddr)
+	require.NotNil(t, account)
+	_, isModuleAccount := account.(sdk.ModuleAccountI)
+	require.True(t, isModuleAccount)
+	require.Equal(t, moduleAddr.String(), account.GetAddress().String())
+
+	balance := ta.SvoteApp.BankKeeper.GetBalance(ctx, account.GetAddress(), sdk.DefaultBondDenom)
+	require.Equal(t, sdkmath.NewInt(1_000_000_000), balance.Amount)
+}
+
+func TestVoteFundingMigrationUpgradeMovesStageVoteManagerBalances(t *testing.T) {
+	ta := testutil.SetupTestAppWithChainID(t, "svote-1")
+	manager1 := testutil.TestAccAddr(0x61)
+	manager2 := testutil.TestAccAddr(0x62)
+	ta.SeedVoteManagers(manager1, manager2)
+	moveVoteFundingModuleBalanceToManagers(t, ta, map[string]int64{
+		manager1: 600_000_000,
+		manager2: 400_000_000,
+	})
+
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	moduleAddr := authtypes.NewModuleAddress(votetypes.VoteFundingModuleName)
+	supplyBefore := ta.SvoteApp.BankKeeper.GetSupply(ctx, sdk.DefaultBondDenom)
+	require.Equal(t, sdkmath.ZeroInt(), ta.SvoteApp.BankKeeper.GetBalance(ctx, moduleAddr, sdk.DefaultBondDenom).Amount)
+
+	runVoteFundingMigrationUpgrade(t, ta)
+
+	ctx = ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	require.Equal(t, supplyBefore, ta.SvoteApp.BankKeeper.GetSupply(ctx, sdk.DefaultBondDenom))
+	require.Equal(t, sdkmath.NewInt(1_000_000_000), ta.SvoteApp.BankKeeper.GetBalance(ctx, moduleAddr, sdk.DefaultBondDenom).Amount)
+	require.Equal(t, sdkmath.ZeroInt(), balanceForAddress(t, ta, ctx, manager1).Amount)
+	require.Equal(t, sdkmath.ZeroInt(), balanceForAddress(t, ta, ctx, manager2).Amount)
+}
+
+func TestVoteFundingMigrationUpgradeSkipsNonStageChain(t *testing.T) {
+	ta := testutil.SetupTestApp(t)
+	manager := testutil.TestAccAddr(0x61)
+	ta.SeedVoteManagers(manager)
+	moveVoteFundingModuleBalanceToManagers(t, ta, map[string]int64{
+		manager: 500_000_000,
+	})
+
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	moduleAddr := authtypes.NewModuleAddress(votetypes.VoteFundingModuleName)
+	supplyBefore := ta.SvoteApp.BankKeeper.GetSupply(ctx, sdk.DefaultBondDenom)
+
+	runVoteFundingMigrationUpgrade(t, ta)
+
+	ctx = ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	require.Equal(t, supplyBefore, ta.SvoteApp.BankKeeper.GetSupply(ctx, sdk.DefaultBondDenom))
+	require.Equal(t, sdkmath.NewInt(500_000_000), ta.SvoteApp.BankKeeper.GetBalance(ctx, moduleAddr, sdk.DefaultBondDenom).Amount)
+	require.Equal(t, sdkmath.NewInt(500_000_000), balanceForAddress(t, ta, ctx, manager).Amount)
 }
 
 func TestVoteManagerScheduleUpgradeStoresPlan(t *testing.T) {
@@ -120,4 +182,41 @@ func TestScheduledUpgradeWithHandlerAppliesAtDueHeight(t *testing.T) {
 	doneHeight, err := ta.SvoteApp.UpgradeKeeper.GetDoneHeight(ctx, "handled-test")
 	require.NoError(t, err)
 	require.Equal(t, dueHeight, doneHeight)
+}
+
+// moveVoteFundingModuleBalanceToManagers simulates the old genesis shape where
+// vote-manager addresses held the funding pool directly.
+func moveVoteFundingModuleBalanceToManagers(t *testing.T, ta *testutil.TestApp, balances map[string]int64) {
+	t.Helper()
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	for manager, amount := range balances {
+		managerAddr, err := sdk.AccAddressFromBech32(manager)
+		require.NoError(t, err)
+		coins := sdk.NewCoins(sdk.NewInt64Coin(sdk.DefaultBondDenom, amount))
+		require.NoError(t, ta.SvoteApp.BankKeeper.SendCoinsFromModuleToAccount(ctx, votetypes.VoteFundingModuleName, managerAddr, coins))
+	}
+	ta.NextBlock()
+}
+
+// runVoteFundingMigrationUpgrade schedules and executes the staging funding
+// migration upgrade handler.
+func runVoteFundingMigrationUpgrade(t *testing.T, ta *testutil.TestApp) {
+	t.Helper()
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	dueHeight := ta.Height + 1
+	require.NoError(t, ta.SvoteApp.UpgradeKeeper.ScheduleUpgrade(ctx, types.Plan{
+		Name:   svoteapp.VoteFundingMigrationUpgradeName,
+		Height: dueHeight,
+	}))
+
+	ta.NextBlock()
+	require.Equal(t, dueHeight, ta.Height)
+}
+
+// balanceForAddress returns the native denom balance for a bech32 account.
+func balanceForAddress(t *testing.T, ta *testutil.TestApp, ctx context.Context, address string) sdk.Coin {
+	t.Helper()
+	addr, err := sdk.AccAddressFromBech32(address)
+	require.NoError(t, err)
+	return ta.SvoteApp.BankKeeper.GetBalance(ctx, addr, sdk.DefaultBondDenom)
 }

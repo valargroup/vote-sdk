@@ -6,6 +6,7 @@ import (
 
 	sdkmath "cosmossdk.io/math"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
@@ -13,9 +14,12 @@ import (
 // validateAuthorizedSendFields checks the MsgAuthorizedSend payload fields
 // before proposal storage and again before execution.
 func validateAuthorizedSendFields(msg *types.MsgAuthorizedSend) (sdk.AccAddress, sdk.AccAddress, sdkmath.Int, error) {
-	fromAddr, err := sdk.AccAddressFromBech32(msg.FromAddress)
+	if err := msg.ValidateBasic(); err != nil {
+		return nil, nil, sdkmath.Int{}, err
+	}
+	creatorAddr, err := sdk.AccAddressFromBech32(msg.Creator)
 	if err != nil {
-		return nil, nil, sdkmath.Int{}, fmt.Errorf("%w: invalid from_address: %v", types.ErrInvalidField, err)
+		return nil, nil, sdkmath.Int{}, fmt.Errorf("%w: creator %q is not a valid bech32 address: %v", types.ErrInvalidField, msg.Creator, err)
 	}
 	toAddr, err := sdk.AccAddressFromBech32(msg.ToAddress)
 	if err != nil {
@@ -26,43 +30,28 @@ func validateAuthorizedSendFields(msg *types.MsgAuthorizedSend) (sdk.AccAddress,
 	if !ok || !amt.IsPositive() {
 		return nil, nil, sdkmath.Int{}, fmt.Errorf("%w: amount must be a positive integer string", types.ErrInvalidField)
 	}
-	if msg.Denom == "" {
-		return nil, nil, sdkmath.Int{}, fmt.Errorf("%w: denom cannot be empty", types.ErrInvalidField)
-	}
-	if err := sdk.ValidateDenom(msg.Denom); err != nil {
-		return nil, nil, sdkmath.Int{}, fmt.Errorf("%w: invalid denom: %v", types.ErrInvalidField, err)
-	}
-	return fromAddr, toAddr, amt, nil
+	return creatorAddr, toAddr, amt, nil
 }
 
-func (ms msgServer) executeAuthorizedSend(goCtx context.Context, msg *types.MsgAuthorizedSend, approvals []string) (*types.MsgAuthorizedSendResponse, error) {
+func (ms msgServer) executeAuthorizedSend(goCtx context.Context, msg *types.MsgAuthorizedSend) (*types.MsgAuthorizedSendResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 
-	fromAddr, toAddr, amt, err := validateAuthorizedSendFields(msg)
+	_, toAddr, amt, err := validateAuthorizedSendFields(msg)
 	if err != nil {
 		return nil, err
 	}
 
-	coins := sdk.NewCoins(sdk.NewCoin(msg.Denom, amt))
-
-	senderIsVoteManager, err := ms.k.IsVoteManager(ctx, msg.FromAddress)
-	if err != nil {
-		return nil, err
-	}
-	if !senderIsVoteManager {
-		return nil, fmt.Errorf("%w: coordinator-funded sends must originate from a vote manager", types.ErrUnauthorizedSend)
-	}
-	if !addressInList(fromAddr.String(), approvals) {
-		return nil, fmt.Errorf("%w: source funding account %s must approve the coordinator action", types.ErrNotAuthorized, fromAddr.String())
+	coins := sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, amt))
+	if err := ms.k.bankKeeper.SendCoinsFromModuleToAccount(ctx, types.VoteFundingModuleName, toAddr, coins); err != nil {
+		return nil, fmt.Errorf("send from %s module failed: %w", types.VoteFundingModuleName, err)
 	}
 
-	if err := ms.k.bankKeeper.SendCoins(ctx, fromAddr, toAddr, coins); err != nil {
-		return nil, fmt.Errorf("send failed: %w", err)
-	}
+	moduleAddr := authtypes.NewModuleAddress(types.VoteFundingModuleName).String()
 
 	ctx.EventManager().EmitEvent(sdk.NewEvent(
 		types.EventTypeAuthorizedSend,
-		sdk.NewAttribute(types.AttributeKeySender, msg.FromAddress),
+		sdk.NewAttribute(types.AttributeKeyCreator, msg.Creator),
+		sdk.NewAttribute(types.AttributeKeySender, moduleAddr),
 		sdk.NewAttribute(types.AttributeKeyRecipient, msg.ToAddress),
 		sdk.NewAttribute(types.AttributeKeyAmount, coins.String()),
 	))

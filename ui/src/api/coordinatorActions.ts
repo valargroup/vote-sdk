@@ -258,17 +258,16 @@ function decodeSetEndorser(bytes: Uint8Array): CoordinatorActionDetail[] {
 
 function decodeAuthorizedSend(bytes: Uint8Array): CoordinatorActionDetail[] {
   const reader = new ProtoReader(bytes);
-  let from = "";
+  let creator = "";
   let to = "";
   let amount = "";
-  let denom = "";
   while (!reader.eof()) {
     const field = reader.readField();
     if (!field) break;
     switch (field.number) {
       case 1:
-        expectWire(field, 2, "from_address");
-        from = reader.readString();
+        expectWire(field, 2, "creator");
+        creator = reader.readString();
         break;
       case 2:
         expectWire(field, 2, "to_address");
@@ -278,19 +277,15 @@ function decodeAuthorizedSend(bytes: Uint8Array): CoordinatorActionDetail[] {
         expectWire(field, 2, "amount");
         amount = reader.readString();
         break;
-      case 4:
-        expectWire(field, 2, "denom");
-        denom = reader.readString();
-        break;
       default:
         reader.skip(field.wireType);
     }
   }
   return [
-    detail("From", from, true),
+    detail("Creator", creator, true),
+    detail("Funding source", "vote_funding"),
     detail("To", to, true),
-    detail("Amount", amount),
-    detail("Denom", denom),
+    detail("Amount", amount ? `${amount} usvote` : ""),
   ];
 }
 

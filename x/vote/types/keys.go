@@ -11,6 +11,10 @@ const (
 
 	// RouterKey defines the module's message routing key.
 	RouterKey = ModuleName
+
+	// VoteFundingModuleName is the module account that holds native tokens for
+	// coordinator-approved funding sends.
+	VoteFundingModuleName = "vote_funding"
 )
 
 // DefaultContributionTimeout is the REGISTERING phase timeout in seconds (10 minutes).

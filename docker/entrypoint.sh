@@ -16,6 +16,12 @@ NUM_VALIDATORS="${NUM_VALIDATORS:-30}"
 CHAIN_ID="${CHAIN_ID:-svote-1}"
 DENOM="usvote"
 HOME_DIR="/root/.svoted"
+GENESIS_ACCOUNTS_LIB="/usr/local/share/svoted/genesis_accounts_lib.sh"
+if [ ! -f "$GENESIS_ACCOUNTS_LIB" ]; then
+    GENESIS_ACCOUNTS_LIB="$(cd "$(dirname "$0")/.." && pwd)/scripts/_genesis_accounts_lib.sh"
+fi
+# shellcheck source=scripts/_genesis_accounts_lib.sh
+. "$GENESIS_ACCOUNTS_LIB"
 
 # ---------------------------------------------------------------------------
 # Archive role: non-validator full node that preserves full history. Peers
@@ -67,7 +73,8 @@ fi
 VALIDATOR_INDEX="${VALIDATOR_INDEX:?VALIDATOR_INDEX must be set for validator role}"
 MONIKER="val${VALIDATOR_INDEX}"
 SELF_DELEGATION="10000000${DENOM}"
-VOTE_MANAGER_BALANCE="1000000000${DENOM}"
+VOTE_FUNDING_MODULE_NAME="vote_funding"
+VOTE_FUNDING_BALANCE="1000000000${DENOM}"
 
 # ---------------------------------------------------------------------------
 # Phase 1: Initialize node and publish address
@@ -123,6 +130,7 @@ if [ "$VALIDATOR_INDEX" -eq 1 ]; then
     RANDOM_KEY=$(cat /dev/urandom | head -c 32 | od -An -tx1 | tr -d ' \n')
     svoted keys import-hex vote-manager-1 "$RANDOM_KEY" --keyring-backend test --home "$HOME_DIR" 2>/dev/null
     VM_ADDR=$(svoted keys show vote-manager-1 -a --keyring-backend test --home "$HOME_DIR")
+    GENESIS="$HOME_DIR/config/genesis.json"
 
     # Add genesis accounts for all validators.
     for i in $(seq 1 "$NUM_VALIDATORS"); do
@@ -131,9 +139,9 @@ if [ "$VALIDATOR_INDEX" -eq 1 ]; then
             --keyring-backend test --home "$HOME_DIR"
     done
 
-    # Add vote-manager account.
-    svoted genesis add-genesis-account "$VM_ADDR" "$VOTE_MANAGER_BALANCE" \
-        --keyring-backend test --home "$HOME_DIR"
+    # Add vote-manager auth account and the shared module funding pool.
+    genesis_add_auth_base_account "$GENESIS" "$VM_ADDR"
+    genesis_add_module_funding_account "$GENESIS" "$VOTE_FUNDING_MODULE_NAME" "$DENOM" "$VOTE_FUNDING_BALANCE"
 
     # Genesis transaction (self-delegation for val1).
     svoted genesis gentx validator "$SELF_DELEGATION" \
@@ -146,7 +154,6 @@ if [ "$VALIDATOR_INDEX" -eq 1 ]; then
     # Patch genesis: set vote_manager_addresses (single vote manager here),
     # register val1's Pallas key for EA ceremonies, configure downtime jailing,
     # and disable token-burning slash fractions.
-    GENESIS="$HOME_DIR/config/genesis.json"
     PALLAS_PK_B64=$(base64 < "$HOME_DIR/pallas.pk" | tr -d '\n')
     jq --arg vm "$VM_ADDR" \
       --arg validator "$VAL_OPER" \

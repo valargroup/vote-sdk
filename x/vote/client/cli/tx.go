@@ -327,9 +327,10 @@ Flags:
            in the new set. Pass the flag once per vote manager. The full
            list replaces the existing set atomically.
 
-The --from signer must be a current coordinator. Balances are not moved — each
-coordinator holds their own funds. New coordinator auth accounts are initialized
-when needed so they can sign future transactions.`,
+The --from signer must be a current coordinator. This action does not move any
+coordinator balances; funding comes from the vote_funding module account. New
+coordinator auth accounts are initialized when needed so they can sign future
+transactions.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			clientCtx, err := client.GetClientTxContext(cmd)
@@ -479,21 +480,20 @@ func CmdClearRoundEndorsement() *cobra.Command {
 // privileged funding path.
 func CmdAuthorizedSend() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "authorized-send [to-address] [amount] [denom]",
+		Use:   "authorized-send [to-address] [amount]",
 		Short: "Propose a coordinator-approved token send",
 		Long: `Propose a MsgAuthorizedSend coordinator action.
 
 Arguments:
   to-address  Recipient bech32 account address (sv1...)
-  amount      Integer amount to send (e.g. 200000)
-  denom       Token denomination (e.g. usvote)
+  amount      Native usvote integer amount to send (e.g. 200000)
 
-The --from flag specifies the coordinator funding account. That account must be
-a current coordinator and must approve the action.
+The --from flag specifies the coordinator proposing the action. Funds come from
+the vote_funding module account once the coordinator action reaches threshold.
 
 Example:
-  svoted tx vote authorized-send sv1abc... 200000 usvote --from mykey`,
-		Args: cobra.ExactArgs(3),
+  svoted tx vote authorized-send sv1abc... 200000 --from mykey`,
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			clientCtx, err := client.GetClientTxContext(cmd)
 			if err != nil {
@@ -501,10 +501,9 @@ Example:
 			}
 
 			msg := &types.MsgAuthorizedSend{
-				FromAddress: clientCtx.GetFromAddress().String(),
-				ToAddress:   args[0],
-				Amount:      args[1],
-				Denom:       args[2],
+				Creator:   clientCtx.GetFromAddress().String(),
+				ToAddress: args[0],
+				Amount:    args[1],
 			}
 
 			return broadcastCoordinatorProposal(clientCtx, cmd.Flags(), msg)

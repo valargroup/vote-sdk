@@ -62,10 +62,9 @@ func TestWhitelist_VoteMsgAuthorizedSendBlocked(t *testing.T) {
 
 	signerAddr := sdk.AccAddress(ta.ValPrivKey.PubKey().Address())
 	msg := &votetypes.MsgAuthorizedSend{
-		FromAddress: signerAddr.String(),
-		ToAddress:   signerAddr.String(),
-		Amount:      "100",
-		Denom:       "usvote",
+		Creator:   signerAddr.String(),
+		ToAddress: signerAddr.String(),
+		Amount:    "100",
 	}
 
 	txBytes := buildSignedTxWithKey(t, ta, ta.ValPrivKey, 0, 0, msg)

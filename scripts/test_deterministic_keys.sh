@@ -180,7 +180,7 @@ echo ""
 echo "--- Step 5: Fund secondary from vote-manager-1 ---"
 echo "Sending tokens to $SECONDARY_ADDR..."
 
-svoted tx vote authorized-send "$SECONDARY_ADDR" 200000 usvote \
+svoted tx vote authorized-send "$SECONDARY_ADDR" 200000 \
     --from vote-manager-1 --home "$PRIMARY_HOME" --keyring-backend test \
     --chain-id "$CHAIN_ID" -y
 

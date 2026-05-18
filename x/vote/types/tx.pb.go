@@ -1448,9 +1448,9 @@ func (*MsgSubmitPartialDecryptionResponse) Descriptor() ([]byte, []int) {
 }
 
 // MsgUpdateVoteManagers atomically replaces the coordinator set and threshold.
-// It is executed through coordinator action approval. It does NOT move balances
-// — each coordinator holds their own funds. The handler creates auth accounts
-// for new managers when needed so they can sign future transactions. Validation:
+// It is executed through coordinator action approval. It does not fund the
+// coordinators. The handler creates auth accounts for new managers when needed
+// so they can sign future transactions. Validation:
 // new_vote_managers must be non-empty, each entry a valid bech32 address, and no
 // duplicates (addresses normalized before compare).
 type MsgUpdateVoteManagers struct {
@@ -1555,15 +1555,15 @@ func (*MsgUpdateVoteManagersResponse) Descriptor() ([]byte, []int) {
 // stake to create a validator, bypassing the controlled validator set.
 //
 // Authorization rules:
-//   - Coordinator-funded sends must be approved as coordinator actions.
+//   - Funding sends must be approved as coordinator actions.
 //   - MsgAuthorizedSend is a coordinator action payload, not a public Msg RPC.
-//   - The source account must be a current coordinator that approved the action.
+//   - The creator must match the coordinator action proposer.
+//   - Funds always come from the vote_funding module account.
 type MsgAuthorizedSend struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	FromAddress   string                 `protobuf:"bytes,1,opt,name=from_address,json=fromAddress,proto3" json:"from_address,omitempty"`
+	Creator       string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`
 	ToAddress     string                 `protobuf:"bytes,2,opt,name=to_address,json=toAddress,proto3" json:"to_address,omitempty"`
-	Amount        string                 `protobuf:"bytes,3,opt,name=amount,proto3" json:"amount,omitempty"` // Integer string, e.g. "1000000"
-	Denom         string                 `protobuf:"bytes,4,opt,name=denom,proto3" json:"denom,omitempty"`   // e.g. "usvote"
+	Amount        string                 `protobuf:"bytes,3,opt,name=amount,proto3" json:"amount,omitempty"` // Native usvote integer string, e.g. "1000000"
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1598,9 +1598,9 @@ func (*MsgAuthorizedSend) Descriptor() ([]byte, []int) {
 	return file_svote_v1_tx_proto_rawDescGZIP(), []int{26}
 }
 
-func (x *MsgAuthorizedSend) GetFromAddress() string {
+func (x *MsgAuthorizedSend) GetCreator() string {
 	if x != nil {
-		return x.FromAddress
+		return x.Creator
 	}
 	return ""
 }
@@ -1615,13 +1615,6 @@ func (x *MsgAuthorizedSend) GetToAddress() string {
 func (x *MsgAuthorizedSend) GetAmount() string {
 	if x != nil {
 		return x.Amount
-	}
-	return ""
-}
-
-func (x *MsgAuthorizedSend) GetDenom() string {
-	if x != nil {
-		return x.Denom
 	}
 	return ""
 }
@@ -2478,13 +2471,12 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12*\n" +
 	"\x11new_vote_managers\x18\x02 \x03(\tR\x0fnewVoteManagers\x12#\n" +
 	"\rnew_threshold\x18\x03 \x01(\rR\fnewThreshold\"\x1f\n" +
-	"\x1dMsgUpdateVoteManagersResponse\"\x83\x01\n" +
-	"\x11MsgAuthorizedSend\x12!\n" +
-	"\ffrom_address\x18\x01 \x01(\tR\vfromAddress\x12\x1d\n" +
+	"\x1dMsgUpdateVoteManagersResponse\"d\n" +
+	"\x11MsgAuthorizedSend\x12\x18\n" +
+	"\acreator\x18\x01 \x01(\tR\acreator\x12\x1d\n" +
 	"\n" +
 	"to_address\x18\x02 \x01(\tR\ttoAddress\x12\x16\n" +
-	"\x06amount\x18\x03 \x01(\tR\x06amount\x12\x14\n" +
-	"\x05denom\x18\x04 \x01(\tR\x05denom\"\x1b\n" +
+	"\x06amount\x18\x03 \x01(\tR\x06amount\"\x1b\n" +
 	"\x19MsgAuthorizedSendResponse\"\x99\x01\n" +
 	"\x12MsgScheduleUpgrade\x12\x18\n" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12\x12\n" +
