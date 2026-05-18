@@ -233,6 +233,7 @@ jobs:
             export VAL_PRIVKEY="${{ secrets.PRIMARY_VAL_PRIVKEY }}"
             export SVOTE_ADMIN_DISABLE=false
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/init.sh" -o /tmp/init.sh
+            curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/_genesis_accounts_lib.sh" -o /tmp/_genesis_accounts_lib.sh
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/_vote_manager_keys_lib.sh" -o /tmp/_vote_manager_keys_lib.sh
             bash /tmp/init.sh
 
