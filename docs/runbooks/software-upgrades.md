@@ -72,10 +72,10 @@ For each future state-breaking release:
 The completed handler records the applied plan in `x/upgrade`, so later queries
 can confirm the upgrade height.
 
-## Current Staging Funding Migration
+## Current Testnet Funding Migration
 
-The module-funded authorized-send rollout adds one staging-only upgrade handler
+The module-funded authorized-send rollout adds one testnet only upgrade handler
 named `stage-vote-funding-module`. On `svote-1`, it moves existing native
 `usvote` balances from the current vote-manager addresses into the shared
-`vote_funding` module account, up to the fresh-genesis funding pool size. It
+`vote_funding` module account, up to the fresh genesis funding pool size. It
 does not mint new supply. On any other chain ID, the handler is a no-op.
