@@ -60,6 +60,8 @@ type TestApp struct {
 	t      *testing.T
 	Height int64
 	Time   time.Time
+	// ChainID is the chain identifier used for InitChain and tx signing.
+	ChainID string
 
 	// ProposerAddress is the consensus address of the genesis validator,
 	// passed in every FinalizeBlock request so the ante handler can verify
@@ -84,7 +86,7 @@ type TestApp struct {
 // and returns a TestApp ready for integration testing.
 func SetupTestApp(t *testing.T) *TestApp {
 	t.Helper()
-	ta := setupTestApp(t, simtestutil.EmptyAppOptions{})
+	ta := setupTestApp(t, simtestutil.EmptyAppOptions{}, testChainID)
 
 	// Seed a confirmed ceremony with a dummy EA keypair so that
 	// CreateVotingSession (which requires a confirmed ceremony) works.
@@ -101,7 +103,19 @@ func SetupTestApp(t *testing.T) *TestApp {
 // It preserves the same post-genesis fixture state as SetupTestApp.
 func SetupTestAppWithAppOptions(t *testing.T, appOpts servertypes.AppOptions) *TestApp {
 	t.Helper()
-	ta := setupTestApp(t, appOpts)
+	ta := setupTestApp(t, appOpts, testChainID)
+
+	_, pk := elgamal.KeyGen(rand.Reader)
+	ta.SeedConfirmedCeremony(pk.Point.ToAffineCompressed())
+	ta.SeedVoteManagers(DefaultVoteManagerAddress)
+
+	return ta
+}
+
+// SetupTestAppWithChainID is SetupTestApp with an explicit chain ID.
+func SetupTestAppWithChainID(t *testing.T, chainID string) *TestApp {
+	t.Helper()
+	ta := setupTestApp(t, simtestutil.EmptyAppOptions{}, chainID)
 
 	_, pk := elgamal.KeyGen(rand.Reader)
 	ta.SeedConfirmedCeremony(pk.Point.ToAffineCompressed())
@@ -130,7 +144,7 @@ func SetupTestAppWithEAKey(t *testing.T) (*TestApp, *elgamal.PublicKey, []byte) 
 		"vote.ea_sk_path": skPath,
 	}
 
-	ta := setupTestApp(t, appOpts)
+	ta := setupTestApp(t, appOpts, testChainID)
 	ta.EaSkDir = tmpDir
 	ta.EaPk = pk.Point.ToAffineCompressed()
 	ta.SeedVoteManagers(DefaultVoteManagerAddress)
@@ -211,8 +225,8 @@ func (ta *TestApp) SeedTallyingRoundThreshold(
 	return roundID
 }
 
-// setupTestApp is the shared implementation for SetupTestApp and SetupTestAppWithEAKey.
-func setupTestApp(t *testing.T, appOpts servertypes.AppOptions) *TestApp {
+// setupTestApp is the shared implementation for TestApp constructors.
+func setupTestApp(t *testing.T, appOpts servertypes.AppOptions, chainID string) *TestApp {
 	t.Helper()
 
 	db := dbm.NewMemDB()
@@ -220,7 +234,7 @@ func setupTestApp(t *testing.T, appOpts servertypes.AppOptions) *TestApp {
 
 	svoteApp := app.NewSvoteApp(
 		logger, db, nil, true, appOpts,
-		baseapp.SetChainID(testChainID),
+		baseapp.SetChainID(chainID),
 	)
 
 	// Create a genesis validator set.
@@ -261,7 +275,7 @@ func setupTestApp(t *testing.T, appOpts servertypes.AppOptions) *TestApp {
 
 	// Initialize the chain.
 	_, err = svoteApp.InitChain(&abci.RequestInitChain{
-		ChainId:         testChainID,
+		ChainId:         chainID,
 		AppStateBytes:   stateBytes,
 		ConsensusParams: simtestutil.DefaultConsensusParams,
 		Validators:      []abci.ValidatorUpdate{},
@@ -291,6 +305,7 @@ func setupTestApp(t *testing.T, appOpts servertypes.AppOptions) *TestApp {
 		t:               t,
 		Height:          1,
 		Time:            now,
+		ChainID:         chainID,
 		ProposerAddress: proposerAddr,
 		ValPrivKey:      privKey,
 	}
@@ -322,7 +337,7 @@ func SetupTestAppWithPallasKey(t *testing.T) (ta *TestApp, pallasSk *elgamal.Sec
 		"vote.ea_sk_path":     eaSkPath,
 	}
 
-	ta = setupTestApp(t, appOpts)
+	ta = setupTestApp(t, appOpts, testChainID)
 	ta.EaSkDir = tmpDir
 	return ta, pallasSk, pallasPk, eaSk, eaPk
 }
@@ -832,7 +847,7 @@ func (ta *TestApp) MustBuildSignedCeremonyTx(msg sdk.Msg) []byte {
 
 	// Generate sign bytes and sign.
 	signerData := authsigning.SignerData{
-		ChainID:       testChainID,
+		ChainID:       ta.ChainID,
 		AccountNumber: accNum,
 		Sequence:      accSeq,
 		PubKey:        privKey.PubKey(),
