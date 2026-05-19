@@ -779,25 +779,19 @@ pub extern "C" fn sv_warm_verifier_caches() -> i32 {
             (
                 "delegation",
                 std::thread::spawn(|| {
-                    delegation::delegation_cached_keys()
-                        .map(|_| ())
-                        .map_err(|e| format!("{:?}", e))
+                    delegation::warm_delegation_keys().map_err(|e| format!("{:?}", e))
                 }),
             ),
             (
                 "vote",
                 std::thread::spawn(|| {
-                    vote_proof::vote_proof_cached_keys()
-                        .map(|_| ())
-                        .map_err(|e| format!("{:?}", e))
+                    vote_proof::warm_vote_proof_keys().map_err(|e| format!("{:?}", e))
                 }),
             ),
             (
                 "share_reveal",
                 std::thread::spawn(|| {
-                    share_reveal::share_reveal_cached_keys()
-                        .map(|_| ())
-                        .map_err(|e| format!("{:?}", e))
+                    share_reveal::warm_share_reveal_keys().map_err(|e| format!("{:?}", e))
                 }),
             ),
         ];
