@@ -951,9 +951,9 @@ dependencies = [
 
 [[package]]
 name = "vote-commitment-tree"
-version = "0.1.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0fb2456313f571003c0bed8d38fb166d78da85653caf828823c1a82f4e1aef1"
+checksum = "da7a7df678ac99da806f2b1a25c4074a21c653469f7532725af50aeebf36acc6"
 dependencies = [
  "anyhow",
  "ff",
@@ -969,7 +969,8 @@ dependencies = [
 [[package]]
 name = "voting-circuits"
 version = "0.5.0"
-source = "git+https://github.com/valargroup/voting-circuits.git?rev=4c94389f1caab3bba1853b8d3f0c84e308b5cef2#4c94389f1caab3bba1853b8d3f0c84e308b5cef2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a24eb3e3d2f7cf35c35703a4fff509323d2cba670e5e23099322bbd3ad410d9e"
 dependencies = [
  "blake2b_simd",
  "ff",

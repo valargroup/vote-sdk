@@ -126,6 +126,23 @@ fn derive_round_id_poseidon(
     Ok(hash)
 }
 
+fn vote_commitment_hash(
+    voting_round_id: Fp,
+    shares_hash: Fp,
+    proposal_id: Fp,
+    vote_decision: Fp,
+) -> Fp {
+    use halo2_gadgets::poseidon::primitives::{self as poseidon, ConstantLength, P128Pow5T3};
+
+    poseidon::Hash::<_, P128Pow5T3, ConstantLength<5>, 3, 2>::init().hash([
+        Fp::from(vote_commitment_tree::DOMAIN_VC),
+        voting_round_id,
+        shares_hash,
+        proposal_id,
+        vote_decision,
+    ])
+}
+
 // ---------------------------------------------------------------------------
 // Halo2 toy circuit verification
 // ---------------------------------------------------------------------------
@@ -1288,7 +1305,7 @@ pub fn build_share_reveal_test_data() -> (
         .expect("test round_id must be canonical Fp");
     let proposal_id_fp = pallas::Base::from(u64::from(proposal_id));
     let vote_decision_fp = pallas::Base::from(u64::from(vote_decision));
-    let vote_commitment = vote_commitment_tree::vote_commitment_hash(
+    let vote_commitment = vote_commitment_hash(
         voting_round_id,
         shares_hash_fp,
         proposal_id_fp,
@@ -1774,7 +1791,7 @@ pub unsafe extern "C" fn sv_vote_commitment_hash(
         let proposal_id_fp = Fp::from(u64::from(proposal_id));
         let vote_decision_fp = Fp::from(u64::from(vote_decision));
 
-        let commitment = vote_commitment_tree::vote_commitment_hash(
+        let commitment = vote_commitment_hash(
             round_id_fp,
             shares_hash_fp,
             proposal_id_fp,

@@ -502,7 +502,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "shielded-vote-circuits",
- "vote-commitment-tree 0.2.0",
+ "vote-commitment-tree",
  "vote-commitment-tree-client",
  "voting-circuits",
  "zcash_voting",
@@ -2169,7 +2169,7 @@ dependencies = [
  "pasta_curves",
  "rand_core",
  "reddsa",
- "vote-commitment-tree 0.1.1",
+ "vote-commitment-tree",
  "voting-circuits",
 ]
 
@@ -2615,25 +2615,9 @@ dependencies = [
 
 [[package]]
 name = "vote-commitment-tree"
-version = "0.1.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0fb2456313f571003c0bed8d38fb166d78da85653caf828823c1a82f4e1aef1"
-dependencies = [
- "anyhow",
- "ff",
- "halo2_gadgets",
- "imt-tree 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "incrementalmerkletree",
- "lazy_static",
- "libc",
- "pasta_curves",
- "shardtree",
-]
-
-[[package]]
-name = "vote-commitment-tree"
-version = "0.2.0"
-source = "git+https://github.com/valargroup/zcash_voting.git?rev=ee63626fa2c37c48014b19cac9b786a1fa420dfb#ee63626fa2c37c48014b19cac9b786a1fa420dfb"
+checksum = "da7a7df678ac99da806f2b1a25c4074a21c653469f7532725af50aeebf36acc6"
 dependencies = [
  "anyhow",
  "ff",
@@ -2648,8 +2632,9 @@ dependencies = [
 
 [[package]]
 name = "vote-commitment-tree-client"
-version = "0.4.0"
-source = "git+https://github.com/valargroup/zcash_voting.git?rev=ee63626fa2c37c48014b19cac9b786a1fa420dfb#ee63626fa2c37c48014b19cac9b786a1fa420dfb"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d2b33754e263d55b684e486b396b2a06cead0ea4a754778b5b63064f13bd4f1"
 dependencies = [
  "base64",
  "ff",
@@ -2658,13 +2643,14 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "vote-commitment-tree 0.2.0",
+ "vote-commitment-tree",
 ]
 
 [[package]]
 name = "voting-circuits"
 version = "0.5.0"
-source = "git+https://github.com/valargroup/voting-circuits.git?rev=4c94389f1caab3bba1853b8d3f0c84e308b5cef2#4c94389f1caab3bba1853b8d3f0c84e308b5cef2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a24eb3e3d2f7cf35c35703a4fff509323d2cba670e5e23099322bbd3ad410d9e"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -3224,8 +3210,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_voting"
-version = "0.8.1"
-source = "git+https://github.com/valargroup/zcash_voting.git?rev=ee63626fa2c37c48014b19cac9b786a1fa420dfb#ee63626fa2c37c48014b19cac9b786a1fa420dfb"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "456e4448916228dac8e0828c63ca6a341c53f2590aa0542c878f9e533c2ec55f"
 dependencies = [
  "anyhow",
  "blake2b_simd",
