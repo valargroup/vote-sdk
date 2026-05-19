@@ -128,29 +128,6 @@ fn derive_round_id_poseidon(
     Ok(hash)
 }
 
-/// Cached delegation circuit params and verifying key.
-///
-/// IPA params generation (K=14 → 16,384 group elements) and circuit keygen
-/// are expensive (~10-30s on slow hardware). They are deterministic and
-/// identical for every verification call, so reuse the upstream cached keys.
-fn delegation_vk_cached(
-) -> Result<(&'static Params<EqAffine>, &'static VerifyingKey<EqAffine>), String> {
-    let (params, _pk, vk) = delegation::delegation_cached_keys()
-        .map_err(|e| format!("delegation key generation failed: {:?}", e))?;
-    Ok((params, vk))
-}
-
-/// Cached vote proof circuit params and verifying key.
-///
-/// Same caching pattern as delegation: K=13 params and circuit keygen are
-/// cached upstream and reused for all subsequent verification calls.
-fn vote_proof_vk_cached(
-) -> Result<(&'static Params<EqAffine>, &'static VerifyingKey<EqAffine>), String> {
-    let (params, _pk, vk) = vote_proof::vote_proof_cached_keys()
-        .map_err(|e| format!("vote key generation failed: {:?}", e))?;
-    Ok((params, vk))
-}
-
 // ---------------------------------------------------------------------------
 // Halo2 toy circuit verification
 // ---------------------------------------------------------------------------
@@ -519,10 +496,10 @@ pub unsafe extern "C" fn sv_verify_delegation_proof(
             dom,
         ];
 
-        let (params, vk) = match delegation_vk_cached() {
-            Ok(cached) => cached,
+        let (params, _pk, vk) = match delegation::delegation_cached_keys() {
+            Ok(keys) => keys,
             Err(e) => {
-                set_ffi_error(format!("delegation: {e}"));
+                set_ffi_error(format!("delegation: key generation failed: {:?}", e));
                 return -6;
             }
         };
@@ -744,10 +721,10 @@ pub unsafe extern "C" fn sv_verify_vote_proof(
             ea_pk_y,
         ];
 
-        let (params, vk) = match vote_proof_vk_cached() {
-            Ok(cached) => cached,
+        let (params, _pk, vk) = match vote_proof::vote_proof_cached_keys() {
+            Ok(keys) => keys,
             Err(e) => {
-                set_ffi_error(format!("vote: {e}"));
+                set_ffi_error(format!("vote: key generation failed: {:?}", e));
                 return -6;
             }
         };
@@ -814,11 +791,19 @@ pub extern "C" fn sv_warm_verifier_caches() -> i32 {
         let handles = [
             (
                 "delegation",
-                std::thread::spawn(|| delegation_vk_cached().map(|_| ())),
+                std::thread::spawn(|| {
+                    delegation::delegation_cached_keys()
+                        .map(|_| ())
+                        .map_err(|e| format!("{:?}", e))
+                }),
             ),
             (
                 "vote",
-                std::thread::spawn(|| vote_proof_vk_cached().map(|_| ())),
+                std::thread::spawn(|| {
+                    vote_proof::vote_proof_cached_keys()
+                        .map(|_| ())
+                        .map_err(|e| format!("{:?}", e))
+                }),
             ),
             (
                 "share_reveal",
