@@ -9,7 +9,7 @@ description = "Rust E2E API tests for Shielded-Vote voting flow (replaces TypeSc
 shielded-vote-circuits = { path = "../circuits" }
 
 orchard = { version = "=0.13.1", features = ["unstable-voting-circuits"] }
-voting-circuits = { git = "https://github.com/valargroup/voting-circuits.git", rev = "b4dae44bf572ccc5f225607869fc5e39f06aae1e" }
+voting-circuits = { git = "https://github.com/valargroup/voting-circuits.git", rev = "597b26b24439f89a900af2c7226e86bec17b756d" }
 vote-commitment-tree = "0.1.1"
 vote-commitment-tree-client = "0.1.1"
 zcash_voting = "0.2.0"
