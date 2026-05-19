@@ -19,10 +19,11 @@ use e2e_tests::{
         SESSION_STATUS_FINALIZED, SESSION_STATUS_TALLYING,
     },
     payloads::{
-        cast_vote_payload_real, coordinator_action_proposal_payload,
-        create_voting_session_payload, delegate_vote_payload, helper_share_payload,
+        cast_vote_payload_real, coordinator_action_proposal_payload, create_voting_session_payload,
+        delegate_vote_payload, helper_share_payload,
     },
     setup::prepare_delegation_bundle_for_test,
+    tree_transport::ReqwestTreeTransport,
 };
 use ff::PrimeField;
 use group::{Curve, GroupEncoding};
@@ -30,6 +31,7 @@ use orchard::keys::SpendAuthorizingKey;
 use pasta_curves::{arithmetic::CurveAffine, pallas};
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
+use std::sync::Arc;
 use vote_commitment_tree::TreeClient;
 use vote_commitment_tree_client::http_sync_api::HttpTreeSyncApi;
 use zcash_voting::{NoopProgressReporter, VotingRoundParams, WireEncryptedShare};
@@ -318,7 +320,7 @@ fn voting_flow_zcash_voting_path() {
     let base_url = api::base_url();
     let mut tree_client = TreeClient::empty();
     tree_client.mark_position(van_position);
-    let sync_api = HttpTreeSyncApi::new(&base_url, &round_id_hex);
+    let sync_api = HttpTreeSyncApi::new(&base_url, &round_id_hex, Arc::new(ReqwestTreeTransport));
     tree_client
         .sync(&sync_api)
         .expect("TreeClient sync from chain");

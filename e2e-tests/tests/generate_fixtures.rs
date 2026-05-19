@@ -18,12 +18,12 @@ use ff::PrimeField;
 use pasta_curves::pallas;
 use serde::{Deserialize, Serialize};
 
-use e2e_tests::payloads;
 use e2e_tests::fixtures::resolve_voter_fixture_dir;
+use e2e_tests::payloads;
 use e2e_tests::setup::build_multi_delegation_bundles;
 
 use vote_commitment_tree::MemoryTreeServer;
-use voting_circuits::vote_proof::circuit::VOTE_COMM_TREE_DEPTH;
+use voting_circuits::vote_proof::VOTE_COMM_TREE_DEPTH;
 
 // ---------------------------------------------------------------------------
 // Serializable fixture types
@@ -157,7 +157,8 @@ fn generate_voter_fixtures() {
         tree.append(*fp).expect("tree append");
     }
     let deleg_checkpoint_height: u32 = 1;
-    tree.checkpoint(deleg_checkpoint_height).expect("checkpoint");
+    tree.checkpoint(deleg_checkpoint_height)
+        .expect("checkpoint");
     let tree_root_after_deleg = tree.root();
 
     eprintln!(
@@ -178,8 +179,7 @@ fn generate_voter_fixtures() {
         let path = tree
             .path(i as u64, deleg_checkpoint_height)
             .unwrap_or_else(|| panic!("no path for position {i}"));
-        let auth: [pallas::Base; VOTE_COMM_TREE_DEPTH] =
-            path.auth_path().map(|h| h.inner());
+        let auth: [pallas::Base; VOTE_COMM_TREE_DEPTH] = path.auth_path().map(|h| h.inner());
         witnesses.push(auth);
     }
 
@@ -212,7 +212,11 @@ fn generate_voter_fixtures() {
         serde_json::to_string(&cast_input_fixtures).unwrap(),
     )
     .expect("write cast_vote_inputs.json");
-    eprintln!("Wrote {} cast-vote input fixtures to {}", count, cast_path.display());
+    eprintln!(
+        "Wrote {} cast-vote input fixtures to {}",
+        count,
+        cast_path.display()
+    );
 
     let manifest = FixtureManifest {
         count,

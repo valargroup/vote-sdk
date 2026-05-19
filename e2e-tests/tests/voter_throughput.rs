@@ -53,9 +53,7 @@ use group::GroupEncoding;
 use pasta_curves::pallas;
 use rand::rngs::OsRng;
 use serde::Deserialize;
-use voting_circuits::vote_proof::{
-    builder::build_vote_proof_from_delegation, circuit::VOTE_COMM_TREE_DEPTH,
-};
+use voting_circuits::vote_proof::{build_vote_proof_from_delegation, VOTE_COMM_TREE_DEPTH};
 
 // ---------------------------------------------------------------------------
 // Fixture deserialization types (must match generate_fixtures.rs)
@@ -604,7 +602,8 @@ fn voter_throughput_stress() {
 
     let overall_start = Instant::now();
     let collector = Arc::new(MetricsCollector::new());
-    let pre_blast_index = commitment_tree_next_index(&round_id_hex).expect("query initial tree size");
+    let pre_blast_index =
+        commitment_tree_next_index(&round_id_hex).expect("query initial tree size");
     assert_eq!(
         pre_blast_index, 0,
         "voter_throughput requires a fresh chain with an empty commitment tree, got next_index={pre_blast_index}"
