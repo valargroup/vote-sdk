@@ -21,6 +21,7 @@ use e2e_tests::{
         coordinator_action_proposal_payload, create_voting_session_payload, delegate_vote_payload,
     },
     setup::{ensure_pallas_key_registered, prepare_multi_delegation_bundles},
+    tree_transport::ReqwestTreeTransport,
 };
 use ff::PrimeField;
 use pasta_curves::pallas;
@@ -141,7 +142,7 @@ fn sync_stress_multi_delegation() {
                     tree_client.mark_position(pre_blast + j);
                 }
 
-                let sync_api = HttpTreeSyncApi::new(&url, &rid);
+                let sync_api = HttpTreeSyncApi::new(&url, &rid, Arc::new(ReqwestTreeTransport));
                 let mut sync_count = 0u32;
                 let mut sync_errors: Vec<String> = Vec::new();
 
