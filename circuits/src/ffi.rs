@@ -12,9 +12,7 @@
 
 use std::ffi::CString;
 
-use halo2_proofs::pasta::{EqAffine, Fp};
-use halo2_proofs::plonk::VerifyingKey;
-use halo2_proofs::poly::commitment::Params;
+use halo2_proofs::pasta::Fp;
 use pasta_curves::group::ff::PrimeField;
 
 use crate::delegation;
@@ -762,17 +760,6 @@ pub unsafe extern "C" fn sv_verify_vote_proof(
 // Share Reveal circuit (ZKP #3) — real Halo2 proof verification
 // ---------------------------------------------------------------------------
 
-/// Cached share reveal circuit params and verifying key.
-///
-/// This reuses the share-reveal prover cache so proof generation and
-/// verification do not initialize separate key sets.
-fn share_reveal_vk_cached(
-) -> Result<(&'static Params<EqAffine>, &'static VerifyingKey<EqAffine>), String> {
-    let (params, _pk, vk) = share_reveal::share_reveal_cached_keys()
-        .map_err(|e| format!("share_reveal key generation failed: {:?}", e))?;
-    Ok((params, vk))
-}
-
 /// Warm all real verifier/prover caches used by the vote chain.
 ///
 /// This performs the deterministic Halo2 params/keygen work normally triggered
@@ -807,7 +794,11 @@ pub extern "C" fn sv_warm_verifier_caches() -> i32 {
             ),
             (
                 "share_reveal",
-                std::thread::spawn(|| share_reveal_vk_cached().map(|_| ())),
+                std::thread::spawn(|| {
+                    share_reveal::share_reveal_cached_keys()
+                        .map(|_| ())
+                        .map_err(|e| format!("{:?}", e))
+                }),
             ),
         ];
 
@@ -930,10 +921,10 @@ pub unsafe extern "C" fn sv_verify_share_reveal_proof(
             }
         }
 
-        let (params, vk) = match share_reveal_vk_cached() {
-            Ok(cached) => cached,
+        let (params, _pk, vk) = match share_reveal::share_reveal_cached_keys() {
+            Ok(keys) => keys,
             Err(e) => {
-                set_ffi_error(format!("share_reveal: {e}"));
+                set_ffi_error(format!("share_reveal: key generation failed: {:?}", e));
                 return -6;
             }
         };
