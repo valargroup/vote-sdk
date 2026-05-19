@@ -123,7 +123,8 @@ fn build_delegation_payload(
     )
     .map_err(|e| format!("build_delegation_bundle: {}", e))?;
 
-    let proof = create_delegation_proof(bundle.circuit, &bundle.instance);
+    let proof = create_delegation_proof(bundle.circuit, &bundle.instance)
+        .map_err(|e| format!("create_delegation_proof: {}", e))?;
     verify_delegation_proof(&proof, &bundle.instance)
         .map_err(|e| format!("verify_delegation_proof: {}", e))?;
 
@@ -656,7 +657,8 @@ fn build_multi_delegation_payloads(
                 )
                 .map_err(|e| format!("delegation {}: build_delegation_bundle: {}", i, e))?;
 
-                let proof = create_delegation_proof(bundle.circuit, &bundle.instance);
+                let proof = create_delegation_proof(bundle.circuit, &bundle.instance)
+                    .map_err(|e| format!("delegation {}: create_delegation_proof: {}", i, e))?;
                 verify_delegation_proof(&proof, &bundle.instance)
                     .map_err(|e| format!("delegation {}: verify_delegation_proof: {}", i, e))?;
                 eprintln!("[multi-deleg] delegation {} proof verified", i);
