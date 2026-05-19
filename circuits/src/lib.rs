@@ -18,7 +18,7 @@ pub mod votetree;
 /// Re-export the delegation circuit's prove/verify API from the `voting-circuits` crate.
 pub mod delegation {
     pub use voting_circuits::delegation::{
-        create_delegation_proof, delegation_params, delegation_proving_key,
+        create_delegation_proof, delegation_cached_keys, delegation_params, delegation_proving_key,
         Circuit, Instance, K,
     };
 
@@ -40,7 +40,7 @@ pub mod delegation {
 /// Re-export the vote proof circuit's prove/verify API from the `voting-circuits` crate.
 pub mod vote_proof {
     pub use voting_circuits::vote_proof::{
-        vote_proof_params, vote_proof_proving_key,
+        vote_proof_cached_keys, vote_proof_params, vote_proof_proving_key,
         Circuit, Instance, K,
     };
 }

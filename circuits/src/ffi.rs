@@ -11,7 +11,6 @@
 //! failing call to retrieve the message before the next FFI call clears it.
 
 use std::ffi::CString;
-use std::sync::OnceLock;
 
 use halo2_proofs::pasta::{EqAffine, Fp};
 use halo2_proofs::plonk::VerifyingKey;
@@ -133,35 +132,23 @@ fn derive_round_id_poseidon(
 ///
 /// IPA params generation (K=14 → 16,384 group elements) and circuit keygen
 /// are expensive (~10-30s on slow hardware). They are deterministic and
-/// identical for every verification call, so we compute them once and reuse.
-fn delegation_vk_cached() -> Result<&'static (Params<EqAffine>, VerifyingKey<EqAffine>), String> {
-    static CACHE: OnceLock<(Params<EqAffine>, VerifyingKey<EqAffine>)> = OnceLock::new();
-    if let Some(cached) = CACHE.get() {
-        return Ok(cached);
-    }
-
-    let params = delegation::delegation_params();
-    let (_pk, vk) = delegation::delegation_proving_key(&params)
+/// identical for every verification call, so reuse the upstream cached keys.
+fn delegation_vk_cached(
+) -> Result<(&'static Params<EqAffine>, &'static VerifyingKey<EqAffine>), String> {
+    let (params, _pk, vk) = delegation::delegation_cached_keys()
         .map_err(|e| format!("delegation key generation failed: {:?}", e))?;
-    let _ = CACHE.set((params, vk));
-    Ok(CACHE.get().expect("delegation cache set before read"))
+    Ok((params, vk))
 }
 
 /// Cached vote proof circuit params and verifying key.
 ///
-/// Same caching pattern as delegation: K=14 params and circuit keygen are
-/// computed once and reused for all subsequent verification calls.
-fn vote_proof_vk_cached() -> Result<&'static (Params<EqAffine>, VerifyingKey<EqAffine>), String> {
-    static CACHE: OnceLock<(Params<EqAffine>, VerifyingKey<EqAffine>)> = OnceLock::new();
-    if let Some(cached) = CACHE.get() {
-        return Ok(cached);
-    }
-
-    let params = vote_proof::vote_proof_params();
-    let (_pk, vk) = vote_proof::vote_proof_proving_key(&params)
+/// Same caching pattern as delegation: K=13 params and circuit keygen are
+/// cached upstream and reused for all subsequent verification calls.
+fn vote_proof_vk_cached(
+) -> Result<(&'static Params<EqAffine>, &'static VerifyingKey<EqAffine>), String> {
+    let (params, _pk, vk) = vote_proof::vote_proof_cached_keys()
         .map_err(|e| format!("vote key generation failed: {:?}", e))?;
-    let _ = CACHE.set((params, vk));
-    Ok(CACHE.get().expect("vote cache set before read"))
+    Ok((params, vk))
 }
 
 // ---------------------------------------------------------------------------
