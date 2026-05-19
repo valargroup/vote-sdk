@@ -416,6 +416,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -959,9 +968,8 @@ dependencies = [
 
 [[package]]
 name = "voting-circuits"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "454ce29a0767cd4d8db05d9437cdbb7ed0970441cb5a35f371b0c53d8c52ea2f"
+version = "0.5.0"
+source = "git+https://github.com/valargroup/voting-circuits.git?rev=4c94389f1caab3bba1853b8d3f0c84e308b5cef2#4c94389f1caab3bba1853b8d3f0c84e308b5cef2"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -970,6 +978,7 @@ dependencies = [
  "halo2_poseidon",
  "halo2_proofs",
  "incrementalmerkletree",
+ "itertools",
  "lazy_static",
  "orchard",
  "pasta_curves",

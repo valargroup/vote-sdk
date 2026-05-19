@@ -609,7 +609,7 @@ dependencies = [
  "shielded-vote-circuits",
  "vote-commitment-tree",
  "vote-commitment-tree-client",
- "voting-circuits",
+ "voting-circuits 0.5.0",
  "zcash_voting",
 ]
 
@@ -1396,6 +1396,15 @@ name = "is_terminal_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
+
+[[package]]
+name = "itertools"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
+dependencies = [
+ "either",
+]
 
 [[package]]
 name = "itoa"
@@ -2470,7 +2479,7 @@ dependencies = [
  "rand_core",
  "reddsa",
  "vote-commitment-tree",
- "voting-circuits",
+ "voting-circuits 0.5.0",
 ]
 
 [[package]]
@@ -3098,6 +3107,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "voting-circuits"
+version = "0.5.0"
+source = "git+https://github.com/valargroup/voting-circuits.git?rev=4c94389f1caab3bba1853b8d3f0c84e308b5cef2#4c94389f1caab3bba1853b8d3f0c84e308b5cef2"
+dependencies = [
+ "blake2b_simd",
+ "ff",
+ "group",
+ "halo2_gadgets",
+ "halo2_poseidon",
+ "halo2_proofs",
+ "incrementalmerkletree",
+ "itertools",
+ "lazy_static",
+ "orchard",
+ "pasta_curves",
+ "rand",
+ "sinsemilla",
+]
+
+[[package]]
 name = "want"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3664,7 +3693,7 @@ dependencies = [
  "thiserror 2.0.18",
  "vote-commitment-tree",
  "vote-commitment-tree-client",
- "voting-circuits",
+ "voting-circuits 0.4.0",
  "zcash_keys",
  "zcash_primitives",
  "zcash_protocol",
