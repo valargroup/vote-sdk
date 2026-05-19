@@ -134,26 +134,34 @@ fn derive_round_id_poseidon(
 /// IPA params generation (K=14 → 16,384 group elements) and circuit keygen
 /// are expensive (~10-30s on slow hardware). They are deterministic and
 /// identical for every verification call, so we compute them once and reuse.
-fn delegation_vk_cached() -> &'static (Params<EqAffine>, VerifyingKey<EqAffine>) {
+fn delegation_vk_cached() -> Result<&'static (Params<EqAffine>, VerifyingKey<EqAffine>), String> {
     static CACHE: OnceLock<(Params<EqAffine>, VerifyingKey<EqAffine>)> = OnceLock::new();
-    CACHE.get_or_init(|| {
-        let params = delegation::delegation_params();
-        let (_pk, vk) = delegation::delegation_proving_key(&params);
-        (params, vk)
-    })
+    if let Some(cached) = CACHE.get() {
+        return Ok(cached);
+    }
+
+    let params = delegation::delegation_params();
+    let (_pk, vk) = delegation::delegation_proving_key(&params)
+        .map_err(|e| format!("delegation key generation failed: {:?}", e))?;
+    let _ = CACHE.set((params, vk));
+    Ok(CACHE.get().expect("delegation cache set before read"))
 }
 
 /// Cached vote proof circuit params and verifying key.
 ///
 /// Same caching pattern as delegation: K=14 params and circuit keygen are
 /// computed once and reused for all subsequent verification calls.
-fn vote_proof_vk_cached() -> &'static (Params<EqAffine>, VerifyingKey<EqAffine>) {
+fn vote_proof_vk_cached() -> Result<&'static (Params<EqAffine>, VerifyingKey<EqAffine>), String> {
     static CACHE: OnceLock<(Params<EqAffine>, VerifyingKey<EqAffine>)> = OnceLock::new();
-    CACHE.get_or_init(|| {
-        let params = vote_proof::vote_proof_params();
-        let (_pk, vk) = vote_proof::vote_proof_proving_key(&params);
-        (params, vk)
-    })
+    if let Some(cached) = CACHE.get() {
+        return Ok(cached);
+    }
+
+    let params = vote_proof::vote_proof_params();
+    let (_pk, vk) = vote_proof::vote_proof_proving_key(&params)
+        .map_err(|e| format!("vote key generation failed: {:?}", e))?;
+    let _ = CACHE.set((params, vk));
+    Ok(CACHE.get().expect("vote cache set before read"))
 }
 
 // ---------------------------------------------------------------------------
@@ -524,7 +532,13 @@ pub unsafe extern "C" fn sv_verify_delegation_proof(
             dom,
         ];
 
-        let (params, vk) = delegation_vk_cached();
+        let (params, vk) = match delegation_vk_cached() {
+            Ok(cached) => cached,
+            Err(e) => {
+                set_ffi_error(format!("delegation: {e}"));
+                return -6;
+            }
+        };
         let strategy = halo2_proofs::plonk::SingleVerifier::new(params);
         let mut transcript = halo2_proofs::transcript::Blake2bRead::<
             _,
@@ -743,7 +757,13 @@ pub unsafe extern "C" fn sv_verify_vote_proof(
             ea_pk_y,
         ];
 
-        let (params, vk) = vote_proof_vk_cached();
+        let (params, vk) = match vote_proof_vk_cached() {
+            Ok(cached) => cached,
+            Err(e) => {
+                set_ffi_error(format!("vote: {e}"));
+                return -6;
+            }
+        };
         let strategy = halo2_proofs::plonk::SingleVerifier::new(params);
         let mut transcript = halo2_proofs::transcript::Blake2bRead::<
             _,
@@ -782,9 +802,11 @@ pub unsafe extern "C" fn sv_verify_vote_proof(
 ///
 /// This reuses the share-reveal prover cache so proof generation and
 /// verification do not initialize separate key sets.
-fn share_reveal_vk_cached() -> (&'static Params<EqAffine>, &'static VerifyingKey<EqAffine>) {
-    let (params, _pk, vk) = share_reveal::share_reveal_cached_keys();
-    (params, vk)
+fn share_reveal_vk_cached(
+) -> Result<(&'static Params<EqAffine>, &'static VerifyingKey<EqAffine>), String> {
+    let (params, _pk, vk) = share_reveal::share_reveal_cached_keys()
+        .map_err(|e| format!("share_reveal key generation failed: {:?}", e))?;
+    Ok((params, vk))
 }
 
 /// Warm all real verifier/prover caches used by the vote chain.
@@ -805,28 +827,31 @@ pub extern "C" fn sv_warm_verifier_caches() -> i32 {
         let handles = [
             (
                 "delegation",
-                std::thread::spawn(|| {
-                    let _ = delegation_vk_cached();
-                }),
+                std::thread::spawn(|| delegation_vk_cached().map(|_| ())),
             ),
             (
                 "vote",
-                std::thread::spawn(|| {
-                    let _ = vote_proof_vk_cached();
-                }),
+                std::thread::spawn(|| vote_proof_vk_cached().map(|_| ())),
             ),
             (
                 "share_reveal",
-                std::thread::spawn(|| {
-                    let _ = share_reveal::share_reveal_cached_keys();
-                }),
+                std::thread::spawn(|| share_reveal_vk_cached().map(|_| ())),
             ),
         ];
 
         let mut failed_cache = None;
         for (name, handle) in handles {
-            if handle.join().is_err() {
-                failed_cache.get_or_insert(name);
+            match handle.join() {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    set_ffi_error(format!(
+                        "sv_warm_verifier_caches: {name} cache warm-up failed: {e}"
+                    ));
+                    return -6;
+                }
+                Err(_) => {
+                    failed_cache.get_or_insert(name);
+                }
             }
         }
         if let Some(name) = failed_cache {
@@ -933,7 +958,13 @@ pub unsafe extern "C" fn sv_verify_share_reveal_proof(
             }
         }
 
-        let (params, vk) = share_reveal_vk_cached();
+        let (params, vk) = match share_reveal_vk_cached() {
+            Ok(cached) => cached,
+            Err(e) => {
+                set_ffi_error(format!("share_reveal: {e}"));
+                return -6;
+            }
+        };
         let strategy = halo2_proofs::plonk::SingleVerifier::new(params);
         let mut transcript = halo2_proofs::transcript::Blake2bRead::<
             _,
@@ -1176,7 +1207,17 @@ pub unsafe extern "C" fn sv_generate_share_reveal(
         let tree_root = bundle.instance.vote_comm_tree_root;
 
         // --- Step 7: Generate Halo2 proof ---
-        let proof_bytes = share_reveal::create_share_reveal_proof(bundle.circuit, &bundle.instance);
+        let proof_bytes =
+            match share_reveal::create_share_reveal_proof(bundle.circuit, &bundle.instance) {
+                Ok(proof) => proof,
+                Err(e) => {
+                    set_ffi_error(format!(
+                        "share_reveal_gen: proof generation failed: {:?}",
+                        e
+                    ));
+                    return -5;
+                }
+            };
 
         // --- Step 8: Write outputs ---
         if proof_bytes.len() > proof_out_capacity {
