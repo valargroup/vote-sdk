@@ -29,26 +29,26 @@ func TestThresholdForN(t *testing.T) {
 		// n=2: ceil(2/2)=1 but floor is 2 → clamped to 2.
 		{n: 2, want: 2},
 
-		// n=3: ceil(3/2)=2, satisfies >=2.
+		// n=3: floor(3/2)+1=2, satisfies >=2.
 		{n: 3, want: 2},
 
-		// n=4: (4+1)/2=2 (integer division).
-		{n: 4, want: 2},
+		// n=4: strict majority prevents a 2-of-4 half coalition.
+		{n: 4, want: 3},
 
-		// n=5: (5+1)/2=3.
+		// n=5: floor(5/2)+1=3.
 		{n: 5, want: 3},
 
-		// n=6: (6+1)/2=3.
-		{n: 6, want: 3},
+		// n=6: strict majority is 4.
+		{n: 6, want: 4},
 
 		// n=9: (9+1)/2=5.
 		{n: 9, want: 5},
 
-		// n=10: (10+1)/2=5.
-		{n: 10, want: 5},
+		// n=10: strict majority is 6.
+		{n: 10, want: 6},
 
 		// Large n.
-		{n: 100, want: 50},
+		{n: 100, want: 51},
 		{n: 101, want: 51},
 	}
 
@@ -72,6 +72,7 @@ func TestThresholdForN_Invariants(t *testing.T) {
 		if n >= 2 {
 			require.GreaterOrEqual(t, got, 2, "n=%d: t must be >= 2 when n >= 2", n)
 		}
+		require.Greater(t, got*2, n, "n=%d: t must be a strict majority", n)
 	}
 }
 

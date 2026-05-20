@@ -591,10 +591,8 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 		if keeper.HalfAcked(round) {
 			stripped := nVals - nAcks
 
-			// Safety check: the ack quorum (>= 1/2) was designed to match the
-			// TSS threshold (ceil(n/2)), so this branch should never trigger
-			// with a correctly-computed threshold. It guards against a dealer
-			// that published an unusually high threshold value.
+			// Safety check: timeout confirmation only keeps ackers, so the kept
+			// validator set must still meet the strict-majority TSS threshold.
 			if nAcks < int(round.Threshold) {
 				oldRoundStatus := round.Status
 				keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
@@ -613,8 +611,8 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 					sdk.NewAttribute(types.AttributeKeyNewStatus, round.Status.String()),
 				))
 			} else {
-				// >= 1/2 acked and remaining ackers meet threshold: strip
-				// non-ackers, confirm ceremony, activate round.
+				// Enough ackers remain to decrypt tallies: strip non-ackers,
+				// confirm ceremony, activate round.
 				keeper.StripNonAckersFromRound(round)
 				round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
 				round.Status = types.SessionStatus_SESSION_STATUS_ACTIVE
