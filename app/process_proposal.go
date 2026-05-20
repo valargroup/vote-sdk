@@ -265,6 +265,10 @@ func validateInjectedDKGContribution(ctx sdk.Context, voteKeeper *votekeeper.Kee
 		return errInvalidInjectedTx(err.Error())
 	}
 
+	if _, _, err := votekeeper.ValidateDKGContributionShape(round, dkgMsg); err != nil {
+		return errInvalidInjectedTx(err.Error())
+	}
+
 	return nil
 }
 

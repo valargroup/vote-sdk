@@ -17,8 +17,8 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/valargroup/vote-sdk/app"
 	voteapi "github.com/valargroup/vote-sdk/api"
+	"github.com/valargroup/vote-sdk/app"
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/testutil"
 	"github.com/valargroup/vote-sdk/x/vote/types"
@@ -43,14 +43,19 @@ func TestProcessProposalDKGContribValidation(t *testing.T) {
 
 	var currentRoundID []byte
 
-	buildContribTx := func(creator string, roundID []byte) []byte {
+	buildContribTxWithCommitments := func(creator string, roundID []byte, commitments [][]byte) []byte {
 		msg := &types.MsgContributeDKG{
-			Creator:     creator,
-			VoteRoundId: roundID,
+			Creator:            creator,
+			VoteRoundId:        roundID,
+			FeldmanCommitments: commitments,
 		}
 		txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagContributeDKG)
 		require.NoError(t, err)
 		return txBytes
+	}
+
+	buildContribTx := func(creator string, roundID []byte) []byte {
+		return buildContribTxWithCommitments(creator, roundID, [][]byte{eaPkBytes})
 	}
 
 	tests := []struct {
@@ -129,6 +134,26 @@ func TestProcessProposalDKGContribValidation(t *testing.T) {
 			wantAccept: false,
 		},
 		{
+			name: "DKG contribution with missing Feldman commitments → reject",
+			setup: func() {
+				currentRoundID = app.SeedRegisteringCeremony(validators)
+			},
+			txs: func() [][]byte {
+				return [][]byte{buildContribTxWithCommitments(valAddr, currentRoundID, nil)}
+			},
+			wantAccept: false,
+		},
+		{
+			name: "DKG contribution with invalid Feldman commitment point → reject",
+			setup: func() {
+				currentRoundID = app.SeedRegisteringCeremony(validators)
+			},
+			txs: func() [][]byte {
+				return [][]byte{buildContribTxWithCommitments(valAddr, currentRoundID, [][]byte{make([]byte, 32)})}
+			},
+			wantAccept: false,
+		},
+		{
 			name: "malformed DKG contribution tx (corrupted protobuf) → reject",
 			setup: func() {
 				currentRoundID = app.SeedRegisteringCeremony(validators)
@@ -190,9 +215,9 @@ func TestProcessProposalAckValidation(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		setup    func()                   // mutate state before this case
-		txs      func() [][]byte          // txs for the ProcessProposal request
+		name       string
+		setup      func()          // mutate state before this case
+		txs        func() [][]byte // txs for the ProcessProposal request
 		wantAccept bool
 	}{
 		{
@@ -395,7 +420,7 @@ func TestProcessProposalTallyValidation(t *testing.T) {
 			wantAccept: false,
 		},
 		{
-			name: "malformed tally tx → reject",
+			name:  "malformed tally tx → reject",
 			setup: func() {},
 			txs: func() [][]byte {
 				return [][]byte{{voteapi.TagSubmitTally, 0xFF, 0xFF}}
@@ -663,4 +688,3 @@ func TestPrepareProposalDKGContributionAcceptedByProcessProposal(t *testing.T) {
 		})
 	}
 }
-

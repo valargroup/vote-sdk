@@ -7,6 +7,7 @@ import (
 	"cosmossdk.io/core/store"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
@@ -101,6 +102,67 @@ func FindContributionInRound(round *types.VoteRound, valAddr string) (*types.DKG
 		}
 	}
 	return nil, false
+}
+
+// ValidateDKGContributionShape validates the deterministic, context-independent
+// shape of a MsgContributeDKG against a round's ceremony snapshot. It is shared
+// by ProcessProposal and FinalizeBlock so malformed proposer-injected
+// contributions are rejected before they can waste a block.
+func ValidateDKGContributionShape(round *types.VoteRound, msg *types.MsgContributeDKG) (nValidators, threshold int, err error) {
+	nValidators = len(round.CeremonyValidators)
+	if nValidators == 0 {
+		return 0, 0, fmt.Errorf("%w: no validators in round ceremony", types.ErrCeremonyWrongStatus)
+	}
+
+	if _, found := FindValidatorInRoundCeremony(round, msg.Creator); !found {
+		return 0, 0, fmt.Errorf("%w: %s is not a ceremony validator", types.ErrNotRegisteredValidator, msg.Creator)
+	}
+
+	threshold, err = ThresholdForN(nValidators)
+	if err != nil {
+		return 0, 0, fmt.Errorf("%w: %v", types.ErrInvalidThreshold, err)
+	}
+
+	if len(msg.FeldmanCommitments) != threshold {
+		return 0, 0, fmt.Errorf("%w: expected %d Feldman commitments, got %d",
+			types.ErrInvalidThreshold, threshold, len(msg.FeldmanCommitments))
+	}
+	for i, c := range msg.FeldmanCommitments {
+		if _, err := elgamal.UnmarshalPublicKey(c); err != nil {
+			return 0, 0, fmt.Errorf("%w: feldman_commitment[%d]: %v",
+				types.ErrInvalidPallasPoint, i, err)
+		}
+	}
+
+	expectedPayloads := nValidators - 1
+	if len(msg.Payloads) != expectedPayloads {
+		return 0, 0, fmt.Errorf("%w: got %d payloads, expected %d (all validators except contributor)",
+			types.ErrPayloadMismatch, len(msg.Payloads), expectedPayloads)
+	}
+
+	covered := make(map[string]bool, expectedPayloads)
+	for _, p := range msg.Payloads {
+		if p.ValidatorAddress == msg.Creator {
+			return 0, 0, fmt.Errorf("%w: payload must not include contributor's own address %s",
+				types.ErrPayloadMismatch, msg.Creator)
+		}
+		if _, found := FindValidatorInRoundCeremony(round, p.ValidatorAddress); !found {
+			return 0, 0, fmt.Errorf("%w: payload references unknown validator %s",
+				types.ErrNotRegisteredValidator, p.ValidatorAddress)
+		}
+		if covered[p.ValidatorAddress] {
+			return 0, 0, fmt.Errorf("%w: duplicate payload for validator %s",
+				types.ErrPayloadMismatch, p.ValidatorAddress)
+		}
+		covered[p.ValidatorAddress] = true
+
+		if _, err := elgamal.UnmarshalPublicKey(p.EphemeralPk); err != nil {
+			return 0, 0, fmt.Errorf("%w: ephemeral_pk for %s: %v",
+				types.ErrInvalidPallasPoint, p.ValidatorAddress, err)
+		}
+	}
+
+	return nValidators, threshold, nil
 }
 
 // FindAckInRoundCeremony returns the index and true if valAddr has an ack entry
