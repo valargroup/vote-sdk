@@ -1,6 +1,8 @@
 package app
 
 import (
+	"fmt"
+
 	abci "github.com/cometbft/cometbft/abci/types"
 
 	"cosmossdk.io/log"
@@ -30,6 +32,9 @@ func ProcessProposalHandler(
 	logger log.Logger,
 ) sdk.ProcessProposalHandler {
 	return func(ctx sdk.Context, req *abci.RequestProcessProposal) (*abci.ResponseProcessProposal, error) {
+		dkgContributionsInProposal := make(map[string]struct{})
+		acksInProposal := make(map[string]struct{})
+
 		for _, txBytes := range req.Txs {
 			if len(txBytes) < 2 {
 				continue
@@ -39,21 +44,37 @@ func ProcessProposalHandler(
 
 			// Validate injected DKG contribution txs.
 			if tag == voteapi.TagContributeDKG {
-				if err := validateInjectedDKGContribution(ctx, voteKeeper, txBytes, logger); err != nil {
+				key, err := validateInjectedDKGContribution(ctx, voteKeeper, txBytes, logger)
+				if err != nil {
 					logger.Error("ProcessProposal: rejecting block — invalid DKG contribution tx", "err", err)
 					sentry.CaptureErr(err, map[string]string{"handler": "ProcessProposal", "tag": "dkg_contribution"})
 					return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
 				}
+				if _, dup := dkgContributionsInProposal[key]; dup {
+					err := errInvalidInjectedTx("duplicate DKG contribution in proposal")
+					logger.Error("ProcessProposal: rejecting block — duplicate DKG contribution tx", "key", key)
+					sentry.CaptureErr(err, map[string]string{"handler": "ProcessProposal", "tag": "dkg_contribution"})
+					return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
+				}
+				dkgContributionsInProposal[key] = struct{}{}
 				continue
 			}
 
 			// Validate injected ceremony ack txs.
 			if tag == voteapi.TagAckExecutiveAuthorityKey {
-				if err := validateInjectedAck(ctx, voteKeeper, txBytes, logger); err != nil {
+				key, err := validateInjectedAck(ctx, voteKeeper, txBytes, logger)
+				if err != nil {
 					logger.Error("ProcessProposal: rejecting block — invalid ack tx", "err", err)
 					sentry.CaptureErr(err, map[string]string{"handler": "ProcessProposal", "tag": "ack"})
 					return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
 				}
+				if _, dup := acksInProposal[key]; dup {
+					err := errInvalidInjectedTx("duplicate ack in proposal")
+					logger.Error("ProcessProposal: rejecting block — duplicate ack tx", "key", key)
+					sentry.CaptureErr(err, map[string]string{"handler": "ProcessProposal", "tag": "ack"})
+					return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
+				}
+				acksInProposal[key] = struct{}{}
 				continue
 			}
 
@@ -88,46 +109,46 @@ func ProcessProposalHandler(
 // valid: the round is PENDING with ceremony in DEALT, the creator is a
 // ceremony validator, the creator has not already acked, and the creator
 // matches the current block proposer.
-func validateInjectedAck(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txBytes []byte, logger log.Logger) error {
+func validateInjectedAck(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txBytes []byte, logger log.Logger) (string, error) {
 	_, msg, err := voteapi.DecodeCeremonyTx(txBytes)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	ackMsg, ok := msg.(*types.MsgAckExecutiveAuthorityKey)
 	if !ok {
-		return errInvalidInjectedTx("expected MsgAckExecutiveAuthorityKey")
+		return "", errInvalidInjectedTx("expected MsgAckExecutiveAuthorityKey")
 	}
 
 	kvStore := voteKeeper.OpenKVStore(ctx)
 	round, err := voteKeeper.GetVoteRound(kvStore, ackMsg.VoteRoundId)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	if round.Status != types.SessionStatus_SESSION_STATUS_PENDING {
-		return errInvalidInjectedTx("round is not PENDING")
+		return "", errInvalidInjectedTx("round is not PENDING")
 	}
 	if round.CeremonyStatus != types.CeremonyStatus_CEREMONY_STATUS_DEALT {
-		return errInvalidInjectedTx("ceremony is not DEALT")
+		return "", errInvalidInjectedTx("ceremony is not DEALT")
 	}
 
 	// Verify creator is a ceremony validator.
 	if _, found := votekeeper.FindValidatorInRoundCeremony(round, ackMsg.Creator); !found {
-		return errInvalidInjectedTx("creator is not a ceremony validator")
+		return "", errInvalidInjectedTx("creator is not a ceremony validator")
 	}
 
 	// Verify no duplicate ack.
 	if _, found := votekeeper.FindAckInRoundCeremony(round, ackMsg.Creator); found {
-		return errInvalidInjectedTx("creator has already acked")
+		return "", errInvalidInjectedTx("creator has already acked")
 	}
 
 	// Verify creator matches the block proposer.
 	if err := voteKeeper.ValidateProposerIsCreator(ctx, ackMsg.Creator, "MsgAckExecutiveAuthorityKey"); err != nil {
-		return errInvalidInjectedTx(err.Error())
+		return "", errInvalidInjectedTx(err.Error())
 	}
 
-	return nil
+	return fmt.Sprintf("%x/%s", ackMsg.VoteRoundId, ackMsg.Creator), nil
 }
 
 // validateInjectedPartialDecrypt checks that an injected
@@ -228,44 +249,44 @@ func validateInjectedTally(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txByt
 // valid: the round is PENDING with ceremony in REGISTERING, the creator is a
 // ceremony validator, the creator has not already contributed, and the creator
 // matches the current block proposer.
-func validateInjectedDKGContribution(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txBytes []byte, logger log.Logger) error {
+func validateInjectedDKGContribution(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txBytes []byte, logger log.Logger) (string, error) {
 	_, msg, err := voteapi.DecodeCeremonyTx(txBytes)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	dkgMsg, ok := msg.(*types.MsgContributeDKG)
 	if !ok {
-		return errInvalidInjectedTx("expected MsgContributeDKG")
+		return "", errInvalidInjectedTx("expected MsgContributeDKG")
 	}
 
 	kvStore := voteKeeper.OpenKVStore(ctx)
 	round, err := voteKeeper.GetVoteRound(kvStore, dkgMsg.VoteRoundId)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	if round.Status != types.SessionStatus_SESSION_STATUS_PENDING {
-		return errInvalidInjectedTx("round is not PENDING")
+		return "", errInvalidInjectedTx("round is not PENDING")
 	}
 	if round.CeremonyStatus != types.CeremonyStatus_CEREMONY_STATUS_REGISTERING {
-		return errInvalidInjectedTx("ceremony is not REGISTERING")
+		return "", errInvalidInjectedTx("ceremony is not REGISTERING")
 	}
 
 	if _, found := votekeeper.FindValidatorInRoundCeremony(round, dkgMsg.Creator); !found {
-		return errInvalidInjectedTx("creator is not a ceremony validator")
+		return "", errInvalidInjectedTx("creator is not a ceremony validator")
 	}
 
 	// Verify no duplicate contribution.
 	if _, found := votekeeper.FindContributionInRound(round, dkgMsg.Creator); found {
-		return errInvalidInjectedTx("creator has already contributed")
+		return "", errInvalidInjectedTx("creator has already contributed")
 	}
 
 	if err := voteKeeper.ValidateProposerIsCreator(ctx, dkgMsg.Creator, "MsgContributeDKG"); err != nil {
-		return errInvalidInjectedTx(err.Error())
+		return "", errInvalidInjectedTx(err.Error())
 	}
 
-	return nil
+	return fmt.Sprintf("%x/%s", dkgMsg.VoteRoundId, dkgMsg.Creator), nil
 }
 
 type invalidInjectedTxError string

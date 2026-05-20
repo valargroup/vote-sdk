@@ -17,8 +17,8 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/valargroup/vote-sdk/app"
 	voteapi "github.com/valargroup/vote-sdk/api"
+	"github.com/valargroup/vote-sdk/app"
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/testutil"
 	"github.com/valargroup/vote-sdk/x/vote/types"
@@ -68,6 +68,17 @@ func TestProcessProposalDKGContribValidation(t *testing.T) {
 				return [][]byte{buildContribTx(valAddr, currentRoundID)}
 			},
 			wantAccept: true,
+		},
+		{
+			name: "duplicate DKG contributions in same proposal → reject",
+			setup: func() {
+				currentRoundID = app.SeedRegisteringCeremony(validators)
+			},
+			txs: func() [][]byte {
+				tx := buildContribTx(valAddr, currentRoundID)
+				return [][]byte{tx, tx}
+			},
+			wantAccept: false,
 		},
 		{
 			name: "DKG contribution for non-existent round → reject",
@@ -190,9 +201,9 @@ func TestProcessProposalAckValidation(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		setup    func()                   // mutate state before this case
-		txs      func() [][]byte          // txs for the ProcessProposal request
+		name       string
+		setup      func()          // mutate state before this case
+		txs        func() [][]byte // txs for the ProcessProposal request
 		wantAccept bool
 	}{
 		{
@@ -204,6 +215,17 @@ func TestProcessProposalAckValidation(t *testing.T) {
 				return [][]byte{validAckTx()}
 			},
 			wantAccept: true,
+		},
+		{
+			name: "duplicate ack txs in same proposal → reject",
+			setup: func() {
+				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, validators)
+			},
+			txs: func() [][]byte {
+				tx := validAckTx()
+				return [][]byte{tx, tx}
+			},
+			wantAccept: false,
 		},
 		{
 			name: "ack tx with no matching PENDING round → reject",
@@ -395,7 +417,7 @@ func TestProcessProposalTallyValidation(t *testing.T) {
 			wantAccept: false,
 		},
 		{
-			name: "malformed tally tx → reject",
+			name:  "malformed tally tx → reject",
 			setup: func() {},
 			txs: func() [][]byte {
 				return [][]byte{{voteapi.TagSubmitTally, 0xFF, 0xFF}}
@@ -565,7 +587,7 @@ func TestValidateInjectedDKGContribution(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.setup()
-			err := app.ValidateInjectedDKGContribution(ctxForValidation(), ta.VoteKeeper(), tc.txBytes(), logger)
+			_, err := app.ValidateInjectedDKGContribution(ctxForValidation(), ta.VoteKeeper(), tc.txBytes(), logger)
 			if tc.wantErr {
 				require.Error(t, err, "expected error for case: %s", tc.name)
 				if tc.errContains != "" {
@@ -663,4 +685,3 @@ func TestPrepareProposalDKGContributionAcceptedByProcessProposal(t *testing.T) {
 		})
 	}
 }
-
