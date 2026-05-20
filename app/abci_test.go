@@ -23,6 +23,7 @@ import (
 	"github.com/mikelodder7/curvey"
 
 	voteapi "github.com/valargroup/vote-sdk/api"
+	voteapp "github.com/valargroup/vote-sdk/app"
 	"github.com/valargroup/vote-sdk/crypto/ecies"
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/crypto/shamir"
@@ -1340,14 +1341,16 @@ func TestDKGFullLifecycle(t *testing.T) {
 		phantom1Commitments[j] = pt.ToAffineCompressed()
 	}
 	phantom1Payloads := make([]*types.DealerPayload, 0, 2)
-	env, err := ecies.Encrypt(G, pallasPk.Point, phantom1Shares[0].Value.Bytes(), rand.Reader)
+	env, err := ecies.EncryptWithAAD(G, pallasPk.Point, phantom1Shares[0].Value.Bytes(),
+		voteapp.DKGShareAAD(roundID, phantom1Addr, 2, proposerAddr, 1), rand.Reader)
 	require.NoError(t, err)
 	phantom1Payloads = append(phantom1Payloads, &types.DealerPayload{
 		ValidatorAddress: proposerAddr,
 		EphemeralPk:      env.Ephemeral.ToAffineCompressed(),
 		Ciphertext:       env.Ciphertext,
 	})
-	env, err = ecies.Encrypt(G, phantom2Pk.Point, phantom1Shares[2].Value.Bytes(), rand.Reader)
+	env, err = ecies.EncryptWithAAD(G, phantom2Pk.Point, phantom1Shares[2].Value.Bytes(),
+		voteapp.DKGShareAAD(roundID, phantom1Addr, 2, phantom2Addr, 3), rand.Reader)
 	require.NoError(t, err)
 	phantom1Payloads = append(phantom1Payloads, &types.DealerPayload{
 		ValidatorAddress: phantom2Addr,
@@ -1361,14 +1364,16 @@ func TestDKGFullLifecycle(t *testing.T) {
 		phantom2Commitments[j] = pt.ToAffineCompressed()
 	}
 	phantom2Payloads := make([]*types.DealerPayload, 0, 2)
-	env, err = ecies.Encrypt(G, pallasPk.Point, phantom2Shares[0].Value.Bytes(), rand.Reader)
+	env, err = ecies.EncryptWithAAD(G, pallasPk.Point, phantom2Shares[0].Value.Bytes(),
+		voteapp.DKGShareAAD(roundID, phantom2Addr, 3, proposerAddr, 1), rand.Reader)
 	require.NoError(t, err)
 	phantom2Payloads = append(phantom2Payloads, &types.DealerPayload{
 		ValidatorAddress: proposerAddr,
 		EphemeralPk:      env.Ephemeral.ToAffineCompressed(),
 		Ciphertext:       env.Ciphertext,
 	})
-	env, err = ecies.Encrypt(G, phantom1Pk.Point, phantom2Shares[1].Value.Bytes(), rand.Reader)
+	env, err = ecies.EncryptWithAAD(G, phantom1Pk.Point, phantom2Shares[1].Value.Bytes(),
+		voteapp.DKGShareAAD(roundID, phantom2Addr, 3, phantom1Addr, 2), rand.Reader)
 	require.NoError(t, err)
 	phantom2Payloads = append(phantom2Payloads, &types.DealerPayload{
 		ValidatorAddress: phantom1Addr,
@@ -1439,6 +1444,11 @@ func TestDKGFullLifecycle(t *testing.T) {
 	// Phantom1 combined share = own partial + proposer's share + phantom2's share.
 	phantom1OwnPartial := shamir.EvalPolynomial(phantom1Coeffs, 2) // ShamirIndex=2
 	phantom1CombinedShare := phantom1OwnPartial
+	shamirIndexByAddr := map[string]uint32{
+		proposerAddr: 1,
+		phantom1Addr: 2,
+		phantom2Addr: 3,
+	}
 
 	for _, contrib := range round.DkgContributions {
 		if contrib.ValidatorAddress == phantom1Addr {
@@ -1450,10 +1460,11 @@ func TestDKGFullLifecycle(t *testing.T) {
 			}
 			ephPk, err := elgamal.UnmarshalPublicKey(p.EphemeralPk)
 			require.NoError(t, err)
-			shareBytes, err := ecies.Decrypt(phantom1Sk.Scalar, &ecies.Envelope{
+			aad := voteapp.DKGShareAAD(roundID, contrib.ValidatorAddress, shamirIndexByAddr[contrib.ValidatorAddress], phantom1Addr, 2)
+			shareBytes, err := ecies.DecryptWithAAD(phantom1Sk.Scalar, &ecies.Envelope{
 				Ephemeral:  ephPk.Point,
 				Ciphertext: p.Ciphertext,
-			})
+			}, aad)
 			require.NoError(t, err)
 			shareScalar, err := new(curvey.ScalarPallas).SetBytes(shareBytes)
 			require.NoError(t, err)
@@ -1605,6 +1616,13 @@ func seedPhantomDKGContributions(
 	kvStore := app.VoteKeeper().OpenKVStore(ctx)
 	round, err := app.VoteKeeper().GetVoteRound(kvStore, roundID)
 	require.NoError(t, err)
+	shamirIndexByAddr := make(map[string]uint32, len(validators))
+	for i, v := range validators {
+		shamirIndexByAddr[v.ValidatorAddress] = v.ShamirIndex
+		if shamirIndexByAddr[v.ValidatorAddress] == 0 {
+			shamirIndexByAddr[v.ValidatorAddress] = uint32(i + 1)
+		}
+	}
 
 	for _, addr := range phantomAddrs {
 		secret := new(curvey.ScalarPallas).Random(rand.Reader)
@@ -1626,7 +1644,8 @@ func seedPhantomDKGContributions(
 			if v.ValidatorAddress == proposerAddr {
 				recipientPk, err := elgamal.UnmarshalPublicKey(v.PallasPk)
 				require.NoError(t, err)
-				env, err := ecies.Encrypt(G, recipientPk.Point, shares[i].Value.Bytes(), rand.Reader)
+				aad := voteapp.DKGShareAAD(roundID, addr, shamirIndexByAddr[addr], v.ValidatorAddress, shamirIndexByAddr[v.ValidatorAddress])
+				env, err := ecies.EncryptWithAAD(G, recipientPk.Point, shares[i].Value.Bytes(), aad, rand.Reader)
 				require.NoError(t, err)
 				payloads = append(payloads, &types.DealerPayload{
 					ValidatorAddress: v.ValidatorAddress,

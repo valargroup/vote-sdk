@@ -65,6 +65,28 @@ func TestEncryptDecryptRoundTrip(t *testing.T) {
 	}
 }
 
+func TestEncryptDecryptWithAAD(t *testing.T) {
+	G := testGenerator()
+	sk, pk := testKeypair()
+	plaintext := []byte("aad-bound plaintext")
+	aad := []byte("round:dealer:recipient")
+
+	env, err := EncryptWithAAD(G, pk, plaintext, aad, rand.Reader)
+	require.NoError(t, err)
+
+	got, err := DecryptWithAAD(sk, env, aad)
+	require.NoError(t, err)
+	require.Equal(t, plaintext, got)
+
+	_, err = DecryptWithAAD(sk, env, []byte("round:dealer:other-recipient"))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "authentication failed")
+
+	_, err = Decrypt(sk, env)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "authentication failed")
+}
+
 // TestEncryptDecryptScalarRoundTrip tests the primary use case: encrypting
 // and decrypting a 32-byte Pallas scalar (ea_sk).
 func TestEncryptDecryptScalarRoundTrip(t *testing.T) {
@@ -275,7 +297,7 @@ func TestEncryptRejectsIdentityEphemeralKey(t *testing.T) {
 	// A zero scalar produces E = 0 * G = identity.
 	zeroScalar := new(curvey.ScalarPallas).Zero()
 
-	_, err := encryptWithEphemeral(G, pk, plaintext, zeroScalar)
+	_, err := encryptWithEphemeral(G, pk, plaintext, nil, zeroScalar)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "ephemeral public key")
 	require.Contains(t, err.Error(), "identity point")
@@ -328,7 +350,7 @@ func TestEncryptRejectsZeroEphemeralScalar(t *testing.T) {
 	_, pk := testKeypair()
 	zero := new(curvey.ScalarPallas).Zero()
 
-	_, err := encryptWithEphemeral(G, pk, []byte("test"), zero)
+	_, err := encryptWithEphemeral(G, pk, []byte("test"), nil, zero)
 	require.Error(t, err)
 	// First defense layer catches it: E = 0 * G = identity.
 	require.Contains(t, err.Error(), "identity point")
@@ -349,7 +371,7 @@ func TestDecryptRejectsIdentityECDHSharedSecret(t *testing.T) {
 
 	// Bypass the zero-sk check in Decrypt by calling the core directly.
 	zero := new(curvey.ScalarPallas).Zero()
-	_, err = decryptWithCheckedInputs(zero, env)
+	_, err = decryptWithCheckedInputs(zero, env, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "ECDH shared secret is the identity point")
 }
@@ -414,8 +436,8 @@ func TestMarshalUnmarshalEnvelopeRoundTrip(t *testing.T) {
 // TestUnmarshalEnvelopeRejectsWrongLength verifies length validation.
 func TestUnmarshalEnvelopeRejectsWrongLength(t *testing.T) {
 	tests := []struct {
-		name string
-		data []byte
+		name  string
+		data  []byte
 		ctLen int
 	}{
 		{"empty", []byte{}, 48},

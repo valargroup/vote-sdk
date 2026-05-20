@@ -226,7 +226,8 @@ func TestCeremonyAckThresholdRejectsBadShare(t *testing.T) {
 	// Tamper with contributor 1's payload for the proposer: encrypt a random
 	// (wrong) share instead of the correct f_1(1).
 	wrongScalar := new(curvey.ScalarPallas).Random(rand.Reader)
-	env, err := ecies.Encrypt(G, pallasPk.Point, wrongScalar.Bytes(), rand.Reader)
+	aad := app.DKGShareAAD(dkgAckTestRoundID(), addrs[1], 2, proposerAddr, 1)
+	env, err := ecies.EncryptWithAAD(G, pallasPk.Point, wrongScalar.Bytes(), aad, rand.Reader)
 	require.NoError(t, err)
 
 	for _, p := range contributions[1].Payloads {
@@ -434,10 +435,12 @@ func TestDKGContributionInjection(t *testing.T) {
 		ephPk, err := elgamal.UnmarshalPublicKey(p.EphemeralPk)
 		require.NoError(t, err)
 
-		decrypted, err := ecies.Decrypt(recipientSk, &ecies.Envelope{
+		recipientIndex := uint32(shamirIndices[p.ValidatorAddress])
+		aad := app.DKGShareAAD(roundID, proposerAddr, 1, p.ValidatorAddress, recipientIndex)
+		decrypted, err := ecies.DecryptWithAAD(recipientSk, &ecies.Envelope{
 			Ephemeral:  ephPk.Point,
 			Ciphertext: p.Ciphertext,
-		})
+		}, aad)
 		require.NoError(t, err, "ECIES decryption must succeed for %s", p.ValidatorAddress)
 		require.Len(t, decrypted, 32, "decrypted share must be 32 bytes")
 
@@ -602,6 +605,7 @@ func buildDKGDealtRoundState(
 	G := elgamal.PallasGenerator()
 	n := len(validatorAddrs)
 	tVal := (n + 1) / 2 // ceil(n/2)
+	roundID := dkgAckTestRoundID()
 
 	allShares = make([][]shamir.Share, n)
 	allCoeffs = make([][]curvey.Scalar, n)
@@ -631,7 +635,8 @@ func buildDKGDealtRoundState(
 			if i == j {
 				continue
 			}
-			env, err := ecies.Encrypt(G, validatorPKs[j], allShares[i][j].Value.Bytes(), rand.Reader)
+			aad := app.DKGShareAAD(roundID, validatorAddrs[i], uint32(i+1), validatorAddrs[j], uint32(j+1))
+			env, err := ecies.EncryptWithAAD(G, validatorPKs[j], allShares[i][j].Value.Bytes(), aad, rand.Reader)
 			require.NoError(t, err)
 			payloads = append(payloads, &types.DealerPayload{
 				ValidatorAddress: validatorAddrs[j],
@@ -684,8 +689,7 @@ func seedDKGDealtRound(
 		}
 	}
 
-	roundID := make([]byte, 32)
-	copy(roundID, []byte("dkg-ack-test"))
+	roundID := dkgAckTestRoundID()
 
 	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
 	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
@@ -714,6 +718,12 @@ func seedDKGDealtRound(
 	}
 	require.NoError(t, os.WriteFile(coeffsPath, buf, 0600))
 
+	return roundID
+}
+
+func dkgAckTestRoundID() []byte {
+	roundID := make([]byte, 32)
+	copy(roundID, []byte("dkg-ack-test"))
 	return roundID
 }
 
@@ -786,7 +796,8 @@ func TestDKGAckRejectsBadShare(t *testing.T) {
 	// Tamper with contributor 1's payload for the proposer: encrypt a random
 	// (wrong) share instead of the correct f_1(1).
 	wrongScalar := new(curvey.ScalarPallas).Random(rand.Reader)
-	env, err := ecies.Encrypt(G, pallasPk.Point, wrongScalar.Bytes(), rand.Reader)
+	aad := app.DKGShareAAD(dkgAckTestRoundID(), addrs[1], 2, proposerAddr, 1)
+	env, err := ecies.EncryptWithAAD(G, pallasPk.Point, wrongScalar.Bytes(), aad, rand.Reader)
 	require.NoError(t, err)
 
 	for _, p := range contributions[1].Payloads {
@@ -1089,6 +1100,7 @@ func buildGoldenAckState(t *testing.T) goldenAckState {
 	G := elgamal.PallasGenerator()
 	const n = 3
 	tVal := 2 // ceil(3/2)
+	roundID := []byte("ack-dkg-unit-test")
 
 	addrs := []string{
 		"sv1proposer0xxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -1128,7 +1140,8 @@ func buildGoldenAckState(t *testing.T) goldenAckState {
 			if i == j {
 				continue
 			}
-			env, err := ecies.Encrypt(G, pks[j].Point, allShares[i][j].Value.Bytes(), rand.Reader)
+			aad := app.DKGShareAAD(roundID, addrs[i], uint32(i+1), addrs[j], uint32(j+1))
+			env, err := ecies.EncryptWithAAD(G, pks[j].Point, allShares[i][j].Value.Bytes(), aad, rand.Reader)
 			require.NoError(t, err)
 			payloads = append(payloads, &types.DealerPayload{
 				ValidatorAddress: addrs[j],
@@ -1151,7 +1164,6 @@ func buildGoldenAckState(t *testing.T) goldenAckState {
 	}
 
 	dir := t.TempDir()
-	roundID := []byte("ack-dkg-unit-test")
 	coeffsPath := filepath.Join(dir, "coeffs."+hex.EncodeToString(roundID))
 	buf := make([]byte, 0, tVal*32)
 	for _, c := range allCoeffs[0] {
@@ -1241,7 +1253,8 @@ func TestAckDKGRound(t *testing.T) {
 			name: "ECIES decrypt fails",
 			mutate: func(t *testing.T, round *types.VoteRound, _ string) {
 				_, wrongPk := elgamal.KeyGen(rand.Reader)
-				env, err := ecies.Encrypt(G, wrongPk.Point, make([]byte, 32), rand.Reader)
+				aad := app.DKGShareAAD(round.VoteRoundId, round.DkgContributions[1].ValidatorAddress, 2, gs.proposerAddr, 1)
+				env, err := ecies.EncryptWithAAD(G, wrongPk.Point, make([]byte, 32), aad, rand.Reader)
 				require.NoError(t, err)
 				p := proposerPayload(round.DkgContributions[1], gs.proposerAddr)
 				p.EphemeralPk = env.Ephemeral.ToAffineCompressed()
@@ -1253,7 +1266,8 @@ func TestAckDKGRound(t *testing.T) {
 			name: "zero share scalar",
 			mutate: func(t *testing.T, round *types.VoteRound, _ string) {
 				proposerPk := G.Mul(gs.pallasSk.Scalar)
-				env, err := ecies.Encrypt(G, proposerPk, make([]byte, 32), rand.Reader)
+				aad := app.DKGShareAAD(round.VoteRoundId, round.DkgContributions[1].ValidatorAddress, 2, gs.proposerAddr, 1)
+				env, err := ecies.EncryptWithAAD(G, proposerPk, make([]byte, 32), aad, rand.Reader)
 				require.NoError(t, err)
 				p := proposerPayload(round.DkgContributions[1], gs.proposerAddr)
 				p.EphemeralPk = env.Ephemeral.ToAffineCompressed()
@@ -1273,7 +1287,8 @@ func TestAckDKGRound(t *testing.T) {
 			mutate: func(t *testing.T, round *types.VoteRound, _ string) {
 				wrongScalar := new(curvey.ScalarPallas).Random(rand.Reader)
 				proposerPk := G.Mul(gs.pallasSk.Scalar)
-				env, err := ecies.Encrypt(G, proposerPk, wrongScalar.Bytes(), rand.Reader)
+				aad := app.DKGShareAAD(round.VoteRoundId, round.DkgContributions[1].ValidatorAddress, 2, gs.proposerAddr, 1)
+				env, err := ecies.EncryptWithAAD(G, proposerPk, wrongScalar.Bytes(), aad, rand.Reader)
 				require.NoError(t, err)
 				p := proposerPayload(round.DkgContributions[1], gs.proposerAddr)
 				p.EphemeralPk = env.Ephemeral.ToAffineCompressed()

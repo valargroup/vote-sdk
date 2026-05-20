@@ -32,6 +32,12 @@ type Envelope struct {
 // The zero nonce is safe because each ephemeral key e is fresh, making the
 // derived symmetric key k unique per encryption.
 func Encrypt(G, recipientPK curvey.Point, plaintext []byte, rng io.Reader) (*Envelope, error) {
+	return EncryptWithAAD(G, recipientPK, plaintext, nil, rng)
+}
+
+// EncryptWithAAD performs ECIES encryption and authenticates aad as
+// ChaCha20-Poly1305 associated data. Decryption must provide identical aad.
+func EncryptWithAAD(G, recipientPK curvey.Point, plaintext, aad []byte, rng io.Reader) (*Envelope, error) {
 	if err := validatePoint(G, "generator"); err != nil {
 		return nil, fmt.Errorf("ecies: Encrypt: %w", err)
 	}
@@ -54,7 +60,7 @@ func Encrypt(G, recipientPK curvey.Point, plaintext []byte, rng io.Reader) (*Env
 	}
 	e := new(curvey.ScalarPallas).Hash(seed[:])
 
-	return encryptWithEphemeral(G, recipientPK, plaintext, e)
+	return encryptWithEphemeral(G, recipientPK, plaintext, aad, e)
 }
 
 // Decrypt performs ECIES decryption using the recipient's secret key.
@@ -64,6 +70,12 @@ func Encrypt(G, recipientPK curvey.Point, plaintext []byte, rng io.Reader) (*Env
 //  2. k = SHA256(E_compressed || S.x)      (derive same symmetric key)
 //  3. plaintext = ChaCha20-Poly1305.Open(k, nonce=0, ciphertext)
 func Decrypt(recipientSK curvey.Scalar, env *Envelope) ([]byte, error) {
+	return DecryptWithAAD(recipientSK, env, nil)
+}
+
+// DecryptWithAAD decrypts an ECIES envelope and authenticates aad as
+// ChaCha20-Poly1305 associated data. It fails if aad differs from encryption.
+func DecryptWithAAD(recipientSK curvey.Scalar, env *Envelope, aad []byte) ([]byte, error) {
 	if recipientSK == nil || recipientSK.IsZero() {
 		return nil, fmt.Errorf("ecies: Decrypt: secret key must not be nil or zero")
 	}
@@ -77,13 +89,13 @@ func Decrypt(recipientSK curvey.Scalar, env *Envelope) ([]byte, error) {
 		return nil, fmt.Errorf("ecies: Decrypt: ciphertext too short")
 	}
 
-	return decryptWithCheckedInputs(recipientSK, env)
+	return decryptWithCheckedInputs(recipientSK, env, aad)
 }
 
 // encryptWithEphemeral performs the core ECIES encryption using the provided
 // ephemeral scalar. Split out from Encrypt to allow testing the defense-in-depth
 // ECDH shared-secret validation with controlled inputs.
-func encryptWithEphemeral(G, recipientPK curvey.Point, plaintext []byte, e curvey.Scalar) (*Envelope, error) {
+func encryptWithEphemeral(G, recipientPK curvey.Point, plaintext, aad []byte, e curvey.Scalar) (*Envelope, error) {
 	// E = e * G (ephemeral public key)
 	E := G.Mul(e)
 	if err := validatePoint(E, "ephemeral public key"); err != nil {
@@ -110,7 +122,7 @@ func encryptWithEphemeral(G, recipientPK curvey.Point, plaintext []byte, e curve
 	// (ChaCha20-Poly1305, AES-GCM, etc.) since the critical requirement — never
 	// reuse (key, nonce) — is satisfied by construction.
 	nonce := make([]byte, chacha20poly1305.NonceSize) // all zeros
-	ct := aead.Seal(nil, nonce, plaintext, nil)
+	ct := aead.Seal(nil, nonce, plaintext, aad)
 
 	return &Envelope{
 		Ephemeral:  E,
@@ -121,7 +133,7 @@ func encryptWithEphemeral(G, recipientPK curvey.Point, plaintext []byte, e curve
 // decryptWithCheckedInputs performs the core ECIES decryption after input
 // validation. Split out from Decrypt to allow testing the defense-in-depth
 // ECDH shared-secret validation with controlled inputs.
-func decryptWithCheckedInputs(recipientSK curvey.Scalar, env *Envelope) ([]byte, error) {
+func decryptWithCheckedInputs(recipientSK curvey.Scalar, env *Envelope, aad []byte) ([]byte, error) {
 	// S = sk * E (ECDH shared secret)
 	S := env.Ephemeral.Mul(recipientSK)
 	if S == nil || S.IsIdentity() {
@@ -142,7 +154,7 @@ func decryptWithCheckedInputs(recipientSK curvey.Scalar, env *Envelope) ([]byte,
 	// (ChaCha20-Poly1305, AES-GCM, etc.) since the critical requirement — never
 	// reuse (key, nonce) — is satisfied by construction.
 	nonce := make([]byte, chacha20poly1305.NonceSize) // all zeros
-	plaintext, err := aead.Open(nil, nonce, env.Ciphertext, nil)
+	plaintext, err := aead.Open(nil, nonce, env.Ciphertext, aad)
 	if err != nil {
 		return nil, fmt.Errorf("ecies: Decrypt: authentication failed: %w", err)
 	}

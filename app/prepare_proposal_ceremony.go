@@ -192,7 +192,8 @@ func CeremonyDKGContributionPrepareProposalHandler(
 			return txs
 		}
 
-		if _, found := votekeeper.FindValidatorInRoundCeremony(round, proposerValAddr); !found {
+		proposerCeremonyVal, found := votekeeper.FindValidatorInRoundCeremony(round, proposerValAddr)
+		if !found {
 			return txs
 		}
 
@@ -274,7 +275,14 @@ func CeremonyDKGContributionPrepareProposalHandler(
 				})
 				return txs
 			}
-			env, err := ecies.Encrypt(G, recipientPk.Point, shares[i].Value.Bytes(), rand.Reader)
+			aad := DKGShareAAD(
+				round.VoteRoundId,
+				proposerValAddr,
+				dkgValidatorIndex(proposerCeremonyVal, -1),
+				v.ValidatorAddress,
+				dkgValidatorIndex(v, i),
+			)
+			env, err := ecies.EncryptWithAAD(G, recipientPk.Point, shares[i].Value.Bytes(), aad, rand.Reader)
 			if err != nil {
 				logger.Error("PrepareProposal[dkg-contribute]: ECIES encryption failed",
 					"validator", v.ValidatorAddress, "err", err)
@@ -496,6 +504,11 @@ func ackDKGRound(
 				contrib.ValidatorAddress, proposerValAddr)
 		}
 
+		dealerVal, found := votekeeper.FindValidatorInRoundCeremony(round, contrib.ValidatorAddress)
+		if !found {
+			return nil, nil, fmt.Errorf("contributor %s: not a ceremony validator", contrib.ValidatorAddress)
+		}
+
 		// Decrypt the share.
 		ephPk, err := elgamal.UnmarshalPublicKey(payload.EphemeralPk)
 		if err != nil {
@@ -503,10 +516,17 @@ func ackDKGRound(
 				contrib.ValidatorAddress, err)
 		}
 		// Decrypt the share.
-		shareBytes, err := ecies.Decrypt(pallasSk.Scalar, &ecies.Envelope{
+		aad := DKGShareAAD(
+			round.VoteRoundId,
+			contrib.ValidatorAddress,
+			dkgValidatorIndex(dealerVal, -1),
+			proposerValAddr,
+			uint32(shamirIndex),
+		)
+		shareBytes, err := ecies.DecryptWithAAD(pallasSk.Scalar, &ecies.Envelope{
 			Ephemeral:  ephPk.Point,
 			Ciphertext: payload.Ciphertext,
-		})
+		}, aad)
 		if err != nil {
 			return nil, nil, fmt.Errorf("contributor %s: ECIES decryption failed: %w",
 				contrib.ValidatorAddress, err)
@@ -563,6 +583,24 @@ func ackDKGRound(
 	// Return the combined share as a byte slice and the combined secret key.
 	secretBytes := combinedShare.Bytes()
 	return secretBytes, &elgamal.SecretKey{Scalar: combinedShare}, nil
+}
+
+// DKGShareAAD returns the AEAD associated data for one encrypted DKG share.
+// It binds ciphertexts to the ceremony round, dealer, recipient, and both
+// Shamir indices so payloads cannot be replayed or swapped across contexts.
+func DKGShareAAD(voteRoundID []byte, dealerAddress string, dealerIndex uint32, recipientAddress string, recipientIndex uint32) []byte {
+	return []byte(fmt.Sprintf("svote-dkg-ecies-v1|%x|%s|%d|%s|%d",
+		voteRoundID, dealerAddress, dealerIndex, recipientAddress, recipientIndex))
+}
+
+func dkgValidatorIndex(v *types.ValidatorPallasKey, fallbackPosition int) uint32 {
+	if v != nil && v.ShamirIndex != 0 {
+		return v.ShamirIndex
+	}
+	if fallbackPosition >= 0 {
+		return uint32(fallbackPosition + 1)
+	}
+	return 0
 }
 
 // deserializeFeldmanCommitments converts serialized Feldman commitments (32-byte
