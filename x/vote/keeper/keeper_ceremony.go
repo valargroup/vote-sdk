@@ -43,10 +43,9 @@ func (k *Keeper) SetCeremonyState(kvStore store.KVStore, state *types.CeremonySt
 	return kvStore.Set(types.CeremonyStateKey, bz)
 }
 
-// ThresholdForN computes the required threshold t = ceil(n/2) for n validators.
-// This matches the ack requirement (HalfAcked) so that the set of validators
-// that survives ceremony stripping is always large enough to reconstruct the
-// EA key during tally.
+// ThresholdForN computes the required threshold t = floor(n/2)+1 for n
+// validators. For even-sized validator sets this requires a strict majority,
+// so exactly half of the set cannot decrypt threshold ciphertexts.
 //
 // For n = 1 returns t = 1 (trivial single-share scheme with no threshold
 // security — used for local testing). Returns an error if n < 1.
@@ -57,7 +56,7 @@ func ThresholdForN(n int) (int, error) {
 	if n == 1 {
 		return 1, nil
 	}
-	t := (n + 1) / 2
+	t := n/2 + 1
 	if t < 2 {
 		t = 2
 	}

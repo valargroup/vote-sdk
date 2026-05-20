@@ -26,29 +26,29 @@ func TestThresholdForN(t *testing.T) {
 		// n=1: solo validator, threshold must be 1.
 		{n: 1, want: 1},
 
-		// n=2: ceil(2/2)=1 but floor is 2 → clamped to 2.
+		// n=2: strict majority requires both validators.
 		{n: 2, want: 2},
 
-		// n=3: ceil(3/2)=2, satisfies >=2.
+		// n=3: floor(3/2)+1=2.
 		{n: 3, want: 2},
 
-		// n=4: (4+1)/2=2 (integer division).
-		{n: 4, want: 2},
+		// n=4: floor(4/2)+1=3.
+		{n: 4, want: 3},
 
-		// n=5: (5+1)/2=3.
+		// n=5: floor(5/2)+1=3.
 		{n: 5, want: 3},
 
-		// n=6: (6+1)/2=3.
-		{n: 6, want: 3},
+		// n=6: floor(6/2)+1=4.
+		{n: 6, want: 4},
 
-		// n=9: (9+1)/2=5.
+		// n=9: floor(9/2)+1=5.
 		{n: 9, want: 5},
 
-		// n=10: (10+1)/2=5.
-		{n: 10, want: 5},
+		// n=10: floor(10/2)+1=6.
+		{n: 10, want: 6},
 
 		// Large n.
-		{n: 100, want: 50},
+		{n: 100, want: 51},
 		{n: 101, want: 51},
 	}
 
@@ -71,6 +71,7 @@ func TestThresholdForN_Invariants(t *testing.T) {
 		require.LessOrEqual(t, got, n, "n=%d: t must not exceed n", n)
 		if n >= 2 {
 			require.GreaterOrEqual(t, got, 2, "n=%d: t must be >= 2 when n >= 2", n)
+			require.Greater(t, got*2, n, "n=%d: t must be a strict majority", n)
 		}
 	}
 }
@@ -111,7 +112,7 @@ func (s *KeeperTestSuite) TestHalfAcked() {
 			expect: true,
 		},
 		{
-			name: "exactly ceil(n/2) (2 of 3)",
+			name: "exactly strict majority (2 of 3)",
 			round: &types.VoteRound{
 				CeremonyValidators: []*types.ValidatorPallasKey{
 					{ValidatorAddress: "val1"}, {ValidatorAddress: "val2"}, {ValidatorAddress: "val3"},

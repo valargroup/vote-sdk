@@ -17,8 +17,8 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/valargroup/vote-sdk/app"
 	voteapi "github.com/valargroup/vote-sdk/api"
+	"github.com/valargroup/vote-sdk/app"
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/testutil"
 	"github.com/valargroup/vote-sdk/x/vote/types"
@@ -190,9 +190,9 @@ func TestProcessProposalAckValidation(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		setup    func()                   // mutate state before this case
-		txs      func() [][]byte          // txs for the ProcessProposal request
+		name       string
+		setup      func()          // mutate state before this case
+		txs        func() [][]byte // txs for the ProcessProposal request
 		wantAccept bool
 	}{
 		{
@@ -395,7 +395,7 @@ func TestProcessProposalTallyValidation(t *testing.T) {
 			wantAccept: false,
 		},
 		{
-			name: "malformed tally tx → reject",
+			name:  "malformed tally tx → reject",
 			setup: func() {},
 			txs: func() [][]byte {
 				return [][]byte{{voteapi.TagSubmitTally, 0xFF, 0xFF}}
@@ -619,7 +619,9 @@ func TestPrepareProposalDKGContributionAcceptedByProcessProposal(t *testing.T) {
 	}{
 		{"n=2 → t=2", 2, 2},
 		{"n=3 → t=2", 3, 2},
+		{"n=4 → t=3", 4, 3},
 		{"n=5 → t=3", 5, 3},
+		{"n=6 → t=4", 6, 4},
 		{"n=7 → t=4", 7, 4},
 	}
 
@@ -663,4 +665,3 @@ func TestPrepareProposalDKGContributionAcceptedByProcessProposal(t *testing.T) {
 		})
 	}
 }
-

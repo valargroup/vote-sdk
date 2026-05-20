@@ -601,7 +601,10 @@ func buildDKGDealtRoundState(
 
 	G := elgamal.PallasGenerator()
 	n := len(validatorAddrs)
-	tVal := (n + 1) / 2 // ceil(n/2)
+	tVal := n/2 + 1 // strict majority
+	if n == 1 {
+		tVal = 1
+	}
 
 	allShares = make([][]shamir.Share, n)
 	allCoeffs = make([][]curvey.Scalar, n)
@@ -673,7 +676,10 @@ func seedDKGDealtRound(
 	t.Helper()
 
 	n := len(validatorAddrs)
-	tVal := (n + 1) / 2
+	tVal := n/2 + 1
+	if n == 1 {
+		tVal = 1
+	}
 
 	validators := make([]*types.ValidatorPallasKey, n)
 	for i := range validatorAddrs {
@@ -875,7 +881,7 @@ func TestDKGContributionThroughPipeline(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, proposerAddr, contrib.Creator)
 	require.Equal(t, roundID, contrib.VoteRoundId)
-	require.Len(t, contrib.FeldmanCommitments, 2, "t=ceil(3/2)=2 commitments")
+	require.Len(t, contrib.FeldmanCommitments, 2, "t=floor(3/2)+1=2 commitments")
 	require.Len(t, contrib.Payloads, 2, "n-1=2 ECIES payloads (self excluded)")
 }
 

@@ -773,7 +773,7 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 	})
 
 	s.Run("timeout+below-threshold logs entry and preserves validators", func() {
-		// n=9, threshold=6 (above standard ceil(9/2)=5), 5 acks: HalfAcked
+		// n=9, threshold=6 (above the standard strict-majority threshold 5), 5 acks: HalfAcked
 		// (5*2=10>=9) but 5 < dealer-set threshold=6. Safety check finalizes
 		// the failed pending round. All 9 validators are preserved for audit.
 		s.SetupTest()

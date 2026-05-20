@@ -1594,7 +1594,7 @@ func seedPhantomDKGContributions(
 	t.Helper()
 
 	n := len(validators)
-	tVal := (n + 1) / 2
+	tVal := n/2 + 1
 	if n == 1 {
 		tVal = 1
 	} else if tVal < 2 {

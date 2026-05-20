@@ -111,7 +111,7 @@ func (s *MsgServerTestSuite) createPendingRoundWithValidators(n int) (roundID []
 // left in DEALT status.
 func (s *MsgServerTestSuite) dealPendingRound(n int) (roundID []byte, addrs []string) {
 	roundID, addrs, _ = s.createPendingRoundWithValidators(n)
-	threshold := (n + 1) / 2
+	threshold := n/2 + 1
 	if n == 1 {
 		threshold = 1
 	} else if threshold < 2 {

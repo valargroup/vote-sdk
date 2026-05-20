@@ -14,7 +14,7 @@ For a ceremony with `n` validators:
 
 ```
 t = 1                (n = 1: trivial single-share, no threshold security)
-t = ceil(n/2)        (n >= 2, minimum 2)
+t = floor(n/2)+1    (n >= 2, strict majority)
 ```
 
 | n | t | Notes |
@@ -50,7 +50,7 @@ Each validator contributes once during REGISTERING. On the n-th contribution, th
 
 When a block proposer detects a PENDING round in REGISTERING status, is a ceremony validator, and has not yet contributed:
 
-1. Generate a random secret `s_i` and compute `t = ceil(n/2)`.
+1. Generate a random secret `s_i` and compute `t = floor(n/2)+1`.
 2. Build a degree-`(t-1)` polynomial `f_i(x)` over Pallas Fq with `f_i(0) = s_i`:
    ```
    f_i(x) = s_i + a_1*x + a_2*x^2 + ... + a_{t-1}*x^{t-1}

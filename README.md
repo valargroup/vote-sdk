@@ -158,7 +158,7 @@ A registered key can be replaced via `MsgRotatePallasKey`. Rotation is rejected 
 #### Auto-Deal and Auto-Ack via PrepareProposal
 
 `PrepareProposal` composes two ceremony injectors:
-1. **Auto-deal** — if a PENDING round is in REGISTERING state and the proposer is a ceremony validator, generate `ea_sk`, Shamir-split it into `(t, n)` shares, ECIES-encrypt `share_i` to each validator, publish `VK_i = share_i * G` and `threshold = ceil(n/2)`, and inject `MsgDealExecutiveAuthorityKey`.
+1. **Auto-deal** — if a PENDING round is in REGISTERING state and the proposer is a ceremony validator, generate `ea_sk`, Shamir-split it into `(t, n)` shares, ECIES-encrypt `share_i` to each validator, publish `VK_i = share_i * G` and `threshold = floor(n/2)+1`, and inject `MsgDealExecutiveAuthorityKey`.
 2. **Auto-ack** — if a PENDING round is in DEALT state and the proposer hasn't acked, decrypt the payload to recover their share, verify `share_i * G == VK_i` (threshold mode) or `ea_sk * G == ea_pk` (legacy), inject `MsgAckExecutiveAuthorityKey`, and write the share/key to disk.
 
 #### Timeout (EndBlocker)

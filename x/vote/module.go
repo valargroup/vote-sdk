@@ -591,10 +591,9 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 		if keeper.HalfAcked(round) {
 			stripped := nVals - nAcks
 
-			// Safety check: the ack quorum (>= 1/2) was designed to match the
-			// TSS threshold (ceil(n/2)), so this branch should never trigger
-			// with a correctly-computed threshold. It guards against a dealer
-			// that published an unusually high threshold value.
+			// Safety check: activation requires enough acks to meet the TSS
+			// threshold, so exactly-half ack quorums on even validator sets
+			// remain pending until more validators ack or the ceremony fails.
 			if nAcks < int(round.Threshold) {
 				oldRoundStatus := round.Status
 				keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),

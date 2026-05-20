@@ -19,11 +19,11 @@ func TestThresholdForN(t *testing.T) {
 		{n: 1, want: 1},
 		{n: 2, want: 2},
 		{n: 3, want: 2},
-		{n: 4, want: 2},
-		{n: 6, want: 3},
+		{n: 4, want: 3},
+		{n: 6, want: 4},
 		{n: 9, want: 5},
-		{n: 10, want: 5},
-		{n: 100, want: 50},
+		{n: 10, want: 6},
+		{n: 100, want: 51},
 	}
 
 	for _, tc := range tests {
@@ -48,6 +48,9 @@ func TestThresholdForN_Invariants(t *testing.T) {
 		require.NoError(t, err)
 		require.GreaterOrEqual(t, got, 1, "n=%d: t must be >= 1", n)
 		require.LessOrEqual(t, got, n, "n=%d: t must not exceed n", n)
+		if n >= 2 {
+			require.Greater(t, got*2, n, "n=%d: t must be a strict majority", n)
+		}
 	}
 }
 
@@ -60,4 +63,3 @@ func TestSharePathForRound(t *testing.T) {
 	got := sharePathForRound("/tmp/keys", roundID)
 	require.Equal(t, "/tmp/keys/share."+hex.EncodeToString(roundID), got)
 }
-
