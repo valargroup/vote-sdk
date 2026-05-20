@@ -242,6 +242,9 @@ func (ms msgServer) finalizeDKG(ctx sdk.Context, round *types.VoteRound, nValida
 	if err != nil {
 		return fmt.Errorf("failed to combine commitments: %w", err)
 	}
+	if combined[0].IsIdentity() {
+		return fmt.Errorf("%w: combined ea_pk must not be the identity point", types.ErrInvalidPallasPoint)
+	}
 
 	round.EaPk = combined[0].ToAffineCompressed()
 
@@ -254,6 +257,15 @@ func (ms msgServer) finalizeDKG(ctx sdk.Context, round *types.VoteRound, nValida
 
 	for i := range round.CeremonyValidators {
 		round.CeremonyValidators[i].ShamirIndex = uint32(i + 1)
+		vk, err := shamir.EvalCommitmentPolynomial(combined, i+1)
+		if err != nil {
+			return fmt.Errorf("%w: failed to derive VK_%d from combined commitments: %v",
+				types.ErrInvalidPallasPoint, i+1, err)
+		}
+		if vk.IsIdentity() {
+			return fmt.Errorf("%w: derived VK_%d must not be the identity point",
+				types.ErrInvalidPallasPoint, i+1)
+		}
 	}
 
 	round.CeremonyPhaseStart = uint64(ctx.BlockTime().Unix())

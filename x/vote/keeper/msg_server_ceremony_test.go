@@ -914,6 +914,14 @@ func makeDKGCommitments(t int) [][]byte {
 	return c
 }
 
+func marshalCommitments(points ...curvey.Point) [][]byte {
+	out := make([][]byte, len(points))
+	for i, p := range points {
+		out[i] = p.ToAffineCompressed()
+	}
+	return out
+}
+
 func (s *MsgServerTestSuite) TestContributeDKG_HappyPath_SingleValidator() {
 	s.SetupTest()
 
@@ -1110,6 +1118,72 @@ func (s *MsgServerTestSuite) TestContributeDKG_FinalComputesCorrectCombinedCommi
 	}
 	expectedPK := G.Mul(secretSum).ToAffineCompressed()
 	s.Require().Equal(expectedPK, round.EaPk, "ea_pk must equal (sum of secrets)*G")
+}
+
+func (s *MsgServerTestSuite) TestContributeDKG_RejectsIdentityCombinedEAPK() {
+	s.SetupTest()
+
+	roundID, addrs, _ := s.createPendingRoundWithValidators(2)
+	G := elgamal.PallasGenerator()
+	two := new(curvey.ScalarPallas).New(2)
+
+	s.setBlockProposer(addrs[0])
+	_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+		Creator:            addrs[0],
+		VoteRoundId:        roundID,
+		FeldmanCommitments: marshalCommitments(G, G.Mul(two)),
+		Payloads:           makeDKGPayloads(addrs, addrs[0]),
+	})
+	s.Require().NoError(err)
+
+	s.setBlockProposer(addrs[1])
+	_, err = s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+		Creator:            addrs[1],
+		VoteRoundId:        roundID,
+		FeldmanCommitments: marshalCommitments(G.Neg(), G),
+		Payloads:           makeDKGPayloads(addrs, addrs[1]),
+	})
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "combined ea_pk must not be the identity point")
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	round, err := s.keeper.GetVoteRound(kv, roundID)
+	s.Require().NoError(err)
+	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, round.CeremonyStatus)
+	s.Require().Empty(round.EaPk)
+}
+
+func (s *MsgServerTestSuite) TestContributeDKG_RejectsIdentityDerivedVK() {
+	s.SetupTest()
+
+	roundID, addrs, _ := s.createPendingRoundWithValidators(2)
+	G := elgamal.PallasGenerator()
+	three := new(curvey.ScalarPallas).New(3)
+
+	s.setBlockProposer(addrs[0])
+	_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+		Creator:            addrs[0],
+		VoteRoundId:        roundID,
+		FeldmanCommitments: marshalCommitments(G, G),
+		Payloads:           makeDKGPayloads(addrs, addrs[0]),
+	})
+	s.Require().NoError(err)
+
+	s.setBlockProposer(addrs[1])
+	_, err = s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+		Creator:            addrs[1],
+		VoteRoundId:        roundID,
+		FeldmanCommitments: marshalCommitments(G, G.Mul(three).Neg()),
+		Payloads:           makeDKGPayloads(addrs, addrs[1]),
+	})
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "derived VK_1 must not be the identity point")
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	round, err := s.keeper.GetVoteRound(kv, roundID)
+	s.Require().NoError(err)
+	s.Require().Equal(types.CeremonyStatus_CEREMONY_STATUS_REGISTERING, round.CeremonyStatus)
+	s.Require().Empty(round.FeldmanCommitments)
 }
 
 func (s *MsgServerTestSuite) TestContributeDKG_EmitsEvent() {
