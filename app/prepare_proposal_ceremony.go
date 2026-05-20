@@ -2,7 +2,6 @@ package app
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -409,11 +408,7 @@ func CeremonyAckPrepareProposalHandler(
 			logger.Info("PrepareProposal[ack]: secret written to disk", "path", diskPath)
 		}
 
-		h := sha256.New()
-		h.Write([]byte(types.AckDigestDomain))
-		h.Write(round.EaPk)
-		h.Write([]byte(proposerValAddr))
-		ackSig := h.Sum(nil)
+		ackSig := votekeeper.AckDigest(round.VoteRoundId, round.EaPk, proposerValAddr)
 
 		ackMsg := &types.MsgAckExecutiveAuthorityKey{
 			Creator:      proposerValAddr,

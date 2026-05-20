@@ -39,6 +39,7 @@ func (s *MsgServerTestSuite) ackSignature(roundID []byte, validator string) []by
 
 	h := sha256.New()
 	h.Write([]byte(types.AckDigestDomain))
+	h.Write(roundID)
 	h.Write(round.EaPk)
 	h.Write([]byte(validator))
 	return h.Sum(nil)
@@ -541,6 +542,27 @@ func (s *MsgServerTestSuite) TestAckExecutiveAuthorityKey_Rejects() {
 				}
 			},
 			errContains: "validator not in ceremony",
+		},
+		{
+			name: "legacy ack digest without round_id",
+			setup: func() ([]byte, []string) {
+				return s.dealPendingRound(2)
+			},
+			msg: func(roundID []byte, addrs []string) *types.MsgAckExecutiveAuthorityKey {
+				kv := s.keeper.OpenKVStore(s.ctx)
+				round, err := s.keeper.GetVoteRound(kv, roundID)
+				s.Require().NoError(err)
+				h := sha256.New()
+				h.Write([]byte(types.AckDigestDomain))
+				h.Write(round.EaPk)
+				h.Write([]byte(addrs[0]))
+				return &types.MsgAckExecutiveAuthorityKey{
+					Creator:      addrs[0],
+					VoteRoundId:  roundID,
+					AckSignature: h.Sum(nil),
+				}
+			},
+			errContains: "ack_signature mismatch",
 		},
 		{
 			name: "duplicate ack",

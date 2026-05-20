@@ -11,12 +11,12 @@ import (
 const CastVoteSighashDomain = "SVOTE_CAST_VOTE_SIGHASH_V0"
 
 // AckDigestDomain is the domain prefix for the ceremony ack commitment digest:
-// SHA256(AckDigestDomain || ea_pk || validator_address).
+// SHA256(AckDigestDomain || vote_round_id || ea_pk || validator_address).
 //
 // This is NOT a cryptographic signature. Authentication of the ack message
 // relies on ValidateProposerIsCreator (which verifies the message creator is
 // the current block proposer). The digest merely binds the acknowledgement to
-// a specific (ea_pk, validator_address) pair as a commitment.
+// a specific (vote_round_id, ea_pk, validator_address) tuple as a commitment.
 const AckDigestDomain = "ack"
 
 // ComputeCastVoteSighash returns the 32-byte Blake2b-256 hash of the

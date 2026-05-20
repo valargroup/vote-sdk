@@ -17,10 +17,11 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/valargroup/vote-sdk/app"
 	voteapi "github.com/valargroup/vote-sdk/api"
+	"github.com/valargroup/vote-sdk/app"
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/testutil"
+	votekeeper "github.com/valargroup/vote-sdk/x/vote/keeper"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
@@ -173,11 +174,7 @@ func TestProcessProposalAckValidation(t *testing.T) {
 
 	// Helper to build a valid ack tx targeting the current round.
 	validAckTx := func() []byte {
-		h := sha256.New()
-		h.Write([]byte(types.AckDigestDomain))
-		h.Write(eaPkBytes)
-		h.Write([]byte(valAddr))
-		sig := h.Sum(nil)
+		sig := votekeeper.AckDigest(currentRoundID, eaPkBytes, valAddr)
 
 		msg := &types.MsgAckExecutiveAuthorityKey{
 			Creator:      valAddr,
@@ -190,9 +187,9 @@ func TestProcessProposalAckValidation(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		setup    func()                   // mutate state before this case
-		txs      func() [][]byte          // txs for the ProcessProposal request
+		name       string
+		setup      func()          // mutate state before this case
+		txs        func() [][]byte // txs for the ProcessProposal request
 		wantAccept bool
 	}{
 		{
@@ -249,6 +246,27 @@ func TestProcessProposalAckValidation(t *testing.T) {
 			txs: func() [][]byte {
 				// Second ack from same validator.
 				return [][]byte{validAckTx()}
+			},
+			wantAccept: false,
+		},
+		{
+			name: "ack tx with legacy digest missing round_id → reject",
+			setup: func() {
+				currentRoundID = app.SeedDealtCeremony(eaPkBytes, eaPkBytes, validators)
+			},
+			txs: func() [][]byte {
+				h := sha256.New()
+				h.Write([]byte(types.AckDigestDomain))
+				h.Write(eaPkBytes)
+				h.Write([]byte(valAddr))
+				msg := &types.MsgAckExecutiveAuthorityKey{
+					Creator:      valAddr,
+					AckSignature: h.Sum(nil),
+					VoteRoundId:  currentRoundID,
+				}
+				txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagAckExecutiveAuthorityKey)
+				require.NoError(t, err)
+				return [][]byte{txBytes}
 			},
 			wantAccept: false,
 		},
@@ -395,7 +413,7 @@ func TestProcessProposalTallyValidation(t *testing.T) {
 			wantAccept: false,
 		},
 		{
-			name: "malformed tally tx → reject",
+			name:  "malformed tally tx → reject",
 			setup: func() {},
 			txs: func() [][]byte {
 				return [][]byte{{voteapi.TagSubmitTally, 0xFF, 0xFF}}
@@ -663,4 +681,3 @@ func TestPrepareProposalDKGContributionAcceptedByProcessProposal(t *testing.T) {
 		})
 	}
 }
-

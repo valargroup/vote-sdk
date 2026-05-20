@@ -1,6 +1,8 @@
 package app
 
 import (
+	"bytes"
+
 	abci "github.com/cometbft/cometbft/abci/types"
 
 	"cosmossdk.io/log"
@@ -125,6 +127,11 @@ func validateInjectedAck(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txBytes
 	// Verify creator matches the block proposer.
 	if err := voteKeeper.ValidateProposerIsCreator(ctx, ackMsg.Creator, "MsgAckExecutiveAuthorityKey"); err != nil {
 		return errInvalidInjectedTx(err.Error())
+	}
+
+	expectedSig := votekeeper.AckDigest(ackMsg.VoteRoundId, round.EaPk, ackMsg.Creator)
+	if !bytes.Equal(ackMsg.AckSignature, expectedSig) {
+		return errInvalidInjectedTx("ack_signature mismatch")
 	}
 
 	return nil
