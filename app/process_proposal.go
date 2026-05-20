@@ -1,6 +1,8 @@
 package app
 
 import (
+	"fmt"
+
 	abci "github.com/cometbft/cometbft/abci/types"
 
 	"cosmossdk.io/log"
@@ -30,6 +32,8 @@ func ProcessProposalHandler(
 	logger log.Logger,
 ) sdk.ProcessProposalHandler {
 	return func(ctx sdk.Context, req *abci.RequestProcessProposal) (*abci.ResponseProcessProposal, error) {
+		partialDecryptsInProposal := make(map[string]struct{})
+
 		for _, txBytes := range req.Txs {
 			if len(txBytes) < 2 {
 				continue
@@ -59,11 +63,18 @@ func ProcessProposalHandler(
 
 			// Validate injected partial decryption txs.
 			if tag == voteapi.TagSubmitPartialDecryption {
-				if err := validateInjectedPartialDecrypt(ctx, voteKeeper, txBytes, logger); err != nil {
+				key, err := validateInjectedPartialDecrypt(ctx, voteKeeper, txBytes, logger)
+				if err != nil {
 					logger.Error("ProcessProposal: rejecting block — invalid partial decrypt tx", "err", err)
 					sentry.CaptureErr(err, map[string]string{"handler": "ProcessProposal", "tag": "partial_decrypt"})
 					return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
 				}
+				if _, dup := partialDecryptsInProposal[key]; dup {
+					logger.Error("ProcessProposal: rejecting block — duplicate partial decrypt tx", "key", key)
+					sentry.CaptureErr(errInvalidInjectedTx("duplicate partial decrypt in proposal"), map[string]string{"handler": "ProcessProposal", "tag": "partial_decrypt"})
+					return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
+				}
+				partialDecryptsInProposal[key] = struct{}{}
 				continue
 			}
 
@@ -135,51 +146,51 @@ func validateInjectedAck(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txBytes
 // Threshold > 0, the creator is a ceremony validator whose ShamirIndex
 // matches the submitted ValidatorIndex, the validator has not already
 // submitted, and the creator matches the current block proposer.
-func validateInjectedPartialDecrypt(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txBytes []byte, logger log.Logger) error {
+func validateInjectedPartialDecrypt(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txBytes []byte, logger log.Logger) (string, error) {
 	_, msg, err := voteapi.DecodeCeremonyTx(txBytes)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	pdMsg, ok := msg.(*types.MsgSubmitPartialDecryption)
 	if !ok {
-		return errInvalidInjectedTx("expected MsgSubmitPartialDecryption")
+		return "", errInvalidInjectedTx("expected MsgSubmitPartialDecryption")
 	}
 
 	kvStore := voteKeeper.OpenKVStore(ctx)
 	round, err := voteKeeper.GetVoteRound(kvStore, pdMsg.VoteRoundId)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	if round.Status != types.SessionStatus_SESSION_STATUS_TALLYING {
-		return errInvalidInjectedTx("round is not TALLYING")
+		return "", errInvalidInjectedTx("round is not TALLYING")
 	}
 	if round.Threshold == 0 {
-		return errInvalidInjectedTx("round is not in threshold mode")
+		return "", errInvalidInjectedTx("round is not in threshold mode")
 	}
 
 	ceremonyVal, found := votekeeper.FindValidatorInRoundCeremony(round, pdMsg.Creator)
 	if !found {
-		return errInvalidInjectedTx("creator is not a ceremony validator")
+		return "", errInvalidInjectedTx("creator is not a ceremony validator")
 	}
 	if pdMsg.ValidatorIndex != ceremonyVal.ShamirIndex {
-		return errInvalidInjectedTx("validator_index does not match stored shamir_index")
+		return "", errInvalidInjectedTx("validator_index does not match stored shamir_index")
 	}
 
 	has, err := voteKeeper.HasPartialDecryptionsFromValidator(kvStore, pdMsg.VoteRoundId, pdMsg.ValidatorIndex)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if has {
-		return errInvalidInjectedTx("validator has already submitted partial decryptions")
+		return "", errInvalidInjectedTx("validator has already submitted partial decryptions")
 	}
 
 	if err := voteKeeper.ValidateProposerIsCreator(ctx, pdMsg.Creator, "MsgSubmitPartialDecryption"); err != nil {
-		return errInvalidInjectedTx(err.Error())
+		return "", errInvalidInjectedTx(err.Error())
 	}
 
-	return nil
+	return fmt.Sprintf("%x/%d", pdMsg.VoteRoundId, pdMsg.ValidatorIndex), nil
 }
 
 // validateInjectedTally checks that an injected MsgSubmitTally is valid:

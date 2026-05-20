@@ -17,8 +17,8 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/valargroup/vote-sdk/app"
 	voteapi "github.com/valargroup/vote-sdk/api"
+	"github.com/valargroup/vote-sdk/app"
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/testutil"
 	"github.com/valargroup/vote-sdk/x/vote/types"
@@ -190,9 +190,9 @@ func TestProcessProposalAckValidation(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		setup    func()                   // mutate state before this case
-		txs      func() [][]byte          // txs for the ProcessProposal request
+		name       string
+		setup      func()          // mutate state before this case
+		txs        func() [][]byte // txs for the ProcessProposal request
 		wantAccept bool
 	}{
 		{
@@ -395,7 +395,7 @@ func TestProcessProposalTallyValidation(t *testing.T) {
 			wantAccept: false,
 		},
 		{
-			name: "malformed tally tx → reject",
+			name:  "malformed tally tx → reject",
 			setup: func() {},
 			txs: func() [][]byte {
 				return [][]byte{{voteapi.TagSubmitTally, 0xFF, 0xFF}}
@@ -418,6 +418,35 @@ func TestProcessProposalTallyValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestProcessProposalRejectsDuplicatePartialDecryptTxsInSameBlock(t *testing.T) {
+	ta := testutil.SetupTestApp(t)
+	valAddr := ta.ValidatorOperAddr()
+	roundID := bytes.Repeat([]byte{0x9D}, 32)
+
+	ta.SeedTallyingRoundThreshold(
+		roundID,
+		1,
+		testutil.SampleProposals(),
+		[]*types.ValidatorPallasKey{{
+			ValidatorAddress: valAddr,
+			PallasPk:         elgamal.PallasGenerator().ToAffineCompressed(),
+			ShamirIndex:      1,
+		}},
+		[][]byte{elgamal.PallasGenerator().ToAffineCompressed()},
+	)
+
+	msg := &types.MsgSubmitPartialDecryption{
+		Creator:        valAddr,
+		VoteRoundId:    roundID,
+		ValidatorIndex: 1,
+	}
+	txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagSubmitPartialDecryption)
+	require.NoError(t, err)
+
+	resp := ta.CallProcessProposal([][]byte{txBytes, txBytes})
+	require.Equal(t, abci.ResponseProcessProposal_REJECT, resp.Status)
 }
 
 // ---------------------------------------------------------------------------
@@ -663,4 +692,3 @@ func TestPrepareProposalDKGContributionAcceptedByProcessProposal(t *testing.T) {
 		})
 	}
 }
-
