@@ -295,10 +295,12 @@ func TestProcessProposalAcceptsDKGContribution(t *testing.T) {
 
 	validators := []*types.ValidatorPallasKey{{ValidatorAddress: valAddr}}
 	roundID := ta.SeedRegisteringCeremony(validators)
+	_, commitment := elgamal.KeyGen(rand.Reader)
 
 	msg := &types.MsgContributeDKG{
-		Creator:     valAddr,
-		VoteRoundId: roundID,
+		Creator:            valAddr,
+		VoteRoundId:        roundID,
+		FeldmanCommitments: [][]byte{commitment.Point.ToAffineCompressed()},
 	}
 	txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagContributeDKG)
 	require.NoError(t, err)

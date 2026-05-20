@@ -456,13 +456,16 @@ func TestValidateInjectedDKGContribution(t *testing.T) {
 	valAddr := ta.ValidatorOperAddr()
 
 	validators := []*types.ValidatorPallasKey{{ValidatorAddress: valAddr}}
+	_, commitment := elgamal.KeyGen(rand.Reader)
+	validCommitments := [][]byte{commitment.Point.ToAffineCompressed()}
 
 	var currentRoundID []byte
 
 	buildDKGTx := func(creator string, roundID []byte) []byte {
 		msg := &types.MsgContributeDKG{
-			Creator:     creator,
-			VoteRoundId: roundID,
+			Creator:            creator,
+			VoteRoundId:        roundID,
+			FeldmanCommitments: validCommitments,
 		}
 		txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagContributeDKG)
 		require.NoError(t, err)
