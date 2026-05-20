@@ -1,6 +1,8 @@
 package app
 
 import (
+	"fmt"
+
 	abci "github.com/cometbft/cometbft/abci/types"
 
 	"cosmossdk.io/log"
@@ -8,6 +10,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	voteapi "github.com/valargroup/vote-sdk/api"
+	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/sentry"
 	votekeeper "github.com/valargroup/vote-sdk/x/vote/keeper"
 	"github.com/valargroup/vote-sdk/x/vote/types"
@@ -163,6 +166,22 @@ func validateInjectedPartialDecrypt(ctx sdk.Context, voteKeeper *votekeeper.Keep
 	}
 	if err := voteKeeper.ValidatePartialDecryptionCompleteness(kvStore, round, pdMsg.Entries); err != nil {
 		return errInvalidInjectedTx(err.Error())
+	}
+	for i, entry := range pdMsg.Entries {
+		if _, err := elgamal.UnmarshalPoint(entry.PartialDecrypt); err != nil {
+			return errInvalidInjectedTx(fmt.Sprintf("entry[%d] partial_decrypt is not a valid Pallas point: %v", i, err))
+		}
+		if err := votekeeper.ValidateEntryBounds(round, entry.ProposalId, entry.VoteDecision); err != nil {
+			return errInvalidInjectedTx(fmt.Sprintf("entry[%d]: %v", i, err))
+		}
+		accBytes, err := voteKeeper.GetTally(kvStore, pdMsg.VoteRoundId, entry.ProposalId, entry.VoteDecision)
+		if err != nil {
+			return err
+		}
+		if accBytes == nil {
+			return errInvalidInjectedTx(fmt.Sprintf("entry[%d] no accumulator for (proposal=%d, decision=%d)",
+				i, entry.ProposalId, entry.VoteDecision))
+		}
 	}
 
 	ceremonyVal, found := votekeeper.FindValidatorInRoundCeremony(round, pdMsg.Creator)

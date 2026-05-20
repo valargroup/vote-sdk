@@ -462,6 +462,16 @@ func TestProcessProposalRejectsIncompletePartialDecryptions(t *testing.T) {
 
 	resp := ta.CallProcessProposal([][]byte{txBytes})
 	require.Equal(t, abci.ResponseProcessProposal_REJECT, resp.Status)
+
+	msg.Entries = []*types.PartialDecryptionEntry{
+		{ProposalId: 1, VoteDecision: 0, PartialDecrypt: nil},
+		{ProposalId: 1, VoteDecision: 1, PartialDecrypt: elgamal.PallasGenerator().ToAffineCompressed()},
+	}
+	txBytes, err = voteapi.EncodeCeremonyTx(msg, voteapi.TagSubmitPartialDecryption)
+	require.NoError(t, err)
+
+	resp = ta.CallProcessProposal([][]byte{txBytes})
+	require.Equal(t, abci.ResponseProcessProposal_REJECT, resp.Status)
 }
 
 // ---------------------------------------------------------------------------
