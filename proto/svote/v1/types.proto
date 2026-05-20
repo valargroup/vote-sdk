@@ -19,6 +19,7 @@ enum SessionStatus {
 message VoteOption {
   uint32 index = 1; // 0-indexed
   string label = 2; // e.g. "Support", "Oppose"
+  string description = 3; // Optional explanatory text shown under the option label
 }
 
 // Proposal represents a single ballot option within a voting session.
@@ -239,6 +240,7 @@ message OptionSummary {
   string label        = 2;
   uint64 ballot_count = 3; // shares revealed for this (proposal, decision)
   uint64 total_value  = 4; // only populated when status = FINALIZED
+  string description  = 5; // Optional explanatory text shown under the option label
 }
 
 // CeremonyStatus represents the lifecycle state of the EA key ceremony.

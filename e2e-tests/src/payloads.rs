@@ -141,6 +141,9 @@ fn encode_vote_option(value: &Value) -> Vec<u8> {
     let mut out = Vec::new();
     push_uint64(&mut out, 1, required_u64(value, "index"));
     push_string(&mut out, 2, required_str(value, "label"));
+    if let Some(description) = value.get("description").and_then(Value::as_str) {
+        push_string(&mut out, 3, description);
+    }
     out
 }
 
