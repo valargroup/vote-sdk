@@ -186,6 +186,10 @@ func (ms msgServer) ContributeDKG(goCtx context.Context, msg *types.MsgContribut
 			return nil, fmt.Errorf("%w: ephemeral_pk for %s: %v",
 				types.ErrInvalidPallasPoint, p.ValidatorAddress, err)
 		}
+		if len(p.Ciphertext) != elgamal.CompressedPointSize+16 {
+			return nil, fmt.Errorf("%w: ciphertext for %s must be %d bytes, got %d",
+				types.ErrPayloadMismatch, p.ValidatorAddress, elgamal.CompressedPointSize+16, len(p.Ciphertext))
+		}
 	}
 
 	// Store the contribution.

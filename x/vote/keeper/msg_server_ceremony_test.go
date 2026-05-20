@@ -1492,6 +1492,42 @@ func (s *MsgServerTestSuite) TestContributeDKG_Rejects() {
 			},
 			errContains: "invalid pallas point",
 		},
+		{
+			name: "payload ciphertext too short",
+			setup: func() ([]byte, []string) {
+				roundID, addrs, _ := s.createPendingRoundWithValidators(2)
+				return roundID, addrs
+			},
+			msg: func(roundID []byte, addrs []string) *types.MsgContributeDKG {
+				payloads := makeDKGPayloads(addrs, addrs[0])
+				payloads[0].Ciphertext = bytes.Repeat([]byte{0x01}, 47)
+				return &types.MsgContributeDKG{
+					Creator:            addrs[0],
+					VoteRoundId:        roundID,
+					FeldmanCommitments: makeDKGCommitments(2),
+					Payloads:           payloads,
+				}
+			},
+			errContains: "ciphertext",
+		},
+		{
+			name: "payload ciphertext too long",
+			setup: func() ([]byte, []string) {
+				roundID, addrs, _ := s.createPendingRoundWithValidators(2)
+				return roundID, addrs
+			},
+			msg: func(roundID []byte, addrs []string) *types.MsgContributeDKG {
+				payloads := makeDKGPayloads(addrs, addrs[0])
+				payloads[0].Ciphertext = bytes.Repeat([]byte{0x01}, 49)
+				return &types.MsgContributeDKG{
+					Creator:            addrs[0],
+					VoteRoundId:        roundID,
+					FeldmanCommitments: makeDKGCommitments(2),
+					Payloads:           payloads,
+				}
+			},
+			errContains: "ciphertext",
+		},
 	}
 
 	for _, tc := range tests {
