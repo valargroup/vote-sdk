@@ -30,6 +30,10 @@ const DefaultDealTimeout uint64 = 600
 // with tally_timed_out=true and empty results to prevent permanent liveness loss.
 const DefaultTallyTimeout uint64 = 21600
 
+// TallyBSGSBound is the exclusive upper bound for totals recoverable by the
+// default baby-step giant-step table used by threshold tally proposers.
+const TallyBSGSBound uint64 = 1 << 28
+
 // RoundIDLen is the fixed byte-length of a VoteRoundId (SHA-256 digest).
 const RoundIDLen = 32
 

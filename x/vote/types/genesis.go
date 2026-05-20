@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+
+	"github.com/valargroup/vote-sdk/crypto/elgamal"
 )
 
 // ValidateAndNormalizeVoteManagerSet parses each address through bech32, rejects
@@ -109,6 +111,9 @@ func ValidateGenesisState(gs *GenesisState) error {
 		if len(result.VoteRoundId) != RoundIDLen {
 			return fmt.Errorf("tally_results[%d].vote_round_id is %d bytes, expected %d", i, len(result.VoteRoundId), RoundIDLen)
 		}
+		if result.TotalValue >= TallyBSGSBound {
+			return fmt.Errorf("tally_results[%d].total_value %d exceeds BSGS bound %d", i, result.TotalValue, TallyBSGSBound)
+		}
 	}
 
 	// Validate Pallas keys.
@@ -119,6 +124,9 @@ func ValidateGenesisState(gs *GenesisState) error {
 		if len(vpk.PallasPk) != 32 {
 			return fmt.Errorf("pallas_keys[%d].pallas_pk is %d bytes, expected 32", i, len(vpk.PallasPk))
 		}
+		if _, err := elgamal.UnmarshalPublicKey(vpk.PallasPk); err != nil {
+			return fmt.Errorf("pallas_keys[%d].pallas_pk is invalid: %w", i, err)
+		}
 	}
 
 	// Validate tally accumulators.
@@ -128,6 +136,13 @@ func ValidateGenesisState(gs *GenesisState) error {
 		}
 		if len(acc.Ciphertext) != 64 {
 			return fmt.Errorf("tally_accumulators[%d].ciphertext is %d bytes, expected 64", i, len(acc.Ciphertext))
+		}
+		ct, err := elgamal.UnmarshalCiphertext(acc.Ciphertext)
+		if err != nil {
+			return fmt.Errorf("tally_accumulators[%d].ciphertext is invalid: %w", i, err)
+		}
+		if ct.C1 == nil || ct.C1.IsIdentity() || ct.C2 == nil || ct.C2.IsIdentity() {
+			return fmt.Errorf("tally_accumulators[%d].ciphertext contains identity point", i)
 		}
 	}
 
@@ -148,6 +163,16 @@ func ValidateGenesisState(gs *GenesisState) error {
 		}
 		if len(pd.PartialDecrypt) != 32 {
 			return fmt.Errorf("partial_decryptions[%d].partial_decrypt is %d bytes, expected 32", i, len(pd.PartialDecrypt))
+		}
+		point, err := elgamal.UnmarshalPoint(pd.PartialDecrypt)
+		if err != nil {
+			return fmt.Errorf("partial_decryptions[%d].partial_decrypt is invalid: %w", i, err)
+		}
+		if point.IsIdentity() {
+			return fmt.Errorf("partial_decryptions[%d].partial_decrypt must not be identity", i)
+		}
+		if len(pd.DleqProof) != 0 && len(pd.DleqProof) != elgamal.DLEQProofSize {
+			return fmt.Errorf("partial_decryptions[%d].dleq_proof is %d bytes, expected %d", i, len(pd.DleqProof), elgamal.DLEQProofSize)
 		}
 	}
 

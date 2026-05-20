@@ -13,6 +13,9 @@ func (k *Keeper) InitGenesis(kvStore store.KVStore, genesis *types.GenesisState)
 	if genesis == nil {
 		return nil
 	}
+	if err := types.ValidateGenesisState(genesis); err != nil {
+		return fmt.Errorf("validate genesis: %w", err)
+	}
 
 	// Restore vote rounds.
 	for _, round := range genesis.Rounds {

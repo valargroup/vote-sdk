@@ -13,6 +13,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/runtime"
 	"github.com/cosmos/cosmos-sdk/testutil"
 
+	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	svtest "github.com/valargroup/vote-sdk/testutil"
 	"github.com/valargroup/vote-sdk/x/vote/keeper"
 	"github.com/valargroup/vote-sdk/x/vote/types"
@@ -108,7 +109,7 @@ func TestExportImportGenesis(t *testing.T) {
 	// Pallas keys.
 	require.NoError(t, k.SetPallasKey(kvStore, &types.ValidatorPallasKey{
 		ValidatorAddress: "svvaloper1abc",
-		PallasPk:         bytes.Repeat([]byte{0xCC}, 32),
+		PallasPk:         elgamal.PallasGenerator().ToAffineCompressed(),
 	}))
 
 	// Commitment roots (scoped to roundID).
@@ -125,18 +126,18 @@ func TestExportImportGenesis(t *testing.T) {
 	pdEntry1 := &types.PartialDecryptionEntry{
 		ProposalId:     1,
 		VoteDecision:   0,
-		PartialDecrypt: bytes.Repeat([]byte{0xF1}, 32),
+		PartialDecrypt: elgamal.PallasGenerator().ToAffineCompressed(),
 	}
 	pdEntry2 := &types.PartialDecryptionEntry{
 		ProposalId:     1,
 		VoteDecision:   1,
-		PartialDecrypt: bytes.Repeat([]byte{0xF2}, 32),
+		PartialDecrypt: elgamal.PallasGenerator().ToAffineCompressed(),
 	}
 	require.NoError(t, k.SetPartialDecryptions(kvStore, roundID, 1, []*types.PartialDecryptionEntry{pdEntry1, pdEntry2}))
 	pdEntry3 := &types.PartialDecryptionEntry{
 		ProposalId:     1,
 		VoteDecision:   0,
-		PartialDecrypt: bytes.Repeat([]byte{0xF3}, 32),
+		PartialDecrypt: elgamal.PallasGenerator().ToAffineCompressed(),
 	}
 	require.NoError(t, k.SetPartialDecryptions(kvStore, roundID, 2, []*types.PartialDecryptionEntry{pdEntry3}))
 
