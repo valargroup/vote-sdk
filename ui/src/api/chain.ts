@@ -259,6 +259,11 @@ export interface ChainRound {
     id: number;
     title: string;
     description: string;
+    options?: Array<{
+      index?: number;
+      label?: string;
+      description?: string;
+    }>;
   }>;
   proposals_hash?: string;
   ea_pk?: string;
@@ -300,6 +305,7 @@ export interface TallyResult {
 export interface VoteSummaryOptionResponse {
   index?: number;
   label?: string;
+  description?: string;
   ballot_count?: number | string; // uint64: encoding/json serializes as number
   total_value?: number | string;  // uint64: encoding/json serializes as number
 }

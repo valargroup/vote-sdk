@@ -5,6 +5,7 @@ export type RoundStatus = "draft" | "published" | "archived";
 export interface ProposalOption {
   id: string;
   label: string;
+  description?: string;
 }
 
 export interface ProposalMetadata {

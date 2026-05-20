@@ -22,7 +22,11 @@ function generateExportJson(round: VotingRound) {
         title: p.title,
         description: p.description,
         type: p.type,
-        options: p.options.map((o) => ({ id: o.id, label: o.label })),
+        options: p.options.map((o) => ({
+          id: o.id,
+          label: o.label,
+          description: o.description ?? "",
+        })),
         zipNumber: p.zipNumber,
         forumURL: p.forumURL,
         metadata: p.metadata,

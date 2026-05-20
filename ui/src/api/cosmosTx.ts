@@ -355,11 +355,12 @@ const MsgClearRoundEndorsementProto = {
 
 // ── Protobuf type: MsgCreateVotingSession ───────────────────────
 
-// message VoteOption { uint32 index = 1; string label = 2; }
-function encodeVoteOption(opt: { index: number; label: string }): ProtoWriter {
+// message VoteOption { uint32 index = 1; string label = 2; string description = 3; }
+function encodeVoteOption(opt: { index: number; label: string; description?: string }): ProtoWriter {
   const w = ProtoWriter.create();
   if (opt.index !== 0) w.uint32(8).uint32(opt.index);   // field 1, wire 0
   if (opt.label !== "") w.uint32(18).string(opt.label);  // field 2, wire 2
+  if (opt.description) w.uint32(26).string(opt.description); // field 3, wire 2
   return w;
 }
 
@@ -368,7 +369,7 @@ function encodeProposal(p: {
   id: number;
   title: string;
   description: string;
-  options: Array<{ index: number; label: string }>;
+  options: Array<{ index: number; label: string; description?: string }>;
   zipNumber?: string;
   forumURL?: string;
 }): ProtoWriter {
@@ -396,7 +397,7 @@ export interface CreateVotingSessionValue {
     id: number;
     title: string;
     description: string;
-    options: Array<{ index: number; label: string }>;
+    options: Array<{ index: number; label: string; description?: string }>;
     zipNumber?: string;
     forumURL?: string;
   }>;
@@ -677,7 +678,7 @@ function computeProposalsHash(
     id: number;
     title: string;
     description: string;
-    options: Array<{ index: number; label: string }>;
+    options: Array<{ index: number; label: string; description?: string }>;
   }>,
 ): Uint8Array {
   const canonical = JSON.stringify(
@@ -685,7 +686,12 @@ function computeProposalsHash(
       id: p.id,
       title: p.title,
       description: p.description,
-      options: p.options.map((o) => ({ index: o.index, label: o.label })),
+      options: p.options.map((o) => {
+        const description = o.description ?? "";
+        return description === ""
+          ? { index: o.index, label: o.label }
+          : { index: o.index, label: o.label, description };
+      }),
     })),
   );
   const encoded = new TextEncoder().encode(canonical);
@@ -935,7 +941,7 @@ export async function createVotingSession(
       id: number;
       title: string;
       description: string;
-      options: Array<{ index: number; label: string }>;
+      options: Array<{ index: number; label: string; description?: string }>;
       zipNumber?: string;
       forumURL?: string;
     }>;

@@ -21,7 +21,7 @@ interface DecodedProposal {
   id: number;
   title: string;
   description: string;
-  options: Array<{ index: number; label: string }>;
+  options: Array<{ index: number; label: string; description: string }>;
   zipNumber: string;
   forumURL: string;
 }
@@ -289,10 +289,11 @@ function decodeAuthorizedSend(bytes: Uint8Array): CoordinatorActionDetail[] {
   ];
 }
 
-function decodeVoteOption(bytes: Uint8Array): { index: number; label: string } {
+function decodeVoteOption(bytes: Uint8Array): { index: number; label: string; description: string } {
   const reader = new ProtoReader(bytes);
   let index = 0;
   let label = "";
+  let description = "";
   while (!reader.eof()) {
     const field = reader.readField();
     if (!field) break;
@@ -305,11 +306,15 @@ function decodeVoteOption(bytes: Uint8Array): { index: number; label: string } {
         expectWire(field, 2, "option.label");
         label = reader.readString();
         break;
+      case 3:
+        expectWire(field, 2, "option.description");
+        description = reader.readString();
+        break;
       default:
         reader.skip(field.wireType);
     }
   }
-  return { index, label };
+  return { index, label, description };
 }
 
 function decodeProposal(bytes: Uint8Array): DecodedProposal {
@@ -317,7 +322,7 @@ function decodeProposal(bytes: Uint8Array): DecodedProposal {
   let id = 0;
   let title = "";
   let description = "";
-  const options: Array<{ index: number; label: string }> = [];
+  const options: Array<{ index: number; label: string; description: string }> = [];
   let zipNumber = "";
   let forumURL = "";
   while (!reader.eof()) {
@@ -358,7 +363,9 @@ function decodeProposal(bytes: Uint8Array): DecodedProposal {
 function describeProposals(proposals: DecodedProposal[]): string {
   if (proposals.length === 0) return "(empty)";
   return proposals.map((p) => {
-    const options = p.options.map((o) => `${o.index}: ${o.label}`).join(", ");
+    const options = p.options
+      .map((o) => `${o.index}: ${o.label}${o.description ? ` (${o.description})` : ""}`)
+      .join(", ");
     return [
       `${p.id}: ${p.title || "(untitled)"}`,
       p.description ? `description: ${p.description}` : "",

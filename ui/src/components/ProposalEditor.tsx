@@ -37,12 +37,12 @@ export function ProposalEditor({ proposal, onUpdate, readonly = false }: Proposa
     const options =
       type === "binary"
         ? [
-            { id: uuidv4(), label: "Support" },
-            { id: uuidv4(), label: "Oppose" },
+            { id: uuidv4(), label: "Support", description: "" },
+            { id: uuidv4(), label: "Oppose", description: "" },
           ]
         : [
-            { id: uuidv4(), label: "Option A" },
-            { id: uuidv4(), label: "Option B" },
+            { id: uuidv4(), label: "Option A", description: "" },
+            { id: uuidv4(), label: "Option B", description: "" },
           ];
     onUpdate({ type, options });
   };
@@ -55,12 +55,20 @@ export function ProposalEditor({ proposal, onUpdate, readonly = false }: Proposa
     });
   };
 
+  const handleOptionDescriptionChange = (optionId: string, description: string) => {
+    onUpdate({
+      options: proposal.options.map((o) =>
+        o.id === optionId ? { ...o, description } : o
+      ),
+    });
+  };
+
   const handleAddOption = () => {
     if (!canAddOption) return;
     onUpdate({
       options: [
         ...proposal.options,
-        { id: uuidv4(), label: "" },
+        { id: uuidv4(), label: "", description: "" },
       ],
     });
   };
@@ -144,12 +152,21 @@ export function ProposalEditor({ proposal, onUpdate, readonly = false }: Proposa
           </label>
           <div className="space-y-1.5">
             {proposal.options.map((option, i) => (
-              <div key={option.id} className="flex items-center gap-2">
+              <div key={option.id} className="flex items-start gap-2">
                 <span
-                  className="w-2.5 h-2.5 rounded-full shrink-0"
+                  className="w-2.5 h-2.5 rounded-full shrink-0 mt-1"
                   style={{ backgroundColor: optionColor(i, proposal.options.length) }}
                 />
-                <span className="text-xs text-text-primary">{option.label || "Unnamed"}</span>
+                <div className="min-w-0">
+                  <p className="text-xs text-text-primary truncate">
+                    {option.label || "Unnamed"}
+                  </p>
+                  {option.description && (
+                    <p className="text-[11px] text-text-muted leading-snug mt-0.5">
+                      {option.description}
+                    </p>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -196,25 +213,35 @@ export function ProposalEditor({ proposal, onUpdate, readonly = false }: Proposa
 
         {/* Options Editor */}
         <div>
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             {proposal.options.map((option, i) => (
-              <div key={option.id} className="flex items-center gap-2">
+              <div key={option.id} className="grid grid-cols-[10px_1fr_auto] gap-2 items-start">
                 <span
-                  className="w-2.5 h-2.5 rounded-full shrink-0"
+                  className="w-2.5 h-2.5 rounded-full shrink-0 mt-3"
                   style={{ backgroundColor: optionColor(i, proposal.options.length) }}
                 />
-                <input
-                  type="text"
-                  value={option.label}
-                  onChange={(e) => handleOptionChange(option.id, e.target.value)}
-                  readOnly={readonly}
-                  className={`flex-1 px-2.5 py-1.5 bg-surface-2 border border-border-subtle rounded-md text-xs text-text-primary focus:outline-none focus:border-accent/50 ${readonly ? "opacity-60 cursor-default" : ""}`}
-                  placeholder="Option label"
-                />
+                <div className="space-y-1.5 min-w-0">
+                  <input
+                    type="text"
+                    value={option.label}
+                    onChange={(e) => handleOptionChange(option.id, e.target.value)}
+                    readOnly={readonly}
+                    className={`w-full px-2.5 py-1.5 bg-surface-2 border border-border-subtle rounded-md text-xs text-text-primary focus:outline-none focus:border-accent/50 ${readonly ? "opacity-60 cursor-default" : ""}`}
+                    placeholder="Option label"
+                  />
+                  <textarea
+                    value={option.description ?? ""}
+                    onChange={(e) => handleOptionDescriptionChange(option.id, e.target.value)}
+                    readOnly={readonly}
+                    rows={2}
+                    className={`w-full px-2.5 py-1.5 bg-surface-2 border border-border-subtle rounded-md text-[11px] leading-relaxed text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 resize-none ${readonly ? "opacity-60 cursor-default" : ""}`}
+                    placeholder="Option description"
+                  />
+                </div>
                 {!readonly && proposal.type === "multi-choice" && proposal.options.length > 2 && (
                   <button
                     onClick={() => handleRemoveOption(option.id)}
-                    className="p-1 text-text-muted hover:text-danger rounded cursor-pointer"
+                    className="p-1 mt-1 text-text-muted hover:text-danger rounded cursor-pointer"
                   >
                     <Trash2 size={12} />
                   </button>
