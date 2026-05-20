@@ -45,27 +45,44 @@ func (k *Keeper) AddToTally(kvStore store.KVStore, roundID []byte, proposalID, d
 		// storing. Subsequent additions go through UnmarshalCiphertext anyway,
 		// but skipping this check on the first share would leave a malformed
 		// baseline in the KV store that breaks all later accumulations.
-		if _, err := elgamal.UnmarshalCiphertext(encShareBytes); err != nil {
-			return fmt.Errorf("failed to unmarshal first enc_share: %w", err)
+		if _, err := validateTallyCiphertext("first enc_share", encShareBytes); err != nil {
+			return err
 		}
 		return kvStore.Set(key, encShareBytes)
 	}
 
 	// Deserialize both, HomomorphicAdd, serialize result.
-	acc, err := elgamal.UnmarshalCiphertext(existing)
+	acc, err := validateTallyCiphertext("accumulator", existing)
 	if err != nil {
-		return fmt.Errorf("failed to unmarshal accumulator: %w", err)
+		return err
 	}
-	share, err := elgamal.UnmarshalCiphertext(encShareBytes)
+	share, err := validateTallyCiphertext("enc_share", encShareBytes)
 	if err != nil {
-		return fmt.Errorf("failed to unmarshal enc_share: %w", err)
+		return err
 	}
 	result := elgamal.HomomorphicAdd(acc, share)
+	if result.C1 == nil || result.C1.IsIdentity() || result.C2 == nil || result.C2.IsIdentity() {
+		return fmt.Errorf("accumulated ciphertext contains identity point")
+	}
 	resultBytes, err := elgamal.MarshalCiphertext(result)
 	if err != nil {
 		return fmt.Errorf("failed to marshal accumulated ciphertext: %w", err)
 	}
 	return kvStore.Set(key, resultBytes)
+}
+
+func validateTallyCiphertext(label string, data []byte) (*elgamal.Ciphertext, error) {
+	ct, err := elgamal.UnmarshalCiphertext(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal %s: %w", label, err)
+	}
+	if ct.C1 == nil || ct.C1.IsIdentity() {
+		return nil, fmt.Errorf("%s C1 must not be the identity point", label)
+	}
+	if ct.C2 == nil || ct.C2.IsIdentity() {
+		return nil, fmt.Errorf("%s C2 must not be the identity point", label)
+	}
+	return ct, nil
 }
 
 // GetProposalTally returns all tallied ciphertexts for a (round, proposal) pair,

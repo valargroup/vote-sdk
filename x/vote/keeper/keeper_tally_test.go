@@ -3,6 +3,7 @@ package keeper_test
 import (
 	"bytes"
 
+	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
@@ -23,8 +24,7 @@ func (s *KeeperTestSuite) TestTally_AddAndAccumulate() {
 	s.SetupTest()
 	kv := s.keeper.OpenKVStore(s.ctx)
 
-	// Create a 64-byte ciphertext stub.
-	ct1 := bytes.Repeat([]byte{0x11}, 64)
+	ct1 := validCiphertextBytes(s.T(), 11)
 
 	// First add: stores directly.
 	s.Require().NoError(s.keeper.AddToTally(kv, testRoundID, 1, 1, ct1))
@@ -32,9 +32,25 @@ func (s *KeeperTestSuite) TestTally_AddAndAccumulate() {
 	s.Require().NoError(err)
 	s.Require().Equal(ct1, got, "first add should store the ciphertext directly")
 
-	// Note: We can't test real HomomorphicAdd with stub bytes (they won't
-	// deserialize as valid Pallas points). The msg_server_test uses real
-	// ElGamal ciphertexts for HomomorphicAdd integration testing.
+	ct2 := validCiphertextBytes(s.T(), 13)
+	s.Require().NoError(s.keeper.AddToTally(kv, testRoundID, 1, 1, ct2))
+
+	got, err = s.keeper.GetTally(kv, testRoundID, 1, 1)
+	s.Require().NoError(err)
+	s.Require().NotEqual(ct1, got, "second add should update the accumulator")
+}
+
+func (s *KeeperTestSuite) TestTally_RejectsIdentityCiphertext() {
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	err := s.keeper.AddToTally(kv, testRoundID, 1, 1, elgamal.IdentityCiphertextBytes())
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "identity point")
+
+	got, getErr := s.keeper.GetTally(kv, testRoundID, 1, 1)
+	s.Require().NoError(getErr)
+	s.Require().Nil(got, "identity ciphertext must not be stored as an accumulator")
 }
 
 func (s *KeeperTestSuite) TestTally_IndependentTuples() {

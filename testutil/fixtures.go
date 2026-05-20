@@ -5,6 +5,7 @@ package testutil
 
 import (
 	"bytes"
+	cryptorand "crypto/rand"
 	"encoding/binary"
 	"math/rand/v2"
 	"time"
@@ -194,11 +195,18 @@ func ValidCastVote(roundID []byte, anchorHeight uint64, nullifierSeed byte) *typ
 	}
 }
 
-// ValidRevealShare returns a MsgRevealShare with mock data.
-// EncShare is a valid ElGamal identity ciphertext (two identity Pallas points)
-// that passes keeper validation. The nullifierSeed only affects ShareNullifier.
+// ValidRevealShare returns a MsgRevealShare with mock data and a well-formed
+// non-identity ElGamal ciphertext. The nullifierSeed only affects ShareNullifier.
 func ValidRevealShare(roundID []byte, anchorHeight uint64, nullifierSeed byte) *types.MsgRevealShare {
-	encShare := elgamal.IdentityCiphertextBytes()
+	_, pk := elgamal.KeyGen(cryptorand.Reader)
+	ct, err := elgamal.Encrypt(pk, 0, cryptorand.Reader)
+	if err != nil {
+		panic(err)
+	}
+	encShare, err := elgamal.MarshalCiphertext(ct)
+	if err != nil {
+		panic(err)
+	}
 	return &types.MsgRevealShare{
 		ShareNullifier:           MakeNullifier(nullifierSeed),
 		EncShare:                 encShare,
