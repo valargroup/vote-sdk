@@ -1,6 +1,8 @@
 package app
 
 import (
+	"fmt"
+
 	abci "github.com/cometbft/cometbft/abci/types"
 
 	"cosmossdk.io/log"
@@ -219,6 +221,12 @@ func validateInjectedTally(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txByt
 	}
 	if err := voteKeeper.ValidateTallyCompleteness(kvStore, round, tallyMsg.Entries); err != nil {
 		return errInvalidInjectedTx(err.Error())
+	}
+	for i, entry := range tallyMsg.Entries {
+		if entry.TotalValue >= types.TallyBSGSBound {
+			return errInvalidInjectedTx(fmt.Sprintf("entry[%d] total_value %d exceeds BSGS bound %d",
+				i, entry.TotalValue, types.TallyBSGSBound))
+		}
 	}
 
 	return nil

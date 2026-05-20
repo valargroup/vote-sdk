@@ -17,8 +17,8 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/valargroup/vote-sdk/app"
 	voteapi "github.com/valargroup/vote-sdk/api"
+	"github.com/valargroup/vote-sdk/app"
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/testutil"
 	"github.com/valargroup/vote-sdk/x/vote/types"
@@ -190,9 +190,9 @@ func TestProcessProposalAckValidation(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		setup    func()                   // mutate state before this case
-		txs      func() [][]byte          // txs for the ProcessProposal request
+		name       string
+		setup      func()          // mutate state before this case
+		txs        func() [][]byte // txs for the ProcessProposal request
 		wantAccept bool
 	}{
 		{
@@ -344,12 +344,12 @@ func TestProcessProposalTallyValidation(t *testing.T) {
 	roundID := app.SeedVotingSession(setupMsg)
 
 	// Helper to build a tally tx.
-	buildTallyTx := func(rid []byte) []byte {
+	buildTallyTx := func(rid []byte, totalValue uint64) []byte {
 		msg := &types.MsgSubmitTally{
 			VoteRoundId: rid,
 			Creator:     valAddr,
 			Entries: []*types.TallyEntry{
-				{ProposalId: 0, VoteDecision: 0, TotalValue: 0},
+				{ProposalId: 0, VoteDecision: 0, TotalValue: totalValue},
 			},
 		}
 		txBytes, err := voteapi.EncodeVoteTx(msg)
@@ -369,7 +369,7 @@ func TestProcessProposalTallyValidation(t *testing.T) {
 				// Round stays ACTIVE; no time advancement.
 			},
 			txs: func() [][]byte {
-				return [][]byte{buildTallyTx(roundID)}
+				return [][]byte{buildTallyTx(roundID, 0)}
 			},
 			wantAccept: false,
 		},
@@ -379,9 +379,19 @@ func TestProcessProposalTallyValidation(t *testing.T) {
 				app.NextBlockAtTime(voteEndTime.Add(1 * time.Second))
 			},
 			txs: func() [][]byte {
-				return [][]byte{buildTallyTx(roundID)}
+				return [][]byte{buildTallyTx(roundID, 0)}
 			},
 			wantAccept: true,
+		},
+		{
+			name: "tally tx at BSGS bound → reject",
+			setup: func() {
+				// State already advanced; round is TALLYING.
+			},
+			txs: func() [][]byte {
+				return [][]byte{buildTallyTx(roundID, types.TallyBSGSBound)}
+			},
+			wantAccept: false,
 		},
 		{
 			name: "tally tx for non-existent round → reject",
@@ -390,12 +400,12 @@ func TestProcessProposalTallyValidation(t *testing.T) {
 			},
 			txs: func() [][]byte {
 				fakeRoundID := bytes.Repeat([]byte{0xFF}, 32)
-				return [][]byte{buildTallyTx(fakeRoundID)}
+				return [][]byte{buildTallyTx(fakeRoundID, 0)}
 			},
 			wantAccept: false,
 		},
 		{
-			name: "malformed tally tx → reject",
+			name:  "malformed tally tx → reject",
 			setup: func() {},
 			txs: func() [][]byte {
 				return [][]byte{{voteapi.TagSubmitTally, 0xFF, 0xFF}}
@@ -663,4 +673,3 @@ func TestPrepareProposalDKGContributionAcceptedByProcessProposal(t *testing.T) {
 		})
 	}
 }
-
