@@ -10,7 +10,7 @@ import (
 // ElGamal decryption: D_i = share_i * C1, tagged with the validator's
 // Shamir evaluation index.
 type PartialDecryption struct {
-	Index int         // validator index (matches Share.Index, 1-based)
+	Index int          // validator index (matches Share.Index, 1-based)
 	Di    curvey.Point // share_i * C1
 }
 
@@ -22,14 +22,14 @@ type PartialDecryption struct {
 // combined via Lagrange interpolation in the exponent (CombinePartials)
 // to recover sk * C1 without any party learning sk.
 func PartialDecrypt(share curvey.Scalar, C1 curvey.Point) (curvey.Point, error) {
-	if share == nil {
-		return nil, fmt.Errorf("shamir: PartialDecrypt: share must not be nil")
+	if share == nil || share.IsZero() {
+		return nil, fmt.Errorf("shamir: PartialDecrypt: share must not be nil or zero")
 	}
 	if C1 == nil {
 		return nil, fmt.Errorf("shamir: PartialDecrypt: C1 must not be nil")
 	}
-	if !C1.IsOnCurve() {
-		return nil, fmt.Errorf("shamir: PartialDecrypt: C1 is not on the Pallas curve")
+	if !C1.IsOnCurve() || C1.IsIdentity() {
+		return nil, fmt.Errorf("shamir: PartialDecrypt: C1 must be a valid non-identity point on the Pallas curve")
 	}
 	return C1.Mul(share), nil
 }
@@ -54,6 +54,9 @@ func CombinePartials(partials []PartialDecryption, t int) (curvey.Point, error) 
 	for i, p := range partials {
 		if p.Di == nil {
 			return nil, fmt.Errorf("shamir: CombinePartials: partial at position %d has nil Di", i)
+		}
+		if !p.Di.IsOnCurve() || p.Di.IsIdentity() {
+			return nil, fmt.Errorf("shamir: CombinePartials: partial at position %d has invalid Di", i)
 		}
 		indices[i] = p.Index
 	}

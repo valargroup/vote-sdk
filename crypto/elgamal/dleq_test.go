@@ -503,7 +503,7 @@ func TestPartialDecryptDLEQVerifyInputValidation(t *testing.T) {
 			VKi:         VKi,
 			C1:          ct.C1,
 			Di:          new(curvey.PointPallas).Identity(),
-			errContains: "verification failed",
+			errContains: "D_i must not be the identity point",
 		},
 	}
 
@@ -550,6 +550,12 @@ func TestPartialDecryptDLEQGenerateInputValidation(t *testing.T) {
 			share:       share,
 			C1:          nil,
 			errContains: "C1 must not be nil",
+		},
+		{
+			name:        "identity_C1",
+			share:       share,
+			C1:          new(curvey.PointPallas).Identity(),
+			errContains: "C1 must not be the identity point",
 		},
 	}
 

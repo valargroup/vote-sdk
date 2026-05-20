@@ -173,6 +173,9 @@ func GeneratePartialDecryptDLEQ(share curvey.Scalar, C1 curvey.Point) ([]byte, e
 	if !C1.IsOnCurve() {
 		return nil, fmt.Errorf("elgamal: GeneratePartialDecryptDLEQ: C1 is not on the Pallas curve")
 	}
+	if C1.IsIdentity() {
+		return nil, fmt.Errorf("elgamal: GeneratePartialDecryptDLEQ: C1 must not be the identity point")
+	}
 
 	G := PallasGenerator()
 	VKi := G.Mul(share)
@@ -227,6 +230,9 @@ func VerifyPartialDecryptDLEQ(proof []byte, VKi, C1, Di curvey.Point) error {
 	}
 	if !Di.IsOnCurve() {
 		return fmt.Errorf("elgamal: VerifyPartialDecryptDLEQ: D_i must be on the Pallas curve")
+	}
+	if Di.IsIdentity() {
+		return fmt.Errorf("elgamal: VerifyPartialDecryptDLEQ: D_i must not be the identity point")
 	}
 
 	e, err := new(curvey.ScalarPallas).SetBytes(proof[:CompressedPointSize])

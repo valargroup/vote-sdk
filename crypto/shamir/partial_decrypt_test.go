@@ -141,11 +141,19 @@ func TestPartialDecryptValidation(t *testing.T) {
 
 	_, err := PartialDecrypt(nil, G)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "share must not be nil")
+	require.Contains(t, err.Error(), "share must not be nil or zero")
 
 	_, err = PartialDecrypt(share, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "C1 must not be nil")
+
+	_, err = PartialDecrypt(new(curvey.ScalarPallas).Zero(), G)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "share must not be nil or zero")
+
+	_, err = PartialDecrypt(share, new(curvey.PointPallas).Identity())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "non-identity")
 }
 
 // TestOneWrongPartialCorruptsTally simulates a 3-of-5 threshold tally where
@@ -407,6 +415,14 @@ func TestCombinePartialsValidation(t *testing.T) {
 	}, 2)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "nil Di")
+
+	// Identity Di in one of the partials.
+	_, err = CombinePartials([]PartialDecryption{
+		{Index: 1, Di: di},
+		{Index: 2, Di: new(curvey.PointPallas).Identity()},
+	}, 2)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid Di")
 
 	// Duplicate indices.
 	_, err = CombinePartials([]PartialDecryption{
