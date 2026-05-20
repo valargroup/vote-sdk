@@ -38,16 +38,6 @@ func (k *Keeper) ValidatePartialDecryptionShape(
 		return fmt.Errorf("%w: entries cannot be empty", types.ErrInvalidField)
 	}
 
-	expected, err := k.CollectNonEmptyAccumulators(kvStore, round)
-	if err != nil {
-		return fmt.Errorf("failed to enumerate accumulators: %w", err)
-	}
-	if len(msg.Entries) != len(expected) {
-		return fmt.Errorf("%w: partial decryptions must cover %d accumulators, got %d",
-			types.ErrInvalidField, len(expected), len(msg.Entries))
-	}
-
-	seen := make(map[[2]uint32]bool, len(msg.Entries))
 	for i, entry := range msg.Entries {
 		if _, err := elgamal.UnmarshalPoint(entry.PartialDecrypt); err != nil {
 			return fmt.Errorf("%w: entry[%d] partial_decrypt is not a valid Pallas point: %v",
@@ -60,7 +50,19 @@ func (k *Keeper) ValidatePartialDecryptionShape(
 		if err := ValidateEntryBounds(round, entry.ProposalId, entry.VoteDecision); err != nil {
 			return fmt.Errorf("entry[%d]: %w", i, err)
 		}
+	}
 
+	expected, err := k.CollectNonEmptyAccumulators(kvStore, round)
+	if err != nil {
+		return fmt.Errorf("failed to enumerate accumulators: %w", err)
+	}
+	if len(msg.Entries) != len(expected) {
+		return fmt.Errorf("%w: partial decryptions must cover %d accumulators, got %d",
+			types.ErrInvalidField, len(expected), len(msg.Entries))
+	}
+
+	seen := make(map[[2]uint32]bool, len(msg.Entries))
+	for i, entry := range msg.Entries {
 		accKey := [2]uint32{entry.ProposalId, entry.VoteDecision}
 		if seen[accKey] {
 			return fmt.Errorf("%w: entry[%d] duplicate accumulator (proposal=%d, decision=%d)",

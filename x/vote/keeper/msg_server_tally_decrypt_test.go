@@ -1232,17 +1232,15 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_RejectsInvalidDleqProof
 	ct := cs.accumulatorCts[keeper.AccumulatorKey(1, 0)]
 	Di := ct.C1.Mul(share.Value)
 	bogusProof := bytes.Repeat([]byte{0xDE}, elgamal.DLEQProofSize)
+	entries := cs.buildValidEntriesForValidator(s, 0)
+	entries[0].PartialDecrypt = Di.ToAffineCompressed()
+	entries[0].DleqProof = bogusProof
 
 	_, err := s.msgServer.SubmitPartialDecryption(s.ctx, &types.MsgSubmitPartialDecryption{
 		VoteRoundId:    msgPdRoundID,
 		Creator:        validators[0].ValidatorAddress,
 		ValidatorIndex: 1,
-		Entries: []*types.PartialDecryptionEntry{{
-			ProposalId:     1,
-			VoteDecision:   0,
-			PartialDecrypt: Di.ToAffineCompressed(),
-			DleqProof:      bogusProof,
-		}},
+		Entries:        entries,
 	})
 	s.Require().Error(err)
 	s.Require().ErrorIs(err, types.ErrInvalidField)
@@ -1260,18 +1258,16 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_RejectsBogusPartialDecr
 	fakeDi := ct.C1.Mul(fakeShare)
 	fakeProof, err := elgamal.GeneratePartialDecryptDLEQ(fakeShare, ct.C1)
 	s.Require().NoError(err)
+	entries := cs.buildValidEntriesForValidator(s, 0)
+	entries[0].PartialDecrypt = fakeDi.ToAffineCompressed()
+	entries[0].DleqProof = fakeProof
 
 	// The proof is internally consistent with fakeShare, but VK_0 is for the real share.
 	_, err = s.msgServer.SubmitPartialDecryption(s.ctx, &types.MsgSubmitPartialDecryption{
 		VoteRoundId:    msgPdRoundID,
 		Creator:        validators[0].ValidatorAddress,
 		ValidatorIndex: 1,
-		Entries: []*types.PartialDecryptionEntry{{
-			ProposalId:     1,
-			VoteDecision:   0,
-			PartialDecrypt: fakeDi.ToAffineCompressed(),
-			DleqProof:      fakeProof,
-		}},
+		Entries:        entries,
 	})
 	s.Require().Error(err)
 	s.Require().ErrorIs(err, types.ErrInvalidField)
