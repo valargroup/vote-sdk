@@ -12,8 +12,7 @@ orchard = { version = "=0.13.1", features = ["unstable-voting-circuits"] }
 voting-circuits = "0.6.0"
 vote-commitment-tree = "0.3.0"
 vote-commitment-tree-client = { version = "0.5.0", features = ["http"] }
-# Unreleased 0.10.0 commit that generates vote proofs with voting-circuits 0.6.0.
-zcash_voting = { git = "https://github.com/valargroup/zcash_voting", rev = "fd6f1b06c7f4e22017ef45eb60a695fe42c7d6cc" }
+zcash_voting = { git = "https://github.com/valargroup/zcash_voting", tag = "0.10.0" }
 
 # HTTP and JSON
 reqwest = { version = "0.12", features = ["blocking", "json"] }
