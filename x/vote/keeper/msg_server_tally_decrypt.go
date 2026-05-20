@@ -242,10 +242,6 @@ func (ms msgServer) SubmitPartialDecryption(goCtx context.Context, msg *types.Ms
 			types.ErrInvalidField, msg.Creator, msg.ValidatorIndex, msg.VoteRoundId)
 	}
 
-	if len(msg.Entries) == 0 {
-		return nil, fmt.Errorf("%w: entries cannot be empty", types.ErrInvalidField)
-	}
-
 	// Derive VK_i from Feldman commitments: VK_i = EvalCommitmentPolynomial(commitments, i).
 	// This replaces the old per-validator VK array with on-the-fly derivation from
 	// the t polynomial commitments stored on the round.
@@ -258,6 +254,10 @@ func (ms msgServer) SubmitPartialDecryption(goCtx context.Context, msg *types.Ms
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to derive VK_%d from Feldman commitments: %v",
 			types.ErrInvalidField, msg.ValidatorIndex, err)
+	}
+
+	if err := ms.k.ValidatePartialDecryptionShape(kvStore, round, msg); err != nil {
+		return nil, err
 	}
 
 	for i, entry := range msg.Entries {

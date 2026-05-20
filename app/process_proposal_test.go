@@ -436,10 +436,12 @@ func TestProcessProposalPartialDecryptValidation(t *testing.T) {
 	}
 	accumulators := seedTallyingRoundWithAccumulators(t, ta, roundID, 1, validators, [][]byte{vk}, eaPk)
 
-	firstAccumulator := accumulators[uint64(1)<<32|uint64(0)]
-	ct, err := elgamal.UnmarshalCiphertext(firstAccumulator)
-	require.NoError(t, err)
-	partial := ct.C1.Mul(share.Scalar).ToAffineCompressed()
+	partialFor := func(proposalID, decision uint32) []byte {
+		accumulator := accumulators[uint64(proposalID)<<32|uint64(decision)]
+		ct, err := elgamal.UnmarshalCiphertext(accumulator)
+		require.NoError(t, err)
+		return ct.C1.Mul(share.Scalar).ToAffineCompressed()
+	}
 
 	buildPartialTx := func(entries []*types.PartialDecryptionEntry) []byte {
 		msg := &types.MsgSubmitPartialDecryption{
@@ -453,65 +455,84 @@ func TestProcessProposalPartialDecryptValidation(t *testing.T) {
 		return txBytes
 	}
 
-	validEntry := func() *types.PartialDecryptionEntry {
-		return &types.PartialDecryptionEntry{
-			ProposalId:     1,
-			VoteDecision:   0,
-			PartialDecrypt: partial,
-			DleqProof:      bytes.Repeat([]byte{0xAB}, elgamal.DLEQProofSize),
+	validEntries := func() []*types.PartialDecryptionEntry {
+		var entries []*types.PartialDecryptionEntry
+		for _, proposalID := range []uint32{1, 2} {
+			for _, decision := range []uint32{0, 1} {
+				entries = append(entries, &types.PartialDecryptionEntry{
+					ProposalId:     proposalID,
+					VoteDecision:   decision,
+					PartialDecrypt: partialFor(proposalID, decision),
+					DleqProof:      bytes.Repeat([]byte{0xAB}, elgamal.DLEQProofSize),
+				})
+			}
 		}
+		return entries
 	}
 
 	tests := []struct {
 		name       string
-		entries    []*types.PartialDecryptionEntry
+		entries    func() []*types.PartialDecryptionEntry
 		wantAccept bool
 	}{
 		{
 			name:       "valid partial decryption shape in TALLYING state",
-			entries:    []*types.PartialDecryptionEntry{validEntry()},
+			entries:    validEntries,
 			wantAccept: true,
 		},
 		{
 			name:       "empty entries → reject",
-			entries:    nil,
+			entries:    func() []*types.PartialDecryptionEntry { return nil },
+			wantAccept: false,
+		},
+		{
+			name: "missing accumulator entry → reject",
+			entries: func() []*types.PartialDecryptionEntry {
+				return validEntries()[:3]
+			},
+			wantAccept: false,
+		},
+		{
+			name: "duplicate accumulator entry → reject",
+			entries: func() []*types.PartialDecryptionEntry {
+				entries := validEntries()
+				entries[1] = entries[0]
+				return entries
+			},
 			wantAccept: false,
 		},
 		{
 			name: "invalid partial_decrypt point → reject",
-			entries: []*types.PartialDecryptionEntry{{
-				ProposalId:     1,
-				VoteDecision:   0,
-				PartialDecrypt: bytes.Repeat([]byte{0xFF}, 32),
-				DleqProof:      bytes.Repeat([]byte{0xAB}, elgamal.DLEQProofSize),
-			}},
+			entries: func() []*types.PartialDecryptionEntry {
+				entries := validEntries()
+				entries[0].PartialDecrypt = bytes.Repeat([]byte{0xFF}, 32)
+				return entries
+			},
 			wantAccept: false,
 		},
 		{
 			name: "wrong DLEQ proof size → reject",
-			entries: []*types.PartialDecryptionEntry{{
-				ProposalId:     1,
-				VoteDecision:   0,
-				PartialDecrypt: partial,
-				DleqProof:      bytes.Repeat([]byte{0xAB}, elgamal.DLEQProofSize-1),
-			}},
+			entries: func() []*types.PartialDecryptionEntry {
+				entries := validEntries()
+				entries[0].DleqProof = bytes.Repeat([]byte{0xAB}, elgamal.DLEQProofSize-1)
+				return entries
+			},
 			wantAccept: false,
 		},
 		{
 			name: "invalid vote decision → reject",
-			entries: []*types.PartialDecryptionEntry{{
-				ProposalId:     1,
-				VoteDecision:   99,
-				PartialDecrypt: partial,
-				DleqProof:      bytes.Repeat([]byte{0xAB}, elgamal.DLEQProofSize),
-			}},
+			entries: func() []*types.PartialDecryptionEntry {
+				entries := validEntries()
+				entries[0].VoteDecision = 99
+				return entries
+			},
 			wantAccept: false,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			resp := ta.CallProcessProposal([][]byte{buildPartialTx(tc.entries)})
+			resp := ta.CallProcessProposal([][]byte{buildPartialTx(tc.entries())})
 			if tc.wantAccept {
 				require.Equal(t, abci.ResponseProcessProposal_ACCEPT, resp.Status)
 			} else {
