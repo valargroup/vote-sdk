@@ -5,6 +5,7 @@ import (
 
 	"cosmossdk.io/core/store"
 
+	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
@@ -22,6 +23,48 @@ type PartialDecryptionWithIndex struct {
 // use as a map key. proposalID occupies the high 32 bits.
 func AccumulatorKey(proposalID, decision uint32) uint64 {
 	return uint64(proposalID)<<32 | uint64(decision)
+}
+
+// ValidatePartialDecryptionShape validates the cheap deterministic checks for a
+// MsgSubmitPartialDecryption. It intentionally does not verify DLEQ proofs; the
+// keeper handler still performs the full cryptographic verification before
+// storing any partials.
+func (k *Keeper) ValidatePartialDecryptionShape(
+	kvStore store.KVStore,
+	round *types.VoteRound,
+	msg *types.MsgSubmitPartialDecryption,
+) error {
+	if len(msg.Entries) == 0 {
+		return fmt.Errorf("%w: entries cannot be empty", types.ErrInvalidField)
+	}
+
+	for i, entry := range msg.Entries {
+		if _, err := elgamal.UnmarshalPoint(entry.PartialDecrypt); err != nil {
+			return fmt.Errorf("%w: entry[%d] partial_decrypt is not a valid Pallas point: %v",
+				types.ErrInvalidField, i, err)
+		}
+		if len(entry.DleqProof) != elgamal.DLEQProofSize {
+			return fmt.Errorf("%w: entry[%d] dleq_proof must be %d bytes, got %d",
+				types.ErrInvalidField, i, elgamal.DLEQProofSize, len(entry.DleqProof))
+		}
+		if err := ValidateEntryBounds(round, entry.ProposalId, entry.VoteDecision); err != nil {
+			return fmt.Errorf("entry[%d]: %w", i, err)
+		}
+
+		accBytes, err := k.GetTally(kvStore, msg.VoteRoundId, entry.ProposalId, entry.VoteDecision)
+		if err != nil {
+			return fmt.Errorf("entry[%d]: failed to load tally accumulator: %w", i, err)
+		}
+		if accBytes == nil {
+			return fmt.Errorf("%w: entry[%d] no accumulator for (proposal=%d, decision=%d)",
+				types.ErrInvalidField, i, entry.ProposalId, entry.VoteDecision)
+		}
+		if _, err := elgamal.UnmarshalCiphertext(accBytes); err != nil {
+			return fmt.Errorf("entry[%d]: failed to unmarshal accumulator: %w", i, err)
+		}
+	}
+
+	return nil
 }
 
 // SetPartialDecryptions stores all entries from a MsgSubmitPartialDecryption.

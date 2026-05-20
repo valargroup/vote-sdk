@@ -17,8 +17,8 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/valargroup/vote-sdk/app"
 	voteapi "github.com/valargroup/vote-sdk/api"
+	"github.com/valargroup/vote-sdk/app"
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/testutil"
 	"github.com/valargroup/vote-sdk/x/vote/types"
@@ -190,9 +190,9 @@ func TestProcessProposalAckValidation(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		setup    func()                   // mutate state before this case
-		txs      func() [][]byte          // txs for the ProcessProposal request
+		name       string
+		setup      func()          // mutate state before this case
+		txs        func() [][]byte // txs for the ProcessProposal request
 		wantAccept bool
 	}{
 		{
@@ -395,7 +395,7 @@ func TestProcessProposalTallyValidation(t *testing.T) {
 			wantAccept: false,
 		},
 		{
-			name: "malformed tally tx → reject",
+			name:  "malformed tally tx → reject",
 			setup: func() {},
 			txs: func() [][]byte {
 				return [][]byte{{voteapi.TagSubmitTally, 0xFF, 0xFF}}
@@ -415,6 +415,107 @@ func TestProcessProposalTallyValidation(t *testing.T) {
 			} else {
 				require.Equal(t, abci.ResponseProcessProposal_REJECT, resp.Status,
 					"expected REJECT for case: %s", tc.name)
+			}
+		})
+	}
+}
+
+// TestProcessProposalPartialDecryptValidation exercises cheap shape validation
+// for proposer-injected MsgSubmitPartialDecryption txs. Expensive DLEQ
+// verification remains in FinalizeBlock.
+func TestProcessProposalPartialDecryptValidation(t *testing.T) {
+	ta, _, pallasPk, _, eaPk := testutil.SetupTestAppWithPallasKey(t)
+	proposerAddr := ta.ValidatorOperAddr()
+	roundID := bytes.Repeat([]byte{0xDE}, 32)
+
+	share, _ := elgamal.KeyGen(rand.Reader)
+	G := elgamal.PallasGenerator()
+	vk := G.Mul(share.Scalar).ToAffineCompressed()
+	validators := []*types.ValidatorPallasKey{
+		{ValidatorAddress: proposerAddr, PallasPk: pallasPk.Point.ToAffineCompressed(), ShamirIndex: 1},
+	}
+	accumulators := seedTallyingRoundWithAccumulators(t, ta, roundID, 1, validators, [][]byte{vk}, eaPk)
+
+	firstAccumulator := accumulators[uint64(1)<<32|uint64(0)]
+	ct, err := elgamal.UnmarshalCiphertext(firstAccumulator)
+	require.NoError(t, err)
+	partial := ct.C1.Mul(share.Scalar).ToAffineCompressed()
+
+	buildPartialTx := func(entries []*types.PartialDecryptionEntry) []byte {
+		msg := &types.MsgSubmitPartialDecryption{
+			VoteRoundId:    roundID,
+			Creator:        proposerAddr,
+			ValidatorIndex: 1,
+			Entries:        entries,
+		}
+		txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagSubmitPartialDecryption)
+		require.NoError(t, err)
+		return txBytes
+	}
+
+	validEntry := func() *types.PartialDecryptionEntry {
+		return &types.PartialDecryptionEntry{
+			ProposalId:     1,
+			VoteDecision:   0,
+			PartialDecrypt: partial,
+			DleqProof:      bytes.Repeat([]byte{0xAB}, elgamal.DLEQProofSize),
+		}
+	}
+
+	tests := []struct {
+		name       string
+		entries    []*types.PartialDecryptionEntry
+		wantAccept bool
+	}{
+		{
+			name:       "valid partial decryption shape in TALLYING state",
+			entries:    []*types.PartialDecryptionEntry{validEntry()},
+			wantAccept: true,
+		},
+		{
+			name:       "empty entries → reject",
+			entries:    nil,
+			wantAccept: false,
+		},
+		{
+			name: "invalid partial_decrypt point → reject",
+			entries: []*types.PartialDecryptionEntry{{
+				ProposalId:     1,
+				VoteDecision:   0,
+				PartialDecrypt: bytes.Repeat([]byte{0xFF}, 32),
+				DleqProof:      bytes.Repeat([]byte{0xAB}, elgamal.DLEQProofSize),
+			}},
+			wantAccept: false,
+		},
+		{
+			name: "wrong DLEQ proof size → reject",
+			entries: []*types.PartialDecryptionEntry{{
+				ProposalId:     1,
+				VoteDecision:   0,
+				PartialDecrypt: partial,
+				DleqProof:      bytes.Repeat([]byte{0xAB}, elgamal.DLEQProofSize-1),
+			}},
+			wantAccept: false,
+		},
+		{
+			name: "invalid vote decision → reject",
+			entries: []*types.PartialDecryptionEntry{{
+				ProposalId:     1,
+				VoteDecision:   99,
+				PartialDecrypt: partial,
+				DleqProof:      bytes.Repeat([]byte{0xAB}, elgamal.DLEQProofSize),
+			}},
+			wantAccept: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := ta.CallProcessProposal([][]byte{buildPartialTx(tc.entries)})
+			if tc.wantAccept {
+				require.Equal(t, abci.ResponseProcessProposal_ACCEPT, resp.Status)
+			} else {
+				require.Equal(t, abci.ResponseProcessProposal_REJECT, resp.Status)
 			}
 		})
 	}
@@ -663,4 +764,3 @@ func TestPrepareProposalDKGContributionAcceptedByProcessProposal(t *testing.T) {
 		})
 	}
 }
-

@@ -179,6 +179,10 @@ func validateInjectedPartialDecrypt(ctx sdk.Context, voteKeeper *votekeeper.Keep
 		return errInvalidInjectedTx(err.Error())
 	}
 
+	if err := voteKeeper.ValidatePartialDecryptionShape(kvStore, round, pdMsg); err != nil {
+		return errInvalidInjectedTx(err.Error())
+	}
+
 	return nil
 }
 
