@@ -14,7 +14,7 @@
 //!   5. ct = ChaCha20-Poly1305(k, nonce=0, plaintext)
 
 use chacha20poly1305::{
-    aead::{Aead, KeyInit},
+    aead::{Aead, KeyInit, Payload},
     ChaCha20Poly1305, Nonce,
 };
 use ff::Field;
@@ -40,6 +40,16 @@ pub struct Envelope {
 pub fn encrypt(
     recipient_pk: &pallas::Point,
     plaintext: &[u8],
+    rng: &mut impl rand_core::RngCore,
+) -> Envelope {
+    encrypt_with_aad(recipient_pk, plaintext, &[], rng)
+}
+
+/// Encrypt `plaintext` and authenticate `aad` as ChaCha20-Poly1305 associated data.
+pub fn encrypt_with_aad(
+    recipient_pk: &pallas::Point,
+    plaintext: &[u8],
+    aad: &[u8],
     rng: &mut impl rand_core::RngCore,
 ) -> Envelope {
     // Generate ephemeral scalar
@@ -72,13 +82,32 @@ pub fn encrypt(
     let cipher = ChaCha20Poly1305::new_from_slice(&key).expect("key is 32 bytes");
     let nonce = Nonce::default(); // all zeros
     let ciphertext = cipher
-        .encrypt(&nonce, plaintext)
+        .encrypt(&nonce, Payload { msg: plaintext, aad })
         .expect("encryption should not fail");
 
     Envelope {
         ephemeral_pk: e_compressed,
         ciphertext,
     }
+}
+
+/// Build the DKG share AAD used by the Go ceremony implementation.
+pub fn dkg_share_aad(
+    vote_round_id: &[u8],
+    dealer_address: &str,
+    dealer_index: u32,
+    recipient_address: &str,
+    recipient_index: u32,
+) -> Vec<u8> {
+    format!(
+        "svote-dkg-ecies-v1|{}|{}|{}|{}|{}",
+        hex::encode(vote_round_id),
+        dealer_address,
+        dealer_index,
+        recipient_address,
+        recipient_index,
+    )
+    .into_bytes()
 }
 
 #[cfg(test)]
@@ -117,5 +146,52 @@ mod tests {
         let nonce = Nonce::default();
         let decrypted = cipher.decrypt(&nonce, env.ciphertext.as_ref()).unwrap();
         assert_eq!(decrypted.as_slice(), plaintext);
+    }
+
+    #[test]
+    fn encrypt_with_aad_authenticates_context() {
+        let g = pallas::Point::from(voting_circuits::vote_proof::spend_auth_g_affine());
+        let sk = pallas::Scalar::random(&mut OsRng);
+        let pk = g * sk;
+        let plaintext = b"hello aad";
+        let aad = dkg_share_aad(&[0x42; 32], "dealer", 2, "recipient", 1);
+
+        let env = encrypt_with_aad(&pk, plaintext, &aad, &mut OsRng);
+
+        let big_e =
+            Option::<pallas::Point>::from(pallas::Point::from_bytes(&env.ephemeral_pk)).unwrap();
+        let big_s = big_e * sk;
+        let s_compressed = big_s.to_affine().to_bytes();
+        let mut s_x = s_compressed;
+        s_x[31] &= 0x7F;
+
+        let mut hasher = Sha256::new();
+        hasher.update(env.ephemeral_pk);
+        hasher.update(s_x);
+        let key: [u8; 32] = hasher.finalize().into();
+
+        let cipher = ChaCha20Poly1305::new_from_slice(&key).unwrap();
+        let nonce = Nonce::default();
+        let decrypted = cipher
+            .decrypt(
+                &nonce,
+                Payload {
+                    msg: env.ciphertext.as_ref(),
+                    aad: &aad,
+                },
+            )
+            .unwrap();
+        assert_eq!(decrypted.as_slice(), plaintext);
+
+        let wrong_aad = dkg_share_aad(&[0x42; 32], "dealer", 2, "other", 3);
+        assert!(cipher
+            .decrypt(
+                &nonce,
+                Payload {
+                    msg: env.ciphertext.as_ref(),
+                    aad: &wrong_aad,
+                },
+            )
+            .is_err());
     }
 }
