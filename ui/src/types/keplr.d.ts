@@ -6,6 +6,7 @@ interface KeplrChainInfo {
   rpc: string;
   rest: string;
   bip44: { coinType: number };
+  alternativeBIP44s?: Array<{ coinType: number }>;
   bech32Config: {
     bech32PrefixAccAddr: string;
     bech32PrefixAccPub: string;

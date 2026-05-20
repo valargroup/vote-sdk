@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	DefaultBIP44Path    = "m/44'/118'/0'/0/0"
+	DefaultBIP44Path    = "m/44'/133'/0'/0/0"
 	DefaultBech32Prefix = "sv"
 	DefaultPurpose      = "shielded-vote/ea-pk-signer/v1"
 	ed25519SeedSaltText = "shielded-vote/ed25519-seed/v1"

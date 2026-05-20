@@ -2,12 +2,12 @@
   "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art",
   "chain_id": "shielded-vote-1",
   "bech32_prefix": "sv",
-  "bip44_path": "m/44'/118'/0'/0/0",
+  "bip44_path": "m/44'/133'/0'/0/0",
   "purpose": "shielded-vote/ea-pk-signer/v1",
-  "expected_address": "sv1r5v5srda7xfth3hn2s26txvrcrntldju3n5lv5",
-  "expected_secp256k1_pub_b64": "ArpmqEz3g5rxcqE+f8n15wCMuLyhWF+PO6+zA57aPB/d",
-  "expected_amino_signdoc_b64": "eyJhY2NvdW50X251bWJlciI6IjAiLCJjaGFpbl9pZCI6IiIsImZlZSI6eyJhbW91bnQiOltdLCJnYXMiOiIwIn0sIm1lbW8iOiIiLCJtc2dzIjpbeyJ0eXBlIjoic2lnbi9Nc2dTaWduRGF0YSIsInZhbHVlIjp7ImRhdGEiOiJjMmhwWld4a1pXUXRkbTkwWlM5bFlTMXdheTF6YVdkdVpYSXZkakU9Iiwic2lnbmVyIjoic3YxcjV2NXNyZGE3eGZ0aDNobjJzMjZ0eHZyY3JudGxkanUzbjVsdjUifX1dLCJzZXF1ZW5jZSI6IjAifQ==",
-  "expected_signature_b64": "TUUA31YPm8Vddd2OTzulyKK6h7EP+U6M3szDffzYrKIuTxzNWFXsUHMrVdruS9j/By+oPOj9soRUI8C4+C/sRw==",
-  "expected_ed25519_seed_b64": "RE21Zu5fGrXFXiQRH/huHyHG/Nyq0z8uFFkIOtUvbkw=",
-  "expected_ed25519_pub_b64": "L9mWw81NjPpERmbT7qOhg7PrioccEQgghUntIsEEZV0="
+  "expected_address": "sv16m6l6lcy5ynsrf9jx55sd7deu6l4tgt7g3zjks",
+  "expected_secp256k1_pub_b64": "AiEMYfgjRB9ggycIC7vnWhvLGXJ5AWoFZ961HjSNQVN4",
+  "expected_amino_signdoc_b64": "eyJhY2NvdW50X251bWJlciI6IjAiLCJjaGFpbl9pZCI6IiIsImZlZSI6eyJhbW91bnQiOltdLCJnYXMiOiIwIn0sIm1lbW8iOiIiLCJtc2dzIjpbeyJ0eXBlIjoic2lnbi9Nc2dTaWduRGF0YSIsInZhbHVlIjp7ImRhdGEiOiJjMmhwWld4a1pXUXRkbTkwWlM5bFlTMXdheTF6YVdkdVpYSXZkakU9Iiwic2lnbmVyIjoic3YxNm02bDZsY3k1eW5zcmY5ang1NXNkN2RldTZsNHRndDdnM3pqa3MifX1dLCJzZXF1ZW5jZSI6IjAifQ==",
+  "expected_signature_b64": "tM/SckbCYtX0G9qQU/qCLloWnvW5Q3oE9qU8UIGMVd56GXLXFErrFSSju+gsI+qZBv9oRlV/K1BAsfW7QMij0w==",
+  "expected_ed25519_seed_b64": "kkTiViVzC+ARXeE/U7dNU4OD2SPjDmOUFsv480MXYOI=",
+  "expected_ed25519_pub_b64": "KWaq/iOZWip1mh+7pucDJguizYxF7jXUQmxZAXneei8="
 }
