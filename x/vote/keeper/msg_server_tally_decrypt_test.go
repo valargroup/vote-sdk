@@ -902,6 +902,30 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_HappyPath() {
 	}
 }
 
+func (s *MsgServerTestSuite) TestSubmitPartialDecryption_RejectsIncompleteEntries() {
+	validators := validatorSet(3)
+	cs := s.setupTallyingRoundWithCrypto(msgPdRoundID, 2, validators)
+	s.setBlockProposer(validators[0].ValidatorAddress)
+
+	entries := cs.buildValidEntries(s)
+	msg := &types.MsgSubmitPartialDecryption{
+		VoteRoundId:    msgPdRoundID,
+		Creator:        validators[0].ValidatorAddress,
+		ValidatorIndex: 1,
+		Entries:        entries[:1],
+	}
+
+	_, err := s.msgServer.SubmitPartialDecryption(s.ctx, msg)
+	s.Require().Error(err)
+	s.Require().ErrorIs(err, types.ErrInvalidField)
+	s.Require().Contains(err.Error(), "missing partial decryption")
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	has, hasErr := s.keeper.HasPartialDecryptionsFromValidator(kv, msgPdRoundID, 1)
+	s.Require().NoError(hasErr)
+	s.Require().False(has, "incomplete partial decryptions must not mark validator as submitted")
+}
+
 func (s *MsgServerTestSuite) TestSubmitPartialDecryption_EmitsEvent() {
 	validators := validatorSet(2)
 	cs := s.setupTallyingRoundWithCrypto(msgPdRoundID, 2, validators)

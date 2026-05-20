@@ -315,6 +315,27 @@ func (k *Keeper) ValidateTallyCompleteness(kvStore store.KVStore, round *types.V
 	return nil
 }
 
+// ValidatePartialDecryptionCompleteness checks that one validator's partial
+// decryption submission covers every non-empty accumulator in the round.
+func (k *Keeper) ValidatePartialDecryptionCompleteness(kvStore store.KVStore, round *types.VoteRound, entries []*types.PartialDecryptionEntry) error {
+	expected, err := k.CollectNonEmptyAccumulators(kvStore, round)
+	if err != nil {
+		return fmt.Errorf("failed to enumerate accumulators: %w", err)
+	}
+
+	covered := make(map[[2]uint32]bool, len(entries))
+	for _, e := range entries {
+		covered[[2]uint32{e.ProposalId, e.VoteDecision}] = true
+	}
+	for key := range expected {
+		if !covered[key] {
+			return fmt.Errorf("%w: missing partial decryption for accumulator (proposal=%d, decision=%d)",
+				types.ErrInvalidField, key[0], key[1])
+		}
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Tally validation helpers
 // ---------------------------------------------------------------------------

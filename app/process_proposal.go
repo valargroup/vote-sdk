@@ -158,6 +158,12 @@ func validateInjectedPartialDecrypt(ctx sdk.Context, voteKeeper *votekeeper.Keep
 	if round.Threshold == 0 {
 		return errInvalidInjectedTx("round is not in threshold mode")
 	}
+	if len(pdMsg.Entries) == 0 {
+		return errInvalidInjectedTx("entries cannot be empty")
+	}
+	if err := voteKeeper.ValidatePartialDecryptionCompleteness(kvStore, round, pdMsg.Entries); err != nil {
+		return errInvalidInjectedTx(err.Error())
+	}
 
 	ceremonyVal, found := votekeeper.FindValidatorInRoundCeremony(round, pdMsg.Creator)
 	if !found {
