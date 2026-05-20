@@ -4,6 +4,7 @@ export const MAX_VOTE_OPTIONS = 8;
 export interface VoteOptionInput {
   index: number;
   label: string;
+  description?: string;
 }
 
 export function validateProposalOptions(

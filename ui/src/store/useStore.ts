@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { v4 as uuidv4 } from "uuid";
 import type { VotingRound, Proposal, ProposalType, RoundStatus } from "../types";
 import {
+  applySampleTemplateOptionDescriptions,
   createSampleRoundFromTemplate,
   createSampleRounds,
   type SampleRoundTemplateId,
@@ -13,7 +14,12 @@ const SEEDED_KEY = "shielded-vote-seeded";
 function loadRounds(): VotingRound[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const stored = JSON.parse(raw) as VotingRound[];
+      const hydrated = applySampleTemplateOptionDescriptions(stored);
+      if (hydrated !== stored) saveRounds(hydrated);
+      return hydrated;
+    }
     // First-time user: seed with sample round
     if (!localStorage.getItem(SEEDED_KEY)) {
       const seed = createSampleRounds();
@@ -38,8 +44,8 @@ function createDefaultProposal(): Proposal {
     description: "",
     type: "binary",
     options: [
-      { id: uuidv4(), label: "Support" },
-      { id: uuidv4(), label: "Oppose" },
+      { id: uuidv4(), label: "Support", description: "" },
+      { id: uuidv4(), label: "Oppose", description: "" },
     ],
     zipNumber: "",
     forumURL: "",
@@ -264,12 +270,12 @@ export function useStore() {
       const defaultOptions =
         type === "binary"
           ? [
-              { id: uuidv4(), label: "Support" },
-              { id: uuidv4(), label: "Oppose" },
+              { id: uuidv4(), label: "Support", description: "" },
+              { id: uuidv4(), label: "Oppose", description: "" },
             ]
           : [
-              { id: uuidv4(), label: "Option A" },
-              { id: uuidv4(), label: "Option B" },
+              { id: uuidv4(), label: "Option A", description: "" },
+              { id: uuidv4(), label: "Option B", description: "" },
             ];
       updateProposal(roundId, proposalId, { type, options: defaultOptions });
     },

@@ -146,7 +146,7 @@ func (k *Keeper) GetShareCount(kvStore store.KVStore, roundID []byte, proposalID
 }
 
 // GetVoteSummary builds a denormalized QueryVoteSummaryResponse for a vote round,
-// including proposals with option labels, ballot counts, and (if finalized) totals.
+// including proposals with option metadata, ballot counts, and (if finalized) totals.
 func (k *Keeper) GetVoteSummary(kvStore store.KVStore, roundID []byte) (*types.QueryVoteSummaryResponse, error) {
 	round, err := k.GetVoteRound(kvStore, roundID)
 	if err != nil {
@@ -180,6 +180,7 @@ func (k *Keeper) GetVoteSummary(kvStore store.KVStore, roundID []byte) (*types.Q
 				Index:       opt.Index,
 				Label:       opt.Label,
 				BallotCount: count,
+				Description: opt.Description,
 			}
 			if tallyResults != nil {
 				key := uint64(prop.Id)<<32 | uint64(opt.Index)
@@ -332,4 +333,3 @@ func (k *Keeper) ValidateRoundForTally(ctx context.Context, roundID []byte) erro
 
 	return nil
 }
-

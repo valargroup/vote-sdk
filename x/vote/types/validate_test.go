@@ -73,6 +73,22 @@ func (s *ValidateBasicTestSuite) TestCreateVotingSession_NewFieldsValidation() {
 				}
 			},
 		},
+		{
+			name: "valid: options may include descriptions",
+			modify: func(m *types.MsgCreateVotingSession) {
+				m.Proposals = []*types.Proposal{
+					{
+						Id:          1,
+						Title:       "A",
+						Description: "ok",
+						Options: []*types.VoteOption{
+							{Index: 0, Label: "Support", Description: "Support the proposal."},
+							{Index: 1, Label: "Oppose", Description: "Oppose the proposal."},
+						},
+					},
+				}
+			},
+		},
 		// ea_pk is no longer in MsgCreateVotingSession; sourced from CeremonyState.
 		// vk_zkp1/2/3 removed: verifying keys are compiled into the Rust Halo2
 		// verifier binary and cannot be overridden per-session.

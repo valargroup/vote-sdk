@@ -532,8 +532,10 @@ All byte fields are hex-encoded in the JSON.  Required fields:
   nullifier_imt_root  (hex)    — Root of the incremental Merkle tree of nullifiers
   nc_root             (hex)    — Note commitment tree root at snapshot_height
   proposals           (array)  — 1-15 proposals, each with id (1-based uint32),
-                                 title (string), and options (2-8 elements with
-                                 index (0-based uint32) and label (ASCII string))
+                                 title (string), optional description (string),
+                                 and options (2-8 elements with index (0-based
+                                 uint32), label (ASCII string), and optional
+                                 description (string))
 
 Example:
   {
@@ -549,7 +551,7 @@ Example:
         "title": "Upgrade proposal",
         "options": [
           {"index": 0, "label": "Yes"},
-          {"index": 1, "label": "No"},
+          {"index": 1, "label": "No", "description": "Do not activate this proposal."},
           {"index": 2, "label": "Abstain"}
         ]
       }
@@ -577,11 +579,13 @@ Example:
 				Description       string `json:"description"`
 				Title             string `json:"title"`
 				Proposals         []struct {
-					Id      uint32 `json:"id"`
-					Title   string `json:"title"`
-					Options []struct {
-						Index uint32 `json:"index"`
-						Label string `json:"label"`
+					Id          uint32 `json:"id"`
+					Title       string `json:"title"`
+					Description string `json:"description"`
+					Options     []struct {
+						Index       uint32 `json:"index"`
+						Label       string `json:"label"`
+						Description string `json:"description"`
 					} `json:"options"`
 				} `json:"proposals"`
 			}
@@ -619,14 +623,16 @@ Example:
 				opts := make([]*types.VoteOption, len(p.Options))
 				for j, o := range p.Options {
 					opts[j] = &types.VoteOption{
-						Index: o.Index,
-						Label: o.Label,
+						Index:       o.Index,
+						Label:       o.Label,
+						Description: o.Description,
 					}
 				}
 				proposals[i] = &types.Proposal{
-					Id:      p.Id,
-					Title:   p.Title,
-					Options: opts,
+					Id:          p.Id,
+					Title:       p.Title,
+					Description: p.Description,
+					Options:     opts,
 				}
 			}
 

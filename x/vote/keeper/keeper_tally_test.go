@@ -77,6 +77,40 @@ func (s *KeeperTestSuite) TestTally_IndependentTuples() {
 	s.Require().Nil(got)
 }
 
+func (s *KeeperTestSuite) TestVoteSummaryIncludesOptionDescriptions() {
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	round := &types.VoteRound{
+		VoteRoundId: testRoundID,
+		Status:      types.SessionStatus_SESSION_STATUS_ACTIVE,
+		Description: "Round description",
+		VoteEndTime: 123,
+		Proposals: []*types.Proposal{
+			{
+				Id:          1,
+				Title:       "P1",
+				Description: "Proposal description",
+				Options: []*types.VoteOption{
+					{Index: 0, Label: "Yes", Description: "Approve the change."},
+					{Index: 1, Label: "No", Description: "Reject the change."},
+				},
+			},
+		},
+	}
+	s.Require().NoError(s.keeper.SetVoteRound(kv, round))
+	s.Require().NoError(s.keeper.IncrementShareCount(kv, testRoundID, 1, 0))
+
+	summary, err := s.keeper.GetVoteSummary(kv, testRoundID)
+	s.Require().NoError(err)
+	s.Require().Len(summary.Proposals, 1)
+	s.Require().Len(summary.Proposals[0].Options, 2)
+	s.Require().Equal("Proposal description", summary.Proposals[0].Description)
+	s.Require().Equal("Approve the change.", summary.Proposals[0].Options[0].Description)
+	s.Require().Equal("Reject the change.", summary.Proposals[0].Options[1].Description)
+	s.Require().Equal(uint64(1), summary.Proposals[0].Options[0].BallotCount)
+}
+
 // ---------------------------------------------------------------------------
 // Tally completeness
 // ---------------------------------------------------------------------------
@@ -179,4 +213,3 @@ func (s *KeeperTestSuite) TestValidateTallyCompleteness() {
 		s.Require().Contains(err.Error(), "proposal=2, decision=1")
 	})
 }
-

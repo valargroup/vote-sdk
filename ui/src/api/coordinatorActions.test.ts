@@ -83,7 +83,7 @@ describe("describeCoordinatorActionPayload", () => {
       varintField(1, 7),
       stringField(2, "ZIP vote"),
       stringField(3, "Proposal body"),
-      bytesField(4, concat([varintField(1, 0), stringField(2, "Support")])),
+      bytesField(4, concat([varintField(1, 0), stringField(2, "Support"), stringField(3, "Vote yes.")])),
       bytesField(4, concat([varintField(1, 1), stringField(2, "Oppose")])),
       stringField(5, "ZIP-999"),
       stringField(6, "https://forum.example/proposal"),
@@ -109,7 +109,7 @@ describe("describeCoordinatorActionPayload", () => {
     expect(valueFor(description, "Discussion URL")).toBe("https://forum.example/round");
     expect(valueFor(description, "Snapshot height")).toBe("123");
     expect(valueFor(description, "Proposals")).toContain("ZIP-999");
-    expect(valueFor(description, "Proposals")).toContain("options: 0: Support, 1: Oppose");
+    expect(valueFor(description, "Proposals")).toContain("options: 0: Support (Vote yes.), 1: Oppose");
     expect(valueFor(description, "Snapshot blockhash")).toBe("aabb");
     expect(valueFor(description, "Proposals hash")).toBe("ccdd");
   });

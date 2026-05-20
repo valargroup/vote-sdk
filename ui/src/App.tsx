@@ -561,8 +561,12 @@ function isProposalValid(p: Proposal): boolean {
   );
 }
 
-function buildChainOptions(p: Proposal): Array<{ index: number; label: string }> {
-  return p.options.map((opt, j) => ({ index: j, label: opt.label }));
+function buildChainOptions(p: Proposal): Array<{ index: number; label: string; description: string }> {
+  return p.options.map((opt, j) => ({
+    index: j,
+    label: opt.label,
+    description: opt.description ?? "",
+  }));
 }
 
 function BuilderView({
@@ -3474,18 +3478,27 @@ function VoteStatusView({
                               return (
                                 <div key={opt.index} className="space-y-0.5">
                                   <div className="flex items-center justify-between">
-                                    <span
-                                      className={`text-[11px] flex items-center gap-1.5 ${
-                                        isWinner ? "font-semibold" : "text-text-secondary"
-                                      }`}
-                                      style={isWinner ? { color: oColor } : undefined}
-                                    >
+                                    <span className="min-w-0 flex-1 pr-3">
                                       <span
-                                        className="w-2 h-2 rounded-full shrink-0 inline-block"
-                                        style={{ backgroundColor: oColor }}
-                                      />
-                                      {isWinner && (isTied ? "⚖ " : "✓ ")}
-                                      {opt.label ?? `Option ${opt.index}`}
+                                        className={`text-[11px] flex items-center gap-1.5 ${
+                                          isWinner ? "font-semibold" : "text-text-secondary"
+                                        }`}
+                                        style={isWinner ? { color: oColor } : undefined}
+                                      >
+                                        <span
+                                          className="w-2 h-2 rounded-full shrink-0 inline-block"
+                                          style={{ backgroundColor: oColor }}
+                                        />
+                                        {isWinner && (isTied ? "⚖ " : "✓ ")}
+                                        <span className="truncate">
+                                          {opt.label ?? `Option ${opt.index}`}
+                                        </span>
+                                      </span>
+                                      {opt.description && (
+                                        <span className="block pl-3.5 text-[10px] text-text-muted leading-snug">
+                                          {opt.description}
+                                        </span>
+                                      )}
                                     </span>
                                     <span className="text-[11px] font-mono text-text-primary">
                                       {isFinalized ? (
@@ -3901,15 +3914,22 @@ function PreviewView({ round, onBack }: { round: VotingRound; onBack: () => void
                   {p.options.map((opt, i) => (
                     <div
                       key={opt.id}
-                      className="flex items-center gap-2 px-3 py-2 bg-surface-2 rounded-lg border border-border-subtle hover:border-accent/30 transition-colors cursor-pointer"
+                      className="flex items-start gap-2 px-3 py-2 bg-surface-2 rounded-lg border border-border-subtle hover:border-accent/30 transition-colors cursor-pointer"
                     >
                       <div
-                        className="w-3 h-3 rounded-full shrink-0"
+                        className="w-3 h-3 rounded-full shrink-0 mt-0.5"
                         style={{ backgroundColor: optionColor(i, p.options.length) }}
                       />
-                      <span className="text-xs text-text-primary">
-                        {opt.label}
-                      </span>
+                      <div className="min-w-0">
+                        <p className="text-xs text-text-primary">
+                          {opt.label}
+                        </p>
+                        {opt.description && (
+                          <p className="text-[11px] text-text-muted leading-snug mt-0.5">
+                            {opt.description}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>

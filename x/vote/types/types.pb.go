@@ -190,8 +190,9 @@ func (CeremonyStatus) EnumDescriptor() ([]byte, []int) {
 // VoteOption represents a named choice within a proposal.
 type VoteOption struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Index         uint32                 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"` // 0-indexed
-	Label         string                 `protobuf:"bytes,2,opt,name=label,proto3" json:"label,omitempty"`  // e.g. "Support", "Oppose"
+	Index         uint32                 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`            // 0-indexed
+	Label         string                 `protobuf:"bytes,2,opt,name=label,proto3" json:"label,omitempty"`             // e.g. "Support", "Oppose"
+	Description   string                 `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"` // Optional explanatory text shown under the option label
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -236,6 +237,13 @@ func (x *VoteOption) GetIndex() uint32 {
 func (x *VoteOption) GetLabel() string {
 	if x != nil {
 		return x.Label
+	}
+	return ""
+}
+
+func (x *VoteOption) GetDescription() string {
+	if x != nil {
+		return x.Description
 	}
 	return ""
 }
@@ -1827,6 +1835,7 @@ type OptionSummary struct {
 	Label         string                 `protobuf:"bytes,2,opt,name=label,proto3" json:"label,omitempty"`
 	BallotCount   uint64                 `protobuf:"varint,3,opt,name=ballot_count,json=ballotCount,proto3" json:"ballot_count,omitempty"` // shares revealed for this (proposal, decision)
 	TotalValue    uint64                 `protobuf:"varint,4,opt,name=total_value,json=totalValue,proto3" json:"total_value,omitempty"`    // only populated when status = FINALIZED
+	Description   string                 `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`                     // Optional explanatory text shown under the option label
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1887,6 +1896,13 @@ func (x *OptionSummary) GetTotalValue() uint64 {
 		return x.TotalValue
 	}
 	return 0
+}
+
+func (x *OptionSummary) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
 }
 
 // CeremonyState tracks the singleton EA key ceremony lifecycle.
@@ -2246,11 +2262,12 @@ var File_svote_v1_types_proto protoreflect.FileDescriptor
 
 const file_svote_v1_types_proto_rawDesc = "" +
 	"\n" +
-	"\x14svote/v1/types.proto\x12\bsvote.v1\x1a\x19google/protobuf/any.proto\"8\n" +
+	"\x14svote/v1/types.proto\x12\bsvote.v1\x1a\x19google/protobuf/any.proto\"Z\n" +
 	"\n" +
 	"VoteOption\x12\x14\n" +
 	"\x05index\x18\x01 \x01(\rR\x05index\x12\x14\n" +
-	"\x05label\x18\x02 \x01(\tR\x05label\"\xbe\x01\n" +
+	"\x05label\x18\x02 \x01(\tR\x05label\x12 \n" +
+	"\vdescription\x18\x03 \x01(\tR\vdescription\"\xbe\x01\n" +
 	"\bProposal\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12 \n" +
@@ -2400,13 +2417,14 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\rR\x02id\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12 \n" +
 	"\vdescription\x18\x03 \x01(\tR\vdescription\x121\n" +
-	"\aoptions\x18\x04 \x03(\v2\x17.svote.v1.OptionSummaryR\aoptions\"\x7f\n" +
+	"\aoptions\x18\x04 \x03(\v2\x17.svote.v1.OptionSummaryR\aoptions\"\xa1\x01\n" +
 	"\rOptionSummary\x12\x14\n" +
 	"\x05index\x18\x01 \x01(\rR\x05index\x12\x14\n" +
 	"\x05label\x18\x02 \x01(\tR\x05label\x12!\n" +
 	"\fballot_count\x18\x03 \x01(\x04R\vballotCount\x12\x1f\n" +
 	"\vtotal_value\x18\x04 \x01(\x04R\n" +
-	"totalValue\"\xdd\x02\n" +
+	"totalValue\x12 \n" +
+	"\vdescription\x18\x05 \x01(\tR\vdescription\"\xdd\x02\n" +
 	"\rCeremonyState\x120\n" +
 	"\x06status\x18\x01 \x01(\x0e2\x18.svote.v1.CeremonyStatusR\x06status\x12\x13\n" +
 	"\x05ea_pk\x18\x02 \x01(\fR\x04eaPk\x12<\n" +
