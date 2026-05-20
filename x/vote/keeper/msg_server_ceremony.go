@@ -134,65 +134,17 @@ func (ms msgServer) ContributeDKG(goCtx context.Context, msg *types.MsgContribut
 		return nil, fmt.Errorf("%w: %s", types.ErrDuplicateContribution, msg.Creator)
 	}
 
-	// Validate the number of Feldman commitments.
-	expectedThreshold, err := ThresholdForN(nValidators)
+	expectedThreshold, err := ValidateDKGContributionShapeAndPoK(round, msg)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", types.ErrInvalidThreshold, err)
-	}
-
-	// Validate the number of Feldman commitments matches the threshold.
-	if len(msg.FeldmanCommitments) != expectedThreshold {
-		return nil, fmt.Errorf("%w: expected %d Feldman commitments, got %d",
-			types.ErrInvalidThreshold, expectedThreshold, len(msg.FeldmanCommitments))
-	}
-	// Validate the Feldman commitments are valid Pallas points.
-	for i, c := range msg.FeldmanCommitments {
-		if _, err := elgamal.UnmarshalPublicKey(c); err != nil {
-			return nil, fmt.Errorf("%w: feldman_commitment[%d]: %v",
-				types.ErrInvalidPallasPoint, i, err)
-		}
-	}
-
-	// Validate the number of payloads.
-	expectedPayloads := nValidators - 1
-	if len(msg.Payloads) != expectedPayloads {
-		return nil, fmt.Errorf("%w: got %d payloads, expected %d (all validators except contributor)",
-			types.ErrPayloadMismatch, len(msg.Payloads), expectedPayloads)
-	}
-
-	// Validate the payloads.
-	covered := make(map[string]bool, expectedPayloads)
-	for _, p := range msg.Payloads {
-		// Validate the payload does not include the contributor's own address.
-		if p.ValidatorAddress == msg.Creator {
-			return nil, fmt.Errorf("%w: payload must not include contributor's own address %s",
-				types.ErrPayloadMismatch, msg.Creator)
-		}
-		// Validate the payload references a registered ceremony validator.
-		if _, found := FindValidatorInRoundCeremony(round, p.ValidatorAddress); !found {
-			return nil, fmt.Errorf("%w: payload references unknown validator %s",
-				types.ErrNotRegisteredValidator, p.ValidatorAddress)
-		}
-		// Validate the payload is not a duplicate.
-		if covered[p.ValidatorAddress] {
-			return nil, fmt.Errorf("%w: duplicate payload for validator %s",
-				types.ErrPayloadMismatch, p.ValidatorAddress)
-		}
-		// Mark the payload as covered.
-		covered[p.ValidatorAddress] = true
-
-		// Validate the ephemeral public key is a valid Pallas point.
-		if _, err := elgamal.UnmarshalPublicKey(p.EphemeralPk); err != nil {
-			return nil, fmt.Errorf("%w: ephemeral_pk for %s: %v",
-				types.ErrInvalidPallasPoint, p.ValidatorAddress, err)
-		}
+		return nil, err
 	}
 
 	// Store the contribution.
 	round.DkgContributions = append(round.DkgContributions, &types.DKGContribution{
-		ValidatorAddress:   msg.Creator,
-		FeldmanCommitments: msg.FeldmanCommitments,
-		Payloads:           msg.Payloads,
+		ValidatorAddress:    msg.Creator,
+		FeldmanCommitments:  msg.FeldmanCommitments,
+		Payloads:            msg.Payloads,
+		FeldmanOpeningProof: msg.FeldmanOpeningProof,
 	})
 
 	// If the number of contributions equals the number of validators, finalize the DKG.

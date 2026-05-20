@@ -977,13 +977,14 @@ func (*MsgRotatePallasKeyResponse) Descriptor() ([]byte, []int) {
 // Each validator generates a random polynomial, publishes Feldman commitments,
 // and distributes ECIES-encrypted shares to all ceremony participants.
 type MsgContributeDKG struct {
-	state              protoimpl.MessageState `protogen:"open.v1"`
-	Creator            string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`
-	VoteRoundId        []byte                 `protobuf:"bytes,2,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`
-	FeldmanCommitments [][]byte               `protobuf:"bytes,3,rep,name=feldman_commitments,json=feldmanCommitments,proto3" json:"feldman_commitments,omitempty"` // C_j = a_j*G for j=0..t-1
-	Payloads           []*DealerPayload       `protobuf:"bytes,4,rep,name=payloads,proto3" json:"payloads,omitempty"`                                               // One ECIES envelope per ceremony validator
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	Creator             string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`
+	VoteRoundId         []byte                 `protobuf:"bytes,2,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`
+	FeldmanCommitments  [][]byte               `protobuf:"bytes,3,rep,name=feldman_commitments,json=feldmanCommitments,proto3" json:"feldman_commitments,omitempty"`      // C_j = a_j*G for j=0..t-1
+	Payloads            []*DealerPayload       `protobuf:"bytes,4,rep,name=payloads,proto3" json:"payloads,omitempty"`                                                    // One ECIES envelope per ceremony validator
+	FeldmanOpeningProof []byte                 `protobuf:"bytes,5,opt,name=feldman_opening_proof,json=feldmanOpeningProof,proto3" json:"feldman_opening_proof,omitempty"` // Schnorr PoK for openings of feldman_commitments
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *MsgContributeDKG) Reset() {
@@ -1040,6 +1041,13 @@ func (x *MsgContributeDKG) GetFeldmanCommitments() [][]byte {
 func (x *MsgContributeDKG) GetPayloads() []*DealerPayload {
 	if x != nil {
 		return x.Payloads
+	}
+	return nil
+}
+
+func (x *MsgContributeDKG) GetFeldmanOpeningProof() []byte {
+	if x != nil {
+		return x.FeldmanOpeningProof
 	}
 	return nil
 }
@@ -2437,12 +2445,13 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"\x12MsgRotatePallasKey\x12\x18\n" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12\"\n" +
 	"\rnew_pallas_pk\x18\x02 \x01(\fR\vnewPallasPk\"\x1c\n" +
-	"\x1aMsgRotatePallasKeyResponse\"\xb6\x01\n" +
+	"\x1aMsgRotatePallasKeyResponse\"\xea\x01\n" +
 	"\x10MsgContributeDKG\x12\x18\n" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12\"\n" +
 	"\rvote_round_id\x18\x02 \x01(\fR\vvoteRoundId\x12/\n" +
 	"\x13feldman_commitments\x18\x03 \x03(\fR\x12feldmanCommitments\x123\n" +
-	"\bpayloads\x18\x04 \x03(\v2\x17.svote.v1.DealerPayloadR\bpayloads\"\x1a\n" +
+	"\bpayloads\x18\x04 \x03(\v2\x17.svote.v1.DealerPayloadR\bpayloads\x122\n" +
+	"\x15feldman_opening_proof\x18\x05 \x01(\fR\x13feldmanOpeningProof\"\x1a\n" +
 	"\x18MsgContributeDKGResponse\"\x80\x01\n" +
 	"\x1bMsgAckExecutiveAuthorityKey\x12\x18\n" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12#\n" +

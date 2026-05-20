@@ -296,10 +296,7 @@ func TestProcessProposalAcceptsDKGContribution(t *testing.T) {
 	validators := []*types.ValidatorPallasKey{{ValidatorAddress: valAddr}}
 	roundID := ta.SeedRegisteringCeremony(validators)
 
-	msg := &types.MsgContributeDKG{
-		Creator:     valAddr,
-		VoteRoundId: roundID,
-	}
+	msg := appTestDKGContributeMsg(roundID, valAddr, 1, nil)
 	txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagContributeDKG)
 	require.NoError(t, err)
 

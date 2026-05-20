@@ -144,6 +144,7 @@ message MsgContributeDKG {
   bytes                  vote_round_id        = 2;
   repeated bytes         feldman_commitments  = 3; // C_j = a_j*G for j=0..t-1
   repeated DealerPayload payloads             = 4; // One ECIES envelope per ceremony validator
+  bytes                  feldman_opening_proof = 5; // Schnorr PoK for openings of feldman_commitments
 }
 
 message MsgContributeDKGResponse {}

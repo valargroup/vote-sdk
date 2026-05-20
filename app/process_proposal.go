@@ -261,6 +261,10 @@ func validateInjectedDKGContribution(ctx sdk.Context, voteKeeper *votekeeper.Kee
 		return errInvalidInjectedTx("creator has already contributed")
 	}
 
+	if _, err := votekeeper.ValidateDKGContributionShapeAndPoK(round, dkgMsg); err != nil {
+		return errInvalidInjectedTx(err.Error())
+	}
+
 	if err := voteKeeper.ValidateProposerIsCreator(ctx, dkgMsg.Creator, "MsgContributeDKG"); err != nil {
 		return errInvalidInjectedTx(err.Error())
 	}

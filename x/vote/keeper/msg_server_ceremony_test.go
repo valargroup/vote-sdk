@@ -124,10 +124,11 @@ func (s *MsgServerTestSuite) dealPendingRound(n int) (roundID []byte, addrs []st
 			payloads = makeDKGPayloads(addrs, addrs[i])
 		}
 		_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
-			Creator:            addrs[i],
-			VoteRoundId:        roundID,
-			FeldmanCommitments: makeDKGCommitments(threshold),
-			Payloads:           payloads,
+			Creator:             addrs[i],
+			VoteRoundId:         roundID,
+			FeldmanCommitments:  makeDKGCommitments(threshold),
+			Payloads:            payloads,
+			FeldmanOpeningProof: makeDKGOpeningProof(roundID, addrs[i], threshold),
 		})
 		s.Require().NoError(err)
 	}
@@ -856,10 +857,11 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_NextRoundExcludesJailedVali
 	for _, addr := range activeAddrs {
 		s.setBlockProposer(addr)
 		_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
-			Creator:            addr,
-			VoteRoundId:        nextResp.VoteRoundId,
-			FeldmanCommitments: makeDKGCommitments(2),
-			Payloads:           makeDKGPayloads(activeAddrs, addr),
+			Creator:             addr,
+			VoteRoundId:         nextResp.VoteRoundId,
+			FeldmanCommitments:  makeDKGCommitments(2),
+			Payloads:            makeDKGPayloads(activeAddrs, addr),
+			FeldmanOpeningProof: makeDKGOpeningProof(nextResp.VoteRoundId, addr, 2),
 		})
 		s.Require().NoError(err)
 	}
@@ -907,11 +909,40 @@ func makeDKGPayloads(allAddrs []string, excludeAddr string) []*types.DealerPaylo
 
 // makeDKGCommitments generates t valid Pallas points to use as Feldman commitments.
 func makeDKGCommitments(t int) [][]byte {
+	G := elgamal.PallasGenerator()
 	c := make([][]byte, t)
 	for i := range c {
-		c[i] = testPallasPK()
+		c[i] = G.Mul(new(curvey.ScalarPallas).New(i + 1)).ToAffineCompressed()
 	}
 	return c
+}
+
+func makeDKGOpeningProof(roundID []byte, creator string, t int) []byte {
+	coeffs := make([]curvey.Scalar, t)
+	commitments := make([]curvey.Point, t)
+	G := elgamal.PallasGenerator()
+	for i := 0; i < t; i++ {
+		coeffs[i] = new(curvey.ScalarPallas).New(i + 1)
+		commitments[i] = G.Mul(coeffs[i])
+	}
+	proof, err := shamir.GenerateFeldmanOpeningProof(G, coeffs, commitments, roundID, creator, rand.Reader)
+	if err != nil {
+		panic(err)
+	}
+	return proof
+}
+
+func makeDKGOpeningProofForScalars(roundID []byte, creator string, coeffs ...curvey.Scalar) []byte {
+	G := elgamal.PallasGenerator()
+	commitments := make([]curvey.Point, len(coeffs))
+	for i, coeff := range coeffs {
+		commitments[i] = G.Mul(coeff)
+	}
+	proof, err := shamir.GenerateFeldmanOpeningProof(G, coeffs, commitments, roundID, creator, rand.Reader)
+	if err != nil {
+		panic(err)
+	}
+	return proof
 }
 
 func marshalCommitments(points ...curvey.Point) [][]byte {
@@ -929,10 +960,11 @@ func (s *MsgServerTestSuite) TestContributeDKG_HappyPath_SingleValidator() {
 	s.setBlockProposer(addrs[0])
 
 	_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
-		Creator:            addrs[0],
-		VoteRoundId:        roundID,
-		FeldmanCommitments: makeDKGCommitments(1),
-		Payloads:           nil,
+		Creator:             addrs[0],
+		VoteRoundId:         roundID,
+		FeldmanCommitments:  makeDKGCommitments(1),
+		Payloads:            nil,
+		FeldmanOpeningProof: makeDKGOpeningProof(roundID, addrs[0], 1),
 	})
 	s.Require().NoError(err)
 
@@ -960,10 +992,11 @@ func (s *MsgServerTestSuite) TestContributeDKG_HappyPath_TwoValidators() {
 	for _, addr := range addrs {
 		s.setBlockProposer(addr)
 		_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
-			Creator:            addr,
-			VoteRoundId:        roundID,
-			FeldmanCommitments: makeDKGCommitments(2),
-			Payloads:           makeDKGPayloads(addrs, addr),
+			Creator:             addr,
+			VoteRoundId:         roundID,
+			FeldmanCommitments:  makeDKGCommitments(2),
+			Payloads:            makeDKGPayloads(addrs, addr),
+			FeldmanOpeningProof: makeDKGOpeningProof(roundID, addr, 2),
 		})
 		s.Require().NoError(err)
 	}
@@ -986,10 +1019,11 @@ func (s *MsgServerTestSuite) TestContributeDKG_PartialAccumulation() {
 	// First contribution: stays REGISTERING.
 	s.setBlockProposer(addrs[0])
 	_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
-		Creator:            addrs[0],
-		VoteRoundId:        roundID,
-		FeldmanCommitments: makeDKGCommitments(2),
-		Payloads:           makeDKGPayloads(addrs, addrs[0]),
+		Creator:             addrs[0],
+		VoteRoundId:         roundID,
+		FeldmanCommitments:  makeDKGCommitments(2),
+		Payloads:            makeDKGPayloads(addrs, addrs[0]),
+		FeldmanOpeningProof: makeDKGOpeningProof(roundID, addrs[0], 2),
 	})
 	s.Require().NoError(err)
 
@@ -1004,10 +1038,11 @@ func (s *MsgServerTestSuite) TestContributeDKG_PartialAccumulation() {
 	// Second contribution: still REGISTERING (need 3).
 	s.setBlockProposer(addrs[1])
 	_, err = s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
-		Creator:            addrs[1],
-		VoteRoundId:        roundID,
-		FeldmanCommitments: makeDKGCommitments(2),
-		Payloads:           makeDKGPayloads(addrs, addrs[1]),
+		Creator:             addrs[1],
+		VoteRoundId:         roundID,
+		FeldmanCommitments:  makeDKGCommitments(2),
+		Payloads:            makeDKGPayloads(addrs, addrs[1]),
+		FeldmanOpeningProof: makeDKGOpeningProof(roundID, addrs[1], 2),
 	})
 	s.Require().NoError(err)
 
@@ -1019,10 +1054,11 @@ func (s *MsgServerTestSuite) TestContributeDKG_PartialAccumulation() {
 	// Third contribution: transitions to DEALT.
 	s.setBlockProposer(addrs[2])
 	_, err = s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
-		Creator:            addrs[2],
-		VoteRoundId:        roundID,
-		FeldmanCommitments: makeDKGCommitments(2),
-		Payloads:           makeDKGPayloads(addrs, addrs[2]),
+		Creator:             addrs[2],
+		VoteRoundId:         roundID,
+		FeldmanCommitments:  makeDKGCommitments(2),
+		Payloads:            makeDKGPayloads(addrs, addrs[2]),
+		FeldmanOpeningProof: makeDKGOpeningProof(roundID, addrs[2], 2),
 	})
 	s.Require().NoError(err)
 
@@ -1057,7 +1093,7 @@ func (s *MsgServerTestSuite) TestContributeDKG_FinalComputesCorrectCombinedCommi
 	}
 	roundID := s.createPendingRound(ceremonyVals)
 
-	allCoeffs := make([][]shamir.Share, numValidators)
+	allCoeffs := make([][]curvey.Scalar, numValidators)
 	allCommitmentPts := make([][]curvey.Point, numValidators)
 	allFeldmanBytes := make([][][]byte, numValidators)
 	secrets := make([]curvey.Scalar, numValidators)
@@ -1068,7 +1104,7 @@ func (s *MsgServerTestSuite) TestContributeDKG_FinalComputesCorrectCombinedCommi
 		shares, coeffs, err := shamir.Split(sk.Scalar, threshold, numValidators)
 		s.Require().NoError(err)
 		_ = shares
-		allCoeffs[i] = nil
+		allCoeffs[i] = coeffs
 
 		commitPts, err := shamir.FeldmanCommit(G, coeffs)
 		s.Require().NoError(err)
@@ -1084,10 +1120,11 @@ func (s *MsgServerTestSuite) TestContributeDKG_FinalComputesCorrectCombinedCommi
 	for i, addr := range addrs {
 		s.setBlockProposer(addr)
 		_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
-			Creator:            addr,
-			VoteRoundId:        roundID,
-			FeldmanCommitments: allFeldmanBytes[i],
-			Payloads:           makeDKGPayloads(addrs, addr),
+			Creator:             addr,
+			VoteRoundId:         roundID,
+			FeldmanCommitments:  allFeldmanBytes[i],
+			Payloads:            makeDKGPayloads(addrs, addr),
+			FeldmanOpeningProof: makeDKGOpeningProofForScalars(roundID, addr, allCoeffs[i]...),
 		})
 		s.Require().NoError(err)
 	}
@@ -1129,19 +1166,21 @@ func (s *MsgServerTestSuite) TestContributeDKG_RejectsIdentityCombinedEAPK() {
 
 	s.setBlockProposer(addrs[0])
 	_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
-		Creator:            addrs[0],
-		VoteRoundId:        roundID,
-		FeldmanCommitments: marshalCommitments(G, G.Mul(two)),
-		Payloads:           makeDKGPayloads(addrs, addrs[0]),
+		Creator:             addrs[0],
+		VoteRoundId:         roundID,
+		FeldmanCommitments:  marshalCommitments(G, G.Mul(two)),
+		Payloads:            makeDKGPayloads(addrs, addrs[0]),
+		FeldmanOpeningProof: makeDKGOpeningProofForScalars(roundID, addrs[0], new(curvey.ScalarPallas).New(1), two),
 	})
 	s.Require().NoError(err)
 
 	s.setBlockProposer(addrs[1])
 	_, err = s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
-		Creator:            addrs[1],
-		VoteRoundId:        roundID,
-		FeldmanCommitments: marshalCommitments(G.Neg(), G),
-		Payloads:           makeDKGPayloads(addrs, addrs[1]),
+		Creator:             addrs[1],
+		VoteRoundId:         roundID,
+		FeldmanCommitments:  marshalCommitments(G.Neg(), G),
+		Payloads:            makeDKGPayloads(addrs, addrs[1]),
+		FeldmanOpeningProof: makeDKGOpeningProofForScalars(roundID, addrs[1], new(curvey.ScalarPallas).New(1).Neg(), new(curvey.ScalarPallas).New(1)),
 	})
 	s.Require().Error(err)
 	s.Require().Contains(err.Error(), "combined ea_pk must not be the identity point")
@@ -1162,19 +1201,21 @@ func (s *MsgServerTestSuite) TestContributeDKG_RejectsIdentityDerivedVK() {
 
 	s.setBlockProposer(addrs[0])
 	_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
-		Creator:            addrs[0],
-		VoteRoundId:        roundID,
-		FeldmanCommitments: marshalCommitments(G, G),
-		Payloads:           makeDKGPayloads(addrs, addrs[0]),
+		Creator:             addrs[0],
+		VoteRoundId:         roundID,
+		FeldmanCommitments:  marshalCommitments(G, G),
+		Payloads:            makeDKGPayloads(addrs, addrs[0]),
+		FeldmanOpeningProof: makeDKGOpeningProofForScalars(roundID, addrs[0], new(curvey.ScalarPallas).New(1), new(curvey.ScalarPallas).New(1)),
 	})
 	s.Require().NoError(err)
 
 	s.setBlockProposer(addrs[1])
 	_, err = s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
-		Creator:            addrs[1],
-		VoteRoundId:        roundID,
-		FeldmanCommitments: marshalCommitments(G, G.Mul(three).Neg()),
-		Payloads:           makeDKGPayloads(addrs, addrs[1]),
+		Creator:             addrs[1],
+		VoteRoundId:         roundID,
+		FeldmanCommitments:  marshalCommitments(G, G.Mul(three).Neg()),
+		Payloads:            makeDKGPayloads(addrs, addrs[1]),
+		FeldmanOpeningProof: makeDKGOpeningProofForScalars(roundID, addrs[1], new(curvey.ScalarPallas).New(1), three.Neg()),
 	})
 	s.Require().Error(err)
 	s.Require().Contains(err.Error(), "derived VK_1 must not be the identity point")
@@ -1193,10 +1234,11 @@ func (s *MsgServerTestSuite) TestContributeDKG_EmitsEvent() {
 	s.setBlockProposer(addrs[0])
 
 	_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
-		Creator:            addrs[0],
-		VoteRoundId:        roundID,
-		FeldmanCommitments: makeDKGCommitments(1),
-		Payloads:           nil,
+		Creator:             addrs[0],
+		VoteRoundId:         roundID,
+		FeldmanCommitments:  makeDKGCommitments(1),
+		Payloads:            nil,
+		FeldmanOpeningProof: makeDKGOpeningProof(roundID, addrs[0], 1),
 	})
 	s.Require().NoError(err)
 
@@ -1221,10 +1263,11 @@ func (s *MsgServerTestSuite) TestContributeDKG_CeremonyLog() {
 
 	s.setBlockProposer(addrs[0])
 	_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
-		Creator:            addrs[0],
-		VoteRoundId:        roundID,
-		FeldmanCommitments: makeDKGCommitments(2),
-		Payloads:           makeDKGPayloads(addrs, addrs[0]),
+		Creator:             addrs[0],
+		VoteRoundId:         roundID,
+		FeldmanCommitments:  makeDKGCommitments(2),
+		Payloads:            makeDKGPayloads(addrs, addrs[0]),
+		FeldmanOpeningProof: makeDKGOpeningProof(roundID, addrs[0], 2),
 	})
 	s.Require().NoError(err)
 
@@ -1237,10 +1280,11 @@ func (s *MsgServerTestSuite) TestContributeDKG_CeremonyLog() {
 
 	s.setBlockProposer(addrs[1])
 	_, err = s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
-		Creator:            addrs[1],
-		VoteRoundId:        roundID,
-		FeldmanCommitments: makeDKGCommitments(2),
-		Payloads:           makeDKGPayloads(addrs, addrs[1]),
+		Creator:             addrs[1],
+		VoteRoundId:         roundID,
+		FeldmanCommitments:  makeDKGCommitments(2),
+		Payloads:            makeDKGPayloads(addrs, addrs[1]),
+		FeldmanOpeningProof: makeDKGOpeningProof(roundID, addrs[1], 2),
 	})
 	s.Require().NoError(err)
 
@@ -1341,10 +1385,11 @@ func (s *MsgServerTestSuite) TestContributeDKG_Rejects() {
 				roundID, addrs, _ := s.createPendingRoundWithValidators(3)
 				s.setBlockProposer(addrs[0])
 				_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
-					Creator:            addrs[0],
-					VoteRoundId:        roundID,
-					FeldmanCommitments: makeDKGCommitments(2),
-					Payloads:           makeDKGPayloads(addrs, addrs[0]),
+					Creator:             addrs[0],
+					VoteRoundId:         roundID,
+					FeldmanCommitments:  makeDKGCommitments(2),
+					Payloads:            makeDKGPayloads(addrs, addrs[0]),
+					FeldmanOpeningProof: makeDKGOpeningProof(roundID, addrs[0], 2),
 				})
 				s.Require().NoError(err)
 				return roundID, addrs

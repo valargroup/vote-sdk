@@ -243,6 +243,19 @@ func CeremonyDKGContributionPrepareProposalHandler(
 		for j, c := range commitmentPts {
 			feldmanCommitments[j] = c.ToAffineCompressed()
 		}
+		feldmanOpeningProof, err := shamir.GenerateFeldmanOpeningProof(
+			G,
+			coeffs,
+			commitmentPts,
+			round.VoteRoundId,
+			proposerValAddr,
+			rand.Reader,
+		)
+		if err != nil {
+			logger.Error("PrepareProposal[dkg-contribute]: Feldman opening proof generation failed", "err", err)
+			sentry.CaptureErr(err, map[string]string{"handler": "PrepareProposal", "stage": "feldman_opening_proof"})
+			return txs
+		}
 
 		if ceremonyDir != "" {
 			cp := coeffsPathForRound(ceremonyDir, round.VoteRoundId)
@@ -293,10 +306,11 @@ func CeremonyDKGContributionPrepareProposalHandler(
 		}
 
 		msg := &types.MsgContributeDKG{
-			Creator:            proposerValAddr,
-			VoteRoundId:        round.VoteRoundId,
-			FeldmanCommitments: feldmanCommitments,
-			Payloads:           payloads,
+			Creator:             proposerValAddr,
+			VoteRoundId:         round.VoteRoundId,
+			FeldmanCommitments:  feldmanCommitments,
+			Payloads:            payloads,
+			FeldmanOpeningProof: feldmanOpeningProof,
 		}
 
 		txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagContributeDKG)

@@ -14,15 +14,51 @@ import (
 
 	abci "github.com/cometbft/cometbft/abci/types"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
+	"github.com/mikelodder7/curvey"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/valargroup/vote-sdk/app"
 	voteapi "github.com/valargroup/vote-sdk/api"
+	"github.com/valargroup/vote-sdk/app"
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
+	"github.com/valargroup/vote-sdk/crypto/shamir"
 	"github.com/valargroup/vote-sdk/testutil"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
+
+func appTestDKGContributeMsg(roundID []byte, creator string, threshold int, payloads []*types.DealerPayload) *types.MsgContributeDKG {
+	return &types.MsgContributeDKG{
+		Creator:             creator,
+		VoteRoundId:         roundID,
+		FeldmanCommitments:  appTestDKGCommitments(threshold),
+		Payloads:            payloads,
+		FeldmanOpeningProof: appTestDKGOpeningProof(roundID, creator, threshold),
+	}
+}
+
+func appTestDKGCommitments(threshold int) [][]byte {
+	G := elgamal.PallasGenerator()
+	out := make([][]byte, threshold)
+	for i := range out {
+		out[i] = G.Mul(new(curvey.ScalarPallas).New(i + 1)).ToAffineCompressed()
+	}
+	return out
+}
+
+func appTestDKGOpeningProof(roundID []byte, creator string, threshold int) []byte {
+	G := elgamal.PallasGenerator()
+	coeffs := make([]curvey.Scalar, threshold)
+	commitments := make([]curvey.Point, threshold)
+	for i := range coeffs {
+		coeffs[i] = new(curvey.ScalarPallas).New(i + 1)
+		commitments[i] = G.Mul(coeffs[i])
+	}
+	proof, err := shamir.GenerateFeldmanOpeningProof(G, coeffs, commitments, roundID, creator, rand.Reader)
+	if err != nil {
+		panic(err)
+	}
+	return proof
+}
 
 // ---------------------------------------------------------------------------
 // Table-driven unit tests for ProcessProposalHandler
@@ -44,10 +80,7 @@ func TestProcessProposalDKGContribValidation(t *testing.T) {
 	var currentRoundID []byte
 
 	buildContribTx := func(creator string, roundID []byte) []byte {
-		msg := &types.MsgContributeDKG{
-			Creator:     creator,
-			VoteRoundId: roundID,
-		}
+		msg := appTestDKGContributeMsg(roundID, creator, 1, nil)
 		txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagContributeDKG)
 		require.NoError(t, err)
 		return txBytes
@@ -190,9 +223,9 @@ func TestProcessProposalAckValidation(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		setup    func()                   // mutate state before this case
-		txs      func() [][]byte          // txs for the ProcessProposal request
+		name       string
+		setup      func()          // mutate state before this case
+		txs        func() [][]byte // txs for the ProcessProposal request
 		wantAccept bool
 	}{
 		{
@@ -395,7 +428,7 @@ func TestProcessProposalTallyValidation(t *testing.T) {
 			wantAccept: false,
 		},
 		{
-			name: "malformed tally tx → reject",
+			name:  "malformed tally tx → reject",
 			setup: func() {},
 			txs: func() [][]byte {
 				return [][]byte{{voteapi.TagSubmitTally, 0xFF, 0xFF}}
@@ -435,10 +468,7 @@ func TestValidateInjectedDKGContribution(t *testing.T) {
 	var currentRoundID []byte
 
 	buildDKGTx := func(creator string, roundID []byte) []byte {
-		msg := &types.MsgContributeDKG{
-			Creator:     creator,
-			VoteRoundId: roundID,
-		}
+		msg := appTestDKGContributeMsg(roundID, creator, 1, nil)
 		txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagContributeDKG)
 		require.NoError(t, err)
 		return txBytes
@@ -663,4 +693,3 @@ func TestPrepareProposalDKGContributionAcceptedByProcessProposal(t *testing.T) {
 		})
 	}
 }
-

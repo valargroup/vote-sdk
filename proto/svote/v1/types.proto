@@ -282,9 +282,10 @@ message ValidatorPallasKey {
 // Each participant generates a random polynomial, publishes Feldman commitments,
 // and ECIES-encrypts a share to every other participant.
 message DKGContribution {
-  string                 validator_address    = 1;
-  repeated bytes         feldman_commitments  = 2; // C_j = a_j*G for j=0..t-1
-  repeated DealerPayload payloads             = 3; // One ECIES envelope per ceremony validator
+  string                 validator_address     = 1;
+  repeated bytes         feldman_commitments   = 2; // C_j = a_j*G for j=0..t-1
+  repeated DealerPayload payloads              = 3; // One ECIES envelope per ceremony validator
+  bytes                  feldman_opening_proof = 4; // Schnorr PoK for openings of feldman_commitments
 }
 
 // DealerPayload is an ECIES envelope from the dealer to a specific validator.
