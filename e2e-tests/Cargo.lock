@@ -3211,7 +3211,7 @@ dependencies = [
 [[package]]
 name = "zcash_voting"
 version = "0.10.0"
-source = "git+https://github.com/valargroup/zcash_voting?rev=fd6f1b06c7f4e22017ef45eb60a695fe42c7d6cc#fd6f1b06c7f4e22017ef45eb60a695fe42c7d6cc"
+source = "git+https://github.com/valargroup/zcash_voting?tag=0.10.0#fd6f1b06c7f4e22017ef45eb60a695fe42c7d6cc"
 dependencies = [
  "anyhow",
  "blake2b_simd",
