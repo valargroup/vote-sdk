@@ -49,7 +49,7 @@ func (k *Keeper) AddToTally(kvStore store.KVStore, roundID []byte, proposalID, d
 		if err != nil {
 			return fmt.Errorf("failed to unmarshal first enc_share: %w", err)
 		}
-		if err := validateNonIdentityC1("first enc_share", share); err != nil {
+		if err := validateNonIdentityCiphertext("first enc_share", share); err != nil {
 			return err
 		}
 		return kvStore.Set(key, encShareBytes)
@@ -64,11 +64,11 @@ func (k *Keeper) AddToTally(kvStore store.KVStore, roundID []byte, proposalID, d
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal enc_share: %w", err)
 	}
-	if err := validateNonIdentityC1("enc_share", share); err != nil {
+	if err := validateNonIdentityCiphertext("enc_share", share); err != nil {
 		return err
 	}
 	result := elgamal.HomomorphicAdd(acc, share)
-	if err := validateNonIdentityC1("accumulated tally", result); err != nil {
+	if err := validateNonIdentityCiphertext("accumulated tally", result); err != nil {
 		return err
 	}
 	resultBytes, err := elgamal.MarshalCiphertext(result)
@@ -78,12 +78,15 @@ func (k *Keeper) AddToTally(kvStore store.KVStore, roundID []byte, proposalID, d
 	return kvStore.Set(key, resultBytes)
 }
 
-func validateNonIdentityC1(label string, ct *elgamal.Ciphertext) error {
-	if ct == nil || ct.C1 == nil {
-		return fmt.Errorf("%s has nil C1", label)
+func validateNonIdentityCiphertext(label string, ct *elgamal.Ciphertext) error {
+	if ct == nil || ct.C1 == nil || ct.C2 == nil {
+		return fmt.Errorf("%s has nil ciphertext point", label)
 	}
 	if ct.C1.IsIdentity() {
 		return fmt.Errorf("%s C1 must not be the identity point", label)
+	}
+	if ct.C2.IsIdentity() {
+		return fmt.Errorf("%s C2 must not be the identity point", label)
 	}
 	return nil
 }

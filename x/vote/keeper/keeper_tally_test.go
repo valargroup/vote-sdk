@@ -55,6 +55,12 @@ func (s *KeeperTestSuite) TestTally_FirstShareValidation() {
 	}
 	identityC1Bytes, err := elgamal.MarshalCiphertext(identityC1)
 	s.Require().NoError(err)
+	identityC2 := &elgamal.Ciphertext{
+		C1: elgamal.PallasGenerator().Mul(new(curvey.ScalarPallas).New(7)),
+		C2: new(curvey.PointPallas).Identity(),
+	}
+	identityC2Bytes, err := elgamal.MarshalCiphertext(identityC2)
+	s.Require().NoError(err)
 
 	tests := []struct {
 		name        string
@@ -66,6 +72,12 @@ func (s *KeeperTestSuite) TestTally_FirstShareValidation() {
 			name:        "rejects identity C1",
 			encShare:    identityC1Bytes,
 			expectErr:   "first enc_share C1 must not be the identity point",
+			expectStore: false,
+		},
+		{
+			name:        "rejects identity C2",
+			encShare:    identityC2Bytes,
+			expectErr:   "first enc_share C2 must not be the identity point",
 			expectStore: false,
 		},
 		{
@@ -99,26 +111,57 @@ func (s *KeeperTestSuite) TestTally_FirstShareValidation() {
 			ct, err := elgamal.UnmarshalCiphertext(got)
 			s.Require().NoError(err)
 			s.Require().False(ct.C1.IsIdentity(), "accepted first share must keep C1 non-identity")
+			s.Require().False(ct.C2.IsIdentity(), "accepted first share must keep C2 non-identity")
 		})
 	}
 }
 
-func (s *KeeperTestSuite) TestTally_RejectsIdentityC1AfterHomomorphicAdd() {
+func (s *KeeperTestSuite) TestTally_RejectsDegenerateCiphertextAfterFirstShare() {
 	s.SetupTest()
 	kv := s.keeper.OpenKVStore(s.ctx)
 
 	pk := testTallyPublicKey(17)
 	ct1 := testTallyCiphertextBytes(s, pk, 4, 11)
-	ct2 := testTallyCiphertextBytesWithScalar(s, pk, 6, new(curvey.ScalarPallas).New(11).Neg())
 
 	s.Require().NoError(s.keeper.AddToTally(kv, testRoundID, 1, 0, ct1))
-	err := s.keeper.AddToTally(kv, testRoundID, 1, 0, ct2)
-	s.Require().Error(err)
-	s.Require().Contains(err.Error(), "accumulated tally C1 must not be the identity point")
 
-	got, err := s.keeper.GetTally(kv, testRoundID, 1, 0)
-	s.Require().NoError(err)
-	s.Require().Equal(ct1, got, "rejected cancellation must leave the existing accumulator unchanged")
+	tests := []struct {
+		name      string
+		encShare  []byte
+		expectErr string
+	}{
+		{
+			name:      "rejects incoming identity C2",
+			encShare:  testTallyCiphertextBytesFromPoints(s, elgamal.PallasGenerator().Mul(new(curvey.ScalarPallas).New(5)), new(curvey.PointPallas).Identity()),
+			expectErr: "enc_share C2 must not be the identity point",
+		},
+		{
+			name:      "rejects accumulated identity C1",
+			encShare:  testTallyCiphertextBytesWithScalar(s, pk, 6, new(curvey.ScalarPallas).New(11).Neg()),
+			expectErr: "accumulated tally C1 must not be the identity point",
+		},
+		{
+			name: "rejects accumulated identity C2",
+			encShare: testTallyCiphertextBytesFromPoints(
+				s,
+				elgamal.PallasGenerator().Mul(new(curvey.ScalarPallas).New(5)),
+				testTallyCiphertextPoint(s, ct1, "seed accumulator").C2.Neg(),
+			),
+			expectErr: "accumulated tally C2 must not be the identity point",
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			err := s.keeper.AddToTally(kv, testRoundID, 1, 0, tc.encShare)
+			s.Require().Error(err)
+			s.Require().Contains(err.Error(), tc.expectErr)
+
+			got, err := s.keeper.GetTally(kv, testRoundID, 1, 0)
+			s.Require().NoError(err)
+			s.Require().Equal(ct1, got, "rejected degenerate share must leave the existing accumulator unchanged")
+		})
+	}
 }
 
 func testTallyPublicKey(seed int) *elgamal.PublicKey {
@@ -143,6 +186,20 @@ func testTallyCiphertextBytesWithScalar(s *KeeperTestSuite, pk *elgamal.PublicKe
 	ctBytes, err := elgamal.MarshalCiphertext(ct)
 	s.Require().NoError(err)
 	return ctBytes
+}
+
+func testTallyCiphertextBytesFromPoints(s *KeeperTestSuite, c1, c2 curvey.Point) []byte {
+	s.T().Helper()
+	ctBytes, err := elgamal.MarshalCiphertext(&elgamal.Ciphertext{C1: c1, C2: c2})
+	s.Require().NoError(err)
+	return ctBytes
+}
+
+func testTallyCiphertextPoint(s *KeeperTestSuite, ctBytes []byte, label string) *elgamal.Ciphertext {
+	s.T().Helper()
+	ct, err := elgamal.UnmarshalCiphertext(ctBytes)
+	s.Require().NoError(err, label)
+	return ct
 }
 
 func (s *KeeperTestSuite) TestTally_IndependentTuples() {
