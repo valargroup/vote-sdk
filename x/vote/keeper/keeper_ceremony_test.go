@@ -75,6 +75,14 @@ func TestThresholdForN_Invariants(t *testing.T) {
 	}
 }
 
+func ceremonyFaultMarginForN(n int) (int, error) {
+	threshold, err := keeper.ThresholdForN(n)
+	if err != nil {
+		return 0, err
+	}
+	return (n - threshold) / 2, nil
+}
+
 func TestCeremonyQuorumForN(t *testing.T) {
 	tests := []struct {
 		n              int
@@ -102,7 +110,7 @@ func TestCeremonyQuorumForN(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		margin, err := keeper.CeremonyFaultMarginForN(tc.n)
+		margin, err := ceremonyFaultMarginForN(tc.n)
 		if tc.wantErr {
 			require.Error(t, err, "n=%d should error", tc.n)
 			_, err = keeper.RequiredCeremonyQuorumForN(tc.n)
