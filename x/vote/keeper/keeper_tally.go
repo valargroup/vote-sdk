@@ -351,6 +351,7 @@ type ValidatedPartialDecryptionEntry struct {
 
 // ValidatePartialDecryptionEntries checks entry shape, bounds, accumulator
 // existence, and completeness for one partial decryption submission.
+// This check should be present in ProcessProposal to prevent a malicious proposer from submitting an incomplete partial decryption.
 func (k *Keeper) ValidatePartialDecryptionEntries(kvStore store.KVStore, round *types.VoteRound, entries []*types.PartialDecryptionEntry) error {
 	_, err := k.ValidateAndDecodePartialDecryptionEntries(kvStore, round, entries)
 	return err
@@ -358,6 +359,8 @@ func (k *Keeper) ValidatePartialDecryptionEntries(kvStore store.KVStore, round *
 
 // ValidateAndDecodePartialDecryptionEntries validates one partial decryption
 // submission and returns the decoded points needed for DLEQ verification.
+// This check should be present in SubmitPartialDecryption to ensure that the submission contains a partial decryption for every non-empty accumulator.
+// It returns the decoded points needed for DLEQ verification.
 func (k *Keeper) ValidateAndDecodePartialDecryptionEntries(
 	kvStore store.KVStore,
 	round *types.VoteRound,
