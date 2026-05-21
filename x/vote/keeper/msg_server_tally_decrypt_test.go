@@ -933,7 +933,7 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_RejectsIncompleteEntrie
 	s.Require().False(has, "incomplete partial decryptions must not mark validator as submitted")
 }
 
-func (s *MsgServerTestSuite) TestSubmitPartialDecryption_IncompleteStoredSubmissionBlocksResubmissionAndTally() {
+func (s *MsgServerTestSuite) TestSubmitPartialDecryption_IncompleteInjectedSubmissionRejected() {
 	ta := svtest.SetupTestApp(s.T())
 	valAddr := ta.ValidatorOperAddr()
 	roundID := bytes.Repeat([]byte{0x9E}, 32)
@@ -972,7 +972,7 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_IncompleteStoredSubmiss
 	s.Require().NoError(err)
 
 	resp := ta.CallProcessProposal([][]byte{txBytes})
-	s.Require().Equal(abci.ResponseProcessProposal_ACCEPT, resp.Status)
+	s.Require().Equal(abci.ResponseProcessProposal_REJECT, resp.Status)
 }
 
 func (s *MsgServerTestSuite) TestSubmitPartialDecryption_IncompleteStoredSubmissionConsequence_AfterProcessProposal() {
@@ -1010,21 +1010,21 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_IncompleteStoredSubmiss
 		return resp.Status
 	}
 
-	// submitCompleteAfterProcessProposal := func(valIdx int) {
-	// 	s.T().Helper()
+	submitCompleteAfterProcessProposal := func(valIdx int) {
+		s.T().Helper()
 
-	// 	msg := &types.MsgSubmitPartialDecryption{
-	// 		VoteRoundId:    msgPdRoundID,
-	// 		Creator:        validators[valIdx].ValidatorAddress,
-	// 		ValidatorIndex: uint32(valIdx + 1),
-	// 		Entries:        cs.buildValidEntriesForValidator(s, valIdx),
-	// 	}
-	// 	s.setBlockProposer(msg.Creator)
-	// 	s.Require().Equal(abci.ResponseProcessProposal_ACCEPT, processProposalStatus(msg))
+		msg := &types.MsgSubmitPartialDecryption{
+			VoteRoundId:    msgPdRoundID,
+			Creator:        validators[valIdx].ValidatorAddress,
+			ValidatorIndex: uint32(valIdx + 1),
+			Entries:        cs.buildValidEntriesForValidator(s, valIdx),
+		}
+		s.setBlockProposer(msg.Creator)
+		s.Require().Equal(abci.ResponseProcessProposal_ACCEPT, processProposalStatus(msg))
 
-	// 	_, err := s.msgServer.SubmitPartialDecryption(s.ctx, msg)
-	// 	s.Require().NoError(err)
-	// }
+		_, err := s.msgServer.SubmitPartialDecryption(s.ctx, msg)
+		s.Require().NoError(err)
+	}
 
 	incompleteMsg := &types.MsgSubmitPartialDecryption{
 		VoteRoundId:    msgPdRoundID,
@@ -1033,71 +1033,18 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_IncompleteStoredSubmiss
 		Entries:        entriesForValidator(0, [2]uint32{1, 0}),
 	}
 	s.setBlockProposer(validators[0].ValidatorAddress)
-	switch processProposalStatus(incompleteMsg) {
-	// case abci.ResponseProcessProposal_REJECT:
-	// 	has, err := s.keeper.HasPartialDecryptionsFromValidator(kv, msgPdRoundID, 1)
-	// 	s.Require().NoError(err)
-	// 	s.Require().False(has, "rejected incomplete submission must not consume validator 1's submission")
-
-	// 	submitCompleteAfterProcessProposal(0)
-	// 	submitCompleteAfterProcessProposal(1)
-
-	// 	s.setBlockProposer("sv1proposer")
-	// 	_, err = s.msgServer.SubmitTally(s.ctx, &types.MsgSubmitTally{
-	// 		VoteRoundId: msgPdRoundID,
-	// 		Creator:     "sv1proposer",
-	// 		Entries: []*types.TallyEntry{
-	// 			{ProposalId: 1, VoteDecision: 0, TotalValue: 42},
-	// 			{ProposalId: 1, VoteDecision: 1, TotalValue: 42},
-	// 			{ProposalId: 2, VoteDecision: 0, TotalValue: 42},
-	// 			{ProposalId: 2, VoteDecision: 1, TotalValue: 42},
-	// 		},
-	// 	})
-	// 	s.Require().NoError(err)
-	// 	return
-
-	case abci.ResponseProcessProposal_ACCEPT:
-		_, err := s.msgServer.SubmitPartialDecryption(s.ctx, incompleteMsg)
-		if err != nil {
-			// MsgServer has the same defense-in-depth check. When only the
-			// ProcessProposal guard is disabled, seed the accepted bad state so
-			// this test still demonstrates why the proposal guard matters.
-			s.Require().ErrorIs(err, types.ErrInvalidField)
-			s.Require().Contains(err.Error(), "missing partial decryption")
-			s.Require().NoError(s.keeper.SetPartialDecryptions(kv, msgPdRoundID, 1, incompleteMsg.Entries))
-		}
-
-	default:
-		s.T().Fatal("unexpected ProcessProposal status")
-	}
+	// Should reject incomplete partial decryption submission
+	resp := processProposalStatus(incompleteMsg)
+	s.Require().Equal(abci.ResponseProcessProposal_REJECT, resp)
 
 	has, err := s.keeper.HasPartialDecryptionsFromValidator(kv, msgPdRoundID, 1)
 	s.Require().NoError(err)
-	s.Require().True(has, "the incomplete stored entry consumes validator 1's one submission")
+	s.Require().False(has, "rejected incomplete submission must not consume validator 1's submission")
 
-	// Cannot resubmit a correct entry once incomplete submission is in the store
-	s.setBlockProposer(validators[0].ValidatorAddress)
-	_, err = s.msgServer.SubmitPartialDecryption(s.ctx, &types.MsgSubmitPartialDecryption{
-		VoteRoundId:    msgPdRoundID,
-		Creator:        validators[0].ValidatorAddress,
-		ValidatorIndex: 1,
-		Entries:        cs.buildValidEntriesForValidator(s, 0),
-	})
-	s.Require().Error(err)
-	s.Require().ErrorIs(err, types.ErrInvalidField)
-	s.Require().Contains(err.Error(), "already submitted")
+	submitCompleteAfterProcessProposal(0)
+	submitCompleteAfterProcessProposal(1)
 
-	// Second validator submits their entry
-	s.setBlockProposer(validators[1].ValidatorAddress)
-	_, err = s.msgServer.SubmitPartialDecryption(s.ctx, &types.MsgSubmitPartialDecryption{
-		VoteRoundId:    msgPdRoundID,
-		Creator:        validators[1].ValidatorAddress,
-		ValidatorIndex: 2,
-		Entries:        cs.buildValidEntriesForValidator(s, 1),
-	})
-	s.Require().NoError(err)
-
-	// Tally fail because the incomplete submission is still in the store
+	// Tally passes with no error
 	s.setBlockProposer("sv1proposer")
 	_, err = s.msgServer.SubmitTally(s.ctx, &types.MsgSubmitTally{
 		VoteRoundId: msgPdRoundID,
@@ -1109,9 +1056,7 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_IncompleteStoredSubmiss
 			{ProposalId: 2, VoteDecision: 1, TotalValue: 42},
 		},
 	})
-	s.Require().Error(err)
-	s.Require().ErrorIs(err, types.ErrTallyMismatch)
-	s.Require().Contains(err.Error(), "Lagrange combination failed")
+	s.Require().NoError(err)
 }
 
 func (s *MsgServerTestSuite) TestSubmitPartialDecryption_EmitsEvent() {
