@@ -98,20 +98,6 @@ func RequiredCeremonyQuorumForN(n int) (int, error) {
 	return max(t+f, n-f), nil
 }
 
-// ---------------------------------------------------------------------------
-// Per-round ceremony helpers (operate on VoteRound ceremony fields)
-// ---------------------------------------------------------------------------
-
-// HalfAcked returns true if at least 1/2 of round ceremony validators have
-// acknowledged. Uses integer arithmetic: acks * 2 >= validators.
-func HalfAcked(round *types.VoteRound) bool {
-	n := len(round.CeremonyValidators)
-	if n == 0 {
-		return false
-	}
-	return len(round.CeremonyAcks)*2 >= n
-}
-
 // FindValidatorInRoundCeremony returns the ValidatorPallasKey and true if
 // valAddr is found in the round's ceremony_validators list, or (nil, false)
 // otherwise. Callers that need the original Shamir evaluation point must use
