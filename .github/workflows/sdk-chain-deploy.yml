@@ -56,6 +56,7 @@ jobs:
           DNS_PREFIX: ${{ vars.DNS_PREFIX }}
           HAS_SECONDARY: ${{ vars.HAS_SECONDARY }}
           DO_SPACES_BUCKET: ${{ vars.DO_SPACES_BUCKET }}
+          DO_SPACES_REGION: ${{ vars.DO_SPACES_REGION }}
           DO_SPACES_BASE: ${{ vars.DO_SPACES_BASE }}
           RELEASE_BASE_URL: ${{ vars.RELEASE_BASE_URL }}
           VOTING_CONFIG_URL: ${{ vars.VOTING_CONFIG_URL }}
@@ -73,7 +74,8 @@ jobs:
             default_voting_config_url="https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/stage/"
           fi
           do_spaces_bucket="${DO_SPACES_BUCKET:-vote}"
-          do_spaces_base="${DO_SPACES_BASE:-https://${do_spaces_bucket}.fra1.digitaloceanspaces.com}"
+          do_spaces_region="${DO_SPACES_REGION:-fra1}"
+          do_spaces_base="${DO_SPACES_BASE:-https://${do_spaces_bucket}.${do_spaces_region}.digitaloceanspaces.com}"
           release_base_url="${RELEASE_BASE_URL:-${do_spaces_base}/binaries/vote-sdk}"
           voting_config_url="${VOTING_CONFIG_URL:-$default_voting_config_url}"
           {

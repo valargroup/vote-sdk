@@ -38,6 +38,7 @@ jobs:
       dns_prefix: ${{ steps.resolve.outputs.dns_prefix }}
       has_secondary: ${{ steps.resolve.outputs.has_secondary }}
       do_spaces_bucket: ${{ steps.resolve.outputs.do_spaces_bucket }}
+      do_spaces_region: ${{ steps.resolve.outputs.do_spaces_region }}
       do_spaces_base: ${{ steps.resolve.outputs.do_spaces_base }}
       release_base_url: ${{ steps.resolve.outputs.release_base_url }}
       genesis_key: ${{ steps.resolve.outputs.genesis_key }}
@@ -52,6 +53,7 @@ jobs:
           DNS_PREFIX: ${{ vars.DNS_PREFIX }}
           HAS_SECONDARY: ${{ vars.HAS_SECONDARY }}
           DO_SPACES_BUCKET: ${{ vars.DO_SPACES_BUCKET }}
+          DO_SPACES_REGION: ${{ vars.DO_SPACES_REGION }}
           DO_SPACES_BASE: ${{ vars.DO_SPACES_BASE }}
           RELEASE_BASE_URL: ${{ vars.RELEASE_BASE_URL }}
           GENESIS_KEY: ${{ vars.GENESIS_KEY }}
@@ -74,7 +76,8 @@ jobs:
           dns_prefix="${DNS_PREFIX:-$default_dns_prefix}"
           has_secondary="${HAS_SECONDARY:-$default_has_secondary}"
           do_spaces_bucket="${DO_SPACES_BUCKET:-vote}"
-          do_spaces_base="${DO_SPACES_BASE:-https://${do_spaces_bucket}.fra1.digitaloceanspaces.com}"
+          do_spaces_region="${DO_SPACES_REGION:-fra1}"
+          do_spaces_base="${DO_SPACES_BASE:-https://${do_spaces_bucket}.${do_spaces_region}.digitaloceanspaces.com}"
           release_base_url="${RELEASE_BASE_URL:-${do_spaces_base}/binaries/vote-sdk}"
           genesis_key="${GENESIS_KEY:-genesis/${chain_id}/genesis.json}"
           snapshots_prefix="${SNAPSHOTS_PREFIX:-snapshots/${chain_id}}"
@@ -84,6 +87,7 @@ jobs:
             echo "dns_prefix=${dns_prefix}"
             echo "has_secondary=${has_secondary}"
             echo "do_spaces_bucket=${do_spaces_bucket}"
+            echo "do_spaces_region=${do_spaces_region}"
             echo "do_spaces_base=${do_spaces_base}"
             echo "release_base_url=${release_base_url}"
             echo "genesis_key=${genesis_key}"
@@ -274,6 +278,7 @@ jobs:
     environment: ${{ inputs.target_environment }}
     env:
       DO_SPACES_BUCKET: ${{ needs.resolve-environment.outputs.do_spaces_bucket }}
+      DO_SPACES_REGION: ${{ needs.resolve-environment.outputs.do_spaces_region }}
       GENESIS_KEY: ${{ needs.resolve-environment.outputs.genesis_key }}
       SNAPSHOTS_PREFIX: ${{ needs.resolve-environment.outputs.snapshots_prefix }}
     steps:
@@ -284,7 +289,7 @@ jobs:
           host: ${{ secrets.PRIMARY_HOST || vars.PRIMARY_HOST || format('{0}vote-chain-primary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: DO_ACCESS_KEY,DO_SECRET_KEY,DO_SPACES_BUCKET,GENESIS_KEY,SNAPSHOTS_PREFIX
+          envs: DO_ACCESS_KEY,DO_SECRET_KEY,DO_SPACES_BUCKET,DO_SPACES_REGION,GENESIS_KEY,SNAPSHOTS_PREFIX
           script: |
             set -euo pipefail
 
@@ -300,9 +305,9 @@ jobs:
             [default]
             access_key = ${DO_ACCESS_KEY}
             secret_key = ${DO_SECRET_KEY}
-            host_base = fra1.digitaloceanspaces.com
-            host_bucket = %(bucket)s.fra1.digitaloceanspaces.com
-            bucket_location = fra1
+            host_base = ${DO_SPACES_REGION}.digitaloceanspaces.com
+            host_bucket = %(bucket)s.${DO_SPACES_REGION}.digitaloceanspaces.com
+            bucket_location = ${DO_SPACES_REGION}
             use_https = True
             EOCFG
             s3cmd -c /tmp/do-spaces.s3cfg put /tmp/genesis.json "s3://${DO_SPACES_BUCKET}/${GENESIS_KEY}" --acl-public --force
@@ -377,6 +382,7 @@ jobs:
       RELEASE_BASE_URL: ${{ needs.resolve-environment.outputs.release_base_url }}
       SNAPSHOT_HOST: ${{ vars.SNAPSHOT_PUBLIC_HOST || format('{0}snapshots.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
       SENTRY_ENVIRONMENT: ${{ inputs.target_environment }}
+      VERIFY_PUBLIC_ENDPOINTS: ${{ vars.VERIFY_PUBLIC_ENDPOINTS || 'true' }}
     steps:
       - name: Install tag and join as snapshot node
         uses: appleboy/ssh-action@v1.0.3
@@ -417,7 +423,7 @@ jobs:
           host: ${{ secrets.SNAPSHOT_HOST || vars.SNAPSHOT_HOST || format('{0}snapshots.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: SNAPSHOT_HOST
+          envs: SNAPSHOT_HOST,VERIFY_PUBLIC_ENDPOINTS
           script: |
             set -euo pipefail
 
@@ -442,18 +448,22 @@ jobs:
               sleep 30
             done
 
-            for path in /daily.json /latest.json /snapshots.json; do
+            if [ "${VERIFY_PUBLIC_ENDPOINTS}" = "false" ]; then
+              echo "Skipping snapshot HTTPS metadata checks before DNS cutover."
+            else
+              for path in /daily.json /latest.json /snapshots.json; do
+                curl -fsS --resolve "${SNAPSHOT_HOST}:443:127.0.0.1" \
+                  "https://${SNAPSHOT_HOST}${path}" \
+                  | jq -e 'type == "object" or type == "array"' > /dev/null
+                echo "[OK] ${path}"
+              done
               curl -fsS --resolve "${SNAPSHOT_HOST}:443:127.0.0.1" \
-                "https://${SNAPSHOT_HOST}${path}" \
-                | jq -e 'type == "object" or type == "array"' > /dev/null
-              echo "[OK] ${path}"
-            done
-            curl -fsS --resolve "${SNAPSHOT_HOST}:443:127.0.0.1" \
-              "https://${SNAPSHOT_HOST}/daily.json" \
-              | jq -e '.roles | index("daily") != null' > /dev/null
-            curl -fsS --resolve "${SNAPSHOT_HOST}:443:127.0.0.1" \
-              "https://${SNAPSHOT_HOST}/latest.json" \
-              | jq -e '.roles | index("latest") != null' > /dev/null
+                "https://${SNAPSHOT_HOST}/daily.json" \
+                | jq -e '.roles | index("daily") != null' > /dev/null
+              curl -fsS --resolve "${SNAPSHOT_HOST}:443:127.0.0.1" \
+                "https://${SNAPSHOT_HOST}/latest.json" \
+                | jq -e '.roles | index("latest") != null' > /dev/null
+            fi
 
       - name: Verify snapshot services
         uses: appleboy/ssh-action@v1.0.3
@@ -461,12 +471,16 @@ jobs:
           host: ${{ secrets.SNAPSHOT_HOST || vars.SNAPSHOT_HOST || format('{0}snapshots.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: SNAPSHOT_HOST
+          envs: SNAPSHOT_HOST,VERIFY_PUBLIC_ENDPOINTS
           script: |
             systemctl is-active --quiet svoted
             systemctl is-enabled --quiet snapshot.timer
-            curl -sf --resolve "${SNAPSHOT_HOST}:443:127.0.0.1" \
-              "https://${SNAPSHOT_HOST}/" > /dev/null
+            if [ "${VERIFY_PUBLIC_ENDPOINTS}" = "false" ]; then
+              echo "Skipping snapshot frontend HTTPS check before DNS cutover."
+            else
+              curl -sf --resolve "${SNAPSHOT_HOST}:443:127.0.0.1" \
+                "https://${SNAPSHOT_HOST}/" > /dev/null
+            fi
             echo "Snapshot node and frontend healthy."
 
   reset-secondary:
@@ -550,6 +564,7 @@ jobs:
       RELEASE_BASE_URL: ${{ needs.resolve-environment.outputs.release_base_url }}
       SNAPSHOT_HOST: ${{ vars.SNAPSHOT_PUBLIC_HOST || format('{0}snapshots.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
       SENTRY_ENVIRONMENT: ${{ inputs.target_environment }}
+      VERIFY_PUBLIC_ENDPOINTS: ${{ vars.VERIFY_PUBLIC_ENDPOINTS || 'true' }}
     steps:
       - name: Install tag and join as archive
         uses: appleboy/ssh-action@v1.0.3
@@ -632,7 +647,7 @@ jobs:
           host: ${{ secrets.EXPLORER_HOST || vars.EXPLORER_HOST || format('{0}explorer.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: SNAPSHOT_HOST
+          envs: SNAPSHOT_HOST,VERIFY_PUBLIC_ENDPOINTS
           script: |
             set -euo pipefail
 
@@ -657,15 +672,19 @@ jobs:
               sleep 30
             done
 
-            curl -fsS "https://${SNAPSHOT_HOST}/archive/latest.json" \
-              | jq -e '.type == "archive" and (.roles | index("latest")) and (.roles | index("archive"))' > /dev/null
-            curl -fsS "https://${SNAPSHOT_HOST}/archive/snapshots.json" \
-              | jq -e 'length == 1 and .[0].type == "archive"' > /dev/null
-            echo "Archive snapshot metadata healthy."
+            if [ "${VERIFY_PUBLIC_ENDPOINTS}" = "false" ]; then
+              echo "Skipping archive HTTPS metadata checks before DNS cutover."
+            else
+              curl -fsS "https://${SNAPSHOT_HOST}/archive/latest.json" \
+                | jq -e '.type == "archive" and (.roles | index("latest")) and (.roles | index("archive"))' > /dev/null
+              curl -fsS "https://${SNAPSHOT_HOST}/archive/snapshots.json" \
+                | jq -e 'length == 1 and .[0].type == "archive"' > /dev/null
+              echo "Archive snapshot metadata healthy."
+            fi
 
   verify:
     name: Post-reset verification
-    if: ${{ always() && needs.reset-archive.result == 'success' && needs.reset-snapshot.result == 'success' }}
+    if: ${{ always() && needs.reset-archive.result == 'success' && needs.reset-snapshot.result == 'success' && vars.VERIFY_PUBLIC_ENDPOINTS != 'false' }}
     runs-on: ubuntu-latest
     needs: [resolve-environment, reset-archive, reset-snapshot]
     environment: ${{ inputs.target_environment }}
