@@ -1,5 +1,4 @@
 package app
 
 var ValidateInjectedDKGContribution = validateInjectedDKGContribution
-var ValidateInjectedPartialDecryptEntries = validateInjectedPartialDecryptEntries
 var AckDKGRound = ackDKGRound

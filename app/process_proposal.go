@@ -1,17 +1,13 @@
 package app
 
 import (
-	"fmt"
-
 	abci "github.com/cometbft/cometbft/abci/types"
 
-	"cosmossdk.io/core/store"
 	"cosmossdk.io/log"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	voteapi "github.com/valargroup/vote-sdk/api"
-	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/sentry"
 	votekeeper "github.com/valargroup/vote-sdk/x/vote/keeper"
 	"github.com/valargroup/vote-sdk/x/vote/types"
@@ -166,8 +162,8 @@ func validateInjectedPartialDecrypt(ctx sdk.Context, voteKeeper *votekeeper.Keep
 	// Ensures that the submission contains a partial decryption for every non-empty accumulator.
 	// Without this check, a malicious proposer could submit an incomplete partial decryption
 	// that later causes a tally to fail.
-	if err := validateInjectedPartialDecryptEntries(voteKeeper, kvStore, round, pdMsg); err != nil {
-		return err
+	if err := voteKeeper.ValidatePartialDecryptionEntries(kvStore, round, pdMsg.Entries); err != nil {
+		return errInvalidInjectedTx(err.Error())
 	}
 
 	ceremonyVal, found := votekeeper.FindValidatorInRoundCeremony(round, pdMsg.Creator)
@@ -188,46 +184,6 @@ func validateInjectedPartialDecrypt(ctx sdk.Context, voteKeeper *votekeeper.Keep
 
 	if err := voteKeeper.ValidateProposerIsCreator(ctx, pdMsg.Creator, "MsgSubmitPartialDecryption"); err != nil {
 		return errInvalidInjectedTx(err.Error())
-	}
-
-	return nil
-}
-
-// validateInjectedPartialDecryptEntries checks entry shape and completeness.
-// Ensures that the submission contains a partial decryption for every non-empty accumulator.
-// Rejects empty entries.
-// Validates entry bound and accumulator existence for each entry.
-func validateInjectedPartialDecryptEntries(
-	voteKeeper *votekeeper.Keeper,
-	kvStore store.KVStore,
-	round *types.VoteRound,
-	pdMsg *types.MsgSubmitPartialDecryption,
-) error {
-	if len(pdMsg.Entries) == 0 {
-		return errInvalidInjectedTx("entries cannot be empty")
-	}
-
-	// Without this check, a malicious proposer could submit an incomplete partial decryption
-	// that later causes a tally to fail.
-	if err := voteKeeper.ValidatePartialDecryptionCompleteness(kvStore, round, pdMsg.Entries); err != nil {
-		return errInvalidInjectedTx(err.Error())
-	}
-
-	for i, entry := range pdMsg.Entries {
-		if _, err := elgamal.UnmarshalPoint(entry.PartialDecrypt); err != nil {
-			return errInvalidInjectedTx(fmt.Sprintf("entry[%d] partial_decrypt is not a valid Pallas point: %v", i, err))
-		}
-		if err := votekeeper.ValidateEntryBounds(round, entry.ProposalId, entry.VoteDecision); err != nil {
-			return errInvalidInjectedTx(fmt.Sprintf("entry[%d]: %v", i, err))
-		}
-		accBytes, err := voteKeeper.GetTally(kvStore, pdMsg.VoteRoundId, entry.ProposalId, entry.VoteDecision)
-		if err != nil {
-			return err
-		}
-		if accBytes == nil {
-			return errInvalidInjectedTx(fmt.Sprintf("entry[%d] no accumulator for (proposal=%d, decision=%d)",
-				i, entry.ProposalId, entry.VoteDecision))
-		}
 	}
 
 	return nil

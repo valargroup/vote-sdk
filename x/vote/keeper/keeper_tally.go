@@ -338,6 +338,39 @@ func (k *Keeper) ValidatePartialDecryptionCompleteness(kvStore store.KVStore, ro
 	return nil
 }
 
+// ValidatePartialDecryptionEntries checks entry shape, bounds, accumulator
+// existence, and completeness for one partial decryption submission.
+func (k *Keeper) ValidatePartialDecryptionEntries(kvStore store.KVStore, round *types.VoteRound, entries []*types.PartialDecryptionEntry) error {
+	if len(entries) == 0 {
+		return fmt.Errorf("%w: entries cannot be empty", types.ErrInvalidField)
+	}
+
+	// Ensures that the submission contains a partial decryption for every non-empty accumulator.
+	if err := k.ValidatePartialDecryptionCompleteness(kvStore, round, entries); err != nil {
+		return err
+	}
+
+	for i, entry := range entries {
+		if _, err := elgamal.UnmarshalPoint(entry.PartialDecrypt); err != nil {
+			return fmt.Errorf("%w: entry[%d] partial_decrypt is not a valid Pallas point: %v",
+				types.ErrInvalidField, i, err)
+		}
+		if err := ValidateEntryBounds(round, entry.ProposalId, entry.VoteDecision); err != nil {
+			return fmt.Errorf("entry[%d]: %w", i, err)
+		}
+		accBytes, err := k.GetTally(kvStore, round.VoteRoundId, entry.ProposalId, entry.VoteDecision)
+		if err != nil {
+			return err
+		}
+		if accBytes == nil {
+			return fmt.Errorf("%w: entry[%d] no accumulator for (proposal=%d, decision=%d)",
+				types.ErrInvalidField, i, entry.ProposalId, entry.VoteDecision)
+		}
+	}
+
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Tally validation helpers
 // ---------------------------------------------------------------------------
