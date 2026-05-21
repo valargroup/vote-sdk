@@ -69,7 +69,7 @@ func configPRPathForConfigURL(configURL string) (string, string) {
 	case "stage":
 		return "stage", "staging"
 	default:
-		return "", "legacy root"
+		return "prod", "production"
 	}
 }
 
@@ -116,7 +116,7 @@ func (c configPRAutomation) environmentLabel() string {
 	if c.EnvironmentLabel != "" {
 		return c.EnvironmentLabel
 	}
-	return "legacy root"
+	return "production"
 }
 
 func (c configPRAutomation) branchName(roundID string) string {

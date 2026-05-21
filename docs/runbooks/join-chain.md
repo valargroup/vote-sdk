@@ -337,7 +337,7 @@ sudo apt-get update && sudo apt-get install -y curl jq lz4 ca-certificates
    export PATH="$INSTALL_DIR:$PATH"
    ```
 
-2. Discover the network and capture the seed peer. The dynamic voting-config payload lives in [token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config/blob/main/dynamic-voting-config.json) and is published at `voting.valargroup.org` — the same source wallets use. Override `VOTING_CONFIG_URL` for staging mirrors.
+2. Discover the network and capture the seed peer. The dynamic voting-config payload is published at `voting.valargroup.org` and defaults to production when no environment path is provided. Source edits live in [token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config/blob/main/prod/dynamic-voting-config.json). Override `VOTING_CONFIG_URL` for staging mirrors.
 
    ```bash
    VOTING_CONFIG_URL="${VOTING_CONFIG_URL:-https://voting.valargroup.org/dynamic-voting-config.json}"
@@ -445,7 +445,7 @@ Interactive runs without an explicit TLS mode prompt until the operator chooses 
 | `SVOTE_ALLOW_NO_PUBLIC_URL` | `0` | When `1`, explicit-domain Caddy failures continue with an empty `VALIDATOR_URL` so the operator can still enter the funding queue. |
 | `SVOTE_SKIP_SERVICE` | `0` | When `1`, skip service install and the sync wait. The node is initialized but not started. Useful for Docker smoke tests and CI. |
 | `SVOTE_FORCE_RESET` | `0` | When `1`, allow `join.sh` to reset an existing install non-interactively. This stops the existing validator service, deletes `SVOTE_HOME`, generates a new validator identity, and rewrites/restarts the service. Use only when the old validator identity and any funded address are disposable or backed up. |
-| `VOTING_CONFIG_URL` | `https://voting.valargroup.org/dynamic-voting-config.json` | Canonical dynamic voting-config (same payload wallets fetch). Override for staging mirrors or fork testing. |
+| `VOTING_CONFIG_URL` | `https://voting.valargroup.org/dynamic-voting-config.json` | Canonical dynamic voting-config. Defaults to production when no environment path is provided. Override for staging mirrors or fork testing. |
 | `SVOTE_ADMIN_URL` | `https://vote-chain-primary.valargroup.org` | Admin server base URL. Used for `POST /api/register-validator` (join queue). Voting-config discovery uses `VOTING_CONFIG_URL` instead. |
 | `SVOTE_WRAPPER_SCRIPT` | bundled path → `${DO_BASE}/svoted-wrapper.sh` fallback | Override path to `svoted-wrapper.sh`. Useful when `join.sh` is piped via curl and the repo's `scripts/svoted-wrapper.sh` isn't reachable. |
 
@@ -497,7 +497,7 @@ The three TLS modes and the Caddy layout are described in [TLS / reverse proxy](
 |-----------|-------------|---------|
 | Outbound 443 | `vote.fra1.digitaloceanspaces.com` or the configured `SVOTE_DO_SPACES_BASE` host | `version.txt`, `svoted` + `create-val-tx` tarballs (`binaries/vote-sdk/…`), `genesis.json`, `svoted-wrapper.sh` fallback |
 | Outbound 443 | `snapshots.valargroup.org` | Latest Zvote snapshot metadata and archive URL used to bootstrap chain data before peer catch-up |
-| Outbound 443 | `voting.valargroup.org` | [`dynamic-voting-config.json`](https://github.com/valargroup/token-holder-voting-config/blob/main/dynamic-voting-config.json) — canonical seed-peer discovery (same payload wallets fetch). Override via `VOTING_CONFIG_URL` for staging mirrors. |
+| Outbound 443 | `voting.valargroup.org` | [`dynamic-voting-config.json`](https://voting.valargroup.org/dynamic-voting-config.json) — canonical seed-peer discovery. Defaults to production when no environment path is provided. Override via `VOTING_CONFIG_URL` for staging mirrors. |
 | Outbound 443 | `vote-chain-primary.valargroup.org` | `POST /api/register-validator` (join queue). Override via `SVOTE_ADMIN_URL`. |
 | Outbound 443 | `<first vote_servers[].url>` | `/cosmos/base/tendermint/v1beta1/node_info` (P2P seed) |
 | Outbound 443 | `ifconfig.me`, `api.ipify.org` | Public IPv4 auto-detection (only when choosing auto sslip.io + Caddy) |
