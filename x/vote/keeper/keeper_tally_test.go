@@ -3,6 +3,9 @@ package keeper_test
 import (
 	"bytes"
 
+	"github.com/mikelodder7/curvey"
+
+	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
@@ -23,8 +26,9 @@ func (s *KeeperTestSuite) TestTally_AddAndAccumulate() {
 	s.SetupTest()
 	kv := s.keeper.OpenKVStore(s.ctx)
 
-	// Create a 64-byte ciphertext stub.
-	ct1 := bytes.Repeat([]byte{0x11}, 64)
+	sk, pk := testTallyKeypair(17)
+	ct1 := testTallyCiphertextBytes(s, pk, 11, 3)
+	ct2 := testTallyCiphertextBytes(s, pk, 13, 5)
 
 	// First add: stores directly.
 	s.Require().NoError(s.keeper.AddToTally(kv, testRoundID, 1, 1, ct1))
@@ -32,9 +36,113 @@ func (s *KeeperTestSuite) TestTally_AddAndAccumulate() {
 	s.Require().NoError(err)
 	s.Require().Equal(ct1, got, "first add should store the ciphertext directly")
 
-	// Note: We can't test real HomomorphicAdd with stub bytes (they won't
-	// deserialize as valid Pallas points). The msg_server_test uses real
-	// ElGamal ciphertexts for HomomorphicAdd integration testing.
+	// Second add: homomorphically accumulates and stores a different ciphertext.
+	s.Require().NoError(s.keeper.AddToTally(kv, testRoundID, 1, 1, ct2))
+	got, err = s.keeper.GetTally(kv, testRoundID, 1, 1)
+	s.Require().NoError(err)
+	s.Require().NotEqual(ct1, got, "second add should update the accumulator")
+	acc, err := elgamal.UnmarshalCiphertext(got)
+	s.Require().NoError(err)
+	s.Require().False(acc.C1.IsIdentity(), "normal accumulation must keep C1 non-identity")
+	s.Require().True(elgamal.DecryptToPoint(sk, acc).Equal(elgamal.ValuePoint(24)), "normal accumulation must remain decryptable")
+}
+
+func (s *KeeperTestSuite) TestTally_FirstShareValidation() {
+	pk := testTallyPublicKey(17)
+	identityC1 := &elgamal.Ciphertext{
+		C1: new(curvey.PointPallas).Identity(),
+		C2: elgamal.PallasGenerator().Mul(new(curvey.ScalarPallas).New(7)),
+	}
+	identityC1Bytes, err := elgamal.MarshalCiphertext(identityC1)
+	s.Require().NoError(err)
+
+	tests := []struct {
+		name        string
+		encShare    []byte
+		expectErr   string
+		expectStore bool
+	}{
+		{
+			name:        "rejects identity C1",
+			encShare:    identityC1Bytes,
+			expectErr:   "first enc_share C1 must not be the identity point",
+			expectStore: false,
+		},
+		{
+			name:        "accepts randomized encryption of zero",
+			encShare:    testTallyCiphertextBytes(s, pk, 0, 9),
+			expectStore: true,
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			s.SetupTest()
+			kv := s.keeper.OpenKVStore(s.ctx)
+
+			err := s.keeper.AddToTally(kv, testRoundID, 1, 0, tc.encShare)
+			if tc.expectErr != "" {
+				s.Require().Error(err)
+				s.Require().Contains(err.Error(), tc.expectErr)
+			} else {
+				s.Require().NoError(err)
+			}
+
+			got, err := s.keeper.GetTally(kv, testRoundID, 1, 0)
+			s.Require().NoError(err)
+			if !tc.expectStore {
+				s.Require().Nil(got, "rejected first share must not create an accumulator")
+				return
+			}
+
+			s.Require().Equal(tc.encShare, got)
+			ct, err := elgamal.UnmarshalCiphertext(got)
+			s.Require().NoError(err)
+			s.Require().False(ct.C1.IsIdentity(), "accepted first share must keep C1 non-identity")
+		})
+	}
+}
+
+func (s *KeeperTestSuite) TestTally_RejectsIdentityC1AfterHomomorphicAdd() {
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	pk := testTallyPublicKey(17)
+	ct1 := testTallyCiphertextBytes(s, pk, 4, 11)
+	ct2 := testTallyCiphertextBytesWithScalar(s, pk, 6, new(curvey.ScalarPallas).New(11).Neg())
+
+	s.Require().NoError(s.keeper.AddToTally(kv, testRoundID, 1, 0, ct1))
+	err := s.keeper.AddToTally(kv, testRoundID, 1, 0, ct2)
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "accumulated tally C1 must not be the identity point")
+
+	got, err := s.keeper.GetTally(kv, testRoundID, 1, 0)
+	s.Require().NoError(err)
+	s.Require().Equal(ct1, got, "rejected cancellation must leave the existing accumulator unchanged")
+}
+
+func testTallyPublicKey(seed int) *elgamal.PublicKey {
+	_, pk := testTallyKeypair(seed)
+	return pk
+}
+
+func testTallyKeypair(seed int) (*elgamal.SecretKey, *elgamal.PublicKey) {
+	sk := &elgamal.SecretKey{Scalar: new(curvey.ScalarPallas).New(seed)}
+	pk := &elgamal.PublicKey{Point: elgamal.PallasGenerator().Mul(sk.Scalar)}
+	return sk, pk
+}
+
+func testTallyCiphertextBytes(s *KeeperTestSuite, pk *elgamal.PublicKey, value uint64, randomness int) []byte {
+	return testTallyCiphertextBytesWithScalar(s, pk, value, new(curvey.ScalarPallas).New(randomness))
+}
+
+func testTallyCiphertextBytesWithScalar(s *KeeperTestSuite, pk *elgamal.PublicKey, value uint64, r curvey.Scalar) []byte {
+	s.T().Helper()
+	ct, err := elgamal.EncryptWithRandomness(pk, value, r)
+	s.Require().NoError(err)
+	ctBytes, err := elgamal.MarshalCiphertext(ct)
+	s.Require().NoError(err)
+	return ctBytes
 }
 
 func (s *KeeperTestSuite) TestTally_IndependentTuples() {

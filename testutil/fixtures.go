@@ -10,6 +10,7 @@ import (
 	"time"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/mikelodder7/curvey"
 
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/x/vote/types"
@@ -195,10 +196,18 @@ func ValidCastVote(roundID []byte, anchorHeight uint64, nullifierSeed byte) *typ
 }
 
 // ValidRevealShare returns a MsgRevealShare with mock data.
-// EncShare is a valid ElGamal identity ciphertext (two identity Pallas points)
-// that passes keeper validation. The nullifierSeed only affects ShareNullifier.
+// EncShare is a randomized encryption of zero with non-identity C1, matching the
+// keeper invariant while still avoiding any end-to-end tally assumptions.
 func ValidRevealShare(roundID []byte, anchorHeight uint64, nullifierSeed byte) *types.MsgRevealShare {
-	encShare := elgamal.IdentityCiphertextBytes()
+	pk := &elgamal.PublicKey{Point: elgamal.PallasGenerator().Mul(new(curvey.ScalarPallas).New(17))}
+	ct, err := elgamal.EncryptWithRandomness(pk, 0, new(curvey.ScalarPallas).New(int(nullifierSeed)+1))
+	if err != nil {
+		panic("testutil: failed to construct reveal share ciphertext: " + err.Error())
+	}
+	encShare, err := elgamal.MarshalCiphertext(ct)
+	if err != nil {
+		panic("testutil: failed to marshal reveal share ciphertext: " + err.Error())
+	}
 	return &types.MsgRevealShare{
 		ShareNullifier:           MakeNullifier(nullifierSeed),
 		EncShare:                 encShare,
