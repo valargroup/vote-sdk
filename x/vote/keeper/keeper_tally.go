@@ -317,6 +317,7 @@ func (k *Keeper) ValidateTallyCompleteness(kvStore store.KVStore, round *types.V
 
 // ValidatePartialDecryptionCompleteness checks that one validator's partial
 // decryption submission covers every non-empty accumulator in the round.
+// Ensures that the submission contains a partial decryption for every non-empty accumulator.
 func (k *Keeper) ValidatePartialDecryptionCompleteness(kvStore store.KVStore, round *types.VoteRound, entries []*types.PartialDecryptionEntry) error {
 	expected, err := k.CollectNonEmptyAccumulators(kvStore, round)
 	if err != nil {
