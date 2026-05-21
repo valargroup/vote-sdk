@@ -245,6 +245,9 @@ func (ms msgServer) SubmitPartialDecryption(goCtx context.Context, msg *types.Ms
 	if len(msg.Entries) == 0 {
 		return nil, fmt.Errorf("%w: entries cannot be empty", types.ErrInvalidField)
 	}
+	// Ensures that the submission contains a partial decryption for every non-empty accumulator.
+	// Without this check, a malicious proposer could submit an incomplete partial decryption
+	// that later causes a tally to fail.
 	if err := ms.k.ValidatePartialDecryptionCompleteness(kvStore, round, msg.Entries); err != nil {
 		return nil, err
 	}
