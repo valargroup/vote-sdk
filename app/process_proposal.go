@@ -5,6 +5,7 @@ import (
 
 	abci "github.com/cometbft/cometbft/abci/types"
 
+	"cosmossdk.io/core/store"
 	"cosmossdk.io/log"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -162,11 +163,44 @@ func validateInjectedPartialDecrypt(ctx sdk.Context, voteKeeper *votekeeper.Keep
 	if round.Threshold == 0 {
 		return errInvalidInjectedTx("round is not in threshold mode")
 	}
+	if err := validateInjectedPartialDecryptEntries(voteKeeper, kvStore, round, pdMsg); err != nil {
+		return err
+	}
+
+	ceremonyVal, found := votekeeper.FindValidatorInRoundCeremony(round, pdMsg.Creator)
+	if !found {
+		return errInvalidInjectedTx("creator is not a ceremony validator")
+	}
+	if pdMsg.ValidatorIndex != ceremonyVal.ShamirIndex {
+		return errInvalidInjectedTx("validator_index does not match stored shamir_index")
+	}
+
+	has, err := voteKeeper.HasPartialDecryptionsFromValidator(kvStore, pdMsg.VoteRoundId, pdMsg.ValidatorIndex)
+	if err != nil {
+		return err
+	}
+	if has {
+		return errInvalidInjectedTx("validator has already submitted partial decryptions")
+	}
+
+	if err := voteKeeper.ValidateProposerIsCreator(ctx, pdMsg.Creator, "MsgSubmitPartialDecryption"); err != nil {
+		return errInvalidInjectedTx(err.Error())
+	}
+
+	return nil
+}
+
+// validateInjectedPartialDecryptEntries checks entry shape and completeness.
+func validateInjectedPartialDecryptEntries(
+	voteKeeper *votekeeper.Keeper,
+	kvStore store.KVStore,
+	round *types.VoteRound,
+	pdMsg *types.MsgSubmitPartialDecryption,
+) error {
 	if len(pdMsg.Entries) == 0 {
 		return errInvalidInjectedTx("entries cannot be empty")
 	}
 
-	// Ensures that the submission contains a partial decryption for every non-empty accumulator.
 	// Without this check, a malicious proposer could submit an incomplete partial decryption
 	// that later causes a tally to fail.
 	if err := voteKeeper.ValidatePartialDecryptionCompleteness(kvStore, round, pdMsg.Entries); err != nil {
@@ -188,26 +222,6 @@ func validateInjectedPartialDecrypt(ctx sdk.Context, voteKeeper *votekeeper.Keep
 			return errInvalidInjectedTx(fmt.Sprintf("entry[%d] no accumulator for (proposal=%d, decision=%d)",
 				i, entry.ProposalId, entry.VoteDecision))
 		}
-	}
-
-	ceremonyVal, found := votekeeper.FindValidatorInRoundCeremony(round, pdMsg.Creator)
-	if !found {
-		return errInvalidInjectedTx("creator is not a ceremony validator")
-	}
-	if pdMsg.ValidatorIndex != ceremonyVal.ShamirIndex {
-		return errInvalidInjectedTx("validator_index does not match stored shamir_index")
-	}
-
-	has, err := voteKeeper.HasPartialDecryptionsFromValidator(kvStore, pdMsg.VoteRoundId, pdMsg.ValidatorIndex)
-	if err != nil {
-		return err
-	}
-	if has {
-		return errInvalidInjectedTx("validator has already submitted partial decryptions")
-	}
-
-	if err := voteKeeper.ValidateProposerIsCreator(ctx, pdMsg.Creator, "MsgSubmitPartialDecryption"); err != nil {
-		return errInvalidInjectedTx(err.Error())
 	}
 
 	return nil
