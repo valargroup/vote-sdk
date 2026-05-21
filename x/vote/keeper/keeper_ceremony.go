@@ -64,23 +64,6 @@ func ThresholdForN(n int) (int, error) {
 	return t, nil
 }
 
-// CeremonyFaultMarginForN returns the symmetric liveness margin f for a
-// ceremony of size n. The same margin is used as x (later tally withholders)
-// and y (pre-activation non-contributors/non-ackers):
-//
-//	f = floor((n - t(n)) / 2)
-//
-// This bound is intentionally derived from the tally threshold so that timeout
-// activation can preserve at least t honest partial decryptions after one
-// adversary pool spends up to f faults across the ceremony and tally phases.
-func CeremonyFaultMarginForN(n int) (int, error) {
-	t, err := ThresholdForN(n)
-	if err != nil {
-		return 0, err
-	}
-	return (n - t) / 2, nil
-}
-
 // RequiredCeremonyQuorumForN returns the minimum contributor/acker count
 // required for bounded-subset ceremony finalization:
 //
