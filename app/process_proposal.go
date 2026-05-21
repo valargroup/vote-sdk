@@ -195,6 +195,8 @@ func validateInjectedPartialDecrypt(ctx sdk.Context, voteKeeper *votekeeper.Keep
 
 // validateInjectedPartialDecryptEntries checks entry shape and completeness.
 // Ensures that the submission contains a partial decryption for every non-empty accumulator.
+// Rejects empty entries.
+// Validates entry bound and accumulator existence for each entry.
 func validateInjectedPartialDecryptEntries(
 	voteKeeper *votekeeper.Keeper,
 	kvStore store.KVStore,
