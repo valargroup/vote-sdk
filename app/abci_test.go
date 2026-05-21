@@ -1277,6 +1277,109 @@ func TestFullLifecycle_SingleValidator(t *testing.T) {
 		"decrypted tally should match encrypted value of 42")
 }
 
+func TestIdentityC1PoisonedProposalBlocksRoundTally_Reproduction(t *testing.T) {
+	app, roundID, eaPk, voteEndTime := setupSingleValidatorActiveRoundForRepro(t, 0xE1)
+
+	// Delegation
+	delegation := testutil.ValidDelegation(roundID, 0x10)
+	result := app.DeliverVoteTx(testutil.MustEncodeVoteTx(delegation))
+	require.Equal(t, uint32(0), result.Code, "delegation should succeed, got: %s", result.Log)
+
+	anchorHeight := uint64(app.Height)
+	// Vote
+	castVote := testutil.ValidCastVote(roundID, anchorHeight, 0x30)
+	result = app.DeliverVoteTx(testutil.MustEncodeVoteTx(castVote))
+	require.Equal(t, uint32(0), result.Code, "cast vote should succeed, got: %s", result.Log)
+
+	revealAnchor := uint64(app.Height)
+
+	validCt, err := elgamal.Encrypt(eaPk, 42, rand.Reader)
+	require.NoError(t, err)
+	validEncShare, err := elgamal.MarshalCiphertext(validCt)
+	require.NoError(t, err)
+
+	// Valid reveal on proposal 1
+	validReveal := testutil.ValidRevealShareReal(roundID, revealAnchor, 0x50, 1, 1, validEncShare)
+	result = app.DeliverVoteTx(testutil.MustEncodeVoteTx(validReveal))
+	require.Equal(t, uint32(0), result.Code, "valid proposal reveal should succeed, got: %s", result.Log)
+
+	// Invalid reveal on proposal 2 (identity)
+	poisonedReveal := testutil.ValidRevealShareReal(roundID, revealAnchor, 0x60, 2, 1, elgamal.IdentityCiphertextBytes())
+	result = app.DeliverVoteTx(testutil.MustEncodeVoteTx(poisonedReveal))
+	require.Equal(t, uint32(0), result.Code, "identity-C1 proposal reveal is accepted when tally guard is commented out, got: %s", result.Log)
+
+	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore := app.VoteKeeper().OpenKVStore(ctx)
+	validTally, err := app.VoteKeeper().GetTally(kvStore, roundID, 1, 1)
+	require.NoError(t, err)
+	require.NotNil(t, validTally, "proposal 1 should have a valid accumulator")
+	poisonedTally, err := app.VoteKeeper().GetTally(kvStore, roundID, 2, 1)
+	require.NoError(t, err)
+	require.NotNil(t, poisonedTally, "proposal 2 should have a poisoned accumulator")
+	poisonedCt, err := elgamal.UnmarshalCiphertext(poisonedTally)
+	require.NoError(t, err)
+	require.True(t, poisonedCt.C1.IsIdentity(), "proposal 2 accumulator should have identity C1")
+
+	app.NextBlockAtTime(voteEndTime.Add(1 * time.Second))
+	round := app.MustGetVoteRound(roundID)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_TALLYING, round.Status)
+
+	// Trigger partial decryption submission
+	app.NextBlockWithPrepareProposal()
+	ctx = app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore = app.VoteKeeper().OpenKVStore(ctx)
+
+	// No partial decryption submissions should be accepted
+	count, err := app.VoteKeeper().CountPartialDecryptionValidators(kvStore, roundID)
+	require.NoError(t, err)
+	require.Zero(t, count, "identity-C1 accumulator should make the partial-decryption tx fail")
+
+	// No tally message injected on subsequent blocks.
+	app.NextBlockWithPrepareProposal()
+	round = app.MustGetVoteRound(roundID)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_TALLYING, round.Status,
+		"one poisoned proposal should block finalization for the whole round, including the valid proposal")
+
+	// No tally results should be accepted
+	results, err := app.VoteKeeper().GetAllTallyResults(kvStore, roundID)
+	require.NoError(t, err)
+	require.Empty(t, results, "no proposal should finalize while the round is stuck")
+}
+
+func setupSingleValidatorActiveRoundForRepro(t *testing.T, roundSeed byte) (*testutil.TestApp, []byte, *elgamal.PublicKey, time.Time) {
+	t.Helper()
+
+	app, _, pallasPk, _, _ := testutil.SetupTestAppWithPallasKey(t)
+	proposerAddr := app.ValidatorOperAddr()
+	voteEndTime := app.Time.Add(60 * time.Second)
+	roundID := make([]byte, 32)
+	roundID[0] = roundSeed
+
+	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
+	kvStore := app.VoteKeeper().OpenKVStore(ctx)
+	require.NoError(t, app.VoteKeeper().SetVoteRound(kvStore, &types.VoteRound{
+		VoteRoundId:    roundID,
+		Status:         types.SessionStatus_SESSION_STATUS_PENDING,
+		CeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_REGISTERING,
+		CeremonyValidators: []*types.ValidatorPallasKey{
+			{ValidatorAddress: proposerAddr, PallasPk: pallasPk.Point.ToAffineCompressed(), ShamirIndex: 1},
+		},
+		VoteEndTime:      uint64(voteEndTime.Unix()),
+		Proposals:        testutil.SampleProposals(),
+		NullifierImtRoot: bytes.Repeat([]byte{0x01}, 32),
+		NcRoot:           bytes.Repeat([]byte{0x02}, 32),
+	}))
+	app.NextBlock()
+	app.NextBlockWithPrepareProposal()
+	app.NextBlockWithPrepareProposal()
+
+	round := app.MustGetVoteRound(roundID)
+	require.Equal(t, types.SessionStatus_SESSION_STATUS_ACTIVE, round.Status)
+	eaPk, err := elgamal.UnmarshalPublicKey(round.EaPk)
+	require.NoError(t, err)
+	return app, roundID, eaPk, voteEndTime
+}
+
 // ---------------------------------------------------------------------------
 // Full Lifecycle E2E: DKG Ceremony → Vote → Tally (n=3, t=2)
 //
