@@ -533,9 +533,10 @@ All byte fields are hex-encoded in the JSON.  Required fields:
   nc_root             (hex)    — Note commitment tree root at snapshot_height
   proposals           (array)  — 1-15 proposals, each with id (1-based uint32),
                                  title (string), optional description (string),
-                                 and options (2-8 elements with index (0-based
-                                 uint32), label (ASCII string), and optional
-                                 description (string))
+                                 optional zip_number (string), optional forum_url
+                                 (string), and options (2-8 elements with index
+                                 (0-based uint32), label (ASCII string), and
+                                 optional description (string))
 
 Example:
   {
@@ -549,6 +550,9 @@ Example:
       {
         "id": 1,
         "title": "Upgrade proposal",
+        "description": "Long-form question text rendered in the wallet.",
+        "zip_number": "ZIP 227",
+        "forum_url": "https://forum.example.com/t/upgrade-proposal/123",
         "options": [
           {"index": 0, "label": "Yes"},
           {"index": 1, "label": "No", "description": "Do not activate this proposal."},
@@ -582,6 +586,8 @@ Example:
 					Id          uint32 `json:"id"`
 					Title       string `json:"title"`
 					Description string `json:"description"`
+					ZipNumber   string `json:"zip_number"`
+					ForumUrl    string `json:"forum_url"`
 					Options     []struct {
 						Index       uint32 `json:"index"`
 						Label       string `json:"label"`
@@ -632,6 +638,8 @@ Example:
 					Id:          p.Id,
 					Title:       p.Title,
 					Description: p.Description,
+					ZipNumber:   p.ZipNumber,
+					ForumUrl:    p.ForumUrl,
 					Options:     opts,
 				}
 			}
