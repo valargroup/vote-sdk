@@ -103,6 +103,10 @@ func (ms msgServer) SubmitTally(goCtx context.Context, msg *types.MsgSubmitTally
 		if err := ValidateEntryBounds(round, entry.ProposalId, entry.VoteDecision); err != nil {
 			return nil, fmt.Errorf("entry[%d]: %w", i, err)
 		}
+		if entry.TotalValue >= types.TallyBSGSBound {
+			return nil, fmt.Errorf("%w: entry[%d] total_value %d exceeds BSGS bound %d",
+				types.ErrTallyMismatch, i, entry.TotalValue, types.TallyBSGSBound)
+		}
 
 		accBytes, err := ms.k.GetTally(kvStore, msg.VoteRoundId, entry.ProposalId, entry.VoteDecision)
 		if err != nil {

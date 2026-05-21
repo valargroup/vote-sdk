@@ -24,7 +24,7 @@ import (
 
 // bsgsDefaultBound is the upper bound for the baby-step giant-step discrete
 // log solver. 2^28 supports vote totals up to ~268 million.
-const bsgsDefaultBound = 1 << 28
+const bsgsDefaultBound = types.TallyBSGSBound
 
 // PrepareProposalInjector is a function that may inject txs into the block
 // proposal. It receives the current tx list and returns the (possibly modified)

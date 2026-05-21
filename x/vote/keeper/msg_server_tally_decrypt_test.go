@@ -762,6 +762,21 @@ func (s *MsgServerTestSuite) TestSubmitTally_ThresholdMode() {
 			errContains: "Lagrange combination failed",
 		},
 		{
+			name: "total value at BSGS bound rejected",
+			setup: func(rid []byte) {
+				s.setupThresholdTallyRound(rid, 2, validators[:2])
+			},
+			msg: func(rid []byte) *types.MsgSubmitTally {
+				return &types.MsgSubmitTally{
+					VoteRoundId: rid,
+					Creator:     "sv1proposer",
+					Entries:     []*types.TallyEntry{{ProposalId: 1, VoteDecision: 0, TotalValue: types.TallyBSGSBound}},
+				}
+			},
+			wantErr:     true,
+			errContains: "exceeds BSGS bound",
+		},
+		{
 			name: "nil accumulator with non-zero value rejected",
 			setup: func(rid []byte) {
 				s.setupThresholdTallyRound(rid, 2, validators[:2])
