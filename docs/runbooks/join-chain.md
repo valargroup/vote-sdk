@@ -33,6 +33,17 @@ On Linux or macOS:
 curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | bash
 ```
 
+The compatibility artifact base is `https://vote.fra1.digitaloceanspaces.com`.
+For a migrated bucket, fetch `join.sh` from that bucket and pass the same base
+to the script:
+
+```bash
+curl -fsSL https://shielded-vote.fra1.digitaloceanspaces.com/join.sh \
+  | SVOTE_DO_SPACES_BASE=https://shielded-vote.fra1.digitaloceanspaces.com bash
+```
+
+`SVOTE_DO_SPACES_BUCKET=shielded-vote` is equivalent for buckets in `fra1`.
+
 The installer prompts for the TLS mode and waits for an explicit selection. For unattended installs, pass the mode in the curl pipeline:
 
 ```bash
@@ -221,7 +232,8 @@ re-run `join.sh`: it wipes `~/.svoted` and recreates validator identity. Use the
 snapshot reset script instead:
 
 ```bash
-curl -fsSL https://vote.fra1.digitaloceanspaces.com/reset-validator-snapshot.sh | bash
+SVOTE_DO_SPACES_BASE="${SVOTE_DO_SPACES_BASE:-https://vote.fra1.digitaloceanspaces.com}"
+curl -fsSL "${SVOTE_DO_SPACES_BASE%/}/reset-validator-snapshot.sh" | bash
 ```
 
 The script downloads and verifies `https://snapshots.valargroup.org/latest.json`
@@ -304,15 +316,17 @@ sudo apt-get update && sudo apt-get install -y curl jq lz4 ca-certificates
 
    ```bash
    PLATFORM=linux-amd64        # or linux-arm64, darwin-arm64, darwin-amd64
-   TAG=$(curl -fsSL https://vote.fra1.digitaloceanspaces.com/version.txt | tr -d '[:space:]')
+   DO_BASE="${SVOTE_DO_SPACES_BASE:-https://vote.fra1.digitaloceanspaces.com}"
+   DO_BASE="${DO_BASE%/}"
+   TAG=$(curl -fsSL "${DO_BASE}/version.txt" | tr -d '[:space:]')
    INSTALL_DIR="$HOME/.local/bin"
    TARBALL="shielded-vote-${TAG}-${PLATFORM}.tar.gz"
 
    mkdir -p "$INSTALL_DIR"
    curl -fsSL -o "/tmp/${TARBALL}" \
-     "https://vote.fra1.digitaloceanspaces.com/binaries/vote-sdk/${TARBALL}"
+     "${DO_BASE}/binaries/vote-sdk/${TARBALL}"
    curl -fsSL -o "/tmp/${TARBALL}.sha256" \
-     "https://vote.fra1.digitaloceanspaces.com/binaries/vote-sdk/${TARBALL}.sha256"
+     "${DO_BASE}/binaries/vote-sdk/${TARBALL}.sha256"
    ( cd /tmp && sha256sum -c "${TARBALL}.sha256" )
 
    tar xzf "/tmp/${TARBALL}" -C /tmp \
@@ -345,7 +359,7 @@ sudo apt-get update && sudo apt-get install -y curl jq lz4 ca-certificates
    HOME_DIR="$HOME/.svoted"
    rm -rf "$HOME_DIR"
    svoted init "$MONIKER" --chain-id svote-1 --home "$HOME_DIR"
-   curl -fsSL -o "$HOME_DIR/config/genesis.json" https://vote.fra1.digitaloceanspaces.com/genesis.json
+   curl -fsSL -o "$HOME_DIR/config/genesis.json" "${DO_BASE}/genesis.json"
    svoted genesis validate-genesis --home "$HOME_DIR"
    ```
 
@@ -418,6 +432,9 @@ Interactive runs without an explicit TLS mode prompt until the operator chooses 
 | `--tls-mode <skip\|custom\|auto>` or `SVOTE_TLS_MODE` | unset | Explicit TLS mode for unattended installs. `skip` leaves `VALIDATOR_URL` empty, `custom` requires `--domain` / `SVOTE_DOMAIN`, and `auto` uses an auto-detected `<ip>.sslip.io` hostname. Numeric aliases `1`, `2`, and `3` are accepted for compatibility with the prompt. |
 | `--domain <host>` or `SVOTE_DOMAIN` | unset | Public hostname for Caddy + `VALIDATOR_URL`. When set, the installer skips the TLS menu and treats Caddy setup for this static hostname as required. |
 | `SVOTE_MONIKER` | interactive prompt | Validator moniker; required for unattended installs. |
+| `SVOTE_DO_SPACES_BASE` | `https://vote.fra1.digitaloceanspaces.com` | Artifact base for `version.txt`, release tarballs, `genesis.json`, and the `svoted-wrapper.sh` fallback. Set this when joining from a migrated bucket. |
+| `SVOTE_DO_SPACES_BUCKET` | unset | Bucket-name shortcut for `SVOTE_DO_SPACES_BASE`, using `SVOTE_DO_SPACES_REGION` or `fra1`. |
+| `SVOTE_DO_SPACES_REGION` | `fra1` | Region used only when `SVOTE_DO_SPACES_BUCKET` is set without `SVOTE_DO_SPACES_BASE`. |
 | `SVOTE_INSTALL_DIR` | `$HOME/.local/bin` | Where `svoted`, `create-val-tx`, and `svoted-wrapper.sh` are installed. For downloaded release binaries, `join.sh` adds this directory to the user's future shell `PATH` if it was missing. |
 | `SVOTE_HOME` | `$HOME/.svoted` | Chain data + config + keys. |
 | `SVOTE_SNAPSHOT_BASE_URL` | `https://snapshots.valargroup.org` | Snapshot service base URL. `join.sh` fetches `${SVOTE_SNAPSHOT_BASE_URL}/latest.json` and restores the archive it declares when metadata is available. |
@@ -478,7 +495,7 @@ The three TLS modes and the Caddy layout are described in [TLS / reverse proxy](
 
 | Direction | Destination | Purpose |
 |-----------|-------------|---------|
-| Outbound 443 | `vote.fra1.digitaloceanspaces.com` | `version.txt`, `svoted` + `create-val-tx` tarballs (`binaries/vote-sdk/…`), `genesis.json`, `svoted-wrapper.sh` fallback |
+| Outbound 443 | `vote.fra1.digitaloceanspaces.com` or the configured `SVOTE_DO_SPACES_BASE` host | `version.txt`, `svoted` + `create-val-tx` tarballs (`binaries/vote-sdk/…`), `genesis.json`, `svoted-wrapper.sh` fallback |
 | Outbound 443 | `snapshots.valargroup.org` | Latest Zvote snapshot metadata and archive URL used to bootstrap chain data before peer catch-up |
 | Outbound 443 | `voting.valargroup.org` | [`dynamic-voting-config.json`](https://github.com/valargroup/token-holder-voting-config/blob/main/dynamic-voting-config.json) — canonical seed-peer discovery (same payload wallets fetch). Override via `VOTING_CONFIG_URL` for staging mirrors. |
 | Outbound 443 | `vote-chain-primary.valargroup.org` | `POST /api/register-validator` (join queue). Override via `SVOTE_ADMIN_URL`. |
@@ -497,7 +514,7 @@ If the validator will answer PIR queries itself, also open inbound 443 for the `
 | Symptom | Likely cause | Action |
 |---------|--------------|--------|
 | `catching_up` stays `true` for >10 min, log shows "Dialing" / no peers connecting | Inbound 26656 blocked, or seed peer is unreachable | Verify firewall lets in 26656 (`ss -ltn | grep 26656`, then test from off-host); check `persistent_peers` in `~/.svoted/config/config.toml`; confirm the seed listed under `vote_servers[0].url` in [the dynamic voting-config](https://voting.valargroup.org/dynamic-voting-config.json) is up by hitting its `/cosmos/base/tendermint/v1beta1/node_info`. |
-| `svoted` exits with "error initializing application: genesis doc mismatch" | Local `genesis.json` doesn't match the live chain | Re-run `join.sh` and confirm the existing-install reset prompt if this is a disposable joining validator. It stops the service, deletes `~/.svoted`, and pulls canonical genesis fresh. For non-interactive reset runs, set `SVOTE_FORCE_RESET=1`. To repair only genesis manually: `curl -fsSL -o ~/.svoted/config/genesis.json https://vote.fra1.digitaloceanspaces.com/genesis.json && svoted genesis validate-genesis --home ~/.svoted`. |
+| `svoted` exits with "error initializing application: genesis doc mismatch" | Local `genesis.json` doesn't match the live chain | Re-run `join.sh` and confirm the existing-install reset prompt if this is a disposable joining validator. It stops the service, deletes `~/.svoted`, and pulls canonical genesis fresh. For non-interactive reset runs, set `SVOTE_FORCE_RESET=1`. To repair only genesis manually: `DO_BASE="${SVOTE_DO_SPACES_BASE:-https://vote.fra1.digitaloceanspaces.com}"; curl -fsSL -o ~/.svoted/config/genesis.json "${DO_BASE%/}/genesis.json" && svoted genesis validate-genesis --home ~/.svoted`. |
 | Service logs repeatedly show `waiting for validator funding` | Not yet funded | Wait. The vote-manager funds from the admin UI join queue. Ping the operator running the primary and confirm your address is listed. |
 | Service logs show an old moniker or keep polling `balance=0` after a re-run | A stale wrapper process survived a previous install and is using the old service environment | Current `join.sh` restarts the rewritten service. On an affected host, run `systemctl show svoted -p Environment --no-pager`, compare `MONIKER`/`VALIDATOR_ADDR` with `journalctl -u svoted -o cat`, then `sudo systemctl restart svoted`. |
 | `create-val-tx` fails with `key not found: validator` | Keyring backend mismatch (os vs test) | The wrapper expects the `validator` key in the test keyring. Confirm `svoted keys show validator -a --keyring-backend test --home ~/.svoted` returns the expected address. If you re-keyed manually, re-run `svoted init-validator-keys`. |
@@ -505,7 +522,7 @@ If the validator will answer PIR queries itself, also open inbound 443 for the `
 | Caddy fails to obtain a certificate (`acme: error 403` or similar) | DNS doesn't resolve to this host, or 80/443 blocked | `dig <SVOTE_DOMAIN>` against a public resolver; ensure inbound 80 AND 443 are open. For automatic sslip.io, confirm `curl -fsSL https://ifconfig.me` returns your actual public IP. |
 | `ERROR: No vote_servers[0].url in voting-config` | The published voting-config has an empty `vote_servers` list (usually during or after a chain reset) | Wait ~1 h, or set `VOTING_CONFIG_URL` to a mirror with a populated list and re-run. The fix is in [valargroup/token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config) — a maintainer adds at least one server URL. |
 | `Could not get lock /var/lib/dpkg/lock-frontend` while installing packages | Another apt job is running, often unattended upgrades or cloud-init on a fresh Linux host | Wait for that package process to finish and re-run. Current `join.sh` waits up to `SVOTE_APT_LOCK_TIMEOUT` seconds before failing. Do not remove the lock file. |
-| `ERROR: Could not fetch version from …/version.txt` | Outbound 443 to DO Spaces blocked | Test `curl -I https://vote.fra1.digitaloceanspaces.com/version.txt`; fix egress; consider `SVOTE_LOCAL_BINARIES=1` if you already have pinned binaries on `$PATH`. |
+| `ERROR: Could not fetch version from …/version.txt` | Outbound 443 to DO Spaces blocked | Test `DO_BASE="${SVOTE_DO_SPACES_BASE:-https://vote.fra1.digitaloceanspaces.com}"; curl -I "${DO_BASE%/}/version.txt"`; fix egress; consider `SVOTE_LOCAL_BINARIES=1` if you already have pinned binaries on `$PATH`. |
 | Checksum mismatch on tarball | Corrupt download or MITM | Retry once; if it keeps happening, pull from the GitHub Release for the same tag and compare against `SHA256SUMS`. |
 | No snapshot metadata is available | The chain was recently reset and no new snapshot has been published yet, or the snapshot service is unavailable | `join.sh` logs a warning and syncs from genesis. Confirm `curl -fsS https://snapshots.valargroup.org/latest.json | jq` once the first post-reset snapshot is expected. |
 | Snapshot download, checksum, or extraction fails | Stale metadata, corrupt download, or missing `lz4` | Confirm `curl -fsS https://snapshots.valargroup.org/latest.json | jq` works from the host. Re-run after fixing egress or the snapshot service. Use `SVOTE_SKIP_SNAPSHOT=1` only for explicit genesis-sync debugging. |

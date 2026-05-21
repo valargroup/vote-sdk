@@ -25,10 +25,10 @@ const (
 	uiModeEnv             = "SVOTE_UI_MODE"
 	precomputedBaseURLEnv = "SVOTE_PRECOMPUTED_BASE_URL"
 
-	// DefaultPrecomputedBaseURL is the production DigitalOcean Spaces bucket
-	// where the publish-snapshot workflow uploads pre-computed PIR snapshots.
-	// Per-deployment overrides go through SVOTE_PRECOMPUTED_BASE_URL so a
-	// staging svoted can point at a staging bucket.
+	// DefaultPrecomputedBaseURL is the backward-compatible DigitalOcean Spaces
+	// bucket where the publish-snapshot workflow uploads pre-computed PIR
+	// snapshots. Per-deployment overrides go through
+	// SVOTE_PRECOMPUTED_BASE_URL so production can move to its own bucket.
 	DefaultPrecomputedBaseURL = "https://vote.fra1.digitaloceanspaces.com"
 )
 

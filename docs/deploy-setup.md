@@ -27,7 +27,7 @@ flowchart LR
 
 | Workflow | Trigger | What it does |
 |----------|---------|-------------|
-| [`release.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/release.yml) | `v*` tag push | Builds `svoted` + admin UI for linux/darwin x amd64/arm64. Creates a GitHub Release with tarballs and uploads shared artifacts to DO Spaces (`s3://vote/`). It does not deploy to any fleet. |
+| [`release.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/release.yml) | `v*` tag push | Builds `svoted` + admin UI for linux/darwin x amd64/arm64. Creates a GitHub Release with tarballs and uploads shared artifacts to the configured DO Spaces bucket (`s3://${DO_SPACES_BUCKET}`, default `s3://vote`). It does not deploy to any fleet. |
 | [`sdk-chain-deploy.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/sdk-chain-deploy.yml) | Manual `workflow_dispatch` | Takes `target_environment`, reads GitHub Environment secrets/vars, SSHes to that fleet, runs `install-release.sh --tag <tag>` (download from Spaces, verify checksum, swap symlink, restart `svoted` where initialized), renders explorer config, and checks public surfaces. Notifies Slack on failure. |
 | [`sdk-chain-reset.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/sdk-chain-reset.yml) | Manual `workflow_dispatch` | Takes `target_environment`. Full chain reset from genesis: quiesces publishers, wipes state on primary, runs `init.sh` with the environment `CHAIN_ID`, uploads namespaced genesis to DO Spaces, optionally funds/joins secondary, joins archive/snapshot nodes, enables the snapshot timer, and verifies public surfaces. |
 
@@ -36,10 +36,11 @@ flowchart LR
 Create `staging` and `production` GitHub Environments before using deploy or
 reset. Environment variables include `CHAIN_ID` (`svote-1` staging, `zvote-1`
 production), `HAS_SECONDARY`, `DNS_PREFIX` (`stage.` / `prod.`),
-`RELEASE_BASE_URL`, `GENESIS_KEY`, and `SNAPSHOTS_PREFIX`. Environment secrets
-include `PRIMARY_HOST`, staging-only `SECONDARY_HOST`, `DOMAIN`, `DEPLOY_USER`,
-`SSH_PRIVATE_KEY`, `SENTRY_DSN`, `CONFIG_PR_GITHUB_TOKEN`, reset keys, Spaces
-credentials, and `SLACK_WEBHOOK_URL`.
+`DO_SPACES_BUCKET`, `DO_SPACES_BASE`, `RELEASE_BASE_URL`, `GENESIS_KEY`, and
+`SNAPSHOTS_PREFIX`. Environment secrets or variables include `PRIMARY_HOST`,
+staging-only `SECONDARY_HOST`, `EXPLORER_HOST`, `SNAPSHOT_HOST`, `DOMAIN`,
+`DEPLOY_USER`, `SSH_PRIVATE_KEY`, `SENTRY_DSN`, `CONFIG_PR_GITHUB_TOKEN`, reset
+keys, Spaces credentials, and `SLACK_WEBHOOK_URL`.
 
 See [runbooks/environments.md](runbooks/environments.md) for the complete
 operator checklist.
@@ -74,11 +75,12 @@ to serve the admin UI. The secondary runs the chain only.
 
 The snapshot host is provisioned by `vote-infrastructure` as a pruned
 non-validator node. `sdk-chain-reset.yml` stops the snapshot publisher before
-resetting the chain, clears old objects under `s3://vote/snapshots/<chain-id>/`,
+resetting the chain, clears old objects under
+`s3://${DO_SPACES_BUCKET}/snapshots/<chain-id>/`,
 initializes it from the current genesis, configures peering with primary,
 starts `svoted`, and enables the snapshot timer.
 The timer publishes `data/`-only `tar.lz4` archives and metadata back to
-`s3://vote/snapshots/<chain-id>/`, while Caddy serves the branded page at
+`s3://${DO_SPACES_BUCKET}/snapshots/<chain-id>/`, while Caddy serves the branded page at
 `https://<dns-prefix>snapshots.<domain>/`.
 
 Deploy and reset jobs always include `vote-snapshot` so routine releases keep the
@@ -210,6 +212,13 @@ off).
 | `disable` | `true` | Set to `false` to enable the admin module. |
 | `config_url` | (CDN) | URL the admin re-serves at `GET /api/voting-config`. Same URL clients hit directly — pointing it at a mirror only changes the cached copy served from this host, not what wallets/`join.sh` discover. |
 | `db_path` | `""` | SQLite path for pending registrations. Empty = `$HOME/.svoted/admin.db`. |
+
+The admin UI reads `precomputed_base_url` from `/api/ui-config`, which the
+server resolves from `SVOTE_PRECOMPUTED_BASE_URL` with a compatibility default
+of `https://vote.fra1.digitaloceanspaces.com`. When that value is a DO Spaces
+origin such as `https://shielded-vote.fra1.digitaloceanspaces.com`, the UI
+fetches PIR manifests through the matching CDN hostname
+`https://shielded-vote.fra1.cdn.digitaloceanspaces.com`.
 
 Pending join rows expire after **7 days**; expired rows are removed by a background sweeper that runs every **hour** (both are fixed in code, not `app.toml` keys).
 

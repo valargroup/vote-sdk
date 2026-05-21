@@ -279,7 +279,10 @@ jobs:
         env:
           DO_ACCESS_KEY: ${{ secrets.DO_ACCESS_KEY }}
           DO_SECRET_KEY: ${{ secrets.DO_SECRET_KEY }}
+          DO_SPACES_BUCKET: ${{ vars.DO_SPACES_BUCKET }}
         run: |
+          set -euo pipefail
+          DO_SPACES_BUCKET="${DO_SPACES_BUCKET:-vote}"
           pip install --quiet s3cmd
           cat > /tmp/do-spaces.s3cfg <<EOF
           [default]
@@ -292,23 +295,23 @@ jobs:
           EOF
           for PLATFORM in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
             TARBALL="shielded-vote-${VERSION}-${PLATFORM}.tar.gz"
-            s3cmd -c /tmp/do-spaces.s3cfg put "${TARBALL}" s3://vote/binaries/vote-sdk/ --acl-public --force
-            s3cmd -c /tmp/do-spaces.s3cfg put "${TARBALL}.sha256" s3://vote/binaries/vote-sdk/ --acl-public --force
+            s3cmd -c /tmp/do-spaces.s3cfg put "${TARBALL}" "s3://${DO_SPACES_BUCKET}/binaries/vote-sdk/" --acl-public --force
+            s3cmd -c /tmp/do-spaces.s3cfg put "${TARBALL}.sha256" "s3://${DO_SPACES_BUCKET}/binaries/vote-sdk/" --acl-public --force
           done
           echo "${VERSION}" > /tmp/version.txt
-          s3cmd -c /tmp/do-spaces.s3cfg put /tmp/version.txt s3://vote/version.txt --acl-public --force
-          s3cmd -c /tmp/do-spaces.s3cfg put join.sh s3://vote/join.sh --acl-public --force
-          s3cmd -c /tmp/do-spaces.s3cfg put scripts/reset-validator-snapshot.sh s3://vote/reset-validator-snapshot.sh --acl-public --force
-          s3cmd -c /tmp/do-spaces.s3cfg put scripts/remove-validator.sh s3://vote/remove-validator.sh --acl-public --force
-          s3cmd -c /tmp/do-spaces.s3cfg put scripts/remove-pir.sh s3://vote/remove-pir.sh --acl-public --force
-          s3cmd -c /tmp/do-spaces.s3cfg put scripts/svoted-wrapper.sh s3://vote/svoted-wrapper.sh --acl-public --force
+          s3cmd -c /tmp/do-spaces.s3cfg put /tmp/version.txt "s3://${DO_SPACES_BUCKET}/version.txt" --acl-public --force
+          s3cmd -c /tmp/do-spaces.s3cfg put join.sh "s3://${DO_SPACES_BUCKET}/join.sh" --acl-public --force
+          s3cmd -c /tmp/do-spaces.s3cfg put scripts/reset-validator-snapshot.sh "s3://${DO_SPACES_BUCKET}/reset-validator-snapshot.sh" --acl-public --force
+          s3cmd -c /tmp/do-spaces.s3cfg put scripts/remove-validator.sh "s3://${DO_SPACES_BUCKET}/remove-validator.sh" --acl-public --force
+          s3cmd -c /tmp/do-spaces.s3cfg put scripts/remove-pir.sh "s3://${DO_SPACES_BUCKET}/remove-pir.sh" --acl-public --force
+          s3cmd -c /tmp/do-spaces.s3cfg put scripts/svoted-wrapper.sh "s3://${DO_SPACES_BUCKET}/svoted-wrapper.sh" --acl-public --force
           s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force join.sh \
-            "s3://vote/scripts/join/${VERSION}/join.sh"
+            "s3://${DO_SPACES_BUCKET}/scripts/join/${VERSION}/join.sh"
           s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force scripts/reset-validator-snapshot.sh \
-            "s3://vote/scripts/reset-validator-snapshot/${VERSION}/reset-validator-snapshot.sh"
+            "s3://${DO_SPACES_BUCKET}/scripts/reset-validator-snapshot/${VERSION}/reset-validator-snapshot.sh"
           s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force scripts/remove-validator.sh \
-            "s3://vote/scripts/remove-validator/${VERSION}/remove-validator.sh"
+            "s3://${DO_SPACES_BUCKET}/scripts/remove-validator/${VERSION}/remove-validator.sh"
           s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force scripts/remove-pir.sh \
-            "s3://vote/scripts/remove-pir/${VERSION}/remove-pir.sh"
+            "s3://${DO_SPACES_BUCKET}/scripts/remove-pir/${VERSION}/remove-pir.sh"
           s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force scripts/svoted-wrapper.sh \
-            "s3://vote/scripts/svoted-wrapper/${VERSION}/svoted-wrapper.sh"
+            "s3://${DO_SPACES_BUCKET}/scripts/svoted-wrapper/${VERSION}/svoted-wrapper.sh"

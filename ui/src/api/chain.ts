@@ -795,8 +795,9 @@ function canonicalPublishedSnapshotBase(precomputedBase: string): string {
   const base = precomputedBase.replace(/\/+$/, "");
   try {
     const url = new URL(base);
-    if (url.hostname === "vote.fra1.digitaloceanspaces.com") {
-      url.hostname = "vote.fra1.cdn.digitaloceanspaces.com";
+    const originMatch = url.hostname.match(/^([a-z0-9][a-z0-9-]*)\.([a-z0-9-]+)\.digitaloceanspaces\.com$/i);
+    if (originMatch) {
+      url.hostname = `${originMatch[1]}.${originMatch[2]}.cdn.digitaloceanspaces.com`;
       return url.toString().replace(/\/+$/, "");
     }
   } catch {
