@@ -504,7 +504,7 @@ export function AttestRoundEntryPage() {
               public key will reappear every time you derive from this account.
               If your key is already in the deployed{" "}
               <a
-                href="https://voting.valargroup.org/static-voting-config.json"
+                href="https://voting.valargroup.org/prod/static-voting-config.json"
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center gap-1 text-accent hover:text-accent/80 underline-offset-2 hover:underline"
@@ -640,7 +640,7 @@ export function AttestRoundEntryPage() {
                       <p>
                         After the PR merges and{" "}
                         <a
-                          href="https://voting.valargroup.org/static-voting-config.json"
+                          href="https://voting.valargroup.org/prod/static-voting-config.json"
                           target="_blank"
                           rel="noreferrer"
                           className="inline-flex items-center gap-1 text-accent hover:text-accent/80 underline-offset-2 hover:underline"

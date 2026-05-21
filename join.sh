@@ -144,7 +144,7 @@ done
 
 default_voting_config_url_for_env() {
   case "$1" in
-    prod)  echo "https://voting.valargroup.org/dynamic-voting-config.json" ;;
+    prod)  echo "https://voting.valargroup.org/prod/dynamic-voting-config.json" ;;
     stage) echo "https://voting.valargroup.org/stage/dynamic-voting-config.json" ;;
     *)     echo "" ;;
   esac

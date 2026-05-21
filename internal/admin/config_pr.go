@@ -65,11 +65,11 @@ func configPRPathForConfigURL(configURL string) (string, string) {
 	}
 	switch configDir {
 	case "prod":
-		return "", "production"
+		return "prod", "production"
 	case "stage":
 		return "stage", "staging"
 	default:
-		return "", "production"
+		return "prod", "production"
 	}
 }
 
@@ -94,15 +94,15 @@ func configPathForFile(configPath, name string) string {
 	configName := path.Base(trimmed)
 	if configName == dynamicConfigName || configName == staticConfigName {
 		configDir := path.Dir(trimmed)
-		if path.Base(configDir) == "prod" {
-			return path.Join(path.Dir(configDir), name)
+		if path.Base(configDir) == "stage" || path.Base(configDir) == "prod" {
+			return path.Join(configDir, name)
 		}
-		return path.Join(configDir, name)
+		return path.Join(configDir, "prod", name)
 	}
-	if configName == "prod" {
-		return path.Join(path.Dir(trimmed), name)
+	if configName == "stage" || configName == "prod" {
+		return path.Join(trimmed, name)
 	}
-	return path.Join(configPath, name)
+	return path.Join(configPath, "prod", name)
 }
 
 func (c configPRAutomation) dynamicConfigPath() string {
