@@ -8,8 +8,15 @@ import (
 
 	"github.com/mikelodder7/curvey"
 
+	"cosmossdk.io/log"
+
+	abci "github.com/cometbft/cometbft/abci/types"
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
+
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
+	voteapi "github.com/valargroup/vote-sdk/api"
+	sdkapp "github.com/valargroup/vote-sdk/app"
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/crypto/shamir"
 	svtest "github.com/valargroup/vote-sdk/testutil"
@@ -924,6 +931,187 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_RejectsIncompleteEntrie
 	has, hasErr := s.keeper.HasPartialDecryptionsFromValidator(kv, msgPdRoundID, 1)
 	s.Require().NoError(hasErr)
 	s.Require().False(has, "incomplete partial decryptions must not mark validator as submitted")
+}
+
+func (s *MsgServerTestSuite) TestSubmitPartialDecryption_IncompleteStoredSubmissionBlocksResubmissionAndTally() {
+	ta := svtest.SetupTestApp(s.T())
+	valAddr := ta.ValidatorOperAddr()
+	roundID := bytes.Repeat([]byte{0x9E}, 32)
+
+	proposals := []*types.Proposal{
+		{Id: 1, Title: "Prop 1", Options: []*types.VoteOption{
+			{Index: 0, Label: "Yes"},
+			{Index: 1, Label: "No"},
+		}},
+	}
+	validators := []*types.ValidatorPallasKey{{ValidatorAddress: valAddr, ShamirIndex: 1}}
+	commitments := [][]byte{elgamal.PallasGenerator().ToAffineCompressed()}
+	ta.SeedTallyingRoundThreshold(roundID, 1, proposals, validators, commitments)
+
+	_, pk := elgamal.KeyGen(rand.Reader)
+	kvStore := ta.VoteKeeper().OpenKVStore(ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height}))
+	for _, decision := range []uint32{0, 1} {
+		ct, err := elgamal.Encrypt(pk, 1, rand.Reader)
+		s.Require().NoError(err)
+		ctBytes, err := elgamal.MarshalCiphertext(ct)
+		s.Require().NoError(err)
+		s.Require().NoError(ta.VoteKeeper().AddToTally(kvStore, roundID, 1, decision, ctBytes))
+	}
+
+	msg := &types.MsgSubmitPartialDecryption{
+		VoteRoundId:    roundID,
+		Creator:        valAddr,
+		ValidatorIndex: 1,
+		Entries: []*types.PartialDecryptionEntry{{
+			ProposalId:     1,
+			VoteDecision:   0,
+			PartialDecrypt: elgamal.PallasGenerator().ToAffineCompressed(),
+		}},
+	}
+	txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagSubmitPartialDecryption)
+	s.Require().NoError(err)
+
+	resp := ta.CallProcessProposal([][]byte{txBytes})
+	s.Require().Equal(abci.ResponseProcessProposal_ACCEPT, resp.Status)
+}
+
+func (s *MsgServerTestSuite) TestSubmitPartialDecryption_IncompleteStoredSubmissionConsequence_AfterProcessProposal() {
+	validators := validatorSet(2)
+	cs := s.setupTallyingRoundWithCrypto(msgPdRoundID, 2, validators)
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	entriesForValidator := func(valIdx int, accumulators ...[2]uint32) []*types.PartialDecryptionEntry {
+		s.T().Helper()
+
+		allowed := make(map[[2]uint32]struct{}, len(accumulators))
+		for _, accumulator := range accumulators {
+			allowed[accumulator] = struct{}{}
+		}
+
+		var entries []*types.PartialDecryptionEntry
+		for _, entry := range cs.buildValidEntriesForValidator(s, valIdx) {
+			if _, ok := allowed[[2]uint32{entry.ProposalId, entry.VoteDecision}]; ok {
+				entries = append(entries, entry)
+			}
+		}
+		return entries
+	}
+
+	processProposalStatus := func(msg *types.MsgSubmitPartialDecryption) abci.ResponseProcessProposal_ProposalStatus {
+		s.T().Helper()
+
+		txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagSubmitPartialDecryption)
+		s.Require().NoError(err)
+
+		handler := sdkapp.ProcessProposalHandler(s.keeper, log.NewNopLogger())
+		resp, err := handler(s.ctx, &abci.RequestProcessProposal{Txs: [][]byte{txBytes}})
+		s.Require().NoError(err)
+		return resp.Status
+	}
+
+	// submitCompleteAfterProcessProposal := func(valIdx int) {
+	// 	s.T().Helper()
+
+	// 	msg := &types.MsgSubmitPartialDecryption{
+	// 		VoteRoundId:    msgPdRoundID,
+	// 		Creator:        validators[valIdx].ValidatorAddress,
+	// 		ValidatorIndex: uint32(valIdx + 1),
+	// 		Entries:        cs.buildValidEntriesForValidator(s, valIdx),
+	// 	}
+	// 	s.setBlockProposer(msg.Creator)
+	// 	s.Require().Equal(abci.ResponseProcessProposal_ACCEPT, processProposalStatus(msg))
+
+	// 	_, err := s.msgServer.SubmitPartialDecryption(s.ctx, msg)
+	// 	s.Require().NoError(err)
+	// }
+
+	incompleteMsg := &types.MsgSubmitPartialDecryption{
+		VoteRoundId:    msgPdRoundID,
+		Creator:        validators[0].ValidatorAddress,
+		ValidatorIndex: 1,
+		Entries:        entriesForValidator(0, [2]uint32{1, 0}),
+	}
+	s.setBlockProposer(validators[0].ValidatorAddress)
+	switch processProposalStatus(incompleteMsg) {
+	// case abci.ResponseProcessProposal_REJECT:
+	// 	has, err := s.keeper.HasPartialDecryptionsFromValidator(kv, msgPdRoundID, 1)
+	// 	s.Require().NoError(err)
+	// 	s.Require().False(has, "rejected incomplete submission must not consume validator 1's submission")
+
+	// 	submitCompleteAfterProcessProposal(0)
+	// 	submitCompleteAfterProcessProposal(1)
+
+	// 	s.setBlockProposer("sv1proposer")
+	// 	_, err = s.msgServer.SubmitTally(s.ctx, &types.MsgSubmitTally{
+	// 		VoteRoundId: msgPdRoundID,
+	// 		Creator:     "sv1proposer",
+	// 		Entries: []*types.TallyEntry{
+	// 			{ProposalId: 1, VoteDecision: 0, TotalValue: 42},
+	// 			{ProposalId: 1, VoteDecision: 1, TotalValue: 42},
+	// 			{ProposalId: 2, VoteDecision: 0, TotalValue: 42},
+	// 			{ProposalId: 2, VoteDecision: 1, TotalValue: 42},
+	// 		},
+	// 	})
+	// 	s.Require().NoError(err)
+	// 	return
+
+	case abci.ResponseProcessProposal_ACCEPT:
+		_, err := s.msgServer.SubmitPartialDecryption(s.ctx, incompleteMsg)
+		if err != nil {
+			// MsgServer has the same defense-in-depth check. When only the
+			// ProcessProposal guard is disabled, seed the accepted bad state so
+			// this test still demonstrates why the proposal guard matters.
+			s.Require().ErrorIs(err, types.ErrInvalidField)
+			s.Require().Contains(err.Error(), "missing partial decryption")
+			s.Require().NoError(s.keeper.SetPartialDecryptions(kv, msgPdRoundID, 1, incompleteMsg.Entries))
+		}
+
+	default:
+		s.T().Fatal("unexpected ProcessProposal status")
+	}
+
+	has, err := s.keeper.HasPartialDecryptionsFromValidator(kv, msgPdRoundID, 1)
+	s.Require().NoError(err)
+	s.Require().True(has, "the incomplete stored entry consumes validator 1's one submission")
+
+	// Cannot resubmit a correct entry once incomplete submission is in the store
+	s.setBlockProposer(validators[0].ValidatorAddress)
+	_, err = s.msgServer.SubmitPartialDecryption(s.ctx, &types.MsgSubmitPartialDecryption{
+		VoteRoundId:    msgPdRoundID,
+		Creator:        validators[0].ValidatorAddress,
+		ValidatorIndex: 1,
+		Entries:        cs.buildValidEntriesForValidator(s, 0),
+	})
+	s.Require().Error(err)
+	s.Require().ErrorIs(err, types.ErrInvalidField)
+	s.Require().Contains(err.Error(), "already submitted")
+
+	// Second validator submits their entry
+	s.setBlockProposer(validators[1].ValidatorAddress)
+	_, err = s.msgServer.SubmitPartialDecryption(s.ctx, &types.MsgSubmitPartialDecryption{
+		VoteRoundId:    msgPdRoundID,
+		Creator:        validators[1].ValidatorAddress,
+		ValidatorIndex: 2,
+		Entries:        cs.buildValidEntriesForValidator(s, 1),
+	})
+	s.Require().NoError(err)
+
+	// Tally fail because the incomplete submission is still in the store
+	s.setBlockProposer("sv1proposer")
+	_, err = s.msgServer.SubmitTally(s.ctx, &types.MsgSubmitTally{
+		VoteRoundId: msgPdRoundID,
+		Creator:     "sv1proposer",
+		Entries: []*types.TallyEntry{
+			{ProposalId: 1, VoteDecision: 0, TotalValue: 42},
+			{ProposalId: 1, VoteDecision: 1, TotalValue: 42},
+			{ProposalId: 2, VoteDecision: 0, TotalValue: 42},
+			{ProposalId: 2, VoteDecision: 1, TotalValue: 42},
+		},
+	})
+	s.Require().Error(err)
+	s.Require().ErrorIs(err, types.ErrTallyMismatch)
+	s.Require().Contains(err.Error(), "Lagrange combination failed")
 }
 
 func (s *MsgServerTestSuite) TestSubmitPartialDecryption_EmitsEvent() {

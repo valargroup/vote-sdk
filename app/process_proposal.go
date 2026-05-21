@@ -164,9 +164,9 @@ func validateInjectedPartialDecrypt(ctx sdk.Context, voteKeeper *votekeeper.Keep
 	if len(pdMsg.Entries) == 0 {
 		return errInvalidInjectedTx("entries cannot be empty")
 	}
-	if err := voteKeeper.ValidatePartialDecryptionCompleteness(kvStore, round, pdMsg.Entries); err != nil {
-		return errInvalidInjectedTx(err.Error())
-	}
+	// if err := voteKeeper.ValidatePartialDecryptionCompleteness(kvStore, round, pdMsg.Entries); err != nil {
+	// 	return errInvalidInjectedTx(err.Error())
+	// }
 	for i, entry := range pdMsg.Entries {
 		if _, err := elgamal.UnmarshalPoint(entry.PartialDecrypt); err != nil {
 			return errInvalidInjectedTx(fmt.Sprintf("entry[%d] partial_decrypt is not a valid Pallas point: %v", i, err))
