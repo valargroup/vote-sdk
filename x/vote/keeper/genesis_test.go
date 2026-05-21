@@ -13,7 +13,6 @@ import (
 	"github.com/cosmos/cosmos-sdk/runtime"
 	"github.com/cosmos/cosmos-sdk/testutil"
 
-	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	svtest "github.com/valargroup/vote-sdk/testutil"
 	"github.com/valargroup/vote-sdk/x/vote/keeper"
 	"github.com/valargroup/vote-sdk/x/vote/types"
@@ -30,6 +29,10 @@ func TestExportImportGenesis(t *testing.T) {
 
 	roundID := bytes.Repeat([]byte{0xAA}, 32)
 	roundID2 := bytes.Repeat([]byte{0xBB}, 32)
+	pallasKey := validPointBytes(1)
+	partialDecrypt1 := validPointBytes(2)
+	partialDecrypt2 := validPointBytes(3)
+	partialDecrypt3 := validPointBytes(4)
 
 	// --- Populate state ---
 
@@ -109,7 +112,7 @@ func TestExportImportGenesis(t *testing.T) {
 	// Pallas keys.
 	require.NoError(t, k.SetPallasKey(kvStore, &types.ValidatorPallasKey{
 		ValidatorAddress: "svvaloper1abc",
-		PallasPk:         elgamal.PallasGenerator().ToAffineCompressed(),
+		PallasPk:         pallasKey,
 	}))
 
 	// Commitment roots (scoped to roundID).
@@ -126,18 +129,18 @@ func TestExportImportGenesis(t *testing.T) {
 	pdEntry1 := &types.PartialDecryptionEntry{
 		ProposalId:     1,
 		VoteDecision:   0,
-		PartialDecrypt: elgamal.PallasGenerator().ToAffineCompressed(),
+		PartialDecrypt: partialDecrypt1,
 	}
 	pdEntry2 := &types.PartialDecryptionEntry{
 		ProposalId:     1,
 		VoteDecision:   1,
-		PartialDecrypt: elgamal.PallasGenerator().ToAffineCompressed(),
+		PartialDecrypt: partialDecrypt2,
 	}
 	require.NoError(t, k.SetPartialDecryptions(kvStore, roundID, 1, []*types.PartialDecryptionEntry{pdEntry1, pdEntry2}))
 	pdEntry3 := &types.PartialDecryptionEntry{
 		ProposalId:     1,
 		VoteDecision:   0,
-		PartialDecrypt: elgamal.PallasGenerator().ToAffineCompressed(),
+		PartialDecrypt: partialDecrypt3,
 	}
 	require.NoError(t, k.SetPartialDecryptions(kvStore, roundID, 2, []*types.PartialDecryptionEntry{pdEntry3}))
 
@@ -196,9 +199,9 @@ func TestExportImportGenesis(t *testing.T) {
 	// Verify partial decryptions export.
 	require.Equal(t, roundID, gs.PartialDecryptions[0].RoundId)
 	require.Equal(t, uint32(1), gs.PartialDecryptions[0].ValidatorIndex)
-	require.Equal(t, bytes.Repeat([]byte{0xF1}, 32), gs.PartialDecryptions[0].PartialDecrypt)
+	require.Equal(t, partialDecrypt1, gs.PartialDecryptions[0].PartialDecrypt)
 	require.Equal(t, uint32(2), gs.PartialDecryptions[2].ValidatorIndex)
-	require.Equal(t, bytes.Repeat([]byte{0xF3}, 32), gs.PartialDecryptions[2].PartialDecrypt)
+	require.Equal(t, partialDecrypt3, gs.PartialDecryptions[2].PartialDecrypt)
 
 	// --- Import into a fresh keeper ---
 	key2 := storetypes.NewKVStoreKey(types.StoreKey + "2")
@@ -272,10 +275,10 @@ func TestExportImportGenesis(t *testing.T) {
 	vpk, err := k2.GetPallasKey(kvStore2, "svvaloper1abc")
 	require.NoError(t, err)
 	require.NotNil(t, vpk)
-	require.Equal(t, bytes.Repeat([]byte{0xCC}, 32), vpk.PallasPk)
+	require.Equal(t, pallasKey, vpk.PallasPk)
 
 	// Verify Pallas key reverse-lookup index is populated after genesis import.
-	owner, err := k2.GetPallasKeyOwner(kvStore2, bytes.Repeat([]byte{0xCC}, 32))
+	owner, err := k2.GetPallasKeyOwner(kvStore2, pallasKey)
 	require.NoError(t, err)
 	require.Equal(t, "svvaloper1abc", owner)
 
@@ -312,15 +315,15 @@ func TestExportImportGenesis(t *testing.T) {
 	pd, err := k2.GetPartialDecryption(kvStore2, roundID, 1, 1, 0)
 	require.NoError(t, err)
 	require.NotNil(t, pd)
-	require.Equal(t, bytes.Repeat([]byte{0xF1}, 32), pd.PartialDecrypt)
+	require.Equal(t, partialDecrypt1, pd.PartialDecrypt)
 	pd, err = k2.GetPartialDecryption(kvStore2, roundID, 1, 1, 1)
 	require.NoError(t, err)
 	require.NotNil(t, pd)
-	require.Equal(t, bytes.Repeat([]byte{0xF2}, 32), pd.PartialDecrypt)
+	require.Equal(t, partialDecrypt2, pd.PartialDecrypt)
 	pd, err = k2.GetPartialDecryption(kvStore2, roundID, 2, 1, 0)
 	require.NoError(t, err)
 	require.NotNil(t, pd)
-	require.Equal(t, bytes.Repeat([]byte{0xF3}, 32), pd.PartialDecrypt)
+	require.Equal(t, partialDecrypt3, pd.PartialDecrypt)
 	// Negative check: non-existent partial decryption.
 	pd, err = k2.GetPartialDecryption(kvStore2, roundID, 3, 1, 0)
 	require.NoError(t, err)
@@ -345,9 +348,11 @@ func TestInitGenesisClearsTreeHeight(t *testing.T) {
 
 	gs := &types.GenesisState{
 		MinCeremonyValidators: 1,
+		VoteManagerAddresses:  []string{"sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"},
 		Rounds: []*types.VoteRound{{
 			VoteRoundId: roundID,
 			Status:      types.SessionStatus_SESSION_STATUS_ACTIVE,
+			VoteEndTime: 2_000_000,
 		}},
 		RoundTrees: []*types.GenesisRoundTree{{
 			VoteRoundId: roundID,
@@ -407,9 +412,10 @@ func TestInitGenesisPopulatesPallasKeyReverseIndex(t *testing.T) {
 	k := keeper.NewKeeper(storeService, svtest.TestAuthority, log.NewNopLogger(), nil, nil)
 	kvStore := k.OpenKVStore(ctx)
 
-	pk := bytes.Repeat([]byte{0xDD}, 32)
+	pk := validPointBytes(1)
 	gs := &types.GenesisState{
 		MinCeremonyValidators: 1,
+		VoteManagerAddresses:  []string{"sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"},
 		PallasKeys: []*types.ValidatorPallasKey{
 			{ValidatorAddress: "svvaloper1first", PallasPk: pk},
 		},
