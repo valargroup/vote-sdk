@@ -378,3 +378,105 @@ func (s *KeeperTestSuite) TestValidateTallyCompleteness() {
 		s.Require().Contains(err.Error(), "proposal=2, decision=1")
 	})
 }
+
+func (s *KeeperTestSuite) TestValidatePartialDecryptionEntries() {
+	validPartial := validPointBytes(7)
+
+	tests := []struct {
+		name        string
+		tallies     []uint32
+		entries     []*types.PartialDecryptionEntry
+		wantErrIs   error
+		errContains string
+	}{
+		{
+			name:    "valid entries cover every accumulator",
+			tallies: []uint32{0},
+			entries: []*types.PartialDecryptionEntry{
+				{ProposalId: 1, VoteDecision: 0, PartialDecrypt: validPartial},
+			},
+		},
+		{
+			name:        "empty entries",
+			tallies:     []uint32{0},
+			entries:     nil,
+			wantErrIs:   types.ErrInvalidField,
+			errContains: "entries cannot be empty",
+		},
+		{
+			name:    "missing accumulator entry",
+			tallies: []uint32{0, 1},
+			entries: []*types.PartialDecryptionEntry{
+				{ProposalId: 1, VoteDecision: 0, PartialDecrypt: validPartial},
+			},
+			wantErrIs:   types.ErrInvalidField,
+			errContains: "missing partial decryption for accumulator",
+		},
+		{
+			name:    "invalid partial decrypt point",
+			tallies: []uint32{0},
+			entries: []*types.PartialDecryptionEntry{
+				{ProposalId: 1, VoteDecision: 0, PartialDecrypt: []byte{0x01, 0x02}},
+			},
+			wantErrIs:   types.ErrInvalidField,
+			errContains: "partial_decrypt is not a valid Pallas point",
+		},
+		{
+			name:    "out of bounds proposal id",
+			tallies: []uint32{0},
+			entries: []*types.PartialDecryptionEntry{
+				{ProposalId: 1, VoteDecision: 0, PartialDecrypt: validPartial},
+				{ProposalId: 2, VoteDecision: 0, PartialDecrypt: validPartial},
+			},
+			wantErrIs:   types.ErrInvalidProposalID,
+			errContains: "proposal_id",
+		},
+		{
+			name:    "entry with no accumulator",
+			tallies: []uint32{0},
+			entries: []*types.PartialDecryptionEntry{
+				{ProposalId: 1, VoteDecision: 0, PartialDecrypt: validPartial},
+				{ProposalId: 1, VoteDecision: 1, PartialDecrypt: validPartial},
+			},
+			wantErrIs:   types.ErrInvalidField,
+			errContains: "no accumulator",
+		},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			s.SetupTest()
+			kv := s.keeper.OpenKVStore(s.ctx)
+			roundID := bytes.Repeat([]byte{0x9F}, 32)
+			round := &types.VoteRound{
+				VoteRoundId: roundID,
+				Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
+				Proposals: []*types.Proposal{
+					{Id: 1, Title: "Prop 1", Options: []*types.VoteOption{
+						{Index: 0, Label: "Yes"},
+						{Index: 1, Label: "No"},
+					}},
+				},
+			}
+			s.Require().NoError(s.keeper.SetVoteRound(kv, round))
+			for _, decision := range tc.tallies {
+				s.Require().NoError(s.keeper.AddToTally(kv, roundID, 1, decision, validCiphertextBytes(s.T(), uint64(decision+1))))
+			}
+
+			validatedEntries, err := s.keeper.ValidateAndDecodePartialDecryptionEntries(kv, round, tc.entries)
+			if tc.wantErrIs != nil {
+				s.Require().Error(err)
+				s.Require().ErrorIs(err, tc.wantErrIs)
+				s.Require().Contains(err.Error(), tc.errContains)
+			} else {
+				s.Require().NoError(err)
+				s.Require().Len(validatedEntries, len(tc.entries))
+				for i, validatedEntry := range validatedEntries {
+					s.Require().Same(tc.entries[i], validatedEntry.Entry)
+					s.Require().NotNil(validatedEntry.PartialDecrypt)
+					s.Require().NotNil(validatedEntry.Accumulator)
+				}
+			}
+		})
+	}
+}

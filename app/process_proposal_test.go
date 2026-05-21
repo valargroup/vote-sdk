@@ -430,6 +430,60 @@ func TestProcessProposalTallyValidation(t *testing.T) {
 	}
 }
 
+func TestProcessProposalRejectsIncompletePartialDecryptions(t *testing.T) {
+	ta := testutil.SetupTestApp(t)
+	valAddr := ta.ValidatorOperAddr()
+	roundID := bytes.Repeat([]byte{0x9E}, 32)
+
+	proposals := []*types.Proposal{
+		{Id: 1, Title: "Prop 1", Options: []*types.VoteOption{
+			{Index: 0, Label: "Yes"},
+			{Index: 1, Label: "No"},
+		}},
+	}
+	validators := []*types.ValidatorPallasKey{{ValidatorAddress: valAddr, ShamirIndex: 1}}
+	commitments := [][]byte{elgamal.PallasGenerator().ToAffineCompressed()}
+	ta.SeedTallyingRoundThreshold(roundID, 1, proposals, validators, commitments)
+
+	_, pk := elgamal.KeyGen(rand.Reader)
+	kvStore := ta.VoteKeeper().OpenKVStore(ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height}))
+	for _, decision := range []uint32{0, 1} {
+		ct, err := elgamal.Encrypt(pk, 1, rand.Reader)
+		require.NoError(t, err)
+		ctBytes, err := elgamal.MarshalCiphertext(ct)
+		require.NoError(t, err)
+		require.NoError(t, ta.VoteKeeper().AddToTally(kvStore, roundID, 1, decision, ctBytes))
+	}
+
+	msg := &types.MsgSubmitPartialDecryption{
+		VoteRoundId:    roundID,
+		Creator:        valAddr,
+		ValidatorIndex: 1,
+		Entries: []*types.PartialDecryptionEntry{
+			{
+				ProposalId:     1,
+				VoteDecision:   0,
+				PartialDecrypt: elgamal.PallasGenerator().ToAffineCompressed(),
+			},
+		},
+	}
+	txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagSubmitPartialDecryption)
+	require.NoError(t, err)
+
+	resp := ta.CallProcessProposal([][]byte{txBytes})
+	require.Equal(t, abci.ResponseProcessProposal_REJECT, resp.Status)
+
+	msg.Entries = []*types.PartialDecryptionEntry{
+		{ProposalId: 1, VoteDecision: 0, PartialDecrypt: nil},
+		{ProposalId: 1, VoteDecision: 1, PartialDecrypt: elgamal.PallasGenerator().ToAffineCompressed()},
+	}
+	txBytes, err = voteapi.EncodeCeremonyTx(msg, voteapi.TagSubmitPartialDecryption)
+	require.NoError(t, err)
+
+	resp = ta.CallProcessProposal([][]byte{txBytes})
+	require.Equal(t, abci.ResponseProcessProposal_REJECT, resp.Status)
+}
+
 // ---------------------------------------------------------------------------
 // Table-driven unit test for validateInjectedDKGContribution
 // ---------------------------------------------------------------------------

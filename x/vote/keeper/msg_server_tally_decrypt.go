@@ -246,8 +246,12 @@ func (ms msgServer) SubmitPartialDecryption(goCtx context.Context, msg *types.Ms
 			types.ErrInvalidField, msg.Creator, msg.ValidatorIndex, msg.VoteRoundId)
 	}
 
-	if len(msg.Entries) == 0 {
-		return nil, fmt.Errorf("%w: entries cannot be empty", types.ErrInvalidField)
+	// Ensures that the submission contains a partial decryption for every non-empty accumulator.
+	// Without this check, a malicious proposer could submit an incomplete partial decryption
+	// that later causes a tally to fail.
+	validatedEntries, err := ms.k.ValidateAndDecodePartialDecryptionEntries(kvStore, round, msg.Entries)
+	if err != nil {
+		return nil, err
 	}
 
 	// Derive VK_i from Feldman commitments: VK_i = EvalCommitmentPolynomial(commitments, i).
@@ -264,32 +268,11 @@ func (ms msgServer) SubmitPartialDecryption(goCtx context.Context, msg *types.Ms
 			types.ErrInvalidField, msg.ValidatorIndex, err)
 	}
 
-	for i, entry := range msg.Entries {
-		Di, err := elgamal.UnmarshalPoint(entry.PartialDecrypt)
-		if err != nil {
-			return nil, fmt.Errorf("%w: entry[%d] partial_decrypt is not a valid Pallas point: %v",
-				types.ErrInvalidField, i, err)
-		}
-		if err := ValidateEntryBounds(round, entry.ProposalId, entry.VoteDecision); err != nil {
-			return nil, fmt.Errorf("entry[%d]: %w", i, err)
-		}
-
-		// Load the tally accumulator to get C1 for DLEQ verification.
-		accBytes, err := ms.k.GetTally(kvStore, msg.VoteRoundId, entry.ProposalId, entry.VoteDecision)
-		if err != nil {
-			return nil, fmt.Errorf("entry[%d]: failed to load tally accumulator: %w", i, err)
-		}
-		if accBytes == nil {
-			return nil, fmt.Errorf("%w: entry[%d] no accumulator for (proposal=%d, decision=%d)",
-				types.ErrInvalidField, i, entry.ProposalId, entry.VoteDecision)
-		}
-		ct, err := elgamal.UnmarshalCiphertext(accBytes)
-		if err != nil {
-			return nil, fmt.Errorf("entry[%d]: failed to unmarshal accumulator: %w", i, err)
-		}
-
+	// For each validated entry, verify the DLEQ proof
+	for i, validatedEntry := range validatedEntries {
+		entry := validatedEntry.Entry
 		// Verify DLEQ proof: log_G(VK_i) == log_{C1}(D_i)
-		if err := elgamal.VerifyPartialDecryptDLEQ(entry.DleqProof, vkPoint, ct.C1, Di); err != nil {
+		if err := elgamal.VerifyPartialDecryptDLEQ(entry.DleqProof, vkPoint, validatedEntry.Accumulator.C1, validatedEntry.PartialDecrypt); err != nil {
 			return nil, fmt.Errorf("%w: entry[%d] DLEQ verification failed for validator %d: %v",
 				types.ErrInvalidField, i, msg.ValidatorIndex, err)
 		}
