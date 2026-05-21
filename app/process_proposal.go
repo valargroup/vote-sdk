@@ -138,6 +138,7 @@ func validateInjectedAck(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txBytes
 // Threshold > 0, the creator is a ceremony validator whose ShamirIndex
 // matches the submitted ValidatorIndex, the validator has not already
 // submitted, and the creator matches the current block proposer.
+// Ensures that the submission contains a partial decryption for every non-empty accumulator.
 func validateInjectedPartialDecrypt(ctx sdk.Context, voteKeeper *votekeeper.Keeper, txBytes []byte, logger log.Logger) error {
 	_, msg, err := voteapi.DecodeCeremonyTx(txBytes)
 	if err != nil {
@@ -164,9 +165,14 @@ func validateInjectedPartialDecrypt(ctx sdk.Context, voteKeeper *votekeeper.Keep
 	if len(pdMsg.Entries) == 0 {
 		return errInvalidInjectedTx("entries cannot be empty")
 	}
+
+	// Ensures that the submission contains a partial decryption for every non-empty accumulator.
+	// Without this check, a malicious proposer could submit an incomplete partial decryption
+	// that later causes a tally to fail.
 	if err := voteKeeper.ValidatePartialDecryptionCompleteness(kvStore, round, pdMsg.Entries); err != nil {
 		return errInvalidInjectedTx(err.Error())
 	}
+
 	for i, entry := range pdMsg.Entries {
 		if _, err := elgamal.UnmarshalPoint(entry.PartialDecrypt); err != nil {
 			return errInvalidInjectedTx(fmt.Sprintf("entry[%d] partial_decrypt is not a valid Pallas point: %v", i, err))
