@@ -15,8 +15,9 @@ Create GitHub Environments named `staging` and `production`.
 | `HAS_SECONDARY` | `true` | `false` | Skips secondary funding, reset, deploy, and verification in production. |
 | `DNS_PREFIX` | `stage.` | `prod.` | Prefixes public DNS names, e.g. `stage.explorer.<domain>`. |
 | `DO_SPACES_BUCKET` | `vote` | `shielded-vote` during migration | Spaces bucket name for reset uploads and release artifacts. Defaults to `vote`. |
-| `DO_SPACES_BASE` | `https://vote.fra1.digitaloceanspaces.com` | `https://shielded-vote.fra1.digitaloceanspaces.com` during migration | Spaces public base URL. Defaults to `https://${DO_SPACES_BUCKET}.fra1.digitaloceanspaces.com`. |
-| `RELEASE_BASE_URL` | `https://vote.fra1.digitaloceanspaces.com/binaries/vote-sdk` | `https://shielded-vote.fra1.digitaloceanspaces.com/binaries/vote-sdk` during migration | Release tarball prefix. Defaults to `${DO_SPACES_BASE}/binaries/vote-sdk`. |
+| `DO_SPACES_REGION` | `fra1` | `nyc3` during production migration | Spaces region used for release and reset uploads. Defaults to `fra1`. |
+| `DO_SPACES_BASE` | `https://vote.fra1.digitaloceanspaces.com` | `https://shielded-vote.nyc3.digitaloceanspaces.com` during migration | Spaces public base URL. Defaults to `https://${DO_SPACES_BUCKET}.${DO_SPACES_REGION}.digitaloceanspaces.com`. |
+| `RELEASE_BASE_URL` | `https://vote.fra1.digitaloceanspaces.com/binaries/vote-sdk` | `https://shielded-vote.nyc3.digitaloceanspaces.com/binaries/vote-sdk` during migration | Release tarball prefix. Defaults to `${DO_SPACES_BASE}/binaries/vote-sdk`. |
 | `GENESIS_KEY` | `genesis/svote-1/genesis.json` | `genesis/zvote-1/genesis.json` | Prevents resets from overwriting another environment's genesis. |
 | `SNAPSHOTS_PREFIX` | `snapshots/svote-1` | `snapshots/zvote-1` | Prefix cleared during reset before fresh snapshots are published. |
 | `PRIMARY_REST_URL` | derived from `DNS_PREFIX` + `DOMAIN` | optional cutover URL | REST base URL used by reset joiners to discover the primary peer. |
@@ -24,6 +25,7 @@ Create GitHub Environments named `staging` and `production`.
 | `EXPLORER_API_BASE_URL` | derived from `DNS_PREFIX` + `DOMAIN` | optional cutover URL | Explorer LCD base URL used by post-reset verification. |
 | `SNAPSHOT_PUBLIC_HOST` | derived from `DNS_PREFIX` + `DOMAIN` | optional cutover host | Public snapshot hostname used for local Host-header checks. |
 | `SNAPSHOT_BASE_URL` | derived from `SNAPSHOT_PUBLIC_HOST` | optional cutover URL | Snapshot frontend and metadata base URL used by post-reset verification. |
+| `VERIFY_PUBLIC_ENDPOINTS` | `true` | `false` before DNS cutover | Set to `false` only for pre-DNS migration resets. SSH jobs still check local services, and public HTTPS checks must run after DNS cutover. |
 
 The workflows have defaults for these values, but operators should set them
 explicitly so the selected environment is visible in GitHub's UI.
@@ -36,8 +38,8 @@ peer with the new primary instead of whichever host public DNS still resolves
 to.
 
 `release.yml` is not tied to a GitHub Environment. If release artifacts should
-be published to a non-default bucket, set the repository variable
-`DO_SPACES_BUCKET` before pushing the release tag.
+be published to a non-default bucket or region, set the repository variables
+`DO_SPACES_BUCKET` and `DO_SPACES_REGION` before pushing the release tag.
 
 ## Environment Secrets
 
