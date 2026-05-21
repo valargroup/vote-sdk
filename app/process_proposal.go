@@ -163,6 +163,9 @@ func validateInjectedPartialDecrypt(ctx sdk.Context, voteKeeper *votekeeper.Keep
 	if round.Threshold == 0 {
 		return errInvalidInjectedTx("round is not in threshold mode")
 	}
+	// Ensures that the submission contains a partial decryption for every non-empty accumulator.
+	// Without this check, a malicious proposer could submit an incomplete partial decryption
+	// that later causes a tally to fail.
 	if err := validateInjectedPartialDecryptEntries(voteKeeper, kvStore, round, pdMsg); err != nil {
 		return err
 	}
