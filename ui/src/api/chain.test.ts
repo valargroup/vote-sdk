@@ -90,6 +90,13 @@ describe("published snapshot validation", () => {
     )).toBe("https://vote.fra1.cdn.digitaloceanspaces.com/snapshots/2800000/manifest.json");
   });
 
+  it("maps any DO Spaces bucket origin to its CDN hostname", () => {
+    expect(getPublishedSnapshotManifestUrl(
+      "https://shielded-vote.fra1.digitaloceanspaces.com",
+      2_800_000
+    )).toBe("https://shielded-vote.fra1.cdn.digitaloceanspaces.com/snapshots/2800000/manifest.json");
+  });
+
   it("leaves non-production precomputed bases unchanged", () => {
     expect(getPublishedSnapshotManifestUrl(
       "https://staging.example.com",

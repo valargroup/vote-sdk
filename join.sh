@@ -22,6 +22,8 @@
 #
 # Optional: SVOTE_WRAPPER_SCRIPT=/path/to/svoted-wrapper.sh when join.sh is piped from curl and
 # svoted-wrapper.sh is not beside join.sh (see vote-sdk/scripts/svoted-wrapper.sh).
+# Optional: SVOTE_DO_SPACES_BASE=https://<bucket>.<region>.digitaloceanspaces.com or
+# SVOTE_DO_SPACES_BUCKET=<bucket> to use a non-default release/genesis bucket.
 # Optional: --env prod|stage or SVOTE_ENV=prod|stage selects the public network.
 # Defaults to prod when omitted.
 #
@@ -49,7 +51,17 @@ INSTALL_DIR="${SVOTE_INSTALL_DIR:-$HOME/.local/bin}"
 HOME_DIR="${SVOTE_HOME:-$HOME/.svoted}"
 ORIGINAL_PATH="${PATH}"
 PATH_REFRESH_COMMAND=""
-DO_BASE="https://vote.fra1.digitaloceanspaces.com"
+DO_BASE_OVERRIDE="${SVOTE_DO_SPACES_BASE:-${DO_SPACES_BASE:-}}"
+DO_BUCKET="${SVOTE_DO_SPACES_BUCKET:-${DO_SPACES_BUCKET:-}}"
+DO_REGION="${SVOTE_DO_SPACES_REGION:-${DO_SPACES_REGION:-fra1}}"
+if [ -n "${DO_BASE_OVERRIDE}" ]; then
+  DO_BASE="${DO_BASE_OVERRIDE}"
+elif [ -n "${DO_BUCKET}" ]; then
+  DO_BASE="https://${DO_BUCKET}.${DO_REGION}.digitaloceanspaces.com"
+else
+  DO_BASE="https://vote.fra1.digitaloceanspaces.com"
+fi
+DO_BASE="${DO_BASE%/}"
 SNAPSHOT_BASE_URL="${SVOTE_SNAPSHOT_BASE_URL:-}"
 # Canonical dynamic voting-config (same payload wallets fetch). Override for
 # staging mirrors or fork testing; see github.com/valargroup/token-holder-voting-config.
@@ -1192,11 +1204,11 @@ normalize_tls_mode() {
 
 print_tls_config_hint() {
   echo "  Use one of:"
-  echo "    curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | bash -s -- --tls-mode skip"
-  echo "    curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | bash -s -- --tls-mode custom --domain val.example.org"
-  echo "    curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | bash -s -- --tls-mode auto"
+  echo "    curl -fsSL ${DO_BASE}/join.sh | bash -s -- --tls-mode skip"
+  echo "    curl -fsSL ${DO_BASE}/join.sh | bash -s -- --tls-mode custom --domain val.example.org"
+  echo "    curl -fsSL ${DO_BASE}/join.sh | bash -s -- --tls-mode auto"
   echo "  Environment variables also work, for example:"
-  echo "    curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | SVOTE_TLS_MODE=auto bash"
+  echo "    curl -fsSL ${DO_BASE}/join.sh | SVOTE_TLS_MODE=auto bash"
 }
 
 prompt_tls_domain() {

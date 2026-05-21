@@ -37,6 +37,7 @@ jobs:
       chain_id: ${{ steps.resolve.outputs.chain_id }}
       dns_prefix: ${{ steps.resolve.outputs.dns_prefix }}
       has_secondary: ${{ steps.resolve.outputs.has_secondary }}
+      do_spaces_bucket: ${{ steps.resolve.outputs.do_spaces_bucket }}
       do_spaces_base: ${{ steps.resolve.outputs.do_spaces_base }}
       release_base_url: ${{ steps.resolve.outputs.release_base_url }}
       genesis_key: ${{ steps.resolve.outputs.genesis_key }}
@@ -50,6 +51,7 @@ jobs:
           CHAIN_ID: ${{ vars.CHAIN_ID }}
           DNS_PREFIX: ${{ vars.DNS_PREFIX }}
           HAS_SECONDARY: ${{ vars.HAS_SECONDARY }}
+          DO_SPACES_BUCKET: ${{ vars.DO_SPACES_BUCKET }}
           DO_SPACES_BASE: ${{ vars.DO_SPACES_BASE }}
           RELEASE_BASE_URL: ${{ vars.RELEASE_BASE_URL }}
           GENESIS_KEY: ${{ vars.GENESIS_KEY }}
@@ -71,7 +73,8 @@ jobs:
           chain_id="${CHAIN_ID:-$default_chain_id}"
           dns_prefix="${DNS_PREFIX:-$default_dns_prefix}"
           has_secondary="${HAS_SECONDARY:-$default_has_secondary}"
-          do_spaces_base="${DO_SPACES_BASE:-https://vote.fra1.digitaloceanspaces.com}"
+          do_spaces_bucket="${DO_SPACES_BUCKET:-vote}"
+          do_spaces_base="${DO_SPACES_BASE:-https://${do_spaces_bucket}.fra1.digitaloceanspaces.com}"
           release_base_url="${RELEASE_BASE_URL:-${do_spaces_base}/binaries/vote-sdk}"
           genesis_key="${GENESIS_KEY:-genesis/${chain_id}/genesis.json}"
           snapshots_prefix="${SNAPSHOTS_PREFIX:-snapshots/${chain_id}}"
@@ -80,6 +83,7 @@ jobs:
             echo "chain_id=${chain_id}"
             echo "dns_prefix=${dns_prefix}"
             echo "has_secondary=${has_secondary}"
+            echo "do_spaces_bucket=${do_spaces_bucket}"
             echo "do_spaces_base=${do_spaces_base}"
             echo "release_base_url=${release_base_url}"
             echo "genesis_key=${genesis_key}"
@@ -112,7 +116,7 @@ jobs:
           if [ "$MISSING" -ne 0 ]; then
             echo ""
             echo "ERROR: tag '${TAG}' is not published. Refusing to proceed (would wipe chain state and then fail)."
-            echo "  Confirm the tag was successfully built by release.yml and uploaded to s3://vote/binaries/vote-sdk/."
+            echo "  Confirm the tag was successfully built by release.yml and uploaded to the configured DO Spaces bucket."
             exit 1
           fi
 
@@ -126,7 +130,7 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         timeout-minutes: 5
         with:
-          host: ${{ needs.resolve-environment.outputs.dns_prefix }}snapshots.${{ secrets.DOMAIN }}
+          host: ${{ secrets.SNAPSHOT_HOST || vars.SNAPSHOT_HOST || format('{0}snapshots.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
@@ -151,7 +155,7 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         timeout-minutes: 5
         with:
-          host: ${{ needs.resolve-environment.outputs.dns_prefix }}explorer.${{ secrets.DOMAIN }}
+          host: ${{ secrets.EXPLORER_HOST || vars.EXPLORER_HOST || format('{0}explorer.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
@@ -175,6 +179,7 @@ jobs:
     env:
       CHAIN_ID: ${{ needs.resolve-environment.outputs.chain_id }}
       DNS_PREFIX: ${{ needs.resolve-environment.outputs.dns_prefix }}
+      RELEASE_BASE_URL: ${{ needs.resolve-environment.outputs.release_base_url }}
       SENTRY_ENVIRONMENT: ${{ inputs.target_environment }}
       SVOTE_CONFIG_URL: ${{ needs.resolve-environment.outputs.voting_config_url }}
       # Staging: valarg-genesis / valarg-secondary split; production: single valargroup moniker.
@@ -184,16 +189,16 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         timeout-minutes: 15
         with:
-          host: ${{ secrets.PRIMARY_HOST }}
+          host: ${{ secrets.PRIMARY_HOST || vars.PRIMARY_HOST || format('{0}vote-chain-primary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: TAG,SENTRY_DSN,SENTRY_ENVIRONMENT,SVOTE_CONFIG_PR_GITHUB_TOKEN,CHAIN_ID,DNS_PREFIX,DOMAIN,SVOTE_CONFIG_URL,MONIKER
+          envs: TAG,SENTRY_DSN,SENTRY_ENVIRONMENT,SVOTE_CONFIG_PR_GITHUB_TOKEN,CHAIN_ID,DNS_PREFIX,DOMAIN,RELEASE_BASE_URL,SVOTE_CONFIG_URL,MONIKER
           script: |
             set -euo pipefail
             export PATH="/opt/shielded-vote/current/bin:$PATH"
 
             # Install the release
-            /opt/shielded-vote/install-release.sh --tag "${TAG}" --skip-restart
+            /opt/shielded-vote/install-release.sh --tag "${TAG}" --base "${RELEASE_BASE_URL}" --skip-restart
 
             # Stop svoted
             systemctl stop svoted || true
@@ -268,6 +273,7 @@ jobs:
     needs: [resolve-environment, reset-primary]
     environment: ${{ inputs.target_environment }}
     env:
+      DO_SPACES_BUCKET: ${{ needs.resolve-environment.outputs.do_spaces_bucket }}
       GENESIS_KEY: ${{ needs.resolve-environment.outputs.genesis_key }}
       SNAPSHOTS_PREFIX: ${{ needs.resolve-environment.outputs.snapshots_prefix }}
     steps:
@@ -275,10 +281,10 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         timeout-minutes: 5
         with:
-          host: ${{ secrets.PRIMARY_HOST }}
+          host: ${{ secrets.PRIMARY_HOST || vars.PRIMARY_HOST || format('{0}vote-chain-primary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: DO_ACCESS_KEY,DO_SECRET_KEY,GENESIS_KEY,SNAPSHOTS_PREFIX
+          envs: DO_ACCESS_KEY,DO_SECRET_KEY,DO_SPACES_BUCKET,GENESIS_KEY,SNAPSHOTS_PREFIX
           script: |
             set -euo pipefail
 
@@ -299,12 +305,12 @@ jobs:
             bucket_location = fra1
             use_https = True
             EOCFG
-            s3cmd -c /tmp/do-spaces.s3cfg put /tmp/genesis.json "s3://vote/${GENESIS_KEY}" --acl-public --force
-            echo "Clearing old snapshot artifacts from s3://vote/${SNAPSHOTS_PREFIX}/..."
-            s3cmd -c /tmp/do-spaces.s3cfg del --recursive "s3://vote/${SNAPSHOTS_PREFIX}/"
+            s3cmd -c /tmp/do-spaces.s3cfg put /tmp/genesis.json "s3://${DO_SPACES_BUCKET}/${GENESIS_KEY}" --acl-public --force
+            echo "Clearing old snapshot artifacts from s3://${DO_SPACES_BUCKET}/${SNAPSHOTS_PREFIX}/..."
+            s3cmd -c /tmp/do-spaces.s3cfg del --recursive "s3://${DO_SPACES_BUCKET}/${SNAPSHOTS_PREFIX}/"
             rm -f /tmp/do-spaces.s3cfg
-            echo "Genesis uploaded to s3://vote/${GENESIS_KEY}"
-            echo "Old snapshots cleared from s3://vote/${SNAPSHOTS_PREFIX}/"
+            echo "Genesis uploaded to s3://${DO_SPACES_BUCKET}/${GENESIS_KEY}"
+            echo "Old snapshots cleared from s3://${DO_SPACES_BUCKET}/${SNAPSHOTS_PREFIX}/"
         env:
           DO_ACCESS_KEY: ${{ secrets.DO_ACCESS_KEY }}
           DO_SECRET_KEY: ${{ secrets.DO_SECRET_KEY }}
@@ -322,7 +328,7 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         timeout-minutes: 5
         with:
-          host: ${{ secrets.PRIMARY_HOST }}
+          host: ${{ secrets.PRIMARY_HOST || vars.PRIMARY_HOST || format('{0}vote-chain-primary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           envs: CHAIN_ID
@@ -367,23 +373,25 @@ jobs:
       DO_SPACES_BASE: ${{ needs.resolve-environment.outputs.do_spaces_base }}
       GENESIS_KEY: ${{ needs.resolve-environment.outputs.genesis_key }}
       DOMAIN: ${{ secrets.DOMAIN }}
-      SNAPSHOT_HOST: ${{ needs.resolve-environment.outputs.dns_prefix }}snapshots.${{ secrets.DOMAIN }}
+      PRIMARY_REST_URL: ${{ vars.PRIMARY_REST_URL || format('https://{0}vote-chain-primary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
+      RELEASE_BASE_URL: ${{ needs.resolve-environment.outputs.release_base_url }}
+      SNAPSHOT_HOST: ${{ vars.SNAPSHOT_PUBLIC_HOST || format('{0}snapshots.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
       SENTRY_ENVIRONMENT: ${{ inputs.target_environment }}
     steps:
       - name: Install tag and join as snapshot node
         uses: appleboy/ssh-action@v1.0.3
         timeout-minutes: 30
         with:
-          host: ${{ needs.resolve-environment.outputs.dns_prefix }}snapshots.${{ secrets.DOMAIN }}
+          host: ${{ secrets.SNAPSHOT_HOST || vars.SNAPSHOT_HOST || format('{0}snapshots.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: TAG,CHAIN_ID,DNS_PREFIX,DO_SPACES_BASE,GENESIS_KEY,DOMAIN,SENTRY_DSN,SENTRY_ENVIRONMENT
+          envs: TAG,CHAIN_ID,DNS_PREFIX,DO_SPACES_BASE,GENESIS_KEY,DOMAIN,PRIMARY_REST_URL,RELEASE_BASE_URL,SENTRY_DSN,SENTRY_ENVIRONMENT
           script: |
             set -euo pipefail
             export PATH="/opt/shielded-vote/current/bin:$PATH"
 
             # Install the release (skip restart — reset-snapshot.sh starts svoted).
-            /opt/shielded-vote/install-release.sh --tag "${TAG}" --skip-restart
+            /opt/shielded-vote/install-release.sh --tag "${TAG}" --base "${RELEASE_BASE_URL}" --skip-restart
             sed -i '/^SENTRY_DSN=/d' /etc/default/svoted
             echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
             sed -i '/^SENTRY_ENVIRONMENT=/d' /etc/default/svoted
@@ -393,7 +401,7 @@ jobs:
             # with primary, start svoted as a pruned non-validator, and enable
             # the snapshot timer.
             export GENESIS_URL="${DO_SPACES_BASE}/${GENESIS_KEY}"
-            export PRIMARY_REST_URL="https://${DNS_PREFIX}vote-chain-primary.${DOMAIN}"
+            export PRIMARY_REST_URL="${PRIMARY_REST_URL}"
             export HOME_DIR=/opt/shielded-vote/.svoted
             export MONIKER=snapshot
 
@@ -406,7 +414,7 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         timeout-minutes: 30
         with:
-          host: ${{ needs.resolve-environment.outputs.dns_prefix }}snapshots.${{ secrets.DOMAIN }}
+          host: ${{ secrets.SNAPSHOT_HOST || vars.SNAPSHOT_HOST || format('{0}snapshots.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           envs: SNAPSHOT_HOST
@@ -450,7 +458,7 @@ jobs:
       - name: Verify snapshot services
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ needs.resolve-environment.outputs.dns_prefix }}snapshots.${{ secrets.DOMAIN }}
+          host: ${{ secrets.SNAPSHOT_HOST || vars.SNAPSHOT_HOST || format('{0}snapshots.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           envs: SNAPSHOT_HOST
@@ -473,22 +481,24 @@ jobs:
       DO_SPACES_BASE: ${{ needs.resolve-environment.outputs.do_spaces_base }}
       GENESIS_KEY: ${{ needs.resolve-environment.outputs.genesis_key }}
       DOMAIN: ${{ secrets.DOMAIN }}
+      PRIMARY_REST_URL: ${{ vars.PRIMARY_REST_URL || format('https://{0}vote-chain-primary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
+      RELEASE_BASE_URL: ${{ needs.resolve-environment.outputs.release_base_url }}
       SENTRY_ENVIRONMENT: ${{ inputs.target_environment }}
     steps:
       - name: Install tag and join
         uses: appleboy/ssh-action@v1.0.3
         timeout-minutes: 30
         with:
-          host: ${{ secrets.SECONDARY_HOST }}
+          host: ${{ secrets.SECONDARY_HOST || vars.SECONDARY_HOST || format('{0}vote-chain-secondary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: TAG,CHAIN_ID,DNS_PREFIX,DO_SPACES_BASE,GENESIS_KEY,DOMAIN,SENTRY_DSN,SENTRY_ENVIRONMENT
+          envs: TAG,CHAIN_ID,DNS_PREFIX,DO_SPACES_BASE,GENESIS_KEY,DOMAIN,PRIMARY_REST_URL,RELEASE_BASE_URL,SENTRY_DSN,SENTRY_ENVIRONMENT
           script: |
             set -euo pipefail
             export PATH="/opt/shielded-vote/current/bin:$PATH"
 
             # Install the release
-            /opt/shielded-vote/install-release.sh --tag "${TAG}" --skip-restart
+            /opt/shielded-vote/install-release.sh --tag "${TAG}" --base "${RELEASE_BASE_URL}" --skip-restart
             sed -i '/^SENTRY_DSN=/d' /etc/default/svoted
             echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
             sed -i '/^SENTRY_ENVIRONMENT=/d' /etc/default/svoted
@@ -496,7 +506,7 @@ jobs:
 
             # Run reset-join with deterministic validator key
             export GENESIS_URL="${DO_SPACES_BASE}/${GENESIS_KEY}"
-            export PRIMARY_REST_URL="https://${DNS_PREFIX}vote-chain-primary.${DOMAIN}"
+            export PRIMARY_REST_URL="${PRIMARY_REST_URL}"
             export VAL_PRIVKEY="${{ secrets.SECONDARY_VAL_PRIVKEY }}"
             export HOME_DIR=/opt/shielded-vote/.svoted
             export MONIKER=valarg-secondary
@@ -509,7 +519,7 @@ jobs:
       - name: Verify secondary health
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.SECONDARY_HOST }}
+          host: ${{ secrets.SECONDARY_HOST || vars.SECONDARY_HOST || format('{0}vote-chain-secondary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
@@ -536,23 +546,25 @@ jobs:
       DO_SPACES_BASE: ${{ needs.resolve-environment.outputs.do_spaces_base }}
       GENESIS_KEY: ${{ needs.resolve-environment.outputs.genesis_key }}
       DOMAIN: ${{ secrets.DOMAIN }}
-      SNAPSHOT_HOST: ${{ needs.resolve-environment.outputs.dns_prefix }}snapshots.${{ secrets.DOMAIN }}
+      PRIMARY_REST_URL: ${{ vars.PRIMARY_REST_URL || format('https://{0}vote-chain-primary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
+      RELEASE_BASE_URL: ${{ needs.resolve-environment.outputs.release_base_url }}
+      SNAPSHOT_HOST: ${{ vars.SNAPSHOT_PUBLIC_HOST || format('{0}snapshots.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
       SENTRY_ENVIRONMENT: ${{ inputs.target_environment }}
     steps:
       - name: Install tag and join as archive
         uses: appleboy/ssh-action@v1.0.3
         timeout-minutes: 30
         with:
-          host: ${{ needs.resolve-environment.outputs.dns_prefix }}explorer.${{ secrets.DOMAIN }}
+          host: ${{ secrets.EXPLORER_HOST || vars.EXPLORER_HOST || format('{0}explorer.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: TAG,CHAIN_ID,DNS_PREFIX,DO_SPACES_BASE,GENESIS_KEY,DOMAIN,SENTRY_DSN,SENTRY_ENVIRONMENT
+          envs: TAG,CHAIN_ID,DNS_PREFIX,DO_SPACES_BASE,GENESIS_KEY,DOMAIN,PRIMARY_REST_URL,RELEASE_BASE_URL,SENTRY_DSN,SENTRY_ENVIRONMENT
           script: |
             set -euo pipefail
             export PATH="/opt/shielded-vote/current/bin:$PATH"
 
             # Install the release (skip restart — reset-archive.sh starts svoted).
-            /opt/shielded-vote/install-release.sh --tag "${TAG}" --skip-restart
+            /opt/shielded-vote/install-release.sh --tag "${TAG}" --base "${RELEASE_BASE_URL}" --skip-restart
             sed -i '/^SENTRY_DSN=/d' /etc/default/svoted
             echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
             sed -i '/^SENTRY_ENVIRONMENT=/d' /etc/default/svoted
@@ -586,7 +598,7 @@ jobs:
             # Run reset-archive: wipe state, download genesis, configure peering
             # with primary, start svoted in archive mode (pruning=nothing).
             export GENESIS_URL="${DO_SPACES_BASE}/${GENESIS_KEY}"
-            export PRIMARY_REST_URL="https://${DNS_PREFIX}vote-chain-primary.${DOMAIN}"
+            export PRIMARY_REST_URL="${PRIMARY_REST_URL}"
             export HOME_DIR=/opt/shielded-vote/.svoted
             export MONIKER=archive
 
@@ -598,7 +610,7 @@ jobs:
       - name: Verify archive health
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ needs.resolve-environment.outputs.dns_prefix }}explorer.${{ secrets.DOMAIN }}
+          host: ${{ secrets.EXPLORER_HOST || vars.EXPLORER_HOST || format('{0}explorer.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
@@ -617,7 +629,7 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         timeout-minutes: 60
         with:
-          host: ${{ needs.resolve-environment.outputs.dns_prefix }}explorer.${{ secrets.DOMAIN }}
+          host: ${{ secrets.EXPLORER_HOST || vars.EXPLORER_HOST || format('{0}explorer.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           envs: SNAPSHOT_HOST
@@ -661,31 +673,34 @@ jobs:
       DNS_PREFIX: ${{ needs.resolve-environment.outputs.dns_prefix }}
       HAS_SECONDARY: ${{ needs.resolve-environment.outputs.has_secondary }}
       DOMAIN: ${{ secrets.DOMAIN }}
+      PRIMARY_REST_URL: ${{ vars.PRIMARY_REST_URL || format('https://{0}vote-chain-primary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
+      SECONDARY_REST_URL: ${{ vars.SECONDARY_REST_URL || format('https://{0}vote-chain-secondary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
+      EXPLORER_API_BASE_URL: ${{ vars.EXPLORER_API_BASE_URL || format('https://{0}explorer-api.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
+      SNAPSHOT_BASE_URL: ${{ vars.SNAPSHOT_BASE_URL || format('https://{0}', vars.SNAPSHOT_PUBLIC_HOST || format('{0}snapshots.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN)) }}
     steps:
       - name: Check fleet endpoints
         run: |
           FAILED=0
-          VALIDATOR_HOSTS=("${DNS_PREFIX}vote-chain-primary")
+          VALIDATOR_URLS=("${PRIMARY_REST_URL%/}/shielded-vote/v1/rounds")
           if [ "${HAS_SECONDARY}" != "false" ]; then
-            VALIDATOR_HOSTS+=("${DNS_PREFIX}vote-chain-secondary")
+            VALIDATOR_URLS+=("${SECONDARY_REST_URL%/}/shielded-vote/v1/rounds")
           fi
-          for HOST in "${VALIDATOR_HOSTS[@]}"; do
-            URL="https://${HOST}.${DOMAIN}/shielded-vote/v1/rounds"
+          for URL in "${VALIDATOR_URLS[@]}"; do
             for i in $(seq 1 10); do
               STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "$URL" || echo "000")
               if [ "$STATUS" = "200" ]; then
-                echo "[OK] ${HOST} healthy"
+                echo "[OK] ${URL} healthy"
                 break
               fi
               if [ "$i" -eq 10 ]; then
-                echo "[FAIL] ${HOST} not healthy (HTTP ${STATUS})"
+                echo "[FAIL] ${URL} not healthy (HTTP ${STATUS})"
                 FAILED=1
               fi
               sleep 10
             done
           done
           # Explorer archive exposes the Cosmos LCD at explorer-api.<domain>.
-          ARCHIVE_URL="https://${DNS_PREFIX}explorer-api.${DOMAIN}/cosmos/base/tendermint/v1beta1/blocks/latest"
+          ARCHIVE_URL="${EXPLORER_API_BASE_URL%/}/cosmos/base/tendermint/v1beta1/blocks/latest"
           for i in $(seq 1 10); do
             STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "$ARCHIVE_URL" || echo "000")
             if [ "$STATUS" = "200" ]; then
@@ -698,7 +713,8 @@ jobs:
             fi
             sleep 10
           done
-          SNAPSHOT_URL="https://${DNS_PREFIX}snapshots.${DOMAIN}/"
+          SNAPSHOT_BASE_URL="${SNAPSHOT_BASE_URL%/}"
+          SNAPSHOT_URL="${SNAPSHOT_BASE_URL}/"
           for i in $(seq 1 10); do
             STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "$SNAPSHOT_URL" || echo "000")
             if [ "$STATUS" = "200" ]; then
@@ -712,7 +728,7 @@ jobs:
             sleep 10
           done
           for METADATA_PATH in /daily.json /latest.json /snapshots.json /archive/latest.json; do
-            URL="https://${DNS_PREFIX}snapshots.${DOMAIN}${METADATA_PATH}"
+            URL="${SNAPSHOT_BASE_URL}${METADATA_PATH}"
             if curl -fsS "$URL" | jq empty > /dev/null; then
               echo "[OK] snapshot metadata ${METADATA_PATH}"
             else

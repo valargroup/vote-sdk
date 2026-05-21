@@ -18,7 +18,7 @@ Production uses dedicated DigitalOcean Droplets in the same region + VPC, runnin
 
 - **vote-primary** (`vote-chain-primary.<domain>`): 4 vCPU / 16 GB RAM / 200 GB NVMe. Bootstrap validator — creates genesis via `scripts/init.sh` with `SVOTE_ADMIN_DISABLE=false` so the admin module is enabled. Serves the admin UI at `https://vote-chain-primary.<domain>/` via `--serve-ui --ui-dist` (systemd drop-in). Secondaries keep `[admin] disable = true` from `svoted init`.
 - **vote-secondary** (`vote-chain-secondary.<domain>`): 4 vCPU / 8 GB RAM / 100 GB NVMe. Joining validator — fetches genesis, syncs, and self-registers via `scripts/reset-join.sh`.
-- **vote-snapshot** (`snapshots.<domain>`): 4 vCPU / 16 GB RAM / 100 GB volume by default. Pruned non-validator node — publishes scheduled `data/` snapshots and metadata to `s3://vote/snapshots/svote-1/`, while Caddy serves the public snapshot page.
+- **vote-snapshot** (`snapshots.<domain>`): 4 vCPU / 16 GB RAM / 100 GB volume by default. Pruned non-validator node — publishes scheduled `data/` snapshots and metadata to `s3://${DO_SPACES_BUCKET}/snapshots/<chain-id>/`, while Caddy serves the public snapshot page.
 
 All chain-facing nodes run the same `svoted` binary. Caddy on each public host terminates TLS via Let's Encrypt.
 
@@ -104,13 +104,22 @@ in [software-upgrades.md](runbooks/software-upgrades.md).
 
 1. **quiesce-snapshot**: stops and disables `snapshot.timer`, stops any running publisher, and stops old snapshot-node `svoted` before chain state changes
 2. **reset-primary**: installs tag, stops svoted, wipes chain state, runs `init.sh` (imports `PRIMARY_VAL_PRIVKEY`) to create fresh genesis, starts svoted
-3. **upload-genesis**: fetches genesis from primary's REST API, uploads to DO Spaces (`s3://vote/genesis.json`), and clears `s3://vote/snapshots/svote-1/`
+3. **upload-genesis**: fetches genesis from primary's REST API, uploads to DO Spaces (`s3://${DO_SPACES_BUCKET}/${GENESIS_KEY}`), and clears `s3://${DO_SPACES_BUCKET}/${SNAPSHOTS_PREFIX}/`
 4. **fund-secondary**: derives the secondary address from `SECONDARY_VAL_PRIVKEY`, sends 100M usvote from a vote manager on the primary
 5. **reset-snapshot**: installs tag, runs `reset-snapshot.sh`, starts a pruned non-validator node, and enables `snapshot.timer`
 6. **reset-secondary**: installs tag, runs `reset-join.sh` (imports `SECONDARY_VAL_PRIVKEY`), syncs, verifies funding, registers as validator
 7. **verify**: checks validators, archive, and snapshot frontend
 
 Required secrets: `PRIMARY_HOST`, `SECONDARY_HOST`, `EXPLORER_HOST`, `SNAPSHOT_HOST`, `DEPLOY_USER`, `SSH_PRIVATE_KEY`, `VM_PRIVKEYS`, `PRIMARY_VAL_PRIVKEY`, `SECONDARY_VAL_PRIVKEY`, `DOMAIN`, `DO_ACCESS_KEY`, `DO_SECRET_KEY`, `SLACK_WEBHOOK_URL`.
+
+`PRIMARY_HOST`, `SECONDARY_HOST`, `EXPLORER_HOST`, and `SNAPSHOT_HOST` are SSH
+targets and can be set as environment variables instead of secrets when the
+values are not sensitive. Use IPs here before DNS cutover; keep public URLs such
+as `PRIMARY_REST_URL`, `SNAPSHOT_PUBLIC_HOST`, and `SNAPSHOT_BASE_URL` as
+environment variables when verification or peering needs a temporary hostname.
+For the first destination reset before DNS cutover, prefer
+`PRIMARY_REST_URL=http://<primary-private-ip>:1317`; vote-infrastructure opens
+that primary REST port only inside the VPC.
 
 Optional primary-only secret: `CONFIG_PR_GITHUB_TOKEN`. When present, the deploy
 and reset workflows write it to the primary node as
@@ -156,7 +165,9 @@ systemctl start svoted
 ```bash
 ssh root@<secondary-ip>
 export PATH="/opt/shielded-vote/current/bin:$PATH"
-export GENESIS_URL=https://vote.fra1.digitaloceanspaces.com/genesis.json
+export DO_SPACES_BASE=https://vote.fra1.digitaloceanspaces.com
+export GENESIS_KEY=genesis/svote-1/genesis.json
+export GENESIS_URL="${DO_SPACES_BASE}/${GENESIS_KEY}"
 export PRIMARY_REST_URL=https://vote-chain-primary.<domain>
 export VAL_PRIVKEY=<64-char-hex>
 export HOME_DIR=/opt/shielded-vote/.svoted
