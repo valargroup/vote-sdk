@@ -75,6 +75,55 @@ func TestThresholdForN_Invariants(t *testing.T) {
 	}
 }
 
+func TestCeremonyQuorumForN(t *testing.T) {
+	tests := []struct {
+		n              int
+		wantMargin     int
+		wantRequired   int
+		wantErr        bool
+		wantThreshold  int
+		wantTallySlack int
+	}{
+		{n: -1, wantErr: true},
+		{n: 0, wantErr: true},
+		{n: 1, wantThreshold: 1, wantMargin: 0, wantRequired: 1, wantTallySlack: 0},
+		{n: 2, wantThreshold: 2, wantMargin: 0, wantRequired: 2, wantTallySlack: 0},
+		{n: 3, wantThreshold: 2, wantMargin: 0, wantRequired: 3, wantTallySlack: 1},
+		{n: 4, wantThreshold: 2, wantMargin: 1, wantRequired: 3, wantTallySlack: 1},
+		{n: 5, wantThreshold: 3, wantMargin: 1, wantRequired: 4, wantTallySlack: 1},
+		{n: 6, wantThreshold: 3, wantMargin: 1, wantRequired: 5, wantTallySlack: 2},
+		{n: 7, wantThreshold: 4, wantMargin: 1, wantRequired: 6, wantTallySlack: 2},
+		{n: 8, wantThreshold: 4, wantMargin: 2, wantRequired: 6, wantTallySlack: 2},
+		{n: 9, wantThreshold: 5, wantMargin: 2, wantRequired: 7, wantTallySlack: 2},
+		{n: 10, wantThreshold: 5, wantMargin: 2, wantRequired: 8, wantTallySlack: 3},
+		{n: 11, wantThreshold: 6, wantMargin: 2, wantRequired: 9, wantTallySlack: 3},
+		{n: 15, wantThreshold: 8, wantMargin: 3, wantRequired: 12, wantTallySlack: 4},
+		{n: 20, wantThreshold: 10, wantMargin: 5, wantRequired: 15, wantTallySlack: 5},
+	}
+
+	for _, tc := range tests {
+		margin, err := keeper.CeremonyFaultMarginForN(tc.n)
+		if tc.wantErr {
+			require.Error(t, err, "n=%d should error", tc.n)
+			_, err = keeper.RequiredCeremonyQuorumForN(tc.n)
+			require.Error(t, err, "n=%d should error", tc.n)
+			continue
+		}
+		require.NoError(t, err, "n=%d", tc.n)
+		require.Equal(t, tc.wantMargin, margin, "margin n=%d", tc.n)
+
+		required, err := keeper.RequiredCeremonyQuorumForN(tc.n)
+		require.NoError(t, err, "n=%d", tc.n)
+		require.Equal(t, tc.wantRequired, required, "required n=%d", tc.n)
+
+		threshold, err := keeper.ThresholdForN(tc.n)
+		require.NoError(t, err, "n=%d", tc.n)
+		require.Equal(t, tc.wantThreshold, threshold, "threshold n=%d", tc.n)
+		require.Equal(t, tc.wantTallySlack, required-threshold, "tally slack n=%d", tc.n)
+		require.GreaterOrEqual(t, required-margin, threshold, "quorum safety invariant n=%d", tc.n)
+	}
+}
+
 // ===========================================================================
 // Per-round ceremony helper tests (pure functions on KeeperTestSuite)
 // ===========================================================================

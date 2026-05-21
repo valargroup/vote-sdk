@@ -555,13 +555,13 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 		wantRoundStatus    types.SessionStatus
 	}{
 		{
-			// n=3: 2 acks satisfies HalfAcked (2*2=4 >= 3). 1 non-acker stripped.
-			name: "DEALT + 1/2 acked + timeout -> CONFIRMED + ACTIVE",
+			// n=3 requires all 3 acks under RequiredCeremonyQuorumForN.
+			name: "DEALT + 2/3 acked + timeout -> CEREMONY_FAILED",
 			setup: func() {
-				seedDealtRound(2) // 2 of 3 acked (ceil(3/2)=2)
+				seedDealtRound(2)
 			},
-			wantCeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED,
-			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_ACTIVE,
+			wantCeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_DEALT,
+			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED,
 		},
 		{
 			name: "DEALT + all acks + timeout -> CONFIRMED + ACTIVE",
@@ -580,8 +580,8 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED,
 		},
 		{
-			// n=3: 1 ack fails HalfAcked (1*2=2 < 3) — below the 1/2 ack quorum.
-			name: "DEALT + below 1/2 (1/3 acks) + timeout -> CEREMONY_FAILED",
+			// n=3: 1 ack is below the required quorum of 3.
+			name: "DEALT + below quorum (1/3 acks) + timeout -> CEREMONY_FAILED",
 			setup: func() {
 				seedDealtRound(1) // 1 of 3 acked
 			},
@@ -589,20 +589,46 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED,
 		},
 		{
-			// n=9, threshold=5 (ceil(9/2)), 5 acks: HalfAcked (5*2=10>=9) and 5 >= threshold=5.
-			// Both conditions met — strip 4 non-ackers and activate.
-			name: "DEALT + exactly 1/2 (5/9 acks) + threshold=5 -> CONFIRMED + ACTIVE",
+			// n=5, threshold=3, required quorum=4. Exactly threshold-sized
+			// ack sets are rejected so one surviving withholder cannot break tally.
+			name: "DEALT + exactly threshold (3/5 acks) -> CEREMONY_FAILED",
 			setup: func() {
-				seedDealtRoundWithThreshold(9, 5, 5)
+				seedDealtRoundWithThreshold(5, 3, 3)
+			},
+			wantCeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_DEALT,
+			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED,
+		},
+		{
+			// n=5, threshold=3, required quorum=4. One non-acker is stripped.
+			name: "DEALT + required quorum (4/5 acks) -> CONFIRMED + ACTIVE",
+			setup: func() {
+				seedDealtRoundWithThreshold(5, 3, 4)
 			},
 			wantCeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED,
 			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_ACTIVE,
 		},
 		{
-			// n=9, threshold=6 (higher than ceil(9/2)=5), 5 acks: HalfAcked but
-			// 5 < threshold=6. Safety check catches a dealer-set threshold above
-			// the standard 1/2 formula and marks the ceremony failed.
-			name: "DEALT + 1/2 acked + dealer threshold=6 above standard -> CEREMONY_FAILED",
+			// n=9, threshold=5, required quorum=7. Exactly threshold-sized
+			// ack sets no longer activate on timeout.
+			name: "DEALT + exactly threshold (5/9 acks) -> CEREMONY_FAILED",
+			setup: func() {
+				seedDealtRoundWithThreshold(9, 5, 5)
+			},
+			wantCeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_DEALT,
+			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED,
+		},
+		{
+			// n=9, threshold=5, required quorum=7. Two non-ackers are stripped.
+			name: "DEALT + required quorum (7/9 acks) -> CONFIRMED + ACTIVE",
+			setup: func() {
+				seedDealtRoundWithThreshold(9, 5, 7)
+			},
+			wantCeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED,
+			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_ACTIVE,
+		},
+		{
+			// n=9 requires 7 acks regardless of the published tally threshold.
+			name: "DEALT + below required quorum (5/9 acks) + threshold=6 -> CEREMONY_FAILED",
 			setup: func() {
 				seedDealtRoundWithThreshold(9, 6, 5)
 			},
@@ -708,9 +734,9 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 	roundID := bytes.Repeat([]byte{0xDD}, 32)
 
 	s.Run("timeout+confirm logs entry", func() {
-		// 2 of 3 acked: HalfAcked (2*2=4 >= 3). 1 non-acker stripped.
+		// n=4 requires 3 acks. One non-acker is stripped.
 		s.SetupTest()
-		addrs := []string{svtest.TestValAddr(1), svtest.TestValAddr(2), svtest.TestValAddr(3)}
+		addrs := []string{svtest.TestValAddr(1), svtest.TestValAddr(2), svtest.TestValAddr(3), svtest.TestValAddr(4)}
 		slashing := s.setupCeremonyJailing(addrs...)
 		kv := s.keeper.OpenKVStore(s.ctx)
 		round := &types.VoteRound{
@@ -722,12 +748,14 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 				{ValidatorAddress: addrs[0], PallasPk: make([]byte, 32)},
 				{ValidatorAddress: addrs[1], PallasPk: make([]byte, 32)},
 				{ValidatorAddress: addrs[2], PallasPk: make([]byte, 32)},
+				{ValidatorAddress: addrs[3], PallasPk: make([]byte, 32)},
 			},
 			CeremonyPhaseStart:   999_400,
 			CeremonyPhaseTimeout: 600,
 			CeremonyAcks: []*types.AckEntry{
 				{ValidatorAddress: addrs[0], AckHeight: 9},
 				{ValidatorAddress: addrs[1], AckHeight: 9},
+				{ValidatorAddress: addrs[2], AckHeight: 9},
 			},
 		}
 		s.Require().NoError(s.keeper.SetVoteRound(kv, round))
@@ -737,7 +765,8 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 		s.Require().NoError(err)
 		s.Require().Len(round.CeremonyLog, 1)
 		s.Require().Contains(round.CeremonyLog[0], "DEALT timeout: confirmed")
-		s.Require().Contains(round.CeremonyLog[0], "2/3 acks")
+		s.Require().Contains(round.CeremonyLog[0], "3/4 acks")
+		s.Require().Contains(round.CeremonyLog[0], "required 3")
 		s.Require().Contains(round.CeremonyLog[0], "1 stripped")
 		s.Require().Empty(slashing.jailCalls)
 	})
@@ -773,9 +802,8 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 	})
 
 	s.Run("timeout+below-threshold logs entry and preserves validators", func() {
-		// n=9, threshold=6 (above standard ceil(9/2)=5), 5 acks: HalfAcked
-		// (5*2=10>=9) but 5 < dealer-set threshold=6. Safety check finalizes
-		// the failed pending round. All 9 validators are preserved for audit.
+		// n=9 requires 7 acks. Five acks leave a threshold-sized survivor set,
+		// so the failed pending round is preserved for audit.
 		s.SetupTest()
 		addrs := make([]string, 9)
 		for i := range addrs {
@@ -810,7 +838,7 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 		s.Require().Len(round.CeremonyLog, 1)
 		s.Require().Contains(round.CeremonyLog[0], "DEALT timeout: ceremony failed")
 		s.Require().Contains(round.CeremonyLog[0], "5/9 acks")
-		s.Require().Contains(round.CeremonyLog[0], "below threshold 6")
+		s.Require().Contains(round.CeremonyLog[0], "required 7")
 		s.Require().Empty(slashing.jailCalls)
 		s.Require().Len(round.CeremonyValidators, 9)
 		s.Require().Equal(types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED, round.Status)

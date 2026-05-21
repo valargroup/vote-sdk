@@ -43,10 +43,10 @@ func (k *Keeper) SetCeremonyState(kvStore store.KVStore, state *types.CeremonySt
 	return kvStore.Set(types.CeremonyStateKey, bz)
 }
 
-// ThresholdForN computes the required threshold t = ceil(n/2) for n validators.
-// This matches the ack requirement (HalfAcked) so that the set of validators
-// that survives ceremony stripping is always large enough to reconstruct the
-// EA key during tally.
+// ThresholdForN computes the tally reconstruction threshold for n validators.
+// Ceremony activation uses RequiredCeremonyQuorumForN instead; keeping the two
+// values separate leaves liveness slack for later partial-decryption
+// withholding after non-ackers/non-contributors have been stripped.
 //
 // For n = 1 returns t = 1 (trivial single-share scheme with no threshold
 // security — used for local testing). Returns an error if n < 1.
@@ -62,6 +62,40 @@ func ThresholdForN(n int) (int, error) {
 		t = 2
 	}
 	return t, nil
+}
+
+// CeremonyFaultMarginForN returns the symmetric liveness margin f for a
+// ceremony of size n. The same margin is used as x (later tally withholders)
+// and y (pre-activation non-contributors/non-ackers):
+//
+//	f = floor((n - t(n)) / 2)
+//
+// This bound is intentionally derived from the tally threshold so that timeout
+// activation can preserve at least t honest partial decryptions after one
+// adversary pool spends up to f faults across the ceremony and tally phases.
+func CeremonyFaultMarginForN(n int) (int, error) {
+	t, err := ThresholdForN(n)
+	if err != nil {
+		return 0, err
+	}
+	return (n - t) / 2, nil
+}
+
+// RequiredCeremonyQuorumForN returns the minimum contributor/acker count
+// required for bounded-subset ceremony finalization:
+//
+//	required = max(t + f, n - f)
+//
+// It is stricter than the tally threshold t, preventing DEALT timeout from
+// activating a round with exactly t survivors where one later withholder could
+// force a tally timeout.
+func RequiredCeremonyQuorumForN(n int) (int, error) {
+	t, err := ThresholdForN(n)
+	if err != nil {
+		return 0, err
+	}
+	f := (n - t) / 2
+	return max(t+f, n-f), nil
 }
 
 // ---------------------------------------------------------------------------

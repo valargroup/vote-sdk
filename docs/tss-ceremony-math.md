@@ -19,10 +19,71 @@ All scalar operations are mod 23.
 | Scalar field | $\mathbb{F}_{23}$ |
 | Validators | $n = 5$ |
 | Threshold | $t = 3$ |
+| Quorum margin | $f = \lfloor(n - t) / 2\rfloor = 1$ |
+| Activation quorum | $required = \max(t + f, n - f) = 4$ |
 | Secret key | $sk = 7$ |
 | Public key | $pk = [sk] = [7]$ |
 
 ---
+
+## Quorum Hardening Parameters
+
+The tally reconstruction threshold remains the Shamir threshold:
+
+$$t(n) = \begin{cases}
+1 & n = 1 \\
+\max(2, \lceil n/2 \rceil) & n \ge 2
+\end{cases}$$
+
+The ceremony activation quorum uses a separate margin so that timeout
+finalization never leaves exactly $t$ survivors when one survivor may later
+withhold partial decryptions:
+
+$$f(n) = \left\lfloor \frac{n - t(n)}{2} \right\rfloor$$
+
+$$x(n) = y(n) = f(n)$$
+
+$$required(n) = \max(t(n) + x(n), n - y(n))$$
+
+The safety invariant is:
+
+$$required(n) - f(n) \ge t(n)$$
+
+Equivalently:
+
+$$n - 2f(n) \ge t(n)$$
+
+This treats the adversary as a single pool: the same adversarial capacity may
+be spent either before activation (non-contribution / non-ack) or after
+activation (partial-decryption withholding).
+
+| $n$ | $t$ | $f=x=y$ | $required$ | $required - t$ |
+|:---:|:---:|:-------:|:----------:|:--------------:|
+| 1 | 1 | 0 | 1 | 0 |
+| 2 | 2 | 0 | 2 | 0 |
+| 3 | 2 | 0 | 3 | 1 |
+| 4 | 2 | 1 | 3 | 1 |
+| 5 | 3 | 1 | 4 | 1 |
+| 6 | 3 | 1 | 5 | 2 |
+| 7 | 4 | 1 | 6 | 2 |
+| 8 | 4 | 2 | 6 | 2 |
+| 9 | 5 | 2 | 7 | 2 |
+| 10 | 5 | 2 | 8 | 3 |
+| 11 | 6 | 2 | 9 | 3 |
+| 12 | 6 | 3 | 9 | 3 |
+| 13 | 7 | 3 | 10 | 3 |
+| 14 | 7 | 3 | 11 | 4 |
+| 15 | 8 | 3 | 12 | 4 |
+| 16 | 8 | 4 | 12 | 4 |
+| 17 | 9 | 4 | 13 | 4 |
+| 18 | 9 | 4 | 14 | 5 |
+| 19 | 10 | 4 | 15 | 5 |
+| 20 | 10 | 5 | 15 | 5 |
+
+For the worked example in this file, $n=5$ and $t=3$, so $required=4$.
+The example still combines exactly $t=3$ partial decryptions during tally; the
+extra validator is activation-time liveness slack, not an input to the
+Lagrange example.
 
 ## Step 1 — Polynomial & Shares
 

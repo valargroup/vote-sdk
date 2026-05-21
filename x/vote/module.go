@@ -556,10 +556,12 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 	}
 
 	// --- 4. Per-round ceremony DEALT phase timeout ---
-	// On DEALT timeout with >= 1/2 acks: strip non-ackers, confirm ceremony,
-	// transition round to ACTIVE.
-	// On DEALT timeout with < 1/2 acks, or too few acks for the published
-	// threshold, finalize the pending round so a new round can be created.
+	// On DEALT timeout with enough acks: strip non-ackers, confirm ceremony,
+	// transition round to ACTIVE. The quorum is deliberately above the tally
+	// threshold so the surviving set has slack for later partial-decryption
+	// withholding.
+	// On DEALT timeout with too few acks, finalize the pending round so a new
+	// round can be created.
 	// Collect round IDs with expired ceremony deadlines (avoid mutating store during iteration).
 	var ceremonyTimeoutIDs [][]byte
 	if err := am.keeper.IteratePendingRounds(kvStore, func(round *types.VoteRound) bool {
@@ -587,64 +589,61 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 
 		nAcks := len(round.CeremonyAcks)
 		nVals := len(round.CeremonyValidators)
+		requiredAcks, err := keeper.RequiredCeremonyQuorumForN(nVals)
+		if err != nil {
+			oldRoundStatus := round.Status
+			keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
+				fmt.Sprintf("DEALT timeout: ceremony failed (invalid validator count %d: %v)",
+					nVals, err))
+			round.Status = types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED
 
-		if keeper.HalfAcked(round) {
+			if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
+				return err
+			}
+
+			ctx.EventManager().EmitEvent(sdk.NewEvent(
+				types.EventTypeRoundStatusChange,
+				sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
+				sdk.NewAttribute(types.AttributeKeyOldStatus, oldRoundStatus.String()),
+				sdk.NewAttribute(types.AttributeKeyNewStatus, round.Status.String()),
+			))
+			continue
+		}
+
+		if nAcks >= requiredAcks {
 			stripped := nVals - nAcks
 
-			// Safety check: the ack quorum (>= 1/2) was designed to match the
-			// TSS threshold (ceil(n/2)), so this branch should never trigger
-			// with a correctly-computed threshold. It guards against a dealer
-			// that published an unusually high threshold value.
-			if nAcks < int(round.Threshold) {
-				oldRoundStatus := round.Status
-				keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
-					fmt.Sprintf("DEALT timeout: ceremony failed (%d/%d acks, below threshold %d)",
-						nAcks, nVals, round.Threshold))
-				round.Status = types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED
+			keeper.StripNonAckersFromRound(round)
+			round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
+			round.Status = types.SessionStatus_SESSION_STATUS_ACTIVE
 
-				if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
-					return err
-				}
+			keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
+				fmt.Sprintf("DEALT timeout: confirmed with %d/%d acks (required %d), %d stripped",
+					nAcks, nVals, requiredAcks, stripped))
 
-				ctx.EventManager().EmitEvent(sdk.NewEvent(
-					types.EventTypeRoundStatusChange,
-					sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
-					sdk.NewAttribute(types.AttributeKeyOldStatus, oldRoundStatus.String()),
-					sdk.NewAttribute(types.AttributeKeyNewStatus, round.Status.String()),
-				))
-			} else {
-				// >= 1/2 acked and remaining ackers meet threshold: strip
-				// non-ackers, confirm ceremony, activate round.
-				keeper.StripNonAckersFromRound(round)
-				round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
-				round.Status = types.SessionStatus_SESSION_STATUS_ACTIVE
-
-				keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
-					fmt.Sprintf("DEALT timeout: confirmed with %d/%d acks, %d stripped", nAcks, nVals, stripped))
-
-				if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
-					return err
-				}
-
-				ctx.EventManager().EmitEvent(sdk.NewEvent(
-					types.EventTypeCeremonyStatusChange,
-					sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
-					sdk.NewAttribute(types.AttributeKeyOldStatus, oldCeremonyStatus.String()),
-					sdk.NewAttribute(types.AttributeKeyNewStatus, round.CeremonyStatus.String()),
-				))
-				ctx.EventManager().EmitEvent(sdk.NewEvent(
-					types.EventTypeRoundStatusChange,
-					sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
-					sdk.NewAttribute(types.AttributeKeyOldStatus, types.SessionStatus_SESSION_STATUS_PENDING.String()),
-					sdk.NewAttribute(types.AttributeKeyNewStatus, types.SessionStatus_SESSION_STATUS_ACTIVE.String()),
-				))
+			if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
+				return err
 			}
+
+			ctx.EventManager().EmitEvent(sdk.NewEvent(
+				types.EventTypeCeremonyStatusChange,
+				sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
+				sdk.NewAttribute(types.AttributeKeyOldStatus, oldCeremonyStatus.String()),
+				sdk.NewAttribute(types.AttributeKeyNewStatus, round.CeremonyStatus.String()),
+			))
+			ctx.EventManager().EmitEvent(sdk.NewEvent(
+				types.EventTypeRoundStatusChange,
+				sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", round.VoteRoundId)),
+				sdk.NewAttribute(types.AttributeKeyOldStatus, types.SessionStatus_SESSION_STATUS_PENDING.String()),
+				sdk.NewAttribute(types.AttributeKeyNewStatus, types.SessionStatus_SESSION_STATUS_ACTIVE.String()),
+			))
 		} else {
-			// < 1/2 acks: finalize this pending round. A later round can
+			// Too few acks: finalize this pending round. A later round can
 			// snapshot the current eligible validator set.
 			oldRoundStatus := round.Status
 			keeper.AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
-				fmt.Sprintf("DEALT timeout: ceremony failed (%d/%d acks, below threshold)", nAcks, nVals))
+				fmt.Sprintf("DEALT timeout: ceremony failed (%d/%d acks, required %d)",
+					nAcks, nVals, requiredAcks))
 			round.Status = types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED
 
 			if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
