@@ -1251,22 +1251,20 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_RejectsInvalidDleqProof
 	cs := s.setupTallyingRoundWithCrypto(msgPdRoundID, 2, validators)
 	s.setBlockProposer(validators[0].ValidatorAddress)
 
-	// Build entries with correct D_i but a bogus DLEQ proof.
+	entries := cs.buildValidEntries(s)
+	// Keep the submission complete so validation reaches DLEQ verification.
 	share := cs.shares[0]
 	ct := cs.accumulatorCts[keeper.AccumulatorKey(1, 0)]
 	Di := ct.C1.Mul(share.Value)
 	bogusProof := bytes.Repeat([]byte{0xDE}, elgamal.DLEQProofSize)
+	entries[0].PartialDecrypt = Di.ToAffineCompressed()
+	entries[0].DleqProof = bogusProof
 
 	_, err := s.msgServer.SubmitPartialDecryption(s.ctx, &types.MsgSubmitPartialDecryption{
 		VoteRoundId:    msgPdRoundID,
 		Creator:        validators[0].ValidatorAddress,
 		ValidatorIndex: 1,
-		Entries: []*types.PartialDecryptionEntry{{
-			ProposalId:     1,
-			VoteDecision:   0,
-			PartialDecrypt: Di.ToAffineCompressed(),
-			DleqProof:      bogusProof,
-		}},
+		Entries:        entries,
 	})
 	s.Require().Error(err)
 	s.Require().ErrorIs(err, types.ErrInvalidField)
@@ -1279,23 +1277,21 @@ func (s *MsgServerTestSuite) TestSubmitPartialDecryption_RejectsBogusPartialDecr
 	s.setBlockProposer(validators[0].ValidatorAddress)
 
 	// Generate a valid DLEQ proof for a DIFFERENT scalar (attacker's share).
+	entries := cs.buildValidEntries(s)
 	ct := cs.accumulatorCts[keeper.AccumulatorKey(1, 0)]
 	fakeShare := new(curvey.ScalarPallas).Random(rand.Reader)
 	fakeDi := ct.C1.Mul(fakeShare)
 	fakeProof, err := elgamal.GeneratePartialDecryptDLEQ(fakeShare, ct.C1)
 	s.Require().NoError(err)
+	entries[0].PartialDecrypt = fakeDi.ToAffineCompressed()
+	entries[0].DleqProof = fakeProof
 
 	// The proof is internally consistent with fakeShare, but VK_0 is for the real share.
 	_, err = s.msgServer.SubmitPartialDecryption(s.ctx, &types.MsgSubmitPartialDecryption{
 		VoteRoundId:    msgPdRoundID,
 		Creator:        validators[0].ValidatorAddress,
 		ValidatorIndex: 1,
-		Entries: []*types.PartialDecryptionEntry{{
-			ProposalId:     1,
-			VoteDecision:   0,
-			PartialDecrypt: fakeDi.ToAffineCompressed(),
-			DleqProof:      fakeProof,
-		}},
+		Entries:        entries,
 	})
 	s.Require().Error(err)
 	s.Require().ErrorIs(err, types.ErrInvalidField)
