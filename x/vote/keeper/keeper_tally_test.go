@@ -298,13 +298,19 @@ func (s *KeeperTestSuite) TestValidatePartialDecryptionEntries() {
 				s.Require().NoError(s.keeper.AddToTally(kv, roundID, 1, decision, validCiphertextBytes(s.T(), uint64(decision+1))))
 			}
 
-			err := s.keeper.ValidatePartialDecryptionEntries(kv, round, tc.entries)
+			validatedEntries, err := s.keeper.ValidateAndDecodePartialDecryptionEntries(kv, round, tc.entries)
 			if tc.wantErrIs != nil {
 				s.Require().Error(err)
 				s.Require().ErrorIs(err, tc.wantErrIs)
 				s.Require().Contains(err.Error(), tc.errContains)
 			} else {
 				s.Require().NoError(err)
+				s.Require().Len(validatedEntries, len(tc.entries))
+				for i, validatedEntry := range validatedEntries {
+					s.Require().Same(tc.entries[i], validatedEntry.Entry)
+					s.Require().NotNil(validatedEntry.PartialDecrypt)
+					s.Require().NotNil(validatedEntry.Accumulator)
+				}
 			}
 		})
 	}

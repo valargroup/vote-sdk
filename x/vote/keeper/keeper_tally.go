@@ -6,6 +6,8 @@ import (
 
 	"cosmossdk.io/core/store"
 
+	"github.com/mikelodder7/curvey"
+
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
@@ -338,37 +340,67 @@ func (k *Keeper) ValidatePartialDecryptionCompleteness(kvStore store.KVStore, ro
 	return nil
 }
 
+// ValidatedPartialDecryptionEntry carries decoded entry data reused by
+// SubmitPartialDecryption's DLEQ verification.
+type ValidatedPartialDecryptionEntry struct {
+	Entry          *types.PartialDecryptionEntry
+	PartialDecrypt curvey.Point
+	Accumulator    *elgamal.Ciphertext
+}
+
 // ValidatePartialDecryptionEntries checks entry shape, bounds, accumulator
 // existence, and completeness for one partial decryption submission.
 func (k *Keeper) ValidatePartialDecryptionEntries(kvStore store.KVStore, round *types.VoteRound, entries []*types.PartialDecryptionEntry) error {
+	_, err := k.ValidateAndDecodePartialDecryptionEntries(kvStore, round, entries)
+	return err
+}
+
+// ValidateAndDecodePartialDecryptionEntries validates one partial decryption
+// submission and returns the decoded points needed for DLEQ verification.
+func (k *Keeper) ValidateAndDecodePartialDecryptionEntries(
+	kvStore store.KVStore,
+	round *types.VoteRound,
+	entries []*types.PartialDecryptionEntry,
+) ([]ValidatedPartialDecryptionEntry, error) {
 	if len(entries) == 0 {
-		return fmt.Errorf("%w: entries cannot be empty", types.ErrInvalidField)
+		return nil, fmt.Errorf("%w: entries cannot be empty", types.ErrInvalidField)
 	}
 
 	// Ensures that the submission contains a partial decryption for every non-empty accumulator.
 	if err := k.ValidatePartialDecryptionCompleteness(kvStore, round, entries); err != nil {
-		return err
+		return nil, err
 	}
 
+	validated := make([]ValidatedPartialDecryptionEntry, 0, len(entries))
 	for i, entry := range entries {
-		if _, err := elgamal.UnmarshalPoint(entry.PartialDecrypt); err != nil {
-			return fmt.Errorf("%w: entry[%d] partial_decrypt is not a valid Pallas point: %v",
+		Di, err := elgamal.UnmarshalPoint(entry.PartialDecrypt)
+		if err != nil {
+			return nil, fmt.Errorf("%w: entry[%d] partial_decrypt is not a valid Pallas point: %v",
 				types.ErrInvalidField, i, err)
 		}
 		if err := ValidateEntryBounds(round, entry.ProposalId, entry.VoteDecision); err != nil {
-			return fmt.Errorf("entry[%d]: %w", i, err)
+			return nil, fmt.Errorf("entry[%d]: %w", i, err)
 		}
 		accBytes, err := k.GetTally(kvStore, round.VoteRoundId, entry.ProposalId, entry.VoteDecision)
 		if err != nil {
-			return err
+			return nil, fmt.Errorf("entry[%d]: failed to load tally accumulator: %w", i, err)
 		}
 		if accBytes == nil {
-			return fmt.Errorf("%w: entry[%d] no accumulator for (proposal=%d, decision=%d)",
+			return nil, fmt.Errorf("%w: entry[%d] no accumulator for (proposal=%d, decision=%d)",
 				types.ErrInvalidField, i, entry.ProposalId, entry.VoteDecision)
 		}
+		ct, err := elgamal.UnmarshalCiphertext(accBytes)
+		if err != nil {
+			return nil, fmt.Errorf("entry[%d]: failed to unmarshal accumulator: %w", i, err)
+		}
+		validated = append(validated, ValidatedPartialDecryptionEntry{
+			Entry:          entry,
+			PartialDecrypt: Di,
+			Accumulator:    ct,
+		})
 	}
 
-	return nil
+	return validated, nil
 }
 
 // ---------------------------------------------------------------------------
