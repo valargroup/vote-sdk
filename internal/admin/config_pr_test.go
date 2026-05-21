@@ -146,14 +146,14 @@ func TestHandleCreateConfigPRCreatesPullRequest(t *testing.T) {
 			writeJSON(t, w, map[string]any{"object": map[string]string{"sha": "main-sha"}})
 		case r.Method == http.MethodPost && path == "/repos/valargroup/token-holder-voting-config/git/refs":
 			sawCreateRef = true
-			writeJSON(t, w, map[string]any{"ref": "refs/heads/config-round-" + body.RoundID[:12]})
-		case r.Method == http.MethodGet && path == "/repos/valargroup/token-holder-voting-config/contents/dynamic-voting-config.json" && r.URL.Query().Get("ref") == "main":
+			writeJSON(t, w, map[string]any{"ref": "refs/heads/config-production-round-" + body.RoundID[:12]})
+		case r.Method == http.MethodGet && path == "/repos/valargroup/token-holder-voting-config/contents/prod/dynamic-voting-config.json" && r.URL.Query().Get("ref") == "main":
 			writeContent(t, w, dynamicConfig, "dynamic-main-sha")
-		case r.Method == http.MethodGet && path == "/repos/valargroup/token-holder-voting-config/contents/static-voting-config.json" && r.URL.Query().Get("ref") == "main":
+		case r.Method == http.MethodGet && path == "/repos/valargroup/token-holder-voting-config/contents/prod/static-voting-config.json" && r.URL.Query().Get("ref") == "main":
 			writeContent(t, w, staticConfig, "static-main-sha")
-		case r.Method == http.MethodGet && path == "/repos/valargroup/token-holder-voting-config/contents/dynamic-voting-config.json" && strings.HasPrefix(r.URL.Query().Get("ref"), "config-round-"):
+		case r.Method == http.MethodGet && path == "/repos/valargroup/token-holder-voting-config/contents/prod/dynamic-voting-config.json" && strings.HasPrefix(r.URL.Query().Get("ref"), "config-production-round-"):
 			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
-		case r.Method == http.MethodPut && path == "/repos/valargroup/token-holder-voting-config/contents/dynamic-voting-config.json":
+		case r.Method == http.MethodPut && path == "/repos/valargroup/token-holder-voting-config/contents/prod/dynamic-voting-config.json":
 			sawUpdateContent = true
 			var req struct {
 				Content string `json:"content"`
@@ -163,7 +163,7 @@ func TestHandleCreateConfigPRCreatesPullRequest(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				t.Fatal(err)
 			}
-			if req.Branch != "config-round-"+body.RoundID[:12] || req.SHA != "dynamic-main-sha" {
+			if req.Branch != "config-production-round-"+body.RoundID[:12] || req.SHA != "dynamic-main-sha" {
 				t.Fatalf("unexpected update request: %+v", req)
 			}
 			updated, err := base64.StdEncoding.DecodeString(req.Content)
@@ -321,22 +321,22 @@ func TestConfigPRPathForConfigURL(t *testing.T) {
 			branchName: "config-staging-round-aaaaaaaaaaaa",
 		},
 		{
-			name:       "legacy root base URL",
+			name:       "root base URL defaults to production",
 			configURL:  "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/",
-			configPath: "",
-			label:      "legacy root",
-			dynamic:    "dynamic-voting-config.json",
-			static:     "static-voting-config.json",
-			branchName: "config-round-aaaaaaaaaaaa",
+			configPath: "prod",
+			label:      "production",
+			dynamic:    "prod/dynamic-voting-config.json",
+			static:     "prod/static-voting-config.json",
+			branchName: "config-production-round-aaaaaaaaaaaa",
 		},
 		{
-			name:       "legacy dynamic file URL",
+			name:       "root dynamic file URL defaults to production",
 			configURL:  "https://voting.valargroup.org/dynamic-voting-config.json",
-			configPath: "",
-			label:      "legacy root",
-			dynamic:    "dynamic-voting-config.json",
-			static:     "static-voting-config.json",
-			branchName: "config-round-aaaaaaaaaaaa",
+			configPath: "prod",
+			label:      "production",
+			dynamic:    "prod/dynamic-voting-config.json",
+			static:     "prod/static-voting-config.json",
+			branchName: "config-production-round-aaaaaaaaaaaa",
 		},
 	}
 
@@ -536,6 +536,7 @@ func testConfigPRAutomation(apiURL string) configPRAutomation {
 		Repo:        "token-holder-voting-config",
 		BaseBranch:  "main",
 		APIURL:      apiURL,
+		ConfigPath:  "prod",
 	}
 }
 
