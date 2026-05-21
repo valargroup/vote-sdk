@@ -48,8 +48,8 @@ const VOTE_OPTION_COLORS = [
 
 const TOKEN_HOLDER_VOTING_CONFIG_REPO_URL =
   "https://github.com/valargroup/token-holder-voting-config";
-const DYNAMIC_VOTING_CONFIG_FILE_URL = `${TOKEN_HOLDER_VOTING_CONFIG_REPO_URL}/blob/main/prod/dynamic-voting-config.json`;
-const DYNAMIC_VOTING_CONFIG_EDIT_URL = `${TOKEN_HOLDER_VOTING_CONFIG_REPO_URL}/edit/main/prod/dynamic-voting-config.json`;
+const DYNAMIC_VOTING_CONFIG_FILE_URL = `${TOKEN_HOLDER_VOTING_CONFIG_REPO_URL}/blob/main/dynamic-voting-config.json`;
+const DYNAMIC_VOTING_CONFIG_EDIT_URL = `${TOKEN_HOLDER_VOTING_CONFIG_REPO_URL}/edit/main/dynamic-voting-config.json`;
 
 function optionColor(index: number, total: number): string {
   if (total === 2) return index === 0 ? VOTE_OPTION_COLORS[0] : VOTE_OPTION_COLORS[1];

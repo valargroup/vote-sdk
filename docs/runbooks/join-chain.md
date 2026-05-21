@@ -337,7 +337,7 @@ sudo apt-get update && sudo apt-get install -y curl jq lz4 ca-certificates
    export PATH="$INSTALL_DIR:$PATH"
    ```
 
-2. Discover the network and capture the seed peer. The dynamic voting-config payload is published at `voting.valargroup.org` and defaults to production when no environment path is provided. Source edits live in [token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config/blob/main/prod/dynamic-voting-config.json). Override `VOTING_CONFIG_URL` for staging mirrors.
+2. Discover the network and capture the seed peer. The dynamic voting-config payload is published at `voting.valargroup.org` and defaults to production when no environment path is provided. Source edits live in [token-holder-voting-config](https://github.com/valargroup/token-holder-voting-config/blob/main/dynamic-voting-config.json). Override `VOTING_CONFIG_URL` for staging mirrors.
 
    ```bash
    VOTING_CONFIG_URL="${VOTING_CONFIG_URL:-https://voting.valargroup.org/dynamic-voting-config.json}"

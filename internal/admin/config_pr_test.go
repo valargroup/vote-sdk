@@ -41,14 +41,14 @@ func TestNewAdminFollowsStaticConfigDynamicURL(t *testing.T) {
 	var cdn *httptest.Server
 	cdn = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/prod/static-voting-config.json":
+		case "/static-voting-config.json":
 			sawStaticFetch = true
 			writeJSON(t, w, map[string]any{
 				"static_config_version": 1,
-				"dynamic_config_url":    cdn.URL + "/prod/dynamic-voting-config.json",
+				"dynamic_config_url":    cdn.URL + "/dynamic-voting-config.json",
 			})
 			return
-		case "/prod/dynamic-voting-config.json":
+		case "/dynamic-voting-config.json":
 			sawDynamicFetch = true
 			writeJSON(t, w, VotingConfig{
 				Version: 1,
@@ -69,7 +69,7 @@ func TestNewAdminFollowsStaticConfigDynamicURL(t *testing.T) {
 	defer cdn.Close()
 
 	a, err := New(Config{
-		ConfigURL: cdn.URL + "/prod/",
+		ConfigURL: cdn.URL + "/",
 	}, t.TempDir(), nil, nil, log.NewNopLogger())
 	if err != nil {
 		t.Fatal(err)
@@ -79,13 +79,13 @@ func TestNewAdminFollowsStaticConfigDynamicURL(t *testing.T) {
 	if !sawStaticFetch || !sawDynamicFetch {
 		t.Fatalf("expected static and dynamic config fetches, got static=%v dynamic=%v", sawStaticFetch, sawDynamicFetch)
 	}
-	if a.configURL != cdn.URL+"/prod/static-voting-config.json" {
+	if a.configURL != cdn.URL+"/static-voting-config.json" {
 		t.Fatalf("unexpected resolved config URL: %q", a.configURL)
 	}
-	if got := a.configPR.dynamicConfigPath(); got != "prod/dynamic-voting-config.json" {
+	if got := a.configPR.dynamicConfigPath(); got != "dynamic-voting-config.json" {
 		t.Fatalf("unexpected dynamic PR path: %q", got)
 	}
-	if got := a.configPR.staticConfigPath(); got != "prod/static-voting-config.json" {
+	if got := a.configPR.staticConfigPath(); got != "static-voting-config.json" {
 		t.Fatalf("unexpected static PR path: %q", got)
 	}
 }
@@ -147,13 +147,13 @@ func TestHandleCreateConfigPRCreatesPullRequest(t *testing.T) {
 		case r.Method == http.MethodPost && path == "/repos/valargroup/token-holder-voting-config/git/refs":
 			sawCreateRef = true
 			writeJSON(t, w, map[string]any{"ref": "refs/heads/config-production-round-" + body.RoundID[:12]})
-		case r.Method == http.MethodGet && path == "/repos/valargroup/token-holder-voting-config/contents/prod/dynamic-voting-config.json" && r.URL.Query().Get("ref") == "main":
+		case r.Method == http.MethodGet && path == "/repos/valargroup/token-holder-voting-config/contents/dynamic-voting-config.json" && r.URL.Query().Get("ref") == "main":
 			writeContent(t, w, dynamicConfig, "dynamic-main-sha")
-		case r.Method == http.MethodGet && path == "/repos/valargroup/token-holder-voting-config/contents/prod/static-voting-config.json" && r.URL.Query().Get("ref") == "main":
+		case r.Method == http.MethodGet && path == "/repos/valargroup/token-holder-voting-config/contents/static-voting-config.json" && r.URL.Query().Get("ref") == "main":
 			writeContent(t, w, staticConfig, "static-main-sha")
-		case r.Method == http.MethodGet && path == "/repos/valargroup/token-holder-voting-config/contents/prod/dynamic-voting-config.json" && strings.HasPrefix(r.URL.Query().Get("ref"), "config-production-round-"):
+		case r.Method == http.MethodGet && path == "/repos/valargroup/token-holder-voting-config/contents/dynamic-voting-config.json" && strings.HasPrefix(r.URL.Query().Get("ref"), "config-production-round-"):
 			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
-		case r.Method == http.MethodPut && path == "/repos/valargroup/token-holder-voting-config/contents/prod/dynamic-voting-config.json":
+		case r.Method == http.MethodPut && path == "/repos/valargroup/token-holder-voting-config/contents/dynamic-voting-config.json":
 			sawUpdateContent = true
 			var req struct {
 				Content string `json:"content"`
@@ -304,11 +304,11 @@ func TestConfigPRPathForConfigURL(t *testing.T) {
 	}{
 		{
 			name:       "production base URL",
-			configURL:  "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/prod/",
-			configPath: "prod",
+			configURL:  "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/",
+			configPath: "",
 			label:      "production",
-			dynamic:    "prod/dynamic-voting-config.json",
-			static:     "prod/static-voting-config.json",
+			dynamic:    "dynamic-voting-config.json",
+			static:     "static-voting-config.json",
 			branchName: "config-production-round-aaaaaaaaaaaa",
 		},
 		{
@@ -323,19 +323,28 @@ func TestConfigPRPathForConfigURL(t *testing.T) {
 		{
 			name:       "root base URL defaults to production",
 			configURL:  "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/",
-			configPath: "prod",
+			configPath: "",
 			label:      "production",
-			dynamic:    "prod/dynamic-voting-config.json",
-			static:     "prod/static-voting-config.json",
+			dynamic:    "dynamic-voting-config.json",
+			static:     "static-voting-config.json",
 			branchName: "config-production-round-aaaaaaaaaaaa",
 		},
 		{
 			name:       "root dynamic file URL defaults to production",
 			configURL:  "https://voting.valargroup.org/dynamic-voting-config.json",
-			configPath: "prod",
+			configPath: "",
 			label:      "production",
-			dynamic:    "prod/dynamic-voting-config.json",
-			static:     "prod/static-voting-config.json",
+			dynamic:    "dynamic-voting-config.json",
+			static:     "static-voting-config.json",
+			branchName: "config-production-round-aaaaaaaaaaaa",
+		},
+		{
+			name:       "legacy prod file URL maps to production root",
+			configURL:  "https://voting.valargroup.org/prod/dynamic-voting-config.json",
+			configPath: "",
+			label:      "production",
+			dynamic:    "dynamic-voting-config.json",
+			static:     "static-voting-config.json",
 			branchName: "config-production-round-aaaaaaaaaaaa",
 		},
 	}
@@ -375,9 +384,9 @@ func TestConfigURLForFile(t *testing.T) {
 	}{
 		{
 			name:      "production base URL",
-			configURL: "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/prod/",
+			configURL: "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/",
 			fileName:  dynamicConfigName,
-			want:      "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/prod/dynamic-voting-config.json",
+			want:      "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/dynamic-voting-config.json",
 		},
 		{
 			name:      "staging base URL",
@@ -386,10 +395,22 @@ func TestConfigURLForFile(t *testing.T) {
 			want:      "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/stage/static-voting-config.json",
 		},
 		{
+			name:      "legacy prod base URL",
+			configURL: "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/prod/",
+			fileName:  dynamicConfigName,
+			want:      "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/dynamic-voting-config.json",
+		},
+		{
 			name:      "dynamic file URL",
+			configURL: "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/dynamic-voting-config.json",
+			fileName:  staticConfigName,
+			want:      "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/static-voting-config.json",
+		},
+		{
+			name:      "legacy prod dynamic file URL",
 			configURL: "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/prod/dynamic-voting-config.json",
 			fileName:  staticConfigName,
-			want:      "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/prod/static-voting-config.json",
+			want:      "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/static-voting-config.json",
 		},
 	}
 
@@ -536,7 +557,6 @@ func testConfigPRAutomation(apiURL string) configPRAutomation {
 		Repo:        "token-holder-voting-config",
 		BaseBranch:  "main",
 		APIURL:      apiURL,
-		ConfigPath:  "prod",
 	}
 }
 

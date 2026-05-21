@@ -44,7 +44,7 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		Disable:   true,
-		ConfigURL: "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/prod/",
+		ConfigURL: "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/",
 	}
 }
 

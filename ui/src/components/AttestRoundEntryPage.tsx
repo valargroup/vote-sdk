@@ -432,12 +432,12 @@ export function AttestRoundEntryPage() {
                 Derive the Ed25519 public key from your Keplr account and
                 publish it as a trust anchor in{" "}
                 <a
-                  href="https://github.com/valargroup/token-holder-voting-config/blob/main/prod/static-voting-config.json"
+                  href="https://github.com/valargroup/token-holder-voting-config/blob/main/static-voting-config.json"
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex items-center gap-1 text-accent hover:text-accent/80 underline-offset-2 hover:underline"
                 >
-                  <code>prod/static-voting-config.json</code>
+                  <code>static-voting-config.json</code>
                   <ExternalLink size={10} />
                 </a>
                 . After the PR merges, update the SHA-256 pin in{" "}
@@ -458,12 +458,12 @@ export function AttestRoundEntryPage() {
                 Once the key is trusted by a shipped wallet release, sign each
                 round&apos;s <code>ea_pk</code> and PR it into{" "}
                 <a
-                  href="https://github.com/valargroup/token-holder-voting-config/blob/main/prod/dynamic-voting-config.json"
+                  href="https://github.com/valargroup/token-holder-voting-config/blob/main/dynamic-voting-config.json"
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex items-center gap-1 text-accent hover:text-accent/80 underline-offset-2 hover:underline"
                 >
-                  <code>prod/dynamic-voting-config.json</code>
+                  <code>dynamic-voting-config.json</code>
                   <ExternalLink size={10} />
                 </a>
                 .
@@ -509,7 +509,7 @@ export function AttestRoundEntryPage() {
                 rel="noreferrer"
                 className="inline-flex items-center gap-1 text-accent hover:text-accent/80 underline-offset-2 hover:underline"
               >
-                <code>prod/static-voting-config.json</code>
+                <code>static-voting-config.json</code>
                 <ExternalLink size={10} />
               </a>{" "}
               and that pin matches a shipped wallet release, you can skip
@@ -618,12 +618,12 @@ export function AttestRoundEntryPage() {
                         Open a PR adding the <em>trusted_keys entry</em> above
                         to{" "}
                         <a
-                          href="https://github.com/valargroup/token-holder-voting-config/edit/main/prod/static-voting-config.json"
+                          href="https://github.com/valargroup/token-holder-voting-config/edit/main/static-voting-config.json"
                           target="_blank"
                           rel="noreferrer"
                           className="inline-flex items-center gap-1 text-accent hover:text-accent/80 underline-offset-2 hover:underline"
                         >
-                          <code>prod/static-voting-config.json</code>
+                          <code>static-voting-config.json</code>
                           <ExternalLink size={10} />
                         </a>{" "}
                         under <code>trusted_keys[]</code>. The CI workflow on
@@ -699,12 +699,12 @@ export function AttestRoundEntryPage() {
             Picks a round, signs its <code>ea_pk</code> with your derived
             Ed25519 key, and offers to open a PR that adds the entry to{" "}
             <a
-              href="https://github.com/valargroup/token-holder-voting-config/blob/main/prod/dynamic-voting-config.json"
+              href="https://github.com/valargroup/token-holder-voting-config/blob/main/dynamic-voting-config.json"
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center gap-1 text-accent hover:text-accent/80 underline-offset-2 hover:underline"
             >
-              <code>prod/dynamic-voting-config.json#/rounds</code>
+              <code>dynamic-voting-config.json#/rounds</code>
               <ExternalLink size={10} />
             </a>
             .
