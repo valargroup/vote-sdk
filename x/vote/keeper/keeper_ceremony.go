@@ -67,18 +67,15 @@ func ThresholdForN(n int) (int, error) {
 // RequiredCeremonyQuorumForN returns the minimum contributor/acker count
 // required for bounded-subset ceremony finalization:
 //
-//	required = max(t + f, n - f)
+//	required(n) = ceil(4n/5)
 //
-// It is stricter than the tally threshold t, preventing DEALT timeout from
-// activating a round with exactly t survivors where one later withholder could
-// force a tally timeout.
+// It is stricter than the tally threshold t: activating with ceil(4n/5)
+// ackers leaves required(n)-t extra active validators above the tally threshold.
 func RequiredCeremonyQuorumForN(n int) (int, error) {
-	t, err := ThresholdForN(n)
-	if err != nil {
-		return 0, err
+	if n < 1 {
+		return 0, fmt.Errorf("RequiredCeremonyQuorumForN: n must be >= 1, got %d", n)
 	}
-	f := (n - t) / 2
-	return max(t+f, n-f), nil
+	return (4*n + 4) / 5, nil
 }
 
 // ---------------------------------------------------------------------------

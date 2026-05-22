@@ -608,7 +608,7 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_ACTIVE,
 		},
 		{
-			// n=9, threshold=5, required quorum=7. Exactly threshold-sized
+			// n=9, threshold=5, required quorum=8. Exactly threshold-sized
 			// ack sets no longer activate on timeout.
 			name: "DEALT + exactly threshold (5/9 acks) -> CEREMONY_FAILED",
 			setup: func() {
@@ -618,16 +618,16 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED,
 		},
 		{
-			// n=9, threshold=5, required quorum=7. Two non-ackers are stripped.
-			name: "DEALT + required quorum (7/9 acks) -> CONFIRMED + ACTIVE",
+			// n=9, threshold=5, required quorum=8. One non-acker is stripped.
+			name: "DEALT + required quorum (8/9 acks) -> CONFIRMED + ACTIVE",
 			setup: func() {
-				seedDealtRoundWithThreshold(9, 5, 7)
+				seedDealtRoundWithThreshold(9, 5, 8)
 			},
 			wantCeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED,
 			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_ACTIVE,
 		},
 		{
-			// n=9 requires 7 acks regardless of the published tally threshold.
+			// n=9 requires 8 acks regardless of the published tally threshold.
 			name: "DEALT + below required quorum (5/9 acks) + threshold=6 -> CEREMONY_FAILED",
 			setup: func() {
 				seedDealtRoundWithThreshold(9, 6, 5)
@@ -734,9 +734,9 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 	roundID := bytes.Repeat([]byte{0xDD}, 32)
 
 	s.Run("timeout+confirm logs entry", func() {
-		// n=4 requires 3 acks. One non-acker is stripped.
+		// n=5 requires 4 acks. One non-acker is stripped.
 		s.SetupTest()
-		addrs := []string{svtest.TestValAddr(1), svtest.TestValAddr(2), svtest.TestValAddr(3), svtest.TestValAddr(4)}
+		addrs := []string{svtest.TestValAddr(1), svtest.TestValAddr(2), svtest.TestValAddr(3), svtest.TestValAddr(4), svtest.TestValAddr(5)}
 		slashing := s.setupCeremonyJailing(addrs...)
 		kv := s.keeper.OpenKVStore(s.ctx)
 		round := &types.VoteRound{
@@ -749,6 +749,7 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 				{ValidatorAddress: addrs[1], PallasPk: make([]byte, 32)},
 				{ValidatorAddress: addrs[2], PallasPk: make([]byte, 32)},
 				{ValidatorAddress: addrs[3], PallasPk: make([]byte, 32)},
+				{ValidatorAddress: addrs[4], PallasPk: make([]byte, 32)},
 			},
 			CeremonyPhaseStart:   999_400,
 			CeremonyPhaseTimeout: 600,
@@ -756,6 +757,7 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 				{ValidatorAddress: addrs[0], AckHeight: 9},
 				{ValidatorAddress: addrs[1], AckHeight: 9},
 				{ValidatorAddress: addrs[2], AckHeight: 9},
+				{ValidatorAddress: addrs[3], AckHeight: 9},
 			},
 		}
 		s.Require().NoError(s.keeper.SetVoteRound(kv, round))
@@ -765,8 +767,8 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 		s.Require().NoError(err)
 		s.Require().Len(round.CeremonyLog, 1)
 		s.Require().Contains(round.CeremonyLog[0], "DEALT timeout: confirmed")
-		s.Require().Contains(round.CeremonyLog[0], "3/4 acks")
-		s.Require().Contains(round.CeremonyLog[0], "required 3")
+		s.Require().Contains(round.CeremonyLog[0], "4/5 acks")
+		s.Require().Contains(round.CeremonyLog[0], "required 4")
 		s.Require().Contains(round.CeremonyLog[0], "1 stripped")
 		s.Require().Empty(slashing.jailCalls)
 	})
@@ -802,7 +804,7 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 	})
 
 	s.Run("timeout+below-threshold logs entry and preserves validators", func() {
-		// n=9 requires 7 acks. Five acks leave a threshold-sized survivor set,
+		// n=9 requires 8 acks. Five acks leave a threshold-sized survivor set,
 		// so the failed pending round is preserved for audit.
 		s.SetupTest()
 		addrs := make([]string, 9)
@@ -838,7 +840,7 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 		s.Require().Len(round.CeremonyLog, 1)
 		s.Require().Contains(round.CeremonyLog[0], "DEALT timeout: ceremony failed")
 		s.Require().Contains(round.CeremonyLog[0], "5/9 acks")
-		s.Require().Contains(round.CeremonyLog[0], "required 7")
+		s.Require().Contains(round.CeremonyLog[0], "required 8")
 		s.Require().Empty(slashing.jailCalls)
 		s.Require().Len(round.CeremonyValidators, 9)
 		s.Require().Equal(types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED, round.Status)

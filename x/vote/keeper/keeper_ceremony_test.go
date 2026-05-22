@@ -75,60 +75,50 @@ func TestThresholdForN_Invariants(t *testing.T) {
 	}
 }
 
-func ceremonyFaultMarginForN(n int) (int, error) {
-	threshold, err := keeper.ThresholdForN(n)
-	if err != nil {
-		return 0, err
-	}
-	return (n - threshold) / 2, nil
-}
-
 func TestCeremonyQuorumForN(t *testing.T) {
 	tests := []struct {
-		n              int
-		wantMargin     int
-		wantRequired   int
-		wantErr        bool
-		wantThreshold  int
-		wantTallySlack int
+		n                     int
+		wantRequired          int
+		wantErr               bool
+		wantThreshold         int
+		wantToleratedFaults   int
+		wantPartialDecryptGap int
 	}{
 		{n: -1, wantErr: true},
 		{n: 0, wantErr: true},
-		{n: 1, wantThreshold: 1, wantMargin: 0, wantRequired: 1, wantTallySlack: 0},
-		{n: 2, wantThreshold: 2, wantMargin: 0, wantRequired: 2, wantTallySlack: 0},
-		{n: 3, wantThreshold: 2, wantMargin: 0, wantRequired: 3, wantTallySlack: 1},
-		{n: 4, wantThreshold: 2, wantMargin: 1, wantRequired: 3, wantTallySlack: 1},
-		{n: 5, wantThreshold: 3, wantMargin: 1, wantRequired: 4, wantTallySlack: 1},
-		{n: 6, wantThreshold: 3, wantMargin: 1, wantRequired: 5, wantTallySlack: 2},
-		{n: 7, wantThreshold: 4, wantMargin: 1, wantRequired: 6, wantTallySlack: 2},
-		{n: 8, wantThreshold: 4, wantMargin: 2, wantRequired: 6, wantTallySlack: 2},
-		{n: 9, wantThreshold: 5, wantMargin: 2, wantRequired: 7, wantTallySlack: 2},
-		{n: 10, wantThreshold: 5, wantMargin: 2, wantRequired: 8, wantTallySlack: 3},
-		{n: 11, wantThreshold: 6, wantMargin: 2, wantRequired: 9, wantTallySlack: 3},
-		{n: 15, wantThreshold: 8, wantMargin: 3, wantRequired: 12, wantTallySlack: 4},
-		{n: 20, wantThreshold: 10, wantMargin: 5, wantRequired: 15, wantTallySlack: 5},
+		{n: 1, wantThreshold: 1, wantRequired: 1, wantToleratedFaults: 0, wantPartialDecryptGap: 0},
+		{n: 2, wantThreshold: 2, wantRequired: 2, wantToleratedFaults: 0, wantPartialDecryptGap: 0},
+		{n: 3, wantThreshold: 2, wantRequired: 3, wantToleratedFaults: 0, wantPartialDecryptGap: 1},
+		{n: 4, wantThreshold: 2, wantRequired: 4, wantToleratedFaults: 0, wantPartialDecryptGap: 2},
+		{n: 5, wantThreshold: 3, wantRequired: 4, wantToleratedFaults: 1, wantPartialDecryptGap: 1},
+		{n: 6, wantThreshold: 3, wantRequired: 5, wantToleratedFaults: 1, wantPartialDecryptGap: 2},
+		{n: 7, wantThreshold: 4, wantRequired: 6, wantToleratedFaults: 1, wantPartialDecryptGap: 2},
+		{n: 8, wantThreshold: 4, wantRequired: 7, wantToleratedFaults: 1, wantPartialDecryptGap: 3},
+		{n: 9, wantThreshold: 5, wantRequired: 8, wantToleratedFaults: 1, wantPartialDecryptGap: 3},
+		{n: 10, wantThreshold: 5, wantRequired: 8, wantToleratedFaults: 2, wantPartialDecryptGap: 3},
+		{n: 11, wantThreshold: 6, wantRequired: 9, wantToleratedFaults: 2, wantPartialDecryptGap: 3},
+		{n: 12, wantThreshold: 6, wantRequired: 10, wantToleratedFaults: 2, wantPartialDecryptGap: 4},
+		{n: 13, wantThreshold: 7, wantRequired: 11, wantToleratedFaults: 2, wantPartialDecryptGap: 4},
+		{n: 14, wantThreshold: 7, wantRequired: 12, wantToleratedFaults: 2, wantPartialDecryptGap: 5},
+		{n: 15, wantThreshold: 8, wantRequired: 12, wantToleratedFaults: 3, wantPartialDecryptGap: 4},
+		{n: 20, wantThreshold: 10, wantRequired: 16, wantToleratedFaults: 4, wantPartialDecryptGap: 6},
 	}
 
 	for _, tc := range tests {
-		margin, err := ceremonyFaultMarginForN(tc.n)
+		required, err := keeper.RequiredCeremonyQuorumForN(tc.n)
 		if tc.wantErr {
-			require.Error(t, err, "n=%d should error", tc.n)
-			_, err = keeper.RequiredCeremonyQuorumForN(tc.n)
 			require.Error(t, err, "n=%d should error", tc.n)
 			continue
 		}
-		require.NoError(t, err, "n=%d", tc.n)
-		require.Equal(t, tc.wantMargin, margin, "margin n=%d", tc.n)
-
-		required, err := keeper.RequiredCeremonyQuorumForN(tc.n)
 		require.NoError(t, err, "n=%d", tc.n)
 		require.Equal(t, tc.wantRequired, required, "required n=%d", tc.n)
 
 		threshold, err := keeper.ThresholdForN(tc.n)
 		require.NoError(t, err, "n=%d", tc.n)
 		require.Equal(t, tc.wantThreshold, threshold, "threshold n=%d", tc.n)
-		require.Equal(t, tc.wantTallySlack, required-threshold, "tally slack n=%d", tc.n)
-		require.GreaterOrEqual(t, required-margin, threshold, "quorum safety invariant n=%d", tc.n)
+		require.Equal(t, tc.wantToleratedFaults, tc.n-required, "tolerated faults n=%d", tc.n)
+		require.Equal(t, tc.wantPartialDecryptGap, required-threshold, "partial decrypt gap n=%d", tc.n)
+		require.GreaterOrEqual(t, 2*required, tc.n+threshold, "quorum safety invariant n=%d", tc.n)
 	}
 }
 
