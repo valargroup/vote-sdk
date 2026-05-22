@@ -2,8 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { fromBech32 } from "@cosmjs/encoding";
 import { Loader2, RefreshCw, Users, AlertCircle, ExternalLink } from "lucide-react";
 import * as chainApi from "../api/chain";
+import { TOKEN_HOLDER_VOTING_CONFIG_REPO_URL, tokenHolderConfigUrl } from "../api/chain";
 import * as cosmosTx from "../api/cosmosTx";
 import type { UseWallet } from "../hooks/useWallet";
+import { useDetectedChainId } from "../hooks/useDetectedChainId";
 
 function formatUnix(ts: number): string {
   if (!ts) return "—";
@@ -11,6 +13,10 @@ function formatUnix(ts: number): string {
 }
 
 export function PendingOperatorsPage({ wallet }: { wallet: UseWallet }) {
+  const detectedChainId = useDetectedChainId();
+  const chainId = wallet.chainId || detectedChainId;
+  const dynamicConfigUrl =
+    tokenHolderConfigUrl({ file: "dynamic", chainId }) ?? TOKEN_HOLDER_VOTING_CONFIG_REPO_URL;
   const [rows, setRows] = useState<chainApi.PendingValidatorPublic[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -123,7 +129,7 @@ export function PendingOperatorsPage({ wallet }: { wallet: UseWallet }) {
             <code className="text-[10px] text-text-primary">vote_servers</code> via a manual PR on{" "}
             <a
               className="text-accent inline-flex items-center gap-0.5 hover:underline"
-              href="https://github.com/valargroup/token-holder-voting-config/blob/main/dynamic-voting-config.json"
+              href={dynamicConfigUrl}
               target="_blank"
               rel="noreferrer"
             >
