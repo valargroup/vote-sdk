@@ -45,6 +45,62 @@ export function getApiBase(): string {
   return apiBase();
 }
 
+/**
+ * Fetch the chain id ("network" in tendermint node_info) from the resolved
+ * chain REST endpoint. Used to detect prod vs stage at runtime.
+ */
+export async function fetchChainId(): Promise<string> {
+  const url = getChainUrl();
+  const resp = await fetch(`${url}/cosmos/base/tendermint/v1beta1/node_info`);
+  if (!resp.ok) {
+    throw new HTTPError(resp.status, `node_info HTTP ${resp.status}`);
+  }
+  const data = await resp.json();
+  return data.default_node_info?.network ?? "";
+}
+
+export const TOKEN_HOLDER_VOTING_CONFIG_REPO_URL =
+  "https://github.com/valargroup/token-holder-voting-config";
+
+export type TokenHolderConfigFolder = "prod" | "stage";
+
+/**
+ * Map a Cosmos chain id to the matching token-holder-voting-config subfolder
+ * that wallets actually consume. Returns null for unrecognized chain ids
+ * (e.g. local dev chains) so callers can render a fallback.
+ */
+export function tokenHolderConfigFolder(
+  chainId: string | null | undefined
+): TokenHolderConfigFolder | null {
+  if (chainId === "zvote-1") return "prod";
+  if (chainId === "svote-1") return "stage";
+  return null;
+}
+
+export type TokenHolderConfigFile = "static" | "dynamic";
+type TokenHolderConfigMode = "blob" | "edit";
+
+interface TokenHolderConfigUrlOptions {
+  file: TokenHolderConfigFile;
+  chainId?: string | null;
+  mode?: TokenHolderConfigMode;
+}
+
+/**
+ * Build a GitHub URL to the chain-specific token-holder-voting-config file.
+ * Returns null when the chain id can't be mapped to a known environment;
+ * callers should fall back to the repo root listing in that case.
+ */
+export function tokenHolderConfigUrl({
+  file,
+  chainId = null,
+  mode = "blob",
+}: TokenHolderConfigUrlOptions): string | null {
+  const folder = tokenHolderConfigFolder(chainId);
+  if (!folder) return null;
+  return `${TOKEN_HOLDER_VOTING_CONFIG_REPO_URL}/${mode}/main/${folder}/${file}-voting-config.json`;
+}
+
 const NULLIFIER_URL_KEY = "shielded-vote-nullifier-url";
 
 export const LOCAL_PIR_URL = "/nullifier";

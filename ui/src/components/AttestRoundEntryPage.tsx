@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
-  Check,
-  Copy,
   ExternalLink,
   KeyRound,
   RefreshCw,
@@ -10,8 +8,11 @@ import {
   Wallet,
 } from "lucide-react";
 import * as chainApi from "../api/chain";
+import { TOKEN_HOLDER_VOTING_CONFIG_REPO_URL, tokenHolderConfigUrl } from "../api/chain";
 import * as votingKey from "../api/votingKey";
 import { useWallet } from "../hooks/useWallet";
+import { useDetectedChainId } from "../hooks/useDetectedChainId";
+import { CopyButton } from "./CopyButton";
 
 interface RoundOption {
   roundIdHex: string;
@@ -114,29 +115,17 @@ function getDefaultRound(rounds: RoundOption[]): RoundOption | null {
   return rounds.find((round) => round.isActive) ?? getLatestRound(rounds);
 }
 
-function CopyButton({ value, label }: { value: string; label: string }) {
-  const [copied, setCopied] = useState(false);
-
-  const copy = async () => {
-    await navigator.clipboard.writeText(value);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
-
-  return (
-    <button
-      onClick={copy}
-      disabled={!value}
-      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-surface-3 hover:bg-surface-2 text-text-secondary hover:text-text-primary rounded-md text-[11px] transition-colors cursor-pointer disabled:opacity-50"
-    >
-      {copied ? <Check size={12} className="text-success" /> : <Copy size={12} />}
-      {copied ? "Copied" : label}
-    </button>
-  );
-}
-
 export function AttestRoundEntryPage() {
   const wallet = useWallet();
+  const detectedChainId = useDetectedChainId();
+  const chainId = wallet.chainId || detectedChainId;
+  const staticConfigBlobUrl =
+    tokenHolderConfigUrl({ file: "static", chainId }) ?? TOKEN_HOLDER_VOTING_CONFIG_REPO_URL;
+  const staticConfigEditUrl =
+    tokenHolderConfigUrl({ file: "static", chainId, mode: "edit" }) ??
+    TOKEN_HOLDER_VOTING_CONFIG_REPO_URL;
+  const dynamicConfigBlobUrl =
+    tokenHolderConfigUrl({ file: "dynamic", chainId }) ?? TOKEN_HOLDER_VOTING_CONFIG_REPO_URL;
   const [keyInfo, setKeyInfo] = useState<DerivedPublicKeyInfo | null>(null);
   const [derivingKey, setDerivingKey] = useState(false);
   const [deriveNotice, setDeriveNotice] = useState("");
@@ -432,7 +421,7 @@ export function AttestRoundEntryPage() {
                 Derive the Ed25519 public key from your Keplr account and
                 publish it as a trust anchor in{" "}
                 <a
-                  href="https://github.com/valargroup/token-holder-voting-config/blob/main/static-voting-config.json"
+                  href={staticConfigBlobUrl}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex items-center gap-1 text-accent hover:text-accent/80 underline-offset-2 hover:underline"
@@ -458,7 +447,7 @@ export function AttestRoundEntryPage() {
                 Once the key is trusted by a shipped wallet release, sign each
                 round&apos;s <code>ea_pk</code> and PR it into{" "}
                 <a
-                  href="https://github.com/valargroup/token-holder-voting-config/blob/main/dynamic-voting-config.json"
+                  href={dynamicConfigBlobUrl}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex items-center gap-1 text-accent hover:text-accent/80 underline-offset-2 hover:underline"
@@ -618,7 +607,7 @@ export function AttestRoundEntryPage() {
                         Open a PR adding the <em>trusted_keys entry</em> above
                         to{" "}
                         <a
-                          href="https://github.com/valargroup/token-holder-voting-config/edit/main/static-voting-config.json"
+                          href={staticConfigEditUrl}
                           target="_blank"
                           rel="noreferrer"
                           className="inline-flex items-center gap-1 text-accent hover:text-accent/80 underline-offset-2 hover:underline"
@@ -699,7 +688,7 @@ export function AttestRoundEntryPage() {
             Picks a round, signs its <code>ea_pk</code> with your derived
             Ed25519 key, and offers to open a PR that adds the entry to{" "}
             <a
-              href="https://github.com/valargroup/token-holder-voting-config/blob/main/dynamic-voting-config.json"
+              href={dynamicConfigBlobUrl}
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center gap-1 text-accent hover:text-accent/80 underline-offset-2 hover:underline"

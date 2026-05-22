@@ -14,6 +14,8 @@ import { AttestRoundEntryPage } from "./components/AttestRoundEntryPage";
 import { EndorsersPage } from "./components/EndorsersPage";
 import { UpgradesPage } from "./components/UpgradesPage";
 import { QueueMonitorPage } from "./components/QueueMonitorPage";
+import { VoteManagerKeysPage } from "./components/VoteManagerKeysPage";
+import { useDetectedChainId } from "./hooks/useDetectedChainId";
 import { useStore } from "./store/useStore";
 import { SAMPLE_ROUND_TEMPLATES, type SampleRoundTemplateId } from "./store/sampleRounds";
 import { Shield, Plus, FileText, Settings, Settings2, RefreshCw, CheckCircle2, AlertCircle, AlertTriangle, X, Loader2, Server, Database, Eye, EyeOff, Wallet, Unplug, BarChart3, Copy, Check, Users, ExternalLink, ShieldAlert, ShieldCheck, GripVertical, MoreHorizontal, Trash2, Lock, ChevronDown, ArrowLeft, ClipboardCheck } from "lucide-react";
@@ -27,6 +29,7 @@ import {
   estimateTimestamp,
 } from "./store/rpc";
 import * as chainApi from "./api/chain";
+import { TOKEN_HOLDER_VOTING_CONFIG_REPO_URL, tokenHolderConfigUrl } from "./api/chain";
 import * as cosmosTx from "./api/cosmosTx";
 import { describeCoordinatorActionPayload } from "./api/coordinatorActions";
 import { useWallet } from "./hooks/useWallet";
@@ -45,11 +48,6 @@ const VOTE_OPTION_COLORS = [
   "#ec4899", // pink
   "#6366f1", // indigo
 ];
-
-const TOKEN_HOLDER_VOTING_CONFIG_REPO_URL =
-  "https://github.com/valargroup/token-holder-voting-config";
-const DYNAMIC_VOTING_CONFIG_FILE_URL = `${TOKEN_HOLDER_VOTING_CONFIG_REPO_URL}/blob/main/dynamic-voting-config.json`;
-const DYNAMIC_VOTING_CONFIG_EDIT_URL = `${TOKEN_HOLDER_VOTING_CONFIG_REPO_URL}/edit/main/dynamic-voting-config.json`;
 
 function optionColor(index: number, total: number): string {
   if (total === 2) return index === 0 ? VOTE_OPTION_COLORS[0] : VOTE_OPTION_COLORS[1];
@@ -72,7 +70,8 @@ type Section =
   | "attest-round"
   | "endorsers"
   | "upgrades"
-  | "snapshot";
+  | "snapshot"
+  | "vote-manager-keys";
 
 const SECTION_PATHS: Record<Section, string> = {
   about: "/",
@@ -91,6 +90,7 @@ const SECTION_PATHS: Record<Section, string> = {
   endorsers: "/endorsements",
   upgrades: "/upgrades",
   snapshot: "/snapshot",
+  "vote-manager-keys": "/vote-manager-keys",
 };
 
 const PATH_TO_SECTION: Record<string, Section> = Object.fromEntries(
@@ -506,6 +506,8 @@ function App() {
         {section === "coordinator-actions" && <CoordinatorActionsPage wallet={wallet} />}
 
         {section === "attest-round" && <AttestRoundEntryPage />}
+
+        {section === "vote-manager-keys" && <VoteManagerKeysPage wallet={wallet} />}
 
         {section === "endorsers" && <EndorsersPage wallet={wallet} />}
 
@@ -2440,6 +2442,13 @@ function formatTokens(raw: string | undefined): string {
 }
 
 function ValidatorsView({ wallet }: { wallet: UseWallet }) {
+  const detectedChainId = useDetectedChainId();
+  const chainId = wallet.chainId || detectedChainId;
+  const dynamicConfigFileUrl =
+    tokenHolderConfigUrl({ file: "dynamic", chainId }) ?? TOKEN_HOLDER_VOTING_CONFIG_REPO_URL;
+  const dynamicConfigEditUrl =
+    tokenHolderConfigUrl({ file: "dynamic", chainId, mode: "edit" }) ??
+    TOKEN_HOLDER_VOTING_CONFIG_REPO_URL;
   const [validators, setValidators] = useState<chainApi.Validator[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -2499,7 +2508,7 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
     setNetworkResult(null);
     try {
       window.open(
-        DYNAMIC_VOTING_CONFIG_EDIT_URL,
+        dynamicConfigEditUrl,
         "_blank",
         "noopener,noreferrer",
       );
@@ -2600,7 +2609,7 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
               All bonded validators on-chain. A validator can be bonded and producing blocks but not listed as an approved submission server if it has been taken out of client rotation by an admin.
               To become a recommended configuration for wallets, server owners should open a pull request in{" "}
               <a
-                href={DYNAMIC_VOTING_CONFIG_FILE_URL}
+                href={dynamicConfigFileUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-accent hover:text-accent-glow"
