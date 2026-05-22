@@ -1,5 +1,5 @@
 # Stage 1: Build Rust static library (Halo2 + RedPallas + Poseidon tree FFI)
-FROM rust:1.85-bookworm AS rust-builder
+FROM rust:1.86-bookworm AS rust-builder
 
 WORKDIR /src
 COPY circuits/ circuits/
