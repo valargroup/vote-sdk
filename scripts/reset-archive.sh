@@ -18,7 +18,7 @@
 # and does not participate in consensus.
 #
 # Required env:
-#   GENESIS_URL       URL to download genesis.json (e.g. https://vote.fra1.digitaloceanspaces.com/genesis.json)
+#   GENESIS_URL       URL to download genesis.json (e.g. https://shielded-vote.nyc3.digitaloceanspaces.com/genesis.json)
 #   PRIMARY_REST_URL  Primary's REST API base URL (e.g. https://vote-chain-primary.example.com)
 #
 # Optional env:

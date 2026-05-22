@@ -165,7 +165,7 @@ systemctl start svoted
 ```bash
 ssh root@<secondary-ip>
 export PATH="/opt/shielded-vote/current/bin:$PATH"
-export DO_SPACES_BASE=https://vote.fra1.digitaloceanspaces.com
+export DO_SPACES_BASE=https://shielded-vote.nyc3.digitaloceanspaces.com
 export GENESIS_KEY=genesis/svote-1/genesis.json
 export GENESIS_URL="${DO_SPACES_BASE}/${GENESIS_KEY}"
 export PRIMARY_REST_URL=https://vote-chain-primary.<domain>

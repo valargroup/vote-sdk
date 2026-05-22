@@ -6,7 +6,7 @@
 
 use std::path::{Component, Path, PathBuf};
 
-const DEFAULT_VOTER_FIXTURE_HOST: &str = "https://vote.fra1.digitaloceanspaces.com";
+const DEFAULT_VOTER_FIXTURE_HOST: &str = "https://shielded-vote.nyc3.digitaloceanspaces.com";
 const VOTER_FIXTURE_FILES: [&str; 3] = ["manifest.json", "delegations.json", "cast_vote_inputs.json"];
 
 #[must_use]
