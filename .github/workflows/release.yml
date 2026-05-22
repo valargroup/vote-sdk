@@ -275,7 +275,6 @@ jobs:
       - name: Set version
         run: echo "VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
       - name: Upload to DigitalOcean Spaces
-        continue-on-error: true
         env:
           DO_ACCESS_KEY: ${{ secrets.DO_ACCESS_KEY }}
           DO_SECRET_KEY: ${{ secrets.DO_SECRET_KEY }}
@@ -317,3 +316,39 @@ jobs:
             "s3://${DO_SPACES_BUCKET}/scripts/remove-pir/${VERSION}/remove-pir.sh"
           s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force scripts/svoted-wrapper.sh \
             "s3://${DO_SPACES_BUCKET}/scripts/svoted-wrapper/${VERSION}/svoted-wrapper.sh"
+      - name: Verify DigitalOcean Spaces uploads
+        env:
+          DO_SPACES_BUCKET: ${{ vars.DO_SPACES_BUCKET }}
+          DO_SPACES_REGION: ${{ vars.DO_SPACES_REGION }}
+          DO_SPACES_BASE: ${{ vars.DO_SPACES_BASE }}
+        run: |
+          set -euo pipefail
+          DO_SPACES_BUCKET="${DO_SPACES_BUCKET:-vote}"
+          DO_SPACES_REGION="${DO_SPACES_REGION:-fra1}"
+          DO_SPACES_BASE="${DO_SPACES_BASE:-https://${DO_SPACES_BUCKET}.${DO_SPACES_REGION}.digitaloceanspaces.com}"
+
+          for PLATFORM in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
+            for SUFFIX in "" ".sha256"; do
+              URL="${DO_SPACES_BASE}/binaries/vote-sdk/shielded-vote-${VERSION}-${PLATFORM}.tar.gz${SUFFIX}"
+              curl -fsSIL --retry 3 --retry-delay 2 "$URL" > /dev/null
+              echo "[OK] $URL"
+            done
+          done
+
+          for KEY in \
+            "version.txt" \
+            "join.sh" \
+            "reset-validator-snapshot.sh" \
+            "remove-validator.sh" \
+            "remove-pir.sh" \
+            "svoted-wrapper.sh" \
+            "scripts/join/${VERSION}/join.sh" \
+            "scripts/reset-validator-snapshot/${VERSION}/reset-validator-snapshot.sh" \
+            "scripts/remove-validator/${VERSION}/remove-validator.sh" \
+            "scripts/remove-pir/${VERSION}/remove-pir.sh" \
+            "scripts/svoted-wrapper/${VERSION}/svoted-wrapper.sh"
+          do
+            URL="${DO_SPACES_BASE}/${KEY}"
+            curl -fsSIL --retry 3 --retry-delay 2 "$URL" > /dev/null
+            echo "[OK] $URL"
+          done

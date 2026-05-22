@@ -110,12 +110,18 @@ jobs:
       - name: HEAD-check published tarballs
         run: |
           set -euo pipefail
+          echo "RELEASE_BASE_URL: ${RELEASE_BASE_URL}"
           MISSING=0
           for PLATFORM in linux-amd64 linux-arm64; do
             URL="${RELEASE_BASE_URL}/shielded-vote-${TAG}-${PLATFORM}.tar.gz"
-            STATUS=$(curl -sI -o /dev/null -w "%{http_code}" "$URL")
+            STATUS=$(curl -sI -o /dev/null -w "%{http_code}" "$URL" || true)
+            STATUS="${STATUS:-000}"
             if [ "$STATUS" = "200" ]; then
               echo "[OK]  ${PLATFORM} -> $URL"
+            elif [[ "$STATUS" =~ ^30[0-9]$ ]]; then
+              echo "[REDIRECT] ${PLATFORM} (HTTP ${STATUS}) -> $URL"
+              echo "  Reset expects RELEASE_BASE_URL to point at public DigitalOcean Spaces objects, not redirecting GitHub release URLs."
+              MISSING=1
             else
               echo "[MISSING] ${PLATFORM} (HTTP ${STATUS}) -> $URL"
               MISSING=1
