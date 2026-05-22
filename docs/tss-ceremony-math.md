@@ -19,10 +19,57 @@ All scalar operations are mod 23.
 | Scalar field | $\mathbb{F}_{23}$ |
 | Validators | $n = 5$ |
 | Threshold | $t = 3$ |
+| Activation quorum | $required = \lceil 4n/5 \rceil = 4$ |
 | Secret key | $sk = 7$ |
 | Public key | $pk = [sk] = [7]$ |
 
 ---
+
+## Quorum Hardening Parameters
+
+The tally reconstruction threshold remains the Shamir threshold:
+
+$$t(n) = \begin{cases}
+1 & n = 1 \\
+\max(2, \lceil n/2 \rceil) & n \ge 2
+\end{cases}$$
+
+The DEALT timeout activation quorum is:
+
+$$required(n) = \left\lceil \frac{4n}{5} \right\rceil$$
+
+This means timeout activation strips non-ackers only when at least 80% of the
+ceremony set acknowledged. The safety check used for the liveness argument is:
+
+$$2 \cdot required(n) \ge n + t(n)$$
+
+For the worked example in this file, $n=5$ and $t=3$, so $required=4$.
+The example still combines exactly $t=3$ partial decryptions during tally; the
+extra validator is activation-time liveness slack, not an input to the
+Lagrange example.
+
+| $n$ | $t$ | $required=\lceil4n/5\rceil$ | tolerated non-ackers | $required - t$ |
+|:---:|:---:|:---------------------------:|:--------------------:|:--------------:|
+| 1 | 1 | 1 | 0 | 0 |
+| 2 | 2 | 2 | 0 | 0 |
+| 3 | 2 | 3 | 0 | 1 |
+| 4 | 2 | 4 | 0 | 2 |
+| 5 | 3 | 4 | 1 | 1 |
+| 6 | 3 | 5 | 1 | 2 |
+| 7 | 4 | 6 | 1 | 2 |
+| 8 | 4 | 7 | 1 | 3 |
+| 9 | 5 | 8 | 1 | 3 |
+| 10 | 5 | 8 | 2 | 3 |
+| 11 | 6 | 9 | 2 | 3 |
+| 12 | 6 | 10 | 2 | 4 |
+| 13 | 7 | 11 | 2 | 4 |
+| 14 | 7 | 12 | 2 | 5 |
+| 15 | 8 | 12 | 3 | 4 |
+| 16 | 8 | 13 | 3 | 5 |
+| 17 | 9 | 14 | 3 | 5 |
+| 18 | 9 | 15 | 3 | 6 |
+| 19 | 10 | 16 | 3 | 6 |
+| 20 | 10 | 16 | 4 | 6 |
 
 ## Step 1 — Polynomial & Shares
 

@@ -13,19 +13,28 @@ The minimum number of eligible validators is controlled by the `min_ceremony_val
 For a ceremony with `n` validators:
 
 ```
-t = 1                (n = 1: trivial single-share, no threshold security)
-t = ceil(n/2)        (n >= 2, minimum 2)
+t(n) = 1                       (n = 1: trivial single-share, no threshold security)
+t(n) = max(2, ceil(n/2))       (n >= 2)
 ```
 
-| n | t | Notes |
-|---|---|---|
-| 1 | 1 | Single share = full key; for local testing only |
-| 2 | 2 | Both validators required |
-| 3 | 2 | |
-| 4 | 2 | |
-| 5 | 3 | |
-| 6 | 3 | |
-| 9 | 5 | |
+The TSS reconstruction threshold `t` is deliberately separate from the
+ceremony activation quorum. Timeout activation requires roughly 80% of the
+ceremony set so the survivor set has margin above `t` if a validator later
+withholds partial decryptions:
+
+```
+required(n) = ceil(4n/5)
+```
+
+| n | t | required(n) | Notes |
+|---|---|-------------|---|
+| 1 | 1 | 1 | Single share = full key; for local testing only |
+| 2 | 2 | 2 | Both validators required |
+| 3 | 2 | 3 | All validators required for activation |
+| 4 | 2 | 4 | All validators required for activation |
+| 5 | 3 | 4 | Canonical 4/5 quorum |
+| 6 | 3 | 5 | |
+| 9 | 5 | 8 | |
 
 **Warning:** with `n = 1, t = 1` the single validator holds the full `ea_sk` (the degree-0 polynomial makes `share = secret`). This provides no threshold security and should only be used for local development/testing.
 
@@ -35,7 +44,11 @@ t = ceil(n/2)        (n >= 2, minimum 2)
 PENDING (REGISTERING) ──[n × MsgContributeDKG]──> PENDING (DEALT) ──[n × MsgAck]──> ACTIVE
 ```
 
-Each validator contributes once during REGISTERING. On the n-th contribution, the handler combines all commitments and transitions to DEALT. Acks proceed identically to the single-dealer design.
+Each validator contributes once during REGISTERING. The all-honest fast path
+combines all commitments and transitions to DEALT after all `n` contributions.
+On DEALT timeout, non-ackers are stripped and the round activates only if at
+least `required(n)` validators acked; otherwise the ceremony fails and must be
+retried.
 
 `VoteRound` fields set during the ceremony:
 
@@ -50,7 +63,7 @@ Each validator contributes once during REGISTERING. On the n-th contribution, th
 
 When a block proposer detects a PENDING round in REGISTERING status, is a ceremony validator, and has not yet contributed:
 
-1. Generate a random secret `s_i` and compute `t = ceil(n/2)`.
+1. Generate a random secret `s_i` and compute `t = max(2, ceil(n/2))` for `n >= 2` (`t = 1` for the single-validator dev path).
 2. Build a degree-`(t-1)` polynomial `f_i(x)` over Pallas Fq with `f_i(0) = s_i`:
    ```
    f_i(x) = s_i + a_1*x + a_2*x^2 + ... + a_{t-1}*x^{t-1}
@@ -235,8 +248,8 @@ Implementation:
 |---|---|
 | Who knows `ea_sk` | **Nobody** — `ea_sk = sum(s_i)` is never assembled |
 | Single party can decrypt votes | No — requires `t` partial decryptions |
-| Malicious contributor sends bad shares | Detected at ack time (Feldman verification per contributor) |
-| Malicious validator sabotages tally | No — DLEQ proof required per partial decryption |
+| Malicious contributor sends bad shares | Detected at ack time (Feldman verification per contributor); timeout activation requires `ceil(4n/5)` acks so threshold-sized survivor sets do not activate |
+| Malicious validator sabotages tally | Invalid partial decryptions are rejected by DLEQ; withholding is tolerated while enough honest survivors remain above `t` |
 | Offline validator | REGISTERING phase times out after `DefaultContributionTimeout` (10 min), non-contributors are jailed through `x/slashing`, the pending round is marked `SESSION_STATUS_CEREMONY_FAILED`, and a later create transaction can retry the same vote metadata with a fresh height-derived `vote_round_id` |
 | Compromised Pallas key | Validator rotates via `MsgRotatePallasKey` (blocked during in-flight ceremonies). Future rounds use the new key. Past ECIES ciphertexts in completed `DkgContributions` remain encrypted to the old key. |
 | Liveness (all honest, n validators) | ~2n blocks (n contributions + n acks) |
@@ -255,19 +268,36 @@ Two liveness gaps were identified during DKG review.
 
 #### Issue 2: Corrupted-share DoS vector (documented, deferred)
 
-**Problem.** A malicious validator can send shares that fail Feldman verification to all other validators. Currently, `ackDKGRound` returns an error on the first failed `VerifyFeldmanShare`, preventing the validator from acking. If every honest validator's ack fails, the DEALT timeout fires and resets to REGISTERING. The malicious validator repeats this on every cycle they propose, stalling the ceremony indefinitely.
+**Problem.** A malicious validator can send shares that fail Feldman verification to selected validators. Currently, `ackDKGRound` returns an error on the first failed `VerifyFeldmanShare`, preventing the validator from acking. If too few validators ack, the DEALT timeout fires and resets to REGISTERING. If the timeout path activates with exactly `t` ackers and one survivor later withholds partial decryptions, the round can reach TALLYING and finalize with `TallyTimedOut=true`.
+
+**Current quorum hardening.** DEALT timeout activation requires:
+
+```
+required(n) = ceil(4n/5)
+```
+
+For `n = 5`, this gives `t = 3`, `required = 4`: if one surviving validator
+withholds during tally, the remaining three can still finalize. This does not
+prove encrypted-share correctness; it only prevents activation with no liveness
+slack.
 
 **Why naive skipping doesn't work.** If `ackDKGRound` simply skipped a bad contributor and summed the remaining shares, validators would need to agree on who was skipped. A sophisticated attacker can send bad shares to *some* validators and valid shares to others. Validators who received good shares include the attacker in their sum; those who received bad shares exclude them. The two groups end up with shares of different combined polynomials — threshold decryption would fail later.
 
 **Proposed solution: majority-vote skip set.** Each ack carries a `SkippedContributors` list identifying which contributors failed Feldman verification for that validator. At confirmation time (fast path or timeout), the chain determines the majority skip set and only counts acks compatible with it. Combined Feldman commitments and `ea_pk` are recomputed excluding the skipped contributors.
 
-Analysis for a single malicious validator `j` who sends bad shares to `k` out of `n-1` honest validators:
+Analysis for a single malicious validator `j` who sends bad shares to `k` out
+of `n-1` honest validators under a future skip-set protocol must use the same
+`required(n) = ceil(4n/5)` quorum, not a bare majority:
 
-- `k < n/2`: majority says no skip, the `k` validators who reported `{skip j}` are stripped. Remaining `n-k > n/2 >= t`. Confirms.
-- `k >= n/2`: majority says skip `j`, the `n-k` validators who reported `{no skip}` are stripped. Remaining `k >= n/2 >= t`. Confirms without `j`.
-- `k = n-1` (bad to everyone): unanimous `{skip j}`. Confirms trivially.
+- `n-k >= required(n)`: the no-skip view has enough validators to confirm with `j` included, while still preserving tally slack.
+- `k >= required(n)`: the skip-`j` view has enough validators to recompute without `j`, while still preserving tally slack.
+- Neither side reaches `required(n)`: the ceremony fails rather than activating a threshold-sized or view-split survivor set.
+- `k = n-1` (bad to everyone): unanimous `{skip j}`. Confirms only if the
+  remaining set still meets the required quorum; otherwise the ceremony fails.
 
-A single attacker cannot prevent confirmation under honest majority. The attack degrades to requiring two or more colluding validators doing coordinated selective targeting (j1 targets group A, j2 targets group B), which is a strictly harder attack.
+A single attacker cannot force activation with no liveness margin. The attack
+degrades to either a bounded failed ceremony or to requiring enough coordinated
+selective targeting that no view reaches `required(n)`.
 
 **Why we defer.** The majority-vote mechanism requires:
 - Proto change: new `SkippedContributors` field on `MsgAckExecutiveAuthorityKey`.
