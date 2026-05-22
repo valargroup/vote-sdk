@@ -6,7 +6,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const chainUrl = env.VITE_CHAIN_URL || 'http://localhost:1317'
   const precomputedUrl =
-    env.VITE_PRECOMPUTED_BASE_URL || 'https://vote.fra1.cdn.digitaloceanspaces.com'
+    env.VITE_PRECOMPUTED_BASE_URL || 'https://shielded-vote.nyc3.cdn.digitaloceanspaces.com'
 
   return {
     plugins: [react(), tailwindcss()],

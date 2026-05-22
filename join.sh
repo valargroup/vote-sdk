@@ -2,7 +2,7 @@
 # join.sh — Join the Shielded-Vote chain as a validator.
 #
 # Binary-only (no repo):
-#   curl -fsSL https://vote.fra1.digitaloceanspaces.com/join.sh | bash
+#   curl -fsSL https://shielded-vote.nyc3.digitaloceanspaces.com/join.sh | bash
 #   curl -fsSL https://setup.valargroup.org/ | bash -s -- --env stage --tls-mode auto
 #
 # Source developer (has repo + mise):
@@ -53,13 +53,13 @@ ORIGINAL_PATH="${PATH}"
 PATH_REFRESH_COMMAND=""
 DO_BASE_OVERRIDE="${SVOTE_DO_SPACES_BASE:-${DO_SPACES_BASE:-}}"
 DO_BUCKET="${SVOTE_DO_SPACES_BUCKET:-${DO_SPACES_BUCKET:-}}"
-DO_REGION="${SVOTE_DO_SPACES_REGION:-${DO_SPACES_REGION:-fra1}}"
+DO_REGION="${SVOTE_DO_SPACES_REGION:-${DO_SPACES_REGION:-nyc3}}"
 if [ -n "${DO_BASE_OVERRIDE}" ]; then
   DO_BASE="${DO_BASE_OVERRIDE}"
 elif [ -n "${DO_BUCKET}" ]; then
   DO_BASE="https://${DO_BUCKET}.${DO_REGION}.digitaloceanspaces.com"
 else
-  DO_BASE="https://vote.fra1.digitaloceanspaces.com"
+  DO_BASE="https://shielded-vote.nyc3.digitaloceanspaces.com"
 fi
 DO_BASE="${DO_BASE%/}"
 SNAPSHOT_BASE_URL="${SVOTE_SNAPSHOT_BASE_URL:-}"

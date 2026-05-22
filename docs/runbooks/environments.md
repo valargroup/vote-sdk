@@ -14,10 +14,10 @@ Create GitHub Environments named `staging` and `production`.
 | `CHAIN_ID` | `svote-1` | `zvote-1` | Passed into `scripts/init.sh`, reset joiners, and explorer config. |
 | `HAS_SECONDARY` | `true` | `false` | Skips secondary funding, reset, deploy, and verification in production. |
 | `DNS_PREFIX` | `stage.` | `prod.` | Prefixes public DNS names, e.g. `stage.explorer.<domain>`. |
-| `DO_SPACES_BUCKET` | `vote` | `shielded-vote` during migration | Spaces bucket name for reset uploads and release artifacts. Defaults to `vote`. |
-| `DO_SPACES_REGION` | `fra1` | `nyc3` during production migration | Spaces region used for release and reset uploads. Defaults to `fra1`. |
-| `DO_SPACES_BASE` | `https://vote.fra1.digitaloceanspaces.com` | `https://shielded-vote.nyc3.digitaloceanspaces.com` during migration | Spaces public base URL. Defaults to `https://${DO_SPACES_BUCKET}.${DO_SPACES_REGION}.digitaloceanspaces.com`. |
-| `RELEASE_BASE_URL` | `https://vote.fra1.digitaloceanspaces.com/binaries/vote-sdk` | `https://shielded-vote.nyc3.digitaloceanspaces.com/binaries/vote-sdk` during migration | Release tarball prefix. Defaults to `${DO_SPACES_BASE}/binaries/vote-sdk`. |
+| `DO_SPACES_BUCKET` | `shielded-vote` | `shielded-vote` | Spaces bucket name for reset uploads and release artifacts. Defaults to `shielded-vote`. |
+| `DO_SPACES_REGION` | `nyc3` | `nyc3` | Spaces region used for release and reset uploads. Defaults to `nyc3`. |
+| `DO_SPACES_BASE` | `https://shielded-vote.nyc3.digitaloceanspaces.com` | `https://shielded-vote.nyc3.digitaloceanspaces.com` | Spaces public base URL. Defaults to `https://${DO_SPACES_BUCKET}.${DO_SPACES_REGION}.digitaloceanspaces.com`. |
+| `RELEASE_BASE_URL` | `https://shielded-vote.nyc3.digitaloceanspaces.com/binaries/vote-sdk` | `https://shielded-vote.nyc3.digitaloceanspaces.com/binaries/vote-sdk` | Release tarball prefix. Defaults to `${DO_SPACES_BASE}/binaries/vote-sdk`. |
 | `GENESIS_KEY` | `genesis/svote-1/genesis.json` | `genesis/zvote-1/genesis.json` | Prevents resets from overwriting another environment's genesis. |
 | `SNAPSHOTS_PREFIX` | `snapshots/svote-1` | `snapshots/zvote-1` | Prefix cleared during reset before fresh snapshots are published. |
 | `PRIMARY_REST_URL` | derived from `DNS_PREFIX` + `DOMAIN` | optional cutover URL | REST base URL used by reset joiners to discover the primary peer. |

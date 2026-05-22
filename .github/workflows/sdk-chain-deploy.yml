@@ -73,8 +73,8 @@ jobs:
             default_has_secondary="true"
             default_voting_config_url="https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/stage/"
           fi
-          do_spaces_bucket="${DO_SPACES_BUCKET:-vote}"
-          do_spaces_region="${DO_SPACES_REGION:-fra1}"
+          do_spaces_bucket="${DO_SPACES_BUCKET:-shielded-vote}"
+          do_spaces_region="${DO_SPACES_REGION:-nyc3}"
           do_spaces_base="${DO_SPACES_BASE:-https://${do_spaces_bucket}.${do_spaces_region}.digitaloceanspaces.com}"
           release_base_url="${RELEASE_BASE_URL:-${do_spaces_base}/binaries/vote-sdk}"
           voting_config_url="${VOTING_CONFIG_URL:-$default_voting_config_url}"

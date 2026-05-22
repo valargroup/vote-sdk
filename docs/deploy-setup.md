@@ -27,7 +27,7 @@ flowchart LR
 
 | Workflow | Trigger | What it does |
 |----------|---------|-------------|
-| [`release.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/release.yml) | `v*` tag push | Builds `svoted` + admin UI for linux/darwin x amd64/arm64. Creates a GitHub Release with tarballs and uploads shared artifacts to the configured DO Spaces bucket (`s3://${DO_SPACES_BUCKET}`, default `s3://vote`). It does not deploy to any fleet. |
+| [`release.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/release.yml) | `v*` tag push | Builds `svoted` + admin UI for linux/darwin x amd64/arm64. Creates a GitHub Release with tarballs and uploads shared artifacts to the configured DO Spaces bucket (`s3://${DO_SPACES_BUCKET}`, default `s3://shielded-vote`). It does not deploy to any fleet. |
 | [`sdk-chain-deploy.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/sdk-chain-deploy.yml) | Manual `workflow_dispatch` | Takes `target_environment`, reads GitHub Environment secrets/vars, SSHes to that fleet, runs `install-release.sh --tag <tag>` (download from Spaces, verify checksum, swap symlink, restart `svoted` where initialized), renders explorer config, and checks public surfaces. Notifies Slack on failure. |
 | [`sdk-chain-reset.yml`](https://github.com/valargroup/vote-sdk/blob/main/.github/workflows/sdk-chain-reset.yml) | Manual `workflow_dispatch` | Takes `target_environment`. Full chain reset from genesis: quiesces publishers, wipes state on primary, runs `init.sh` with the environment `CHAIN_ID`, uploads namespaced genesis to DO Spaces, optionally funds/joins secondary, joins archive/snapshot nodes, enables the snapshot timer, and verifies public surfaces. |
 
@@ -214,11 +214,11 @@ off).
 | `db_path` | `""` | SQLite path for pending registrations. Empty = `$HOME/.svoted/admin.db`. |
 
 The admin UI reads `precomputed_base_url` from `/api/ui-config`, which the
-server resolves from `SVOTE_PRECOMPUTED_BASE_URL` with a compatibility default
-of `https://vote.fra1.digitaloceanspaces.com`. When that value is a DO Spaces
-origin such as `https://shielded-vote.fra1.digitaloceanspaces.com`, the UI
+server resolves from `SVOTE_PRECOMPUTED_BASE_URL` with a default of
+`https://shielded-vote.nyc3.digitaloceanspaces.com`. When that value is a DO
+Spaces origin such as `https://shielded-vote.nyc3.digitaloceanspaces.com`, the UI
 fetches PIR manifests through the matching CDN hostname
-`https://shielded-vote.fra1.cdn.digitaloceanspaces.com`.
+`https://shielded-vote.nyc3.cdn.digitaloceanspaces.com`.
 
 Pending join rows expire after **7 days**; expired rows are removed by a background sweeper that runs every **hour** (both are fixed in code, not `app.toml` keys).
 
