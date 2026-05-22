@@ -43,10 +43,10 @@ func (k *Keeper) SetCeremonyState(kvStore store.KVStore, state *types.CeremonySt
 	return kvStore.Set(types.CeremonyStateKey, bz)
 }
 
-// ThresholdForN computes the required threshold t = ceil(n/2) for n validators.
-// This matches the ack requirement (HalfAcked) so that the set of validators
-// that survives ceremony stripping is always large enough to reconstruct the
-// EA key during tally.
+// ThresholdForN computes the tally reconstruction threshold for n validators.
+// Ceremony activation uses RequiredCeremonyQuorumForN instead; keeping the two
+// values separate leaves liveness slack for later partial-decryption
+// withholding after non-ackers/non-contributors have been stripped.
 //
 // For n = 1 returns t = 1 (trivial single-share scheme with no threshold
 // security — used for local testing). Returns an error if n < 1.
@@ -62,6 +62,20 @@ func ThresholdForN(n int) (int, error) {
 		t = 2
 	}
 	return t, nil
+}
+
+// RequiredCeremonyQuorumForN returns the minimum contributor/acker count
+// required for bounded-subset ceremony finalization:
+//
+//	required(n) = ceil(4n/5)
+//
+// It is stricter than the tally threshold t: activating with ceil(4n/5)
+// ackers leaves required(n)-t extra active validators above the tally threshold.
+func RequiredCeremonyQuorumForN(n int) (int, error) {
+	if n < 1 {
+		return 0, fmt.Errorf("RequiredCeremonyQuorumForN: n must be >= 1, got %d", n)
+	}
+	return (4*n + 4) / 5, nil
 }
 
 // ---------------------------------------------------------------------------

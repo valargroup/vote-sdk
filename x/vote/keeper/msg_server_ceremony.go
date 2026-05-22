@@ -329,7 +329,7 @@ func (ms msgServer) AckExecutiveAuthorityKey(goCtx context.Context, msg *types.M
 	// Fast path: confirm only when ALL validators have acked. This gives
 	// every validator a chance to ack via PrepareProposal before the ceremony
 	// closes. If some validators are offline, the timeout path in EndBlocker
-	// handles confirmation with >= 1/2 acks and strips non-ackers.
+	// applies the required ceremony quorum and strips non-ackers.
 	if len(round.CeremonyAcks) == len(round.CeremonyValidators) {
 		round.CeremonyStatus = types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED
 		round.Status = types.SessionStatus_SESSION_STATUS_ACTIVE
