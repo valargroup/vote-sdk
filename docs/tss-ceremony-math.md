@@ -472,7 +472,6 @@ for i := uint64(0); i <= maxI; i++ {
 | Lagrange coefficients | $\lambda_j = \prod \frac{-x_m}{x_j - x_m}$ | `crypto/shamir/shamir.go` — `LagrangeCoefficients()` |
 | Combine partials | $\sum \lambda_j D_j = sk \cdot C_1$ | `crypto/shamir/partial_decrypt.go` — `CombinePartials()` |
 | Recover plaintext | $v \cdot G = C_2 - sk \cdot C_1$, BSGS $\to v$ | `crypto/elgamal/bsgs.go` — `Solve()` |
-| Tally DLEQ proof | $\log_G(pk) = \log_{C_1}(D)$ | `crypto/elgamal/dleq.go` — `GenerateDLEQProof()` |
 
 ### Orchestration Code
 

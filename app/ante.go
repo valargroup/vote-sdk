@@ -42,8 +42,8 @@ type DualAnteHandlerOptions struct {
 
 // ProductionOpts returns ValidateOpts wired with real cryptographic verifiers
 // (RedPallas via FFI, Halo2 via FFI). Only use in production binaries built
-// with `make install-ffi` (-tags halo2,redpallas). Tests should use
-// voteante.MockOpts() instead.
+// with `make install-ffi` (-tags halo2,redpallas). Tests should inject mock
+// verifiers directly.
 func ProductionOpts() voteante.ValidateOpts {
 	return voteante.ValidateOpts{
 		SigVerifier: redpallas.NewVerifier(),
