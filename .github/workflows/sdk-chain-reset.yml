@@ -2,7 +2,7 @@
 # wipe state, re-init primary with deterministic keys, upload genesis to DO
 # Spaces, reset the snapshot node, fund the secondary from a vote manager, then
 # join secondary and archive.
-# Manual-only staging reset: triggered via workflow_dispatch with a release tag.
+# Manual-only: triggered via workflow_dispatch with a release tag.
 
 name: Reset SDK Chain
 
@@ -18,6 +18,7 @@ on:
         type: choice
         options:
           - staging
+          - production
         default: staging
         required: true
 
@@ -28,25 +29,9 @@ env:
   TAG: ${{ inputs.tag }}
 
 jobs:
-  reject-production-reset:
-    name: Reject production reset
-    runs-on: ubuntu-latest
-    steps:
-      - name: Refuse production reset
-        env:
-          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
-        run: |
-          set -euo pipefail
-          if [ "$TARGET_ENVIRONMENT" = "production" ]; then
-            echo "ERROR: production resets are disabled in this workflow."
-            echo "Use Deploy SDK for production binary updates. Rebuilding production from genesis requires a dedicated reviewed workflow change."
-            exit 1
-          fi
-
   resolve-environment:
     name: Resolve environment settings
     runs-on: ubuntu-latest
-    needs: reject-production-reset
     environment: ${{ inputs.target_environment }}
     outputs:
       chain_id: ${{ steps.resolve.outputs.chain_id }}
