@@ -44,16 +44,6 @@ type ValidateOpts struct {
 	ZKPVerifier zkp.Verifier
 }
 
-// MockOpts returns ValidateOpts with mock verifiers for use in tests ONLY.
-// Never use in production — all proofs and signatures will be accepted
-// without cryptographic verification.
-func MockOpts() ValidateOpts {
-	return ValidateOpts{
-		SigVerifier: redpallas.NewMockVerifier(),
-		ZKPVerifier: zkp.NewMockVerifier(),
-	}
-}
-
 // ValidateVoteTx runs the full validation pipeline for a vote module transaction.
 //
 // The pipeline is designed to be called from:

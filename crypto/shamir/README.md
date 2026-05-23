@@ -61,7 +61,6 @@ During the tally phase, $VK_i$ (needed for DLEQ proof verification) is derived o
 | Function | Purpose |
 |---|---|
 | `Split(secret, t, n)` | Generate $n$ shares from a degree-$(t{-}1)$ polynomial with $f(0) = \text{secret}$. Returns shares and coefficients. |
-| `Reconstruct(shares, t)` | Recover the secret from $\geq t$ shares via Lagrange at $x = 0$. Test-only — production uses `CombinePartials`. |
 | `LagrangeCoefficients(indices, target)` | Compute Lagrange basis scalars for given evaluation points at an arbitrary target. |
 | `FeldmanCommit(G, coeffs)` | Compute Feldman commitments $C_j = a_j \cdot G$ from the polynomial coefficients returned by `Split`. |
 | `VerifyFeldmanShare(G, commitments, index, share)` | Check a share against Feldman commitments: $\text{share} \cdot G = \sum C_j \cdot i^j$. |
