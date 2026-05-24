@@ -229,7 +229,8 @@ export function VoteManagerKeysPage({ wallet }: { wallet: UseWallet }) {
                 keplr.app/get
                 <ExternalLink size={10} />
               </a>
-              {" "}for Firefox / other browsers).
+              {" "}for Firefox / other browsers), <em>or</em> install Keplr
+              Mobile and open this page in the Keplr in-app browser.
             </li>
             <li>Create a new wallet or import an existing one.</li>
             <li>Pin the Keplr extension to the browser toolbar.</li>
