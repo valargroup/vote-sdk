@@ -18,7 +18,7 @@ import { VoteManagerKeysPage } from "./components/VoteManagerKeysPage";
 import { useDetectedChainId } from "./hooks/useDetectedChainId";
 import { useStore } from "./store/useStore";
 import { SAMPLE_ROUND_TEMPLATES, type SampleRoundTemplateId } from "./store/sampleRounds";
-import { Shield, Plus, FileText, Settings, Settings2, RefreshCw, CheckCircle2, AlertCircle, AlertTriangle, X, Loader2, Server, Database, Eye, EyeOff, Wallet, Unplug, BarChart3, Copy, Check, Users, ExternalLink, ShieldAlert, ShieldCheck, GripVertical, MoreHorizontal, Trash2, Lock, ChevronDown, ArrowLeft, ClipboardCheck } from "lucide-react";
+import { Shield, Plus, FileText, Settings, Settings2, RefreshCw, CheckCircle2, AlertCircle, AlertTriangle, X, Loader2, Server, Database, Eye, EyeOff, Wallet, Unplug, BarChart3, Copy, Check, Users, ExternalLink, ShieldAlert, ShieldCheck, GripVertical, MoreHorizontal, Trash2, Lock, ChevronDown, ArrowLeft, ClipboardCheck, Menu } from "lucide-react";
 import type { Proposal, RoundSettings, RoundStatus, VotingRound } from "./types";
 import { MAX_VOTE_OPTIONS, MIN_VOTE_OPTIONS } from "./constants/vote";
 import {
@@ -132,6 +132,11 @@ function App() {
   const [route, setRouteState] = useState<AppRoute>(routeFromPath);
   const section = route.section;
   const [filter, setFilter] = useState<RoundStatus | "all">("all");
+  // Sidebar is a slide-in drawer on mobile; always-visible on md+ via CSS.
+  // Initial state: open on desktop, collapsed on mobile.
+  const [sidebarOpen, setSidebarOpen] = useState(
+    () => typeof window !== "undefined" && window.innerWidth >= 768,
+  );
   const importRef = useRef<HTMLInputElement>(null);
   const [publishModal, setPublishModal] = useState<string | null>(null); // round id
   const [publishStatus, setPublishStatus] = useState<"idle" | "publishing" | "ok" | "error">("idle");
@@ -371,6 +376,15 @@ function App() {
         onChange={handleFileImport}
       />
 
+      {/* Mobile backdrop: tapping it closes the drawer */}
+      {sidebarOpen && (
+        <div
+          className="md:hidden fixed inset-0 bg-black/50 z-30"
+          onClick={() => setSidebarOpen(false)}
+          aria-hidden
+        />
+      )}
+
       <Sidebar
         rounds={store.rounds}
         activeRoundId={store.activeRoundId}
@@ -381,9 +395,21 @@ function App() {
         onNavigate={handleNavigate}
         onDeleteRound={store.deleteRound}
         currentSection={section}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
       />
 
-      <main className="flex-1 flex flex-col overflow-hidden">
+      <main className="flex-1 flex flex-col overflow-hidden min-w-0">
+        {/* Mobile-only top strip with hamburger */}
+        <div className="md:hidden flex items-center px-2 py-2 bg-surface-1 border-b border-border">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="p-1.5 rounded-md hover:bg-surface-2 text-text-secondary cursor-pointer"
+            aria-label="Open menu"
+          >
+            <Menu size={18} />
+          </button>
+        </div>
         {/* About page */}
         {section === "about" && (
           <AboutPage

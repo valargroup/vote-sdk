@@ -581,7 +581,7 @@ export function AttestRoundEntryPage() {
                         key_id: keyInfo.signerId,
                         alg: "ed25519",
                         pubkey: keyInfo.publicKeyB64,
-                        notes: `Vote-manager Keplr-derived key for ${keyInfo.sourceAddress}`,
+                        notes: `derived key for ${keyInfo.sourceAddress}`,
                       },
                       null,
                       2

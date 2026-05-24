@@ -73,7 +73,9 @@ let keplrChainId = "";
 
 export async function connectKeplr(restUrl: string, rpcUrl: string): Promise<WalletConnection> {
   if (!window.keplr) {
-    throw new Error("Keplr extension not found. Please install Keplr to connect your wallet.");
+    throw new Error(
+      "Keplr not found. Install the Keplr extension, or install Keplr Mobile and open this page in the Keplr in-app browser, to connect your wallet."
+    );
   }
 
   const chainId = await fetchChainId(restUrl);
