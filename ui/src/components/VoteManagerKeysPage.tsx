@@ -31,7 +31,20 @@ const KEPLR_LINKS = {
   download: "https://www.keplr.app/get",
   chromeStore:
     "https://chromewebstore.google.com/detail/keplr/dmkamcknogkgcdfhhbddcghachkejeap",
+  appStore: "https://apps.apple.com/us/app/keplr-wallet/id1567851089",
+  playStore:
+    "https://play.google.com/store/apps/details?id=com.chainapsis.keplr",
 };
+
+type KeplrPlatform = "ios" | "android" | "desktop";
+
+function detectKeplrPlatform(): KeplrPlatform {
+  if (typeof navigator === "undefined") return "desktop";
+  const ua = navigator.userAgent;
+  if (/iPad|iPhone|iPod/.test(ua)) return "ios";
+  if (/Android/.test(ua)) return "android";
+  return "desktop";
+}
 
 const ENV_LABELS: Record<"prod" | "stage", string> = {
   prod: "production",
@@ -59,6 +72,30 @@ export function VoteManagerKeysPage({ wallet }: { wallet: UseWallet }) {
 
   const keplrConnected =
     !!wallet.address && wallet.source === "keplr" && !!wallet.chainId;
+
+  const platform = useMemo(detectKeplrPlatform, []);
+  const installLink = useMemo(() => {
+    if (platform === "ios") {
+      return {
+        href: KEPLR_LINKS.appStore,
+        storeName: "App Store",
+        buttonLabel: "Install from App Store",
+      };
+    }
+    if (platform === "android") {
+      return {
+        href: KEPLR_LINKS.playStore,
+        storeName: "Google Play",
+        buttonLabel: "Install from Google Play",
+      };
+    }
+    return {
+      href: KEPLR_LINKS.chromeStore,
+      storeName: "Chrome Web Store",
+      buttonLabel: "Install from Chrome Web Store",
+    };
+  }, [platform]);
+  const isMobile = platform !== "desktop";
 
   // Clear derived key when user switches Keplr accounts.
   useEffect(() => {
@@ -208,30 +245,48 @@ export function VoteManagerKeysPage({ wallet }: { wallet: UseWallet }) {
             1 · Install Keplr
           </h2>
           <ol className="space-y-2 text-[11px] text-text-secondary list-decimal list-inside">
-            <li>
-              Install the Keplr extension from the{" "}
-              <a
-                href={KEPLR_LINKS.chromeStore}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1 text-accent hover:text-accent/80 underline-offset-2 hover:underline"
-              >
-                Chrome Web Store
-                <ExternalLink size={10} />
-              </a>
-              {" "}(or see{" "}
-              <a
-                href={KEPLR_LINKS.download}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1 text-accent hover:text-accent/80 underline-offset-2 hover:underline"
-              >
-                keplr.app/get
-                <ExternalLink size={10} />
-              </a>
-              {" "}for Firefox / other browsers), <em>or</em> install Keplr
-              Mobile and open this page in the Keplr in-app browser.
-            </li>
+            {isMobile ? (
+              <li>
+                Install Keplr Mobile from the{" "}
+                <a
+                  href={installLink.href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-accent hover:text-accent/80 underline-offset-2 hover:underline"
+                >
+                  {installLink.storeName}
+                  <ExternalLink size={10} />
+                </a>
+                , then open this page in the Keplr in-app browser. Already
+                have it? Open Keplr Mobile, tap the browser tab, and paste
+                this page&apos;s URL.
+              </li>
+            ) : (
+              <li>
+                Install the Keplr extension from the{" "}
+                <a
+                  href={installLink.href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-accent hover:text-accent/80 underline-offset-2 hover:underline"
+                >
+                  {installLink.storeName}
+                  <ExternalLink size={10} />
+                </a>
+                {" "}(or see{" "}
+                <a
+                  href={KEPLR_LINKS.download}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-accent hover:text-accent/80 underline-offset-2 hover:underline"
+                >
+                  keplr.app/get
+                  <ExternalLink size={10} />
+                </a>
+                {" "}for Firefox / other browsers), <em>or</em> install Keplr
+                Mobile and open this page in the Keplr in-app browser.
+              </li>
+            )}
             <li>Create a new wallet or import an existing one.</li>
             <li>Return to this page and click <strong>Connect Keplr</strong> below.</li>
             <li>
@@ -241,13 +296,13 @@ export function VoteManagerKeysPage({ wallet }: { wallet: UseWallet }) {
           </ol>
           <div className="flex flex-wrap gap-2 pt-1">
             <a
-              href={KEPLR_LINKS.chromeStore}
+              href={installLink.href}
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-accent/90 hover:bg-accent text-surface-0 rounded-md text-[11px] font-semibold transition-colors cursor-pointer"
             >
               <ExternalLink size={11} />
-              Install from Chrome Web Store
+              {installLink.buttonLabel}
             </a>
           </div>
         </section>
