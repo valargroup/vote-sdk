@@ -16,6 +16,7 @@ import {
   ClipboardCheck,
   KeyRound,
   BadgeCheck,
+  X,
 } from "lucide-react";
 import type { VotingRound, RoundStatus } from "../types";
 
@@ -66,6 +67,8 @@ interface SidebarProps {
   onNavigate: (section: string) => void;
   onDeleteRound: (id: string) => void;
   currentSection: string;
+  isOpen: boolean;
+  onClose: () => void;
 }
 
 export function Sidebar({
@@ -73,18 +76,46 @@ export function Sidebar({
   activeRoundId,
   activeFilter,
   onFilterChange,
-  onSelectRound,
-  onCreateRound,
-  onNavigate,
+  onSelectRound: rawSelectRound,
+  onCreateRound: rawCreateRound,
+  onNavigate: rawNavigate,
   onDeleteRound,
   currentSection,
+  isOpen,
+  onClose,
 }: SidebarProps) {
+  // Wrap nav/select/create so any selection auto-closes the mobile drawer.
+  const onNavigate = (section: string) => {
+    rawNavigate(section);
+    onClose();
+  };
+  const onSelectRound = (id: string) => {
+    rawSelectRound(id);
+    onClose();
+  };
+  const onCreateRound = () => {
+    rawCreateRound();
+    onClose();
+  };
+
   const recentRounds = [...rounds]
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
     .slice(0, 5);
 
   return (
-    <aside className="w-[280px] min-w-[280px] h-screen bg-surface-1 border-r border-border flex flex-col">
+    <aside
+      className={`fixed md:static inset-y-0 left-0 z-40 w-[280px] min-w-[280px] h-screen bg-surface-1 border-r border-border flex flex-col transform transition-transform duration-200 ease-out ${
+        isOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+      }`}
+    >
+      {/* Mobile close button */}
+      <button
+        onClick={onClose}
+        className="md:hidden absolute top-3 right-3 z-10 p-1.5 rounded-md hover:bg-surface-2 text-text-secondary cursor-pointer"
+        aria-label="Close menu"
+      >
+        <X size={16} />
+      </button>
       {/* Header */}
       <div className="p-4 border-b border-border-subtle">
         <button
