@@ -314,8 +314,12 @@ jobs:
           s3cmd -c /tmp/do-spaces.s3cfg put scripts/svoted-wrapper.sh "s3://${DO_SPACES_BUCKET}/svoted-wrapper.sh" --acl-public --force
           s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force join.sh \
             "s3://${DO_SPACES_BUCKET}/scripts/join/${VERSION}/join.sh"
-          s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force join-full.sh \
+          VERSIONED_JOIN_FULL="$(mktemp)"
+          sed "s|^SVOTE_JOIN_COMMON_VERSION=.*|SVOTE_JOIN_COMMON_VERSION=\"\${SVOTE_JOIN_COMMON_VERSION:-${VERSION}}\"|" \
+            join-full.sh > "${VERSIONED_JOIN_FULL}"
+          s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force "${VERSIONED_JOIN_FULL}" \
             "s3://${DO_SPACES_BUCKET}/scripts/join-full/${VERSION}/join-full.sh"
+          rm -f "${VERSIONED_JOIN_FULL}"
           s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force scripts/_join_common.sh \
             "s3://${DO_SPACES_BUCKET}/scripts/join-common/${VERSION}/_join_common.sh"
           s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force scripts/reset-validator-snapshot.sh \
@@ -348,10 +352,14 @@ jobs:
           for KEY in \
             "version.txt" \
             "join.sh" \
+            "join-full.sh" \
+            "scripts/_join_common.sh" \
             "reset-validator-snapshot.sh" \
             "remove-validator.sh" \
             "remove-pir.sh" \
             "svoted-wrapper.sh" \
+            "scripts/join-full/${VERSION}/join-full.sh" \
+            "scripts/join-common/${VERSION}/_join_common.sh" \
             "scripts/join/${VERSION}/join.sh" \
             "scripts/reset-validator-snapshot/${VERSION}/reset-validator-snapshot.sh" \
             "scripts/remove-validator/${VERSION}/remove-validator.sh" \

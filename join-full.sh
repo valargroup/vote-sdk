@@ -10,6 +10,7 @@
 set -euo pipefail
 
 SVOTE_ENV="${SVOTE_ENV:-prod}"
+SVOTE_JOIN_COMMON_VERSION="${SVOTE_JOIN_COMMON_VERSION:-}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --env)
@@ -51,7 +52,9 @@ svote_source_common() {
   elif [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" != "bash" ]; then
     local script_dir
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    if [ -f "${script_dir}/scripts/_join_common.sh" ]; then
+    if [ -f "${script_dir}/_join_common.sh" ]; then
+      common="${script_dir}/_join_common.sh"
+    elif [ -f "${script_dir}/scripts/_join_common.sh" ]; then
       common="${script_dir}/scripts/_join_common.sh"
     fi
   fi
@@ -59,7 +62,13 @@ svote_source_common() {
   if [ -z "${common}" ]; then
     local tmp
     tmp=$(mktemp)
-    curl -fsSL "$(svote_bootstrap_do_base)/scripts/_join_common.sh" -o "${tmp}"
+    if [ -n "${SVOTE_JOIN_COMMON_URL:-}" ]; then
+      curl -fsSL "${SVOTE_JOIN_COMMON_URL}" -o "${tmp}"
+    elif [ -n "${SVOTE_JOIN_COMMON_VERSION}" ]; then
+      curl -fsSL "$(svote_bootstrap_do_base)/scripts/join-common/${SVOTE_JOIN_COMMON_VERSION}/_join_common.sh" -o "${tmp}"
+    else
+      curl -fsSL "$(svote_bootstrap_do_base)/scripts/_join_common.sh" -o "${tmp}"
+    fi
     common="${tmp}"
   fi
 

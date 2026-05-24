@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	abci "github.com/cometbft/cometbft/abci/types"
+	"github.com/mikelodder7/curvey"
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/proto"
 
@@ -227,12 +228,26 @@ func verifyTallyEntry(
 		check.Failure = fmt.Sprintf("invalid accumulator: %v", err)
 		return check
 	}
+	commitmentPts, err := deserializeTallyVerifierFeldmanCommitments(round.FeldmanCommitments)
+	if err != nil {
+		check.Failure = fmt.Sprintf("invalid feldman commitments: %v", err)
+		return check
+	}
 
 	shamirPartials := make([]shamir.PartialDecryption, len(partials))
 	for i, partial := range partials {
 		point, err := elgamal.UnmarshalPoint(partial.PartialDecrypt)
 		if err != nil {
 			check.Failure = fmt.Sprintf("invalid partial from validator %d: %v", partial.ValidatorIndex, err)
+			return check
+		}
+		vkPoint, err := shamir.EvalCommitmentPolynomial(commitmentPts, int(partial.ValidatorIndex))
+		if err != nil {
+			check.Failure = fmt.Sprintf("invalid validator index %d: %v", partial.ValidatorIndex, err)
+			return check
+		}
+		if err := elgamal.VerifyPartialDecryptDLEQ(partial.DleqProof, vkPoint, ct.C1, point); err != nil {
+			check.Failure = fmt.Sprintf("invalid DLEQ proof from validator %d: %v", partial.ValidatorIndex, err)
 			return check
 		}
 		shamirPartials[i] = shamir.PartialDecryption{
@@ -256,6 +271,21 @@ func verifyTallyEntry(
 		check.Failure = "C2 - combined_partial != total_value * G"
 	}
 	return check
+}
+
+func deserializeTallyVerifierFeldmanCommitments(raw [][]byte) ([]curvey.Point, error) {
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("empty feldman commitments")
+	}
+	pts := make([]curvey.Point, len(raw))
+	for i, b := range raw {
+		pt, err := elgamal.DecompressPallasPoint(b)
+		if err != nil {
+			return nil, fmt.Errorf("feldman commitment %d: %w", i, err)
+		}
+		pts[i] = pt
+	}
+	return pts, nil
 }
 
 func queryVoteModule(clientCtx client.Context, path string, req proto.Message, resp proto.Message) error {
