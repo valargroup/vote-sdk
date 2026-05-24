@@ -24,6 +24,7 @@ const (
 	Query_VoteRound_FullMethodName                 = "/svote.v1.Query/VoteRound"
 	Query_ProposalTally_FullMethodName             = "/svote.v1.Query/ProposalTally"
 	Query_TallyResults_FullMethodName              = "/svote.v1.Query/TallyResults"
+	Query_PartialDecryptions_FullMethodName        = "/svote.v1.Query/PartialDecryptions"
 	Query_CommitmentLeaves_FullMethodName          = "/svote.v1.Query/CommitmentLeaves"
 	Query_ActiveRound_FullMethodName               = "/svote.v1.Query/ActiveRound"
 	Query_CeremonyState_FullMethodName             = "/svote.v1.Query/CeremonyState"
@@ -53,6 +54,8 @@ type QueryClient interface {
 	ProposalTally(ctx context.Context, in *QueryProposalTallyRequest, opts ...grpc.CallOption) (*QueryProposalTallyResponse, error)
 	// TallyResults returns finalized tally results for a vote round (after MsgSubmitTally).
 	TallyResults(ctx context.Context, in *QueryTallyResultsRequest, opts ...grpc.CallOption) (*QueryTallyResultsResponse, error)
+	// PartialDecryptions returns all stored validator partial decryptions for a vote round.
+	PartialDecryptions(ctx context.Context, in *QueryPartialDecryptionsRequest, opts ...grpc.CallOption) (*QueryPartialDecryptionsResponse, error)
 	// CommitmentLeaves returns the commitment tree leaves organized by block height.
 	// Used by remote clients implementing TreeSyncApi to sync the vote commitment tree.
 	CommitmentLeaves(ctx context.Context, in *QueryCommitmentLeavesRequest, opts ...grpc.CallOption) (*QueryCommitmentLeavesResponse, error)
@@ -132,6 +135,16 @@ func (c *queryClient) TallyResults(ctx context.Context, in *QueryTallyResultsReq
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(QueryTallyResultsResponse)
 	err := c.cc.Invoke(ctx, Query_TallyResults_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryClient) PartialDecryptions(ctx context.Context, in *QueryPartialDecryptionsRequest, opts ...grpc.CallOption) (*QueryPartialDecryptionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(QueryPartialDecryptionsResponse)
+	err := c.cc.Invoke(ctx, Query_PartialDecryptions_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -264,6 +277,8 @@ type QueryServer interface {
 	ProposalTally(context.Context, *QueryProposalTallyRequest) (*QueryProposalTallyResponse, error)
 	// TallyResults returns finalized tally results for a vote round (after MsgSubmitTally).
 	TallyResults(context.Context, *QueryTallyResultsRequest) (*QueryTallyResultsResponse, error)
+	// PartialDecryptions returns all stored validator partial decryptions for a vote round.
+	PartialDecryptions(context.Context, *QueryPartialDecryptionsRequest) (*QueryPartialDecryptionsResponse, error)
 	// CommitmentLeaves returns the commitment tree leaves organized by block height.
 	// Used by remote clients implementing TreeSyncApi to sync the vote commitment tree.
 	CommitmentLeaves(context.Context, *QueryCommitmentLeavesRequest) (*QueryCommitmentLeavesResponse, error)
@@ -313,6 +328,9 @@ func (UnimplementedQueryServer) ProposalTally(context.Context, *QueryProposalTal
 }
 func (UnimplementedQueryServer) TallyResults(context.Context, *QueryTallyResultsRequest) (*QueryTallyResultsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method TallyResults not implemented")
+}
+func (UnimplementedQueryServer) PartialDecryptions(context.Context, *QueryPartialDecryptionsRequest) (*QueryPartialDecryptionsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PartialDecryptions not implemented")
 }
 func (UnimplementedQueryServer) CommitmentLeaves(context.Context, *QueryCommitmentLeavesRequest) (*QueryCommitmentLeavesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CommitmentLeaves not implemented")
@@ -454,6 +472,24 @@ func _Query_TallyResults_Handler(srv interface{}, ctx context.Context, dec func(
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(QueryServer).TallyResults(ctx, req.(*QueryTallyResultsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Query_PartialDecryptions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryPartialDecryptionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).PartialDecryptions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Query_PartialDecryptions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).PartialDecryptions(ctx, req.(*QueryPartialDecryptionsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -682,6 +718,10 @@ var Query_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "TallyResults",
 			Handler:    _Query_TallyResults_Handler,
+		},
+		{
+			MethodName: "PartialDecryptions",
+			Handler:    _Query_PartialDecryptions_Handler,
 		},
 		{
 			MethodName: "CommitmentLeaves",

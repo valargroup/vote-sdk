@@ -3,6 +3,7 @@ package keeper
 import (
 	"context"
 	"errors"
+	"sort"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"google.golang.org/grpc/codes"
@@ -140,6 +141,50 @@ func (qs queryServer) TallyResults(goCtx context.Context, req *types.QueryTallyR
 	}
 
 	return &types.QueryTallyResultsResponse{Results: results}, nil
+}
+
+// PartialDecryptions returns all stored validator partial decryptions for a vote round.
+func (qs queryServer) PartialDecryptions(goCtx context.Context, req *types.QueryPartialDecryptionsRequest) (*types.QueryPartialDecryptionsResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "empty request")
+	}
+	if len(req.VoteRoundId) != types.RoundIDLen {
+		return nil, status.Errorf(codes.InvalidArgument, "vote_round_id must be exactly %d bytes, got %d", types.RoundIDLen, len(req.VoteRoundId))
+	}
+
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	kvStore := qs.k.OpenKVStore(ctx)
+
+	partialsByAccumulator, err := qs.k.GetPartialDecryptionsForRound(kvStore, req.VoteRoundId)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get partial decryptions: %v", err)
+	}
+
+	var entries []*types.StoredPartialDecryption
+	for accumulatorKey, partials := range partialsByAccumulator {
+		proposalID := uint32(accumulatorKey >> 32)
+		voteDecision := uint32(accumulatorKey)
+		for _, partial := range partials {
+			entries = append(entries, &types.StoredPartialDecryption{
+				ValidatorIndex: partial.ValidatorIndex,
+				ProposalId:     proposalID,
+				VoteDecision:   voteDecision,
+				PartialDecrypt: partial.PartialDecrypt,
+				DleqProof:      partial.DleqProof,
+			})
+		}
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].ProposalId != entries[j].ProposalId {
+			return entries[i].ProposalId < entries[j].ProposalId
+		}
+		if entries[i].VoteDecision != entries[j].VoteDecision {
+			return entries[i].VoteDecision < entries[j].VoteDecision
+		}
+		return entries[i].ValidatorIndex < entries[j].ValidatorIndex
+	})
+
+	return &types.QueryPartialDecryptionsResponse{Entries: entries}, nil
 }
 
 // CommitmentLeaves returns the commitment tree leaves for a round, organized by block height.

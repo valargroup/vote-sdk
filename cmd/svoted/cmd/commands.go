@@ -229,6 +229,7 @@ func queryCommand() *cobra.Command {
 		server.QueryBlocksCmd(),
 		authcmd.QueryTxCmd(),
 		server.QueryBlockResultsCmd(),
+		votecli.GetQueryCmd(),
 	)
 
 	return cmd
