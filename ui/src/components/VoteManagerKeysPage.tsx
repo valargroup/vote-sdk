@@ -138,12 +138,12 @@ export function VoteManagerKeysPage({ wallet }: { wallet: UseWallet }) {
           <div className="flex items-center gap-2 mb-2">
             <KeyRound size={18} className="text-accent" />
             <h1 className="text-lg font-bold text-text-primary">
-              Vote Manager Keys
+              Vote Coordinator Keys
             </h1>
           </div>
           <p className="text-[11px] text-text-muted max-w-2xl">
             Use this page to generate the two public keys needed to become a
-            Shielded Vote manager. Connect Keplr, sign a challenge,
+            Vote coordinator. Connect Keplr, sign a challenge,
             and copy the resulting handoff message.
           </p>
         </div>

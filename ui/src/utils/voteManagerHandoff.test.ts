@@ -12,7 +12,7 @@ describe("buildTrustedKeyEntry", () => {
       key_id: "keplr:sv1abc",
       alg: "ed25519",
       pubkey: "AAAA",
-      notes: "Vote-manager Keplr-derived key for sv1abc",
+      notes: "derived key for sv1abc",
     });
   });
 });
