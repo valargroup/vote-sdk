@@ -30,13 +30,13 @@ svote_default_voting_config_url_for_env() {
 svote_resolve_do_base() {
   local do_base_override="${SVOTE_DO_SPACES_BASE:-${DO_SPACES_BASE:-}}"
   local do_bucket="${SVOTE_DO_SPACES_BUCKET:-${DO_SPACES_BUCKET:-}}"
-  local do_region="${SVOTE_DO_SPACES_REGION:-${DO_SPACES_REGION:-fra1}}"
+  local do_region="${SVOTE_DO_SPACES_REGION:-${DO_SPACES_REGION:-nyc3}}"
   if [ -n "${do_base_override}" ]; then
     DO_BASE="${do_base_override}"
   elif [ -n "${do_bucket}" ]; then
     DO_BASE="https://${do_bucket}.${do_region}.digitaloceanspaces.com"
   else
-    DO_BASE="https://vote.fra1.digitaloceanspaces.com"
+    DO_BASE="https://shielded-vote.nyc3.digitaloceanspaces.com"
   fi
   DO_BASE="${DO_BASE%/}"
   export DO_BASE

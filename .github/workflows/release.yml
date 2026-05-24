@@ -287,8 +287,8 @@ jobs:
           DO_SPACES_REGION: ${{ vars.DO_SPACES_REGION }}
         run: |
           set -euo pipefail
-          DO_SPACES_BUCKET="${DO_SPACES_BUCKET:-vote}"
-          DO_SPACES_REGION="${DO_SPACES_REGION:-fra1}"
+          DO_SPACES_BUCKET="${DO_SPACES_BUCKET:-shielded-vote}"
+          DO_SPACES_REGION="${DO_SPACES_REGION:-nyc3}"
           pip install --quiet s3cmd
           cat > /tmp/do-spaces.s3cfg <<EOF
           [default]

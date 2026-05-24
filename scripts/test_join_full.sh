@@ -74,6 +74,7 @@ for PLATFORM in "${PLATFORMS[@]}"; do
   echo "--- Running join-full.sh and sync verification ---"
   if docker run --rm --platform "${PLATFORM}" \
       -e "SVOTE_ENV=${SVOTE_ENV:-prod}" \
+      -e "SVOTE_DO_SPACES_BASE=${SVOTE_DO_SPACES_BASE:-}" \
       -e "SVOTE_SKIP_SNAPSHOT=${SVOTE_SKIP_SNAPSHOT:-0}" \
       -e "SVOTE_FORCE_RESET=1" \
       "${TAG}" bash -lc '

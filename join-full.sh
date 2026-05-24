@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # join-full.sh — Join the Shielded-Vote chain as a regular full node.
 #
-#   curl -fsSL https://vote.fra1.digitaloceanspaces.com/join-full.sh | bash
-#   curl -fsSL https://vote.fra1.digitaloceanspaces.com/join-full.sh | bash -s -- --env stage
+#   curl -fsSL https://shielded-vote.nyc3.digitaloceanspaces.com/join-full.sh | bash
+#   curl -fsSL https://shielded-vote.nyc3.digitaloceanspaces.com/join-full.sh | bash -s -- --env stage
 #
 # This observer-only installer does not generate validator keys, register with
 # the join queue, expose a helper server, or configure public TLS.
@@ -34,13 +34,13 @@ done
 svote_bootstrap_do_base() {
   local do_base_override="${SVOTE_DO_SPACES_BASE:-${DO_SPACES_BASE:-}}"
   local do_bucket="${SVOTE_DO_SPACES_BUCKET:-${DO_SPACES_BUCKET:-}}"
-  local do_region="${SVOTE_DO_SPACES_REGION:-${DO_SPACES_REGION:-fra1}}"
+  local do_region="${SVOTE_DO_SPACES_REGION:-${DO_SPACES_REGION:-nyc3}}"
   if [ -n "${do_base_override}" ]; then
     printf '%s\n' "${do_base_override%/}"
   elif [ -n "${do_bucket}" ]; then
     printf 'https://%s.%s.digitaloceanspaces.com\n' "${do_bucket}" "${do_region}"
   else
-    printf '%s\n' "https://vote.fra1.digitaloceanspaces.com"
+    printf '%s\n' "https://shielded-vote.nyc3.digitaloceanspaces.com"
   fi
 }
 
