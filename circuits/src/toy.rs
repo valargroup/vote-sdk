@@ -234,11 +234,13 @@ impl<F: Field> Circuit<F> for ToyCircuit<F> {
 
 use halo2_proofs::{
     pasta::{EqAffine, Fp},
-    plonk::{create_proof, keygen_pk, keygen_vk, verify_proof, SingleVerifier},
+    plonk::{create_proof, keygen_pk, keygen_vk},
     poly::commitment::Params,
-    transcript::{Blake2bRead, Blake2bWrite, Challenge255},
+    transcript::{Blake2bWrite, Challenge255},
 };
 use rand_core::OsRng;
+
+use crate::proof::{verify_halo2_proof_bytes, ProofVerifyError};
 
 /// Generate the IPA params (SRS) for our toy circuit.
 /// Deterministic for a given `k`.
@@ -305,17 +307,12 @@ pub fn verify_toy(proof: &[u8], public_input: &Fp) -> Result<(), String> {
 
     let public_inputs = vec![*public_input];
 
-    let strategy = SingleVerifier::new(&params);
-    let mut transcript = Blake2bRead::<_, EqAffine, Challenge255<_>>::init(proof);
-
-    verify_proof(
-        &params,
-        &vk,
-        strategy,
-        &[&[&public_inputs]],
-        &mut transcript,
-    )
-    .map_err(|e| format!("verification failed: {:?}", e))
+    verify_halo2_proof_bytes(&params, &vk, proof, &public_inputs).map_err(|e| match e {
+        ProofVerifyError::Halo2(e) => format!("verification failed: {:?}", e),
+        ProofVerifyError::TrailingBytes(len) => {
+            format!("verification failed: proof has {len} trailing unread bytes")
+        }
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -379,5 +376,18 @@ mod tests {
         let (mut proof, c) = create_toy_proof(2, 3);
         proof[0] ^= 0xFF;
         assert!(verify_toy(&proof, &c).is_err());
+    }
+
+    #[test]
+    fn test_real_verify_trailing_proof_bytes() {
+        let (mut proof, c) = create_toy_proof(2, 3);
+        proof.extend_from_slice(b"junk");
+
+        let err = verify_toy(&proof, &c).expect_err("trailing proof bytes must fail");
+
+        assert!(
+            err.contains("4 trailing unread bytes"),
+            "unexpected error: {err}"
+        );
     }
 }

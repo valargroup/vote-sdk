@@ -50,6 +50,17 @@ func TestToyProofCorrupted(t *testing.T) {
 	require.Error(t, err, "corrupted proof should fail verification")
 }
 
+func TestToyProofTrailingBytes(t *testing.T) {
+	proof := mustReadFixture(t, "toy_valid_proof.bin")
+	input := mustReadFixture(t, "toy_valid_input.bin")
+
+	withTrailingBytes := append(append([]byte{}, proof...), []byte("junk")...)
+	err := VerifyToyProof(withTrailingBytes, input)
+
+	require.Error(t, err, "proof with trailing bytes should fail verification")
+	require.Contains(t, err.Error(), "4 trailing unread bytes")
+}
+
 func TestToyProofEmptyProof(t *testing.T) {
 	input := mustReadFixture(t, "toy_valid_input.bin")
 	err := VerifyToyProof([]byte{}, input)

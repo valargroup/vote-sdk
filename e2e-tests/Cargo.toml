@@ -50,3 +50,7 @@ rand = "0.8"
 rand_chacha = "0.3"
 
 [workspace]
+
+[patch.crates-io]
+# TODO: replace with crates.io release once tagged.
+voting-circuits = { git = "https://github.com/valargroup/voting-circuits.git", rev = "ac9c6251045f4b55494ae0fe32928b0f0e8914f2" }
