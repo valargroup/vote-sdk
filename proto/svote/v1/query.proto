@@ -22,6 +22,9 @@ service Query {
   // TallyResults returns finalized tally results for a vote round (after MsgSubmitTally).
   rpc TallyResults(QueryTallyResultsRequest) returns (QueryTallyResultsResponse);
 
+  // PartialDecryptions returns all stored validator partial decryptions for a vote round.
+  rpc PartialDecryptions(QueryPartialDecryptionsRequest) returns (QueryPartialDecryptionsResponse);
+
   // CommitmentLeaves returns the commitment tree leaves organized by block height.
   // Used by remote clients implementing TreeSyncApi to sync the vote commitment tree.
   rpc CommitmentLeaves(QueryCommitmentLeavesRequest) returns (QueryCommitmentLeavesResponse);
@@ -100,6 +103,22 @@ message QueryTallyResultsRequest {
 
 message QueryTallyResultsResponse {
   repeated TallyResult results = 1;
+}
+
+message QueryPartialDecryptionsRequest {
+  bytes vote_round_id = 1;
+}
+
+message QueryPartialDecryptionsResponse {
+  repeated StoredPartialDecryption entries = 1;
+}
+
+message StoredPartialDecryption {
+  uint32 validator_index = 1;
+  uint32 proposal_id     = 2;
+  uint32 vote_decision   = 3;
+  bytes  partial_decrypt = 4;
+  bytes  dleq_proof      = 5;
 }
 
 message QueryCommitmentLeavesRequest {

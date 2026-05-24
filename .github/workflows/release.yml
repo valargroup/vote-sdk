@@ -7,7 +7,7 @@
 #     explorer/dist/                       (ping-pub block explorer SPA)
 #     systemd/svoted-val{1,2,3}.service    (Linux only)
 #     scripts/init_multi.sh, reset-archive.sh, reset-validator-snapshot.sh,
-#     svoted-wrapper.sh, _vote_manager_keys_lib.sh
+#     svoted-wrapper.sh, _vote_manager_keys_lib.sh, _join_common.sh
 #     config/Caddyfile
 
 name: Release
@@ -222,7 +222,11 @@ jobs:
                   "$f" > "${DIR}/systemd/${name}"
             done
           fi
+          cp join-full.sh "${DIR}/scripts/"
+          chmod +x "${DIR}/scripts/join-full.sh"
           cp scripts/init_multi.sh scripts/_vote_manager_keys_lib.sh "${DIR}/scripts/"
+          cp scripts/_join_common.sh "${DIR}/scripts/"
+          chmod +x "${DIR}/scripts/_join_common.sh"
           cp scripts/render-explorer-dist.sh "${DIR}/scripts/"
           chmod +x "${DIR}/scripts/render-explorer-dist.sh"
           cp scripts/reset-archive.sh "${DIR}/scripts/"
@@ -302,12 +306,18 @@ jobs:
           echo "${VERSION}" > /tmp/version.txt
           s3cmd -c /tmp/do-spaces.s3cfg put /tmp/version.txt "s3://${DO_SPACES_BUCKET}/version.txt" --acl-public --force
           s3cmd -c /tmp/do-spaces.s3cfg put join.sh "s3://${DO_SPACES_BUCKET}/join.sh" --acl-public --force
+          s3cmd -c /tmp/do-spaces.s3cfg put join-full.sh "s3://${DO_SPACES_BUCKET}/join-full.sh" --acl-public --force
+          s3cmd -c /tmp/do-spaces.s3cfg put scripts/_join_common.sh "s3://${DO_SPACES_BUCKET}/scripts/_join_common.sh" --acl-public --force
           s3cmd -c /tmp/do-spaces.s3cfg put scripts/reset-validator-snapshot.sh "s3://${DO_SPACES_BUCKET}/reset-validator-snapshot.sh" --acl-public --force
           s3cmd -c /tmp/do-spaces.s3cfg put scripts/remove-validator.sh "s3://${DO_SPACES_BUCKET}/remove-validator.sh" --acl-public --force
           s3cmd -c /tmp/do-spaces.s3cfg put scripts/remove-pir.sh "s3://${DO_SPACES_BUCKET}/remove-pir.sh" --acl-public --force
           s3cmd -c /tmp/do-spaces.s3cfg put scripts/svoted-wrapper.sh "s3://${DO_SPACES_BUCKET}/svoted-wrapper.sh" --acl-public --force
           s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force join.sh \
             "s3://${DO_SPACES_BUCKET}/scripts/join/${VERSION}/join.sh"
+          s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force join-full.sh \
+            "s3://${DO_SPACES_BUCKET}/scripts/join-full/${VERSION}/join-full.sh"
+          s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force scripts/_join_common.sh \
+            "s3://${DO_SPACES_BUCKET}/scripts/join-common/${VERSION}/_join_common.sh"
           s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force scripts/reset-validator-snapshot.sh \
             "s3://${DO_SPACES_BUCKET}/scripts/reset-validator-snapshot/${VERSION}/reset-validator-snapshot.sh"
           s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force scripts/remove-validator.sh \

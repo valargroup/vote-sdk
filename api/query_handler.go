@@ -31,6 +31,7 @@ import (
 //	GET /shielded-vote/v1/rounds/active
 //	GET /shielded-vote/v1/tally/{round_id}/{proposal_id}
 //	GET /shielded-vote/v1/tally-results/{round_id}
+//	GET /shielded-vote/v1/partial-decryptions/{round_id}
 //	GET /shielded-vote/v1/vote-summary/{round_id}
 //	GET /shielded-vote/v1/ceremony
 //	GET /shielded-vote/v1/pallas-keys
@@ -54,6 +55,7 @@ func (h *Handler) RegisterQueryRoutes(router *mux.Router, clientCtx client.Conte
 	router.Handle("/shielded-vote/v1/round/{round_id}", trace(http.HandlerFunc(qh.handleVoteRound))).Methods("GET")
 	router.Handle("/shielded-vote/v1/tally/{round_id}/{proposal_id}", trace(http.HandlerFunc(qh.handleProposalTally))).Methods("GET")
 	router.Handle("/shielded-vote/v1/tally-results/{round_id}", trace(http.HandlerFunc(qh.handleTallyResults))).Methods("GET")
+	router.Handle("/shielded-vote/v1/partial-decryptions/{round_id}", trace(http.HandlerFunc(qh.handlePartialDecryptions))).Methods("GET")
 	router.Handle("/shielded-vote/v1/vote-summary/{round_id}", trace(http.HandlerFunc(qh.handleVoteSummary))).Methods("GET")
 	router.Handle("/shielded-vote/v1/ceremony", trace(http.HandlerFunc(qh.handleCeremonyState))).Methods("GET")
 	router.Handle("/shielded-vote/v1/pallas-keys", trace(http.HandlerFunc(qh.handlePallasKeys))).Methods("GET")
@@ -246,6 +248,23 @@ func (qh *queryHandler) handleTallyResults(w http.ResponseWriter, r *http.Reques
 	resp := &types.QueryTallyResultsResponse{}
 
 	if err := qh.abciQuery("/svote.v1.Query/TallyResults", req, resp); err != nil {
+		writeQueryError(w, err)
+		return
+	}
+
+	writeProtoJSON(w, resp)
+}
+
+func (qh *queryHandler) handlePartialDecryptions(w http.ResponseWriter, r *http.Request) {
+	roundID := parseRoundID(w, r)
+	if roundID == nil {
+		return
+	}
+
+	req := &types.QueryPartialDecryptionsRequest{VoteRoundId: roundID}
+	resp := &types.QueryPartialDecryptionsResponse{}
+
+	if err := qh.abciQuery("/svote.v1.Query/PartialDecryptions", req, resp); err != nil {
 		writeQueryError(w, err)
 		return
 	}
