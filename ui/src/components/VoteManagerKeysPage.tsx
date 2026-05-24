@@ -233,7 +233,6 @@ export function VoteManagerKeysPage({ wallet }: { wallet: UseWallet }) {
               Mobile and open this page in the Keplr in-app browser.
             </li>
             <li>Create a new wallet or import an existing one.</li>
-            <li>Pin the Keplr extension to the browser toolbar.</li>
             <li>Return to this page and click <strong>Connect Keplr</strong> below.</li>
             <li>
               If Keplr asks to add the Shielded-Vote chain, click{" "}
