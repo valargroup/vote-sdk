@@ -18,7 +18,7 @@ All scalar operations are mod 23.
 |-----------|-------|
 | Scalar field | $\mathbb{F}_{23}$ |
 | Validators | $n = 5$ |
-| Threshold | $t = 3$ |
+| Threshold | $t = 4$ |
 | Activation quorum | $required = \lceil 4n/5 \rceil = 4$ |
 | Secret key | $sk = 7$ |
 | Public key | $pk = [sk] = [7]$ |
@@ -31,7 +31,7 @@ The tally reconstruction threshold remains the Shamir threshold:
 
 $$t(n) = \begin{cases}
 1 & n = 1 \\
-\max(2, \lceil n/2 \rceil) & n \ge 2
+\max(2, \lceil 2n/3 \rceil) & n \ge 2
 \end{cases}$$
 
 The DEALT timeout activation quorum is:
@@ -39,57 +39,59 @@ The DEALT timeout activation quorum is:
 $$required(n) = \left\lceil \frac{4n}{5} \right\rceil$$
 
 This means timeout activation strips non-ackers only when at least 80% of the
-ceremony set acknowledged. The safety check used for the liveness argument is:
+ceremony set acknowledged. With the two-thirds threshold, this can leave little
+or no extra tally liveness slack for small validator sets. The old stronger
+intersection check is no longer a universal invariant:
 
 $$2 \cdot required(n) \ge n + t(n)$$
 
-For the worked example in this file, $n=5$ and $t=3$, so $required=4$.
-The example still combines exactly $t=3$ partial decryptions during tally; the
-extra validator is activation-time liveness slack, not an input to the
-Lagrange example.
+For the worked example in this file, $n=5$ and $t=4$, so $required=4$.
+The example combines exactly $t=4$ partial decryptions during tally; timeout
+activation at 4/5 has no extra partial-decryption slack for this validator
+count.
 
 | $n$ | $t$ | $required=\lceil4n/5\rceil$ | tolerated non-ackers | $required - t$ |
 |:---:|:---:|:---------------------------:|:--------------------:|:--------------:|
 | 1 | 1 | 1 | 0 | 0 |
 | 2 | 2 | 2 | 0 | 0 |
 | 3 | 2 | 3 | 0 | 1 |
-| 4 | 2 | 4 | 0 | 2 |
-| 5 | 3 | 4 | 1 | 1 |
-| 6 | 3 | 5 | 1 | 2 |
-| 7 | 4 | 6 | 1 | 2 |
-| 8 | 4 | 7 | 1 | 3 |
-| 9 | 5 | 8 | 1 | 3 |
-| 10 | 5 | 8 | 2 | 3 |
-| 11 | 6 | 9 | 2 | 3 |
-| 12 | 6 | 10 | 2 | 4 |
-| 13 | 7 | 11 | 2 | 4 |
-| 14 | 7 | 12 | 2 | 5 |
-| 15 | 8 | 12 | 3 | 4 |
-| 16 | 8 | 13 | 3 | 5 |
-| 17 | 9 | 14 | 3 | 5 |
-| 18 | 9 | 15 | 3 | 6 |
-| 19 | 10 | 16 | 3 | 6 |
-| 20 | 10 | 16 | 4 | 6 |
+| 4 | 3 | 4 | 0 | 1 |
+| 5 | 4 | 4 | 1 | 0 |
+| 6 | 4 | 5 | 1 | 1 |
+| 7 | 5 | 6 | 1 | 1 |
+| 8 | 6 | 7 | 1 | 1 |
+| 9 | 6 | 8 | 1 | 2 |
+| 10 | 7 | 8 | 2 | 1 |
+| 11 | 8 | 9 | 2 | 1 |
+| 12 | 8 | 10 | 2 | 2 |
+| 13 | 9 | 11 | 2 | 2 |
+| 14 | 10 | 12 | 2 | 2 |
+| 15 | 10 | 12 | 3 | 2 |
+| 16 | 11 | 13 | 3 | 2 |
+| 17 | 12 | 14 | 3 | 2 |
+| 18 | 12 | 15 | 3 | 3 |
+| 19 | 13 | 16 | 3 | 3 |
+| 20 | 14 | 16 | 4 | 2 |
 
 ## Step 1 — Polynomial & Shares
 
-The dealer picks a random degree-$(t{-}1) = 2$ polynomial with the secret as the constant term:
+The dealer picks a random degree-$(t{-}1) = 3$ polynomial with the secret as the constant term:
 
-$$f(x) = \underbrace{7}_{a_0 = sk} + \underbrace{3}_{a_1} \cdot x + \underbrace{11}_{a_2} \cdot x^2 \pmod{23}$$
+$$f(x) = \underbrace{7}_{a_0 = sk} + \underbrace{3}_{a_1} \cdot x + \underbrace{11}_{a_2} \cdot x^2 + \underbrace{5}_{a_3} \cdot x^3 \pmod{23}$$
 
-The coefficients $a_1 = 3$ and $a_2 = 11$ are random. The secret $sk = 7$ is $a_0 = f(0)$.
+The coefficients $a_1 = 3$, $a_2 = 11$, and $a_3 = 5$ are random. The secret $sk = 7$ is $a_0 = f(0)$.
 
 Evaluate at $x = 1, \ldots, 5$ to get each validator's share:
 
 | Validator $i$ | $f(i)$ | $s_i \bmod 23$ |
 |:---:|:---|:---:|
-| 1 | $7 + 3(1) + 11(1) = 21$ | **21** |
-| 2 | $7 + 3(2) + 11(4) = 57$ | **11** |
-| 3 | $7 + 3(3) + 11(9) = 115$ | **0** |
-| 4 | $7 + 3(4) + 11(16) = 195$ | **11** |
-| 5 | $7 + 3(5) + 11(25) = 297$ | **21** |
+| 1 | $7 + 3(1) + 11(1) + 5(1) = 26$ | **3** |
+| 2 | $7 + 3(2) + 11(4) + 5(8) = 97$ | **5** |
+| 3 | $7 + 3(3) + 11(9) + 5(27) = 250$ | **20** |
+| 4 | $7 + 3(4) + 11(16) + 5(64) = 515$ | **9** |
+| 5 | $7 + 3(5) + 11(25) + 5(125) = 922$ | **2** |
 
-Evaluation uses Horner's method: $f(x) = a_0 + x(a_1 + x \cdot a_2)$ — only $t{-}1$ multiplications.
+Evaluation uses Horner's method: $f(x) = a_0 + x(a_1 + x(a_2 + x \cdot a_3))$ — only $t{-}1$ multiplications.
 
 **Code:** `crypto/shamir/shamir.go` — `Split()`, `evalPolynomial()`
 
@@ -120,6 +122,7 @@ $$C_j = [a_j] = a_j \cdot G \qquad \text{for } j = 0, \ldots, t{-}1$$
 | 0 | 7 (= $sk$) | $[7]$ (= $pk$) |
 | 1 | 3 | $[3]$ |
 | 2 | 11 | $[11]$ |
+| 3 | 5 | $[5]$ |
 
 Note: $C_0 = [a_0] = [sk] = pk$, so the public key is derivable from the commitments.
 
@@ -127,25 +130,25 @@ Note: $C_0 = [a_0] = [sk] = pk$, so the public key is derivable from the commitm
 
 Validator $i$ checks:
 
-$$[s_i] \;\stackrel{?}{=}\; C_0 + i \cdot C_1 + i^2 \cdot C_2$$
+$$[s_i] \;\stackrel{?}{=}\; C_0 + i \cdot C_1 + i^2 \cdot C_2 + i^3 \cdot C_3$$
 
 This works because:
 
-$$C_0 + i \cdot C_1 + i^2 \cdot C_2 = [a_0] + i \cdot [a_1] + i^2 \cdot [a_2] = [a_0 + a_1 i + a_2 i^2] = [f(i)] = [s_i]$$
+$$C_0 + i \cdot C_1 + i^2 \cdot C_2 + i^3 \cdot C_3 = [a_0] + i \cdot [a_1] + i^2 \cdot [a_2] + i^3 \cdot [a_3] = [f(i)] = [s_i]$$
 
 The scalar arithmetic "lifts" into the group without revealing any $a_j$.
 
-**Validator 1** ($s_1 = 21$):
+**Validator 1** ($s_1 = 3$):
 
-$$\text{RHS} = [7] + 1 \cdot [3] + 1 \cdot [11] = [7 + 3 + 11] = [21] \qquad \text{LHS} = [21] \quad \checkmark$$
+$$\text{RHS} = [7] + 1 \cdot [3] + 1 \cdot [11] + 1 \cdot [5] = [26 \bmod 23] = [3] \qquad \text{LHS} = [3] \quad \checkmark$$
 
-**Validator 2** ($s_2 = 11$):
+**Validator 2** ($s_2 = 5$):
 
-$$\text{RHS} = [7] + 2 \cdot [3] + 4 \cdot [11] = [7 + 6 + 44] = [57 \bmod 23] = [11] \qquad \text{LHS} = [11] \quad \checkmark$$
+$$\text{RHS} = [7] + 2 \cdot [3] + 4 \cdot [11] + 8 \cdot [5] = [97 \bmod 23] = [5] \qquad \text{LHS} = [5] \quad \checkmark$$
 
-**Validator 4** ($s_4 = 11$):
+**Validator 4** ($s_4 = 9$):
 
-$$\text{RHS} = [7] + 4 \cdot [3] + 16 \cdot [11] = [7 + 12 + 176] = [195 \bmod 23] = [11] \qquad \text{LHS} = [11] \quad \checkmark$$
+$$\text{RHS} = [7] + 4 \cdot [3] + 16 \cdot [11] + 64 \cdot [5] = [515 \bmod 23] = [9] \qquad \text{LHS} = [9] \quad \checkmark$$
 
 **Why this matters:** A malicious dealer who gives validator 2 a share from a *different* polynomial would be caught — the commitments lock in a single polynomial that all validators verify against.
 
@@ -196,13 +199,15 @@ Each validator computes a partial decryption by multiplying their share by $C_1$
 
 $$D_i = s_i \cdot C_1$$
 
-Validators 1, 2, and 4 participate ($t = 3$ required):
+Validators 1, 2, 3, and 4 participate ($t = 4$ required):
 
-$$D_1 = 21 \cdot [4] = [84 \bmod 23] = [84 - 3 \times 23] = [15]$$
+$$D_1 = 3 \cdot [4] = [12]$$
 
-$$D_2 = 11 \cdot [4] = [44 \bmod 23] = [44 - 1 \times 23] = [21]$$
+$$D_2 = 5 \cdot [4] = [20]$$
 
-$$D_4 = 11 \cdot [4] = [44 \bmod 23] = [21]$$
+$$D_3 = 20 \cdot [4] = [80 \bmod 23] = [11]$$
+
+$$D_4 = 9 \cdot [4] = [36 \bmod 23] = [13]$$
 
 Nobody reconstructs $sk$ — each validator only uses their own share.
 
@@ -228,9 +233,9 @@ In words: "The same secret $s_i$ satisfies both $VK_i = s_i \cdot G$ and $D_i = 
 
 **Public values:**
 
-$$VK_2 = [s_2] = [11], \qquad C_1 = [4], \qquad D_2 = [21]$$
+$$VK_2 = [s_2] = [5], \qquad C_1 = [4], \qquad D_2 = [20]$$
 
-**Prover (validator 2, knows $s_2 = 11$):**
+**Prover (validator 2, knows $s_2 = 5$):**
 
 **1. Commit** — pick random $k = 9$, compute:
 
@@ -242,29 +247,29 @@ The prover locks in $k$ before seeing the challenge. This prevents cheating — 
 
 **2. Challenge** — Fiat-Shamir hash of all public values plus commitments:
 
-$$e = H\!\left(\texttt{"svote-pd-dleq-v1"} \| G \| [11] \| [4] \| [21] \| [9] \| [13]\right) = 5 \quad \text{(toy hash)}$$
+$$e = H\!\left(\texttt{"svote-pd-dleq-v1"} \| G \| [5] \| [4] \| [20] \| [9] \| [13]\right) = 5 \quad \text{(toy hash)}$$
 
 The challenge is unpredictable at commit time, which is what makes the proof sound.
 
 **3. Response:**
 
-$$z = k + e \cdot s_i = 9 + 5 \times 11 = 64 \bmod 23 = 18$$
+$$z = k + e \cdot s_i = 9 + 5 \times 5 = 34 \bmod 23 = 11$$
 
 This "mixes" the secret with the blinding scalar, weighted by the unpredictable challenge.
 
-**4. Proof:** $(e, z) = (5, 18)$ — just two scalars, 64 bytes total.
+**4. Proof:** $(e, z) = (5, 11)$ — just two scalars, 64 bytes total.
 
 ### Verification
 
 The verifier knows only the public values and the proof $(e, z)$. They recompute $R_1'$ and $R_2'$:
 
-$$R_1' = z \cdot G - e \cdot VK_2 = [18] - 5 \cdot [11] = [18] - [55 \bmod 23] = [18] - [9] = [18 - 9] = [9]$$
+$$R_1' = z \cdot G - e \cdot VK_2 = [11] - 5 \cdot [5] = [11] - [25 \bmod 23] = [11] - [2] = [9]$$
 
-$$R_2' = z \cdot C_1 - e \cdot D_2 = 18 \cdot [4] - 5 \cdot [21] = [72 \bmod 23] - [105 \bmod 23] = [3] - [13] = [3 - 13 \bmod 23] = [13]$$
+$$R_2' = z \cdot C_1 - e \cdot D_2 = 11 \cdot [4] - 5 \cdot [20] = [44 \bmod 23] - [100 \bmod 23] = [21] - [8] = [13]$$
 
 Recompute the challenge:
 
-$$e' = H\!\left(\texttt{"svote-pd-dleq-v1"} \| G \| [11] \| [4] \| [21] \| [9] \| [13]\right) = 5$$
+$$e' = H\!\left(\texttt{"svote-pd-dleq-v1"} \| G \| [5] \| [4] \| [20] \| [9] \| [13]\right) = 5$$
 
 $$e' = 5 = e \quad \checkmark$$
 
@@ -298,27 +303,29 @@ ePrime := pdDleqChallenge(G, VKi, C1, Di, R1, R2)
 
 ## Step 6 — Lagrange Interpolation in the Exponent
 
-Combine the $t = 3$ partial decryptions to recover $sk \cdot C_1$ — without anyone learning $sk$.
+Combine the $t = 4$ partial decryptions to recover $sk \cdot C_1$ — without anyone learning $sk$.
 
 ### Intuition
 
-We have a degree-2 polynomial $f(x)$ but don't know its coefficients. We only know 3 points on the curve: $f(1) = 21$, $f(2) = 11$, $f(4) = 11$. A degree-2 polynomial is fully determined by 3 points — there's exactly one parabola through them. Lagrange interpolation finds that parabola and evaluates it at $x = 0$ to recover the secret.
+We have a degree-3 polynomial $f(x)$ but don't know its coefficients. We only know 4 points on the curve: $f(1) = 3$, $f(2) = 5$, $f(3) = 20$, $f(4) = 9$. A degree-3 polynomial is fully determined by 4 points. Lagrange interpolation finds that polynomial and evaluates it at $x = 0$ to recover the secret.
 
 The trick is to construct **basis polynomials** $L_j(x)$, each designed so that $L_j = 1$ at point $x_j$ and $L_j = 0$ at every other point:
 
-$$L_1(x) = \frac{(x - 2)(x - 4)}{(1 - 2)(1 - 4)} \qquad \begin{cases} L_1(1) = 1 \\ L_1(2) = 0 \\ L_1(4) = 0 \end{cases}$$
+$$L_1(x) = \frac{(x - 2)(x - 3)(x - 4)}{(1 - 2)(1 - 3)(1 - 4)} \qquad \begin{cases} L_1(1) = 1 \\ L_1(2) = 0 \\ L_1(3) = 0 \\ L_1(4) = 0 \end{cases}$$
 
-$$L_2(x) = \frac{(x - 1)(x - 4)}{(2 - 1)(2 - 4)} \qquad \begin{cases} L_2(1) = 0 \\ L_2(2) = 1 \\ L_2(4) = 0 \end{cases}$$
+$$L_2(x) = \frac{(x - 1)(x - 3)(x - 4)}{(2 - 1)(2 - 3)(2 - 4)} \qquad \begin{cases} L_2(1) = 0 \\ L_2(2) = 1 \\ L_2(3) = 0 \\ L_2(4) = 0 \end{cases}$$
 
-$$L_4(x) = \frac{(x - 1)(x - 2)}{(4 - 1)(4 - 2)} \qquad \begin{cases} L_4(1) = 0 \\ L_4(2) = 0 \\ L_4(4) = 1 \end{cases}$$
+$$L_3(x) = \frac{(x - 1)(x - 2)(x - 4)}{(3 - 1)(3 - 2)(3 - 4)} \qquad \begin{cases} L_3(1) = 0 \\ L_3(2) = 0 \\ L_3(3) = 1 \\ L_3(4) = 0 \end{cases}$$
+
+$$L_4(x) = \frac{(x - 1)(x - 2)(x - 3)}{(4 - 1)(4 - 2)(4 - 3)} \qquad \begin{cases} L_4(1) = 0 \\ L_4(2) = 0 \\ L_4(3) = 0 \\ L_4(4) = 1 \end{cases}$$
 
 Each one is a "selector" — it picks out exactly one point and ignores the rest. Blend them weighted by the known values:
 
-$$f(x) = s_1 \cdot L_1(x) + s_2 \cdot L_2(x) + s_4 \cdot L_4(x)$$
+$$f(x) = s_1 \cdot L_1(x) + s_2 \cdot L_2(x) + s_3 \cdot L_3(x) + s_4 \cdot L_4(x)$$
 
 To get the secret, evaluate at $x = 0$. The **Lagrange coefficients** $\lambda_j$ are just $L_j(0)$ — "how much weight does share $j$ get when reconstructing the value at $x = 0$?"
 
-$$sk = f(0) = s_1 \cdot \underbrace{L_1(0)}_{\lambda_1} + s_2 \cdot \underbrace{L_2(0)}_{\lambda_2} + s_4 \cdot \underbrace{L_4(0)}_{\lambda_4}$$
+$$sk = f(0) = s_1 \cdot \underbrace{L_1(0)}_{\lambda_1} + s_2 \cdot \underbrace{L_2(0)}_{\lambda_2} + s_3 \cdot \underbrace{L_3(0)}_{\lambda_3} + s_4 \cdot \underbrace{L_4(0)}_{\lambda_4}$$
 
 ### Why "in the exponent"?
 
@@ -327,9 +334,9 @@ In the tally we **don't want to reconstruct** $sk$ as a number — that would ex
 The key insight: Lagrange interpolation is just a weighted sum, and scalar multiplication distributes over point addition:
 
 $$\begin{aligned}
-\lambda_1 \cdot D_1 + \lambda_2 \cdot D_2 + \lambda_4 \cdot D_4
-&= \lambda_1 (s_1 \cdot C_1) + \lambda_2 (s_2 \cdot C_1) + \lambda_4 (s_4 \cdot C_1) \\[4pt]
-&= \underbrace{(\lambda_1 s_1 + \lambda_2 s_2 + \lambda_4 s_4)}_{= \; sk \text{ by Lagrange}} \cdot C_1 \\[4pt]
+\lambda_1 \cdot D_1 + \lambda_2 \cdot D_2 + \lambda_3 \cdot D_3 + \lambda_4 \cdot D_4
+&= \lambda_1 (s_1 \cdot C_1) + \lambda_2 (s_2 \cdot C_1) + \lambda_3 (s_3 \cdot C_1) + \lambda_4 (s_4 \cdot C_1) \\[4pt]
+&= \underbrace{(\lambda_1 s_1 + \lambda_2 s_2 + \lambda_3 s_3 + \lambda_4 s_4)}_{= \; sk \text{ by Lagrange}} \cdot C_1 \\[4pt]
 &= sk \cdot C_1
 \end{aligned}$$
 
@@ -337,46 +344,50 @@ The reconstruction of $sk$ happens **implicitly inside the scalar multiplier** o
 
 ### Compute Lagrange Coefficients
 
-For indices $\{1, 2, 4\}$ at target $x = 0$:
+For indices $\{1, 2, 3, 4\}$ at target $x = 0$:
 
 $$\lambda_j = \prod_{\substack{m \in S \\ m \neq j}} \frac{0 - x_m}{x_j - x_m}$$
 
 ---
 
-**$\lambda_1$** &ensp; ($j = 1$, others $\{2, 4\}$):
+**$\lambda_1$** &ensp; ($j = 1$, others $\{2, 3, 4\}$):
 
-$$\lambda_1 = \frac{(0 - 2)(0 - 4)}{(1 - 2)(1 - 4)} = \frac{(-2)(-4)}{(-1)(-3)} = \frac{8}{3}$$
+$$\lambda_1 = \frac{(0 - 2)(0 - 3)(0 - 4)}{(1 - 2)(1 - 3)(1 - 4)} = \frac{(-2)(-3)(-4)}{(-1)(-2)(-3)} = 4$$
 
-> $3^{-1} \bmod 23 = 8$ &ensp; (since $3 \times 8 = 24 \equiv 1$)
->
-> $\lambda_1 = 8 \times 8 = 64 \bmod 23 = \mathbf{18}$
+> $\lambda_1 = \mathbf{4}$
 
 ---
 
-**$\lambda_2$** &ensp; ($j = 2$, others $\{1, 4\}$):
+**$\lambda_2$** &ensp; ($j = 2$, others $\{1, 3, 4\}$):
 
-$$\lambda_2 = \frac{(0 - 1)(0 - 4)}{(2 - 1)(2 - 4)} = \frac{4}{-2} = -2 \equiv \mathbf{21} \pmod{23}$$
+$$\lambda_2 = \frac{(0 - 1)(0 - 3)(0 - 4)}{(2 - 1)(2 - 3)(2 - 4)} = \frac{(-1)(-3)(-4)}{(1)(-1)(-2)} = -6 \equiv \mathbf{17} \pmod{23}$$
 
 ---
 
-**$\lambda_4$** &ensp; ($j = 4$, others $\{1, 2\}$):
+**$\lambda_3$** &ensp; ($j = 3$, others $\{1, 2, 4\}$):
 
-$$\lambda_4 = \frac{(0 - 1)(0 - 2)}{(4 - 1)(4 - 2)} = \frac{2}{6}$$
+$$\lambda_3 = \frac{(0 - 1)(0 - 2)(0 - 4)}{(3 - 1)(3 - 2)(3 - 4)} = \frac{(-1)(-2)(-4)}{(2)(1)(-1)} = 4$$
 
-> $6^{-1} \bmod 23 = 4$ &ensp; (since $6 \times 4 = 24 \equiv 1$)
->
-> $\lambda_4 = 2 \times 4 = \mathbf{8}$
+> $\lambda_3 = \mathbf{4}$
+
+---
+
+**$\lambda_4$** &ensp; ($j = 4$, others $\{1, 2, 3\}$):
+
+$$\lambda_4 = \frac{(0 - 1)(0 - 2)(0 - 3)}{(4 - 1)(4 - 2)(4 - 3)} = \frac{(-1)(-2)(-3)}{(3)(2)(1)} = -1 \equiv \mathbf{22} \pmod{23}$$
+
+> $\lambda_4 = \mathbf{22}$
 
 ---
 
 ### Combine
 
 $$\begin{aligned}
-sk \cdot C_1 &= \lambda_1 \cdot D_1 + \lambda_2 \cdot D_2 + \lambda_4 \cdot D_4 \\[6pt]
-             &= 18 \cdot [15] + 21 \cdot [21] + 8 \cdot [21] \\[4pt]
-             &= [270 \bmod 23] + [441 \bmod 23] + [168 \bmod 23] \\[4pt]
-             &= [17] + [4] + [7] \\[4pt]
-             &= [17 + 4 + 7] \\[4pt]
+sk \cdot C_1 &= \lambda_1 \cdot D_1 + \lambda_2 \cdot D_2 + \lambda_3 \cdot D_3 + \lambda_4 \cdot D_4 \\[6pt]
+             &= 4 \cdot [12] + 17 \cdot [20] + 4 \cdot [11] + 22 \cdot [13] \\[4pt]
+             &= [48 \bmod 23] + [340 \bmod 23] + [44 \bmod 23] + [286 \bmod 23] \\[4pt]
+             &= [2] + [18] + [21] + [10] \\[4pt]
+             &= [2 + 18 + 21 + 10] \\[4pt]
              &= [28 \bmod 23] \\[4pt]
              &= [5]
 \end{aligned}$$
@@ -445,12 +456,12 @@ for i := uint64(0); i <= maxI; i++ {
 
 | Step | Input | Output | What's public |
 |------|-------|--------|---------------|
-| **1. Polynomial** | $sk = 7$, random $a_1{=}3$, $a_2{=}11$ | $f(x) = 7 + 3x + 11x^2$ | Nothing (dealer memory only) |
-| **2. Feldman** | Coefficients $a_0, a_1, a_2$ | $C_0{=}[7]$, $C_1{=}[3]$, $C_2{=}[11]$ | Commitments (on-chain) |
-| **2b. Verify** | Share $s_i$, commitments | $[s_i] \stackrel{?}{=} C_0 + iC_1 + i^2C_2$ | Pass/fail (each validator) |
+| **1. Polynomial** | $sk = 7$, random $a_1{=}3$, $a_2{=}11$, $a_3{=}5$ | $f(x) = 7 + 3x + 11x^2 + 5x^3$ | Nothing (dealer memory only) |
+| **2. Feldman** | Coefficients $a_0, a_1, a_2, a_3$ | $C_0{=}[7]$, $C_1{=}[3]$, $C_2{=}[11]$, $C_3{=}[5]$ | Commitments (on-chain) |
+| **2b. Verify** | Share $s_i$, commitments | $[s_i] \stackrel{?}{=} C_0 + iC_1 + i^2C_2 + i^3C_3$ | Pass/fail (each validator) |
 | **3. Encrypt** | $v{=}3$, $r{=}4$ | $([4], [8])$ | Ciphertext (on-chain) |
-| **4. Partial decrypt** | $D_i = s_i \cdot C_1$ | $[15], [21], [21]$ | $D_i$ values (on-chain) |
-| **5. DLEQ proof** | $(e, z) = (5, 18)$ | Proof for validator 2 | Proof (on-chain, 64 bytes) |
+| **4. Partial decrypt** | $D_i = s_i \cdot C_1$ | $[12], [20], [11], [13]$ | $D_i$ values (on-chain) |
+| **5. DLEQ proof** | $(e, z) = (5, 11)$ | Proof for validator 2 | Proof (on-chain, 64 bytes) |
 | **6. Lagrange combine** | $\sum \lambda_i D_i$ | $[5] = sk \cdot C_1$ | Combined point |
 | **7. Recover** | $C_2 - sk \cdot C_1$ | $[3] \Rightarrow v = 3$ | Tally result |
 

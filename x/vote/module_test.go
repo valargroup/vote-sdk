@@ -589,39 +589,39 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeout() {
 			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED,
 		},
 		{
-			// n=5, threshold=3, required quorum=4. Exactly threshold-sized
-			// ack sets are rejected so one surviving withholder cannot break tally.
-			name: "DEALT + exactly threshold (3/5 acks) -> CEREMONY_FAILED",
+			// n=5, threshold=4, required quorum=4. Three acks are below both.
+			name: "DEALT + below threshold and quorum (3/5 acks) -> CEREMONY_FAILED",
 			setup: func() {
-				seedDealtRoundWithThreshold(5, 3, 3)
+				seedDealtRoundWithThreshold(5, 4, 3)
 			},
 			wantCeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_DEALT,
 			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED,
 		},
 		{
-			// n=5, threshold=3, required quorum=4. One non-acker is stripped.
+			// n=5, threshold=4, required quorum=4. One non-acker is stripped,
+			// leaving no extra partial-decryption slack above threshold.
 			name: "DEALT + required quorum (4/5 acks) -> CONFIRMED + ACTIVE",
 			setup: func() {
-				seedDealtRoundWithThreshold(5, 3, 4)
+				seedDealtRoundWithThreshold(5, 4, 4)
 			},
 			wantCeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED,
 			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_ACTIVE,
 		},
 		{
-			// n=9, threshold=5, required quorum=8. Exactly threshold-sized
+			// n=9, threshold=6, required quorum=8. Exactly threshold-sized
 			// ack sets no longer activate on timeout.
-			name: "DEALT + exactly threshold (5/9 acks) -> CEREMONY_FAILED",
+			name: "DEALT + exactly threshold (6/9 acks) -> CEREMONY_FAILED",
 			setup: func() {
-				seedDealtRoundWithThreshold(9, 5, 5)
+				seedDealtRoundWithThreshold(9, 6, 6)
 			},
 			wantCeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_DEALT,
 			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED,
 		},
 		{
-			// n=9, threshold=5, required quorum=8. One non-acker is stripped.
+			// n=9, threshold=6, required quorum=8. One non-acker is stripped.
 			name: "DEALT + required quorum (8/9 acks) -> CONFIRMED + ACTIVE",
 			setup: func() {
-				seedDealtRoundWithThreshold(9, 5, 8)
+				seedDealtRoundWithThreshold(9, 6, 8)
 			},
 			wantCeremonyStatus: types.CeremonyStatus_CEREMONY_STATUS_CONFIRMED,
 			wantRoundStatus:    types.SessionStatus_SESSION_STATUS_ACTIVE,
@@ -804,7 +804,7 @@ func (s *EndBlockerTestSuite) TestEndBlock_CeremonyTimeoutLog() {
 	})
 
 	s.Run("timeout+below-threshold logs entry and preserves validators", func() {
-		// n=9 requires 8 acks. Five acks leave a threshold-sized survivor set,
+		// n=9 requires 8 acks. Five acks are below the threshold and quorum,
 		// so the failed pending round is preserved for audit.
 		s.SetupTest()
 		addrs := make([]string, 9)

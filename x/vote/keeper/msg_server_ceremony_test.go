@@ -19,6 +19,7 @@ import (
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/crypto/shamir"
 	svtest "github.com/valargroup/vote-sdk/testutil"
+	"github.com/valargroup/vote-sdk/x/vote/keeper"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
@@ -111,19 +112,15 @@ func (s *MsgServerTestSuite) createPendingRoundWithValidators(n int) (roundID []
 // left in DEALT status.
 func (s *MsgServerTestSuite) dealPendingRound(n int) (roundID []byte, addrs []string) {
 	roundID, addrs, _ = s.createPendingRoundWithValidators(n)
-	threshold := (n + 1) / 2
-	if n == 1 {
-		threshold = 1
-	} else if threshold < 2 {
-		threshold = 2
-	}
+	threshold, err := keeper.ThresholdForN(n)
+	s.Require().NoError(err)
 	for i := 0; i < n; i++ {
 		s.setBlockProposer(addrs[i])
 		var payloads []*types.DealerPayload
 		if n > 1 {
 			payloads = makeDKGPayloads(addrs, addrs[i])
 		}
-		_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+		_, err = s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
 			Creator:            addrs[i],
 			VoteRoundId:        roundID,
 			FeldmanCommitments: makeDKGCommitments(threshold),

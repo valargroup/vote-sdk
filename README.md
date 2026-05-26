@@ -129,7 +129,7 @@ Ceremony state is stored on the `VoteRound` itself (fields `ceremony_status`, `c
              v                    v
   CEREMONY_FAILED     ACTIVE (CONFIRMED)
                          + strip non-ackers
-                                  │ timeout (< 1/2)
+                                 │ timeout (< required quorum)
                                   v
                           CEREMONY_FAILED
 ```
@@ -138,12 +138,12 @@ Ceremony state is stored on the `VoteRound` itself (fields `ceremony_status`, `c
 | ----------- | ------------------ | ----------------------------- | ----------------------------------------------- |
 | REGISTERING | DEALT              | Auto-deal via PrepareProposal | Block proposer is a ceremony validator          |
 | DEALT       | CONFIRMED + ACTIVE | MsgAckExecutiveAuthorityKey   | All validators acked (fast path)                |
-| DEALT       | CONFIRMED + ACTIVE | EndBlocker timeout            | >= 1/2 acked at timeout; non-ackers stripped |
+| DEALT       | CONFIRMED + ACTIVE | EndBlocker timeout            | >= `required(n) = ceil(4n/5)` acks at timeout; non-ackers stripped |
 | REGISTERING | CEREMONY_FAILED    | EndBlocker timeout            | DKG contributions incomplete at timeout; non-contributors jailed |
-| DEALT       | CEREMONY_FAILED    | EndBlocker timeout            | < 1/2 acked or below published threshold |
+| DEALT       | CEREMONY_FAILED    | EndBlocker timeout            | Below `required(n) = ceil(4n/5)` acks |
 
 Key behaviors:
-- **Fast path vs timeout** — the fast path confirms when ALL validators ack (no stripping needed). The timeout path confirms with >= 1/2 acks (integer arithmetic: `acks * 2 >= validators`) and strips non-ackers.
+- **Fast path vs timeout** — the fast path confirms when ALL validators ack (no stripping needed). The timeout path confirms with `required(n) = ceil(4n/5)` acks and strips non-ackers.
 - **Auto-deal** — the block proposer automatically deals when it detects a PENDING round in REGISTERING state. No manual `ceremony.sh deal` step.
 - **Auto-ack** — each block proposer auto-acks via PrepareProposal when it detects a DEALT round.
 - **Ceremony timeout jailing** — validators who miss REGISTERING contributions are jailed through `x/slashing` until the chain's downtime jail duration elapses. DEALT non-ackers are stripped from successful timeout confirmations but are not jailed because a missing ack is not reliable blame evidence.
@@ -158,15 +158,15 @@ A registered key can be replaced via `MsgRotatePallasKey`. Rotation is rejected 
 #### Auto-Deal and Auto-Ack via PrepareProposal
 
 `PrepareProposal` composes two ceremony injectors:
-1. **Auto-deal** — if a PENDING round is in REGISTERING state and the proposer is a ceremony validator, generate `ea_sk`, Shamir-split it into `(t, n)` shares, ECIES-encrypt `share_i` to each validator, publish `VK_i = share_i * G` and `threshold = ceil(n/2)`, and inject `MsgDealExecutiveAuthorityKey`.
+1. **Auto-deal** — if a PENDING round is in REGISTERING state and the proposer is a ceremony validator, generate DKG material, Shamir-split it into `(t, n)` shares with `threshold = max(2, ceil(2n/3))` for `n >= 2`, ECIES-encrypt `share_i` to each validator, publish Feldman commitments, and inject `MsgContributeDKG`.
 2. **Auto-ack** — if a PENDING round is in DEALT state and the proposer hasn't acked, decrypt the payload to recover their share, verify `share_i * G == VK_i` (threshold mode) or `ea_sk * G == ea_pk` (legacy), inject `MsgAckExecutiveAuthorityKey`, and write the share/key to disk.
 
 #### Timeout (EndBlocker)
 
 REGISTERING and DEALT phases have timeouts (default: 10 minutes):
 - **REGISTERING timeout:** Jail validators that did not contribute DKG material and mark the pending round `CEREMONY_FAILED`.
-- **DEALT timeout, >= 1/2 acked:** Strip non-ackers, confirm ceremony, activate round.
-- **DEALT timeout, < 1/2 acked:** Mark the pending round `CEREMONY_FAILED` without jailing non-ackers, because missing acks are not reliable blame evidence. A later create transaction can retry the same vote metadata because `vote_round_id` includes the round creation height.
+- **DEALT timeout, >= required quorum:** Strip non-ackers, confirm ceremony, activate round.
+- **DEALT timeout, < required quorum:** Mark the pending round `CEREMONY_FAILED` without jailing non-ackers, because missing acks are not reliable blame evidence. A later create transaction can retry the same vote metadata because `vote_round_id` includes the round creation height.
 
 #### ECIES Encryption Scheme
 
@@ -212,7 +212,7 @@ ACTIVE ──> TALLYING ──> FINALIZED
 ### PrepareProposal / ProcessProposal Pipeline
 
 `PrepareProposal` composes four injectors that run sequentially on each proposed block:
-1. **Ceremony deal injection** — if a PENDING round is in REGISTERING and the proposer is a ceremony validator, auto-deal via `MsgDealExecutiveAuthorityKey`
+1. **Ceremony DKG contribution injection** — if a PENDING round is in REGISTERING and the proposer is a ceremony validator, auto-contribute via `MsgContributeDKG`
 2. **Ceremony ack injection** — if a PENDING round is in DEALT and the proposer hasn't acked, auto-ack via `MsgAckExecutiveAuthorityKey`
 3. **Partial decryption injection** (threshold mode) — if a TALLYING round has `threshold > 0` and the proposer hasn't yet submitted, compute `D_i = share_i * C1` per accumulator and inject `MsgSubmitPartialDecryption`
 4. **Tally injection** — when `t` partials are on-chain (threshold mode) or `ea_sk` is on disk (legacy), Lagrange-combine and BSGS-solve, then inject `MsgSubmitTally`
@@ -223,7 +223,7 @@ ACTIVE ──> TALLYING ──> FINALIZED
 
 #### Rationale
 
-The standard Cosmos SDK `Tx` envelope requires a signer address, fee fields, and a conventional signature (secp256k1 or ed25519). Vote-round messages (`MsgDelegateVote`, `MsgCastVote`, `MsgRevealShare`) cannot use this envelope because they are authenticated via **ZKP + RedPallas spend-auth signatures** — there is no conventional Cosmos account involved. Similarly, `MsgDealExecutiveAuthorityKey`, `MsgAckExecutiveAuthorityKey`, and `MsgSubmitPartialDecryption` are **auto-injected by the block proposer** via `PrepareProposal` and are never client-signed at all.
+The standard Cosmos SDK `Tx` envelope requires a signer address, fee fields, and a conventional signature (secp256k1 or ed25519). Vote-round messages (`MsgDelegateVote`, `MsgCastVote`, `MsgRevealShare`) cannot use this envelope because they are authenticated via **ZKP + RedPallas spend-auth signatures** — there is no conventional Cosmos account involved. Similarly, `MsgContributeDKG`, `MsgAckExecutiveAuthorityKey`, and `MsgSubmitPartialDecryption` are **auto-injected by the block proposer** via `PrepareProposal` and are never client-signed at all.
 
 The custom wire format is the minimal encoding that satisfies both cases: a single-byte type tag lets the `TxDecoder` unambiguously identify the message type without parsing a full `TxBody`, and the tag byte acts as the sole discriminator between the custom path and the standard Cosmos SDK path. Messages that do have a conventional signer, including coordinator action proposals/approvals and validator setup messages, use the standard `Tx` envelope and flow through normal signature verification.
 
@@ -289,7 +289,7 @@ These are auto-injected by `PrepareProposal` and **cannot be submitted through t
 
 | Message                        | Ante check                                                                           | ProcessProposal check                                                                                                           | MsgServer check                                                                                                                                                           |
 | ------------------------------ | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MsgDealExecutiveAuthorityKey` | `ValidateProposerIsCreator` (mempool block + creator == proposer)                    | Round PENDING + REGISTERING; payload count matches; creator is ceremony validator; creator == proposer                          | `ValidateProposerIsCreator`; round PENDING + REGISTERING; creator in ceremony validators; ea_pk valid; payloads 1:1 with validators; threshold + VK validation            |
+| `MsgContributeDKG`             | `ValidateProposerIsCreator` (mempool block + creator == proposer)                    | Round PENDING + REGISTERING; payload count matches; creator is ceremony validator; creator == proposer                          | `ValidateProposerIsCreator`; round PENDING + REGISTERING; creator in ceremony validators; payload count matches; Feldman commitment count matches threshold               |
 | `MsgAckExecutiveAuthorityKey`  | `ValidateProposerIsCreator` (mempool block + creator == proposer)                    | Round PENDING + DEALT; creator is ceremony validator; no duplicate ack; creator == proposer                                     | `ValidateProposerIsCreator`; round PENDING + DEALT; creator in ceremony validators; no duplicate ack                                                                      |
 | `MsgSubmitPartialDecryption`   | `ValidateProposerIsCreator` (mempool block + creator == proposer)                    | Round TALLYING + threshold > 0; creator is ceremony validator; ValidatorIndex == ShamirIndex; no duplicate; creator == proposer | `ValidateProposerIsCreator`; round TALLYING + threshold > 0; creator in ceremony validators; ValidatorIndex == ShamirIndex; no duplicate; entries are valid Pallas points |
 | `MsgSubmitTally`               | `ValidateVoteTx` → `ValidateProposerIsCreator` (mempool block + creator == proposer) | Round TALLYING; creator == proposer                                                                                             | `ValidateProposerIsCreator`; round TALLYING; verify each entry against on-chain accumulators (DLEQ proof in legacy mode, Lagrange re-derivation in threshold mode); transition to FINALIZED |
@@ -308,7 +308,7 @@ Standard Cosmos transactions pass through a two-layer gate before reaching the d
 #### Layer 1: Pre-filter in `NewDualAnteHandler` (before any decorator runs)
 
 1. **Single-message only.** Multi-message transactions are rejected unconditionally. This eliminates the noop-signer attack class where a zero-signer message (e.g. `MsgRevealShare`) piggybacks on a legitimately-signed carrier message.
-2. **Vote/ceremony messages blocked (defense-in-depth).** `isVoteModuleMsg` rejects `MsgDelegateVote`, `MsgCastVote`, `MsgRevealShare`, `MsgDealExecutiveAuthorityKey`, `MsgAckExecutiveAuthorityKey`, `MsgSubmitPartialDecryption`, and `MsgSubmitTally`. These must enter via the custom `VoteTxWrapper` path where ZKP/RedPallas verification runs. The whitelist (Layer 2) would also catch these, but this explicit type check fires earlier and produces a more actionable error.
+2. **Vote/ceremony messages blocked (defense-in-depth).** `isVoteModuleMsg` rejects `MsgDelegateVote`, `MsgCastVote`, `MsgRevealShare`, `MsgContributeDKG`, `MsgAckExecutiveAuthorityKey`, `MsgSubmitPartialDecryption`, and `MsgSubmitTally`. These must enter via the custom `VoteTxWrapper` path where ZKP/RedPallas verification runs. The whitelist (Layer 2) would also catch these, but this explicit type check fires earlier and produces a more actionable error.
 3. **`MsgCreateValidator` blocked post-genesis.** At `BlockHeight > 0`, raw `MsgCreateValidator` is rejected — validators must use `MsgCreateValidatorWithPallasKey` to atomically register a Pallas key. The message is allowed at height 0 for genesis `gentx` bootstrapping.
 
 #### Layer 2: `MessageWhitelistDecorator` (inside the standard ante chain)
@@ -363,7 +363,7 @@ Vote-round messages use the custom wire format and are submitted as JSON POST re
 | POST   | `/shielded-vote/v1/cast-vote`     | Cast an encrypted vote (ZKP #2)    |
 | POST   | `/shielded-vote/v1/reveal-share`  | Reveal an encrypted share (ZKP #3) |
 
-These endpoints accept JSON, encode the message with the custom wire format, and broadcast via CometBFT's `broadcast_tx_sync`. `MsgSubmitTally`, `MsgDealExecutiveAuthorityKey`, `MsgAckExecutiveAuthorityKey`, and `MsgSubmitPartialDecryption` have no REST endpoints — they are proposer-only and auto-injected via PrepareProposal.
+These endpoints accept JSON, encode the message with the custom wire format, and broadcast via CometBFT's `broadcast_tx_sync`. `MsgSubmitTally`, `MsgContributeDKG`, `MsgAckExecutiveAuthorityKey`, and `MsgSubmitPartialDecryption` have no REST endpoints — they are proposer-only and auto-injected via PrepareProposal.
 
 Validator-owned messages (`MsgRegisterPallasKey`, `MsgRotatePallasKey`,
 `MsgCreateValidatorWithPallasKey`) and coordinator action messages
@@ -432,15 +432,15 @@ submitted on-chain before the round closed.
 enum CeremonyStatus {
   CEREMONY_STATUS_UNSPECIFIED   = 0;
   CEREMONY_STATUS_REGISTERING   = 1; // Accepting validator pk_i registrations (no timeout)
-  CEREMONY_STATUS_DEALT         = 2; // DealerTx landed, awaiting acks
-  CEREMONY_STATUS_CONFIRMED     = 3; // All acked (fast path) or >=1/2 acked at timeout, ea_pk ready
+  CEREMONY_STATUS_DEALT         = 2; // DKG contributions landed, awaiting acks
+  CEREMONY_STATUS_CONFIRMED     = 3; // All acked (fast path) or required quorum acked at timeout, ea_pk ready
 }
 
 message CeremonyState {
   CeremonyStatus              status        = 1;
-  bytes                       ea_pk         = 2;  // Set when DealerTx lands
+  bytes                       ea_pk         = 2;  // Set when DKG contributions complete
   repeated ValidatorPallasKey validators    = 3;  // All registered pk_i
-  repeated DealerPayload      payloads      = 4;  // ECIES envelopes from DealerTx
+  repeated DealerPayload      payloads      = 4;  // ECIES envelopes from DKG contributions
   repeated AckEntry           acks          = 5;  // Per-validator ack status
   string                      dealer        = 6;  // Validator address of the dealer
   uint64                      phase_start   = 7;  // Unix seconds when current phase started

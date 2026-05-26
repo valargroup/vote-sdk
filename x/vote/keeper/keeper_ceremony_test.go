@@ -26,30 +26,30 @@ func TestThresholdForN(t *testing.T) {
 		// n=1: solo validator, threshold must be 1.
 		{n: 1, want: 1},
 
-		// n=2: ceil(2/2)=1 but floor is 2 → clamped to 2.
+		// n=2: ceil(2n/3)=2, satisfies >=2.
 		{n: 2, want: 2},
 
-		// n=3: ceil(3/2)=2, satisfies >=2.
+		// n=3: ceil(2n/3)=2, satisfies >=2.
 		{n: 3, want: 2},
 
-		// n=4: (4+1)/2=2 (integer division).
-		{n: 4, want: 2},
+		// n=4: ceil(8/3)=3.
+		{n: 4, want: 3},
 
-		// n=5: (5+1)/2=3.
-		{n: 5, want: 3},
+		// n=5: ceil(10/3)=4.
+		{n: 5, want: 4},
 
-		// n=6: (6+1)/2=3.
-		{n: 6, want: 3},
+		// n=6: ceil(12/3)=4.
+		{n: 6, want: 4},
 
-		// n=9: (9+1)/2=5.
-		{n: 9, want: 5},
+		// n=9: ceil(18/3)=6.
+		{n: 9, want: 6},
 
-		// n=10: (10+1)/2=5.
-		{n: 10, want: 5},
+		// n=10: ceil(20/3)=7.
+		{n: 10, want: 7},
 
 		// Large n.
-		{n: 100, want: 50},
-		{n: 101, want: 51},
+		{n: 100, want: 67},
+		{n: 101, want: 68},
 	}
 
 	for _, tc := range tests {
@@ -89,19 +89,19 @@ func TestCeremonyQuorumForN(t *testing.T) {
 		{n: 1, wantThreshold: 1, wantRequired: 1, wantToleratedFaults: 0, wantPartialDecryptGap: 0},
 		{n: 2, wantThreshold: 2, wantRequired: 2, wantToleratedFaults: 0, wantPartialDecryptGap: 0},
 		{n: 3, wantThreshold: 2, wantRequired: 3, wantToleratedFaults: 0, wantPartialDecryptGap: 1},
-		{n: 4, wantThreshold: 2, wantRequired: 4, wantToleratedFaults: 0, wantPartialDecryptGap: 2},
-		{n: 5, wantThreshold: 3, wantRequired: 4, wantToleratedFaults: 1, wantPartialDecryptGap: 1},
-		{n: 6, wantThreshold: 3, wantRequired: 5, wantToleratedFaults: 1, wantPartialDecryptGap: 2},
-		{n: 7, wantThreshold: 4, wantRequired: 6, wantToleratedFaults: 1, wantPartialDecryptGap: 2},
-		{n: 8, wantThreshold: 4, wantRequired: 7, wantToleratedFaults: 1, wantPartialDecryptGap: 3},
-		{n: 9, wantThreshold: 5, wantRequired: 8, wantToleratedFaults: 1, wantPartialDecryptGap: 3},
-		{n: 10, wantThreshold: 5, wantRequired: 8, wantToleratedFaults: 2, wantPartialDecryptGap: 3},
-		{n: 11, wantThreshold: 6, wantRequired: 9, wantToleratedFaults: 2, wantPartialDecryptGap: 3},
-		{n: 12, wantThreshold: 6, wantRequired: 10, wantToleratedFaults: 2, wantPartialDecryptGap: 4},
-		{n: 13, wantThreshold: 7, wantRequired: 11, wantToleratedFaults: 2, wantPartialDecryptGap: 4},
-		{n: 14, wantThreshold: 7, wantRequired: 12, wantToleratedFaults: 2, wantPartialDecryptGap: 5},
-		{n: 15, wantThreshold: 8, wantRequired: 12, wantToleratedFaults: 3, wantPartialDecryptGap: 4},
-		{n: 20, wantThreshold: 10, wantRequired: 16, wantToleratedFaults: 4, wantPartialDecryptGap: 6},
+		{n: 4, wantThreshold: 3, wantRequired: 4, wantToleratedFaults: 0, wantPartialDecryptGap: 1},
+		{n: 5, wantThreshold: 4, wantRequired: 4, wantToleratedFaults: 1, wantPartialDecryptGap: 0},
+		{n: 6, wantThreshold: 4, wantRequired: 5, wantToleratedFaults: 1, wantPartialDecryptGap: 1},
+		{n: 7, wantThreshold: 5, wantRequired: 6, wantToleratedFaults: 1, wantPartialDecryptGap: 1},
+		{n: 8, wantThreshold: 6, wantRequired: 7, wantToleratedFaults: 1, wantPartialDecryptGap: 1},
+		{n: 9, wantThreshold: 6, wantRequired: 8, wantToleratedFaults: 1, wantPartialDecryptGap: 2},
+		{n: 10, wantThreshold: 7, wantRequired: 8, wantToleratedFaults: 2, wantPartialDecryptGap: 1},
+		{n: 11, wantThreshold: 8, wantRequired: 9, wantToleratedFaults: 2, wantPartialDecryptGap: 1},
+		{n: 12, wantThreshold: 8, wantRequired: 10, wantToleratedFaults: 2, wantPartialDecryptGap: 2},
+		{n: 13, wantThreshold: 9, wantRequired: 11, wantToleratedFaults: 2, wantPartialDecryptGap: 2},
+		{n: 14, wantThreshold: 10, wantRequired: 12, wantToleratedFaults: 2, wantPartialDecryptGap: 2},
+		{n: 15, wantThreshold: 10, wantRequired: 12, wantToleratedFaults: 3, wantPartialDecryptGap: 2},
+		{n: 20, wantThreshold: 14, wantRequired: 16, wantToleratedFaults: 4, wantPartialDecryptGap: 2},
 	}
 
 	for _, tc := range tests {
@@ -118,7 +118,7 @@ func TestCeremonyQuorumForN(t *testing.T) {
 		require.Equal(t, tc.wantThreshold, threshold, "threshold n=%d", tc.n)
 		require.Equal(t, tc.wantToleratedFaults, tc.n-required, "tolerated faults n=%d", tc.n)
 		require.Equal(t, tc.wantPartialDecryptGap, required-threshold, "partial decrypt gap n=%d", tc.n)
-		require.GreaterOrEqual(t, 2*required, tc.n+threshold, "quorum safety invariant n=%d", tc.n)
+		require.GreaterOrEqual(t, required, threshold, "activation quorum must cover tally threshold n=%d", tc.n)
 	}
 }
 
@@ -158,7 +158,7 @@ func (s *KeeperTestSuite) TestHalfAcked() {
 			expect: true,
 		},
 		{
-			name: "exactly ceil(n/2) (2 of 3)",
+			name: "exactly half (2 of 3)",
 			round: &types.VoteRound{
 				CeremonyValidators: []*types.ValidatorPallasKey{
 					{ValidatorAddress: "val1"}, {ValidatorAddress: "val2"}, {ValidatorAddress: "val3"},

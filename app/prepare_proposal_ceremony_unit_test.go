@@ -19,11 +19,11 @@ func TestThresholdForN(t *testing.T) {
 		{n: 1, want: 1},
 		{n: 2, want: 2},
 		{n: 3, want: 2},
-		{n: 4, want: 2},
-		{n: 6, want: 3},
-		{n: 9, want: 5},
-		{n: 10, want: 5},
-		{n: 100, want: 50},
+		{n: 4, want: 3},
+		{n: 6, want: 4},
+		{n: 9, want: 6},
+		{n: 10, want: 7},
+		{n: 100, want: 67},
 	}
 
 	for _, tc := range tests {
@@ -60,4 +60,3 @@ func TestSharePathForRound(t *testing.T) {
 	got := sharePathForRound("/tmp/keys", roundID)
 	require.Equal(t, "/tmp/keys/share."+hex.EncodeToString(roundID), got)
 }
-

@@ -1278,7 +1278,7 @@ func TestFullLifecycle_SingleValidator(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Full Lifecycle E2E: DKG Ceremony → Vote → Tally (n=3, t=2)
+// Full Lifecycle E2E: DKG Ceremony -> Vote -> Tally (n=3, t=2)
 //
 // Drives the complete pipeline with Joint-Feldman DKG instead of a single dealer:
 //   REGISTERING → 3 DKG contributions (phantom1, phantom2 pre-seeded; proposer via pipeline)
@@ -1315,7 +1315,7 @@ func TestDKGFullLifecycle(t *testing.T) {
 	roundID[0] = 0xD0
 
 	n := 3
-	tVal := 2 // ceil(3/2)
+	tVal := 2 // ceil(2n/3)
 
 	// -----------------------------------------------------------------------
 	// Phase A: Generate phantom DKG state and pre-seed contributions
@@ -1594,12 +1594,8 @@ func seedPhantomDKGContributions(
 	t.Helper()
 
 	n := len(validators)
-	tVal := (n + 1) / 2
-	if n == 1 {
-		tVal = 1
-	} else if tVal < 2 {
-		tVal = 2
-	}
+	tVal, err := votekeeper.ThresholdForN(n)
+	require.NoError(t, err)
 
 	ctx := app.NewUncachedContext(false, cmtproto.Header{Height: app.Height})
 	kvStore := app.VoteKeeper().OpenKVStore(ctx)
