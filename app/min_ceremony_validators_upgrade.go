@@ -10,7 +10,7 @@ import (
 const (
 	// MinCeremonyValidatorsUpgradeName is the x/upgrade plan name that raises
 	// the minimum eligible ceremony validator count for new voting rounds.
-	MinCeremonyValidatorsUpgradeName = "raise-min-ceremony-validators"
+	MinCeremonyValidatorsUpgradeName = "v1"
 
 	minCeremonyValidatorsAfterUpgrade uint32 = 6
 )
