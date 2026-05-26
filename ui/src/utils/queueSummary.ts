@@ -2,25 +2,31 @@ import type { QueueSummaryBucket, QueueSummaryResponse, ServiceEntry } from "../
 
 export type QueueStateKey =
   | "submitted"
+  | "observed_on_chain"
   | "pending_future"
   | "overdue_pending"
   | "processing"
-  | "failed";
+  | "failed"
+  | "missed_deadline";
 
 export const QUEUE_STATE_ORDER: QueueStateKey[] = [
   "failed",
+  "missed_deadline",
   "processing",
   "overdue_pending",
   "pending_future",
+  "observed_on_chain",
   "submitted",
 ];
 
 export const QUEUE_STATE_META: Record<QueueStateKey, { label: string; color: string }> = {
   submitted: { label: "Submitted", color: "#4a9a4a" },
+  observed_on_chain: { label: "Observed", color: "#65a30d" },
   pending_future: { label: "Future", color: "#3b82f6" },
   overdue_pending: { label: "Overdue", color: "#c4943a" },
   processing: { label: "Processing", color: "#a855f7" },
   failed: { label: "Failed", color: "#c44a4a" },
+  missed_deadline: { label: "Missed", color: "#ef4444" },
 };
 
 export interface QueueServerOK {
@@ -59,23 +65,31 @@ export function queueBucketBacklog(bucket: Pick<QueueSummaryBucket, "overdue_pen
   return bucket.overdue_pending + bucket.processing;
 }
 
+export function queueStateCount(bucket: QueueSummaryBucket, state: QueueStateKey): number {
+  return bucket[state] ?? 0;
+}
+
 export function queueSummaryTotals(summary: QueueSummaryResponse): Record<QueueStateKey | "total", number> {
   return summary.buckets.reduce(
     (acc, bucket) => {
       acc.submitted += bucket.submitted;
+      acc.observed_on_chain += bucket.observed_on_chain ?? 0;
       acc.pending_future += bucket.pending_future;
       acc.overdue_pending += bucket.overdue_pending;
       acc.processing += bucket.processing;
       acc.failed += bucket.failed;
+      acc.missed_deadline += bucket.missed_deadline ?? 0;
       acc.total += bucket.total;
       return acc;
     },
     {
       submitted: 0,
+      observed_on_chain: 0,
       pending_future: 0,
       overdue_pending: 0,
       processing: 0,
       failed: 0,
+      missed_deadline: 0,
       total: 0,
     }
   );
@@ -153,10 +167,12 @@ export function aggregateQueueBuckets(results: QueueServerOK[]): AggregatedQueue
       start: window.start,
       end: window.end,
       submitted: 0,
+      observed_on_chain: 0,
       pending_future: 0,
       overdue_pending: 0,
       processing: 0,
       failed: 0,
+      missed_deadline: 0,
       total: 0,
       byServer: window.byServer,
     };
@@ -165,10 +181,14 @@ export function aggregateQueueBuckets(results: QueueServerOK[]): AggregatedQueue
       const serverBucket = window.byServer[result.server.url];
       if (!serverBucket) continue;
       bucket.submitted += serverBucket.submitted;
+      bucket.observed_on_chain =
+        queueStateCount(bucket, "observed_on_chain") + queueStateCount(serverBucket, "observed_on_chain");
       bucket.pending_future += serverBucket.pending_future;
       bucket.overdue_pending += serverBucket.overdue_pending;
       bucket.processing += serverBucket.processing;
       bucket.failed += serverBucket.failed;
+      bucket.missed_deadline =
+        queueStateCount(bucket, "missed_deadline") + queueStateCount(serverBucket, "missed_deadline");
       bucket.total += serverBucket.total;
     }
 

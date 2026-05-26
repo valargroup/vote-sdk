@@ -156,12 +156,16 @@ the REST API port. It is configured in `app.toml` under `[helper]` (written by
 | `db_path` | `""` | Path to SQLite database. Empty = `$HOME/helper.db`. |
 | `chain_api_port` | `1418` | Port of the REST API (for `MsgRevealShare` submission). In production this is `1317`. |
 | `max_concurrent_proofs` | `8` | Maximum parallel proof generation goroutines (~500 MB RAM each). |
+| `completed_round_data_serve_seconds` | `1209600` | Seconds after `vote_end_time` to serve completed-round queue summaries. Use `-1` to serve indefinitely, or `0` to stop immediately. Values below `-1` fall back to the default. |
 
 The queue summary endpoint reports only per-round bucketed counts across all
 proposals. It omits proposal IDs, vote decisions, share indices, nullifiers,
 tree positions, and exact submit times. Failed rows are reported immediately,
 including in open buckets, so operators can detect broken share processing
-without waiting for a bucket to close.
+without waiting for a bucket to close. When a round closes, processable rows are
+closed out as either `missed_deadline` or `observed_on_chain`, witness
+material is scrubbed, and the helper keeps the remaining accounting rows in
+SQLite.
 
 ## Admin UI
 

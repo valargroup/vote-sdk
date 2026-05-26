@@ -38,6 +38,7 @@ func newQueueStatusRouter(t *testing.T, token string) (*mux.Router, *ShareStore)
 		nil,
 		nil,
 		nil,
+		nil,
 		log.NewNopLogger(),
 	)
 	return router, store
@@ -52,6 +53,7 @@ func newQueueSummaryRouter(t *testing.T, store *ShareStore, token string, expose
 		func() string { return token },
 		func() bool { return false },
 		func() bool { return expose },
+		nil,
 		nil,
 		nil,
 		nil,
@@ -118,6 +120,7 @@ func TestShareStatus_PendingThenConfirmed(t *testing.T) {
 		nil,
 		nil,
 		func() ShareNullifierChecker { return checker },
+		nil,
 		log.NewNopLogger(),
 	)
 
@@ -276,7 +279,7 @@ func TestQueueStatus_RequiresTokenWhenEnabled(t *testing.T) {
 
 func TestQueueSummary_PublicNoToken(t *testing.T) {
 	roundID := "aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd"
-	start := uint64(time.Now().Add(-10 * time.Minute).Unix())
+	start := uint64(time.Now().Add(-5 * time.Minute).Unix())
 	end := start + 10*60
 	fetcher := func(roundID string) (RoundInfo, error) {
 		return RoundInfo{CreatedAtTime: start, VoteEndTime: end}, nil
@@ -300,6 +303,37 @@ func TestQueueSummary_PublicNoToken(t *testing.T) {
 	assert.Equal(t, roundID, resp.RoundID)
 	assert.Equal(t, uint64(60), resp.BucketSeconds)
 	assert.Equal(t, 1, resp.Buckets[1].OverduePending)
+}
+
+func TestQueueSummary_CompletedRoundOutsideServeWindow(t *testing.T) {
+	roundID := "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	start := uint64(time.Now().Add(-10 * time.Minute).Unix())
+	end := start + 5*60
+	fetcher := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: start, VoteEndTime: end}, nil
+	}
+	store, err := NewShareStore(":memory:", fetcher)
+	require.NoError(t, err)
+	defer store.Close()
+
+	router := mux.NewRouter()
+	RegisterRoutesWithQueueSummaryGetters(
+		router,
+		func() *ShareStore { return store },
+		func() string { return "" },
+		func() bool { return false },
+		func() bool { return true },
+		nil,
+		nil,
+		nil,
+		func() int64 { return 0 },
+		log.NewNopLogger(),
+	)
+
+	req := httptest.NewRequest("GET", "/shielded-vote/v1/queue-summary/"+roundID, nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusGone, w.Code)
 }
 
 func TestQueueSummary_Disabled(t *testing.T) {
@@ -423,6 +457,7 @@ func TestSubmitShare_APITokenAuth(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 		log.NewNopLogger(),
 	)
 
@@ -480,6 +515,7 @@ func vcTestRouter(t *testing.T) (*mux.Router, *ShareStore, *vcMockTree) {
 		func() bool { return false },
 		func() TreeReader { return tree },
 		func() VCHashFunc { return vcHash },
+		nil,
 		nil,
 		log.NewNopLogger(),
 	)
@@ -578,6 +614,32 @@ func TestSubmitShare_UnknownRound(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "unknown voting round")
 }
 
+func TestSubmitShare_RoundClosed(t *testing.T) {
+	now := uint64(time.Now().Unix())
+	fetcher := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: now - 2*oneHourSecs, VoteEndTime: now - oneHourSecs}, nil
+	}
+	store, err := NewShareStore(":memory:", fetcher)
+	require.NoError(t, err)
+	defer store.Close()
+
+	router := mux.NewRouter()
+	RegisterRoutes(router, store, log.NewNopLogger())
+
+	roundID := "aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd"
+	payload := testPayload(roundID, 0)
+	body, err := json.Marshal(payload)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("POST", "/shielded-vote/v1/shares", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusGone, w.Code)
+	assert.Contains(t, w.Body.String(), "voting round closed")
+}
+
 func TestSubmitShare_VCCrossCheck_GracefulDegradation(t *testing.T) {
 	// When VCHash is nil (not configured), shares should still be accepted.
 	store := newTestStore(t)
@@ -587,6 +649,7 @@ func TestSubmitShare_VCCrossCheck_GracefulDegradation(t *testing.T) {
 		func() *ShareStore { return store },
 		func() string { return "" },
 		func() bool { return false },
+		nil,
 		nil,
 		nil,
 		nil,

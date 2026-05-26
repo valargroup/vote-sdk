@@ -409,13 +409,16 @@ or `SENTRY_DSN` is present in the environment. Sentry events include a `stage`
 tag that identifies the helper code path that emitted the error, such as
 `enqueue`, `process_share`, `leaf_read`, `helper_new`, or `tree_status`.
 
-When a voting round closes, the helper summarizes queued shares before purging
-expired witness data. If any shares for that round are still pending or failed,
-it emits a Sentry error with `stage=round_closed_unsubmitted_shares` and tags
-for `round_id`, `total_shares`, `pending_shares`, `failed_shares`,
-`submitted_shares`, and `unsubmitted_shares`. Configure Sentry issue alerts on
-that stage tag to page when share data was accepted by the helper but not
-submitted on-chain before the round closed.
+When a voting round closes, the helper closes out processable rows before
+summarizing them. Rows already accepted on-chain are marked
+`observed_on_chain`; rows still absent on-chain are marked `missed_deadline`,
+and witness data is cleared. If any shares are still unsubmitted after that
+classification, the helper emits a Sentry error with
+`stage=round_closed_unsubmitted_shares` and tags for `round_id`,
+`total_shares`, `pending_shares`, `failed_shares`, `missed_deadline_shares`,
+`submitted_shares`, `observed_on_chain_rows`, and `unsubmitted_shares`.
+Configure Sentry issue alerts on that stage tag to page when share data was
+accepted by the helper but not submitted on-chain before the round closed.
 
 ### On-Chain State (KV Store Keys)
 

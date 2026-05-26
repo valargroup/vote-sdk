@@ -385,10 +385,12 @@ export interface QueueSummaryBucket {
   start: number;
   end: number;
   submitted: number;
+  observed_on_chain?: number;
   pending_future: number;
   overdue_pending: number;
   processing: number;
   failed: number;
+  missed_deadline?: number;
   total: number;
 }
 

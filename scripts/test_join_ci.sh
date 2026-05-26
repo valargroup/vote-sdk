@@ -91,6 +91,7 @@ expose_queue_summary = true
 db_path = ""
 chain_api_port = 1419
 max_concurrent_proofs = 2
+completed_round_data_serve_seconds = 1209600
 HELPERCFG
 
 # ─── Step 4: Start joiner and wait for sync ──────────────────────────────────

@@ -71,6 +71,31 @@ func requireScheduleChanged(t *testing.T, s *ShareStore) {
 	}
 }
 
+func expireRoundRowsForTest(t *testing.T, s *ShareStore, roundID string, end uint64) {
+	t.Helper()
+	_, err := s.db.Exec(
+		`UPDATE shares
+		    SET vote_end_time = ?
+		  WHERE round_id = ?`,
+		end,
+		roundID,
+	)
+	require.NoError(t, err)
+	_, err = s.db.Exec(
+		`INSERT INTO rounds (round_id, vote_end_time, created_at_time, closed_at)
+		 VALUES (?, ?, ?, 0)
+		 ON CONFLICT(round_id) DO UPDATE SET
+		   vote_end_time = excluded.vote_end_time,
+		   created_at_time = excluded.created_at_time,
+		   closed_at = 0`,
+		roundID,
+		end,
+		end-oneHourSecs,
+	)
+	require.NoError(t, err)
+	s.roundCache[roundID] = RoundInfo{CreatedAtTime: end - oneHourSecs, VoteEndTime: end}
+}
+
 func TestEnqueueAndTakeReady(t *testing.T) {
 	s := newTestStore(t)
 
@@ -85,6 +110,13 @@ func TestEnqueueAndTakeReady(t *testing.T) {
 	// Second call: nothing ready (already taken).
 	ready = s.TakeReady()
 	assert.Empty(t, ready)
+}
+
+func TestDefaultConfigCompletedRoundDataServeSeconds(t *testing.T) {
+	assert.Equal(t, DefaultCompletedRoundDataServeSeconds, DefaultConfig().CompletedRoundDataServeSeconds)
+	assert.Equal(t, DefaultCompletedRoundDataServeSeconds, NormalizeCompletedRoundDataServeSeconds(-2))
+	assert.Equal(t, int64(-1), NormalizeCompletedRoundDataServeSeconds(-1))
+	assert.Equal(t, int64(0), NormalizeCompletedRoundDataServeSeconds(0))
 }
 
 func TestMarkSubmitted(t *testing.T) {
@@ -133,7 +165,10 @@ func TestMarkFailed_RetryAndPermanent(t *testing.T) {
 	// After 4 failures (attempts = 4), take once more.
 	ready := s.TakeReady()
 	require.Len(t, ready, 1)
-	s.MarkFailed("round1", 0, 1, 0) // 5th attempt = permanent failure
+	knownNullifier := make([]byte, 32)
+	knownNullifier[0] = 0xAB
+	knownNullifier[1] = 0xCD
+	s.MarkFailed("round1", 0, 1, 0, knownNullifier) // 5th attempt = permanent failure
 
 	// Now it should be permanently failed.
 	status := s.Status()
@@ -141,16 +176,17 @@ func TestMarkFailed_RetryAndPermanent(t *testing.T) {
 	assert.Equal(t, 0, status["round1"].Pending)
 
 	// Witness data must be scrubbed after permanent failure.
-	var c1, c2, comms, blind string
+	var c1, c2, comms, blind, shareNullifier string
 	err := s.db.QueryRow(
-		"SELECT enc_share_c1, enc_share_c2, share_comms, primary_blind FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
+		"SELECT enc_share_c1, enc_share_c2, share_comms, primary_blind, share_nullifier FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
 		"round1", 0, 1, 0,
-	).Scan(&c1, &c2, &comms, &blind)
+	).Scan(&c1, &c2, &comms, &blind, &shareNullifier)
 	require.NoError(t, err)
 	assert.Empty(t, c1, "enc_share_c1 should be cleared after permanent failure")
 	assert.Empty(t, c2, "enc_share_c2 should be cleared after permanent failure")
 	assert.Equal(t, "[]", comms, "share_comms should be reset after permanent failure")
 	assert.Empty(t, blind, "primary_blind should be cleared after permanent failure")
+	assert.Equal(t, "abcd"+strings.Repeat("0", 60), shareNullifier)
 }
 
 func TestStatus(t *testing.T) {
@@ -185,7 +221,7 @@ func TestQueueSummaryRejectsTooManyBuckets(t *testing.T) {
 	require.NoError(t, err)
 	defer s.Close()
 
-	_, err = s.QueueSummary(roundID, time.Unix(int64(start), 0))
+	_, err = s.QueueSummary(roundID, time.Unix(int64(start), 0), DefaultCompletedRoundDataServeSeconds)
 	require.ErrorIs(t, err, ErrInvalidRoundInfo)
 }
 
@@ -200,7 +236,7 @@ func TestQueueSummaryLastMinuteStartPolicy(t *testing.T) {
 
 func TestQueueSummaryAggregatesStatesByBucket(t *testing.T) {
 	const roundID = "1111111111111111111111111111111111111111111111111111111111111111"
-	start := uint64(1700000000)
+	start := uint64(time.Now().Add(time.Hour).Unix())
 	end := start + 2*24*3600
 	now := time.Unix(int64(start+2*3600+30*60), 0)
 
@@ -241,7 +277,7 @@ func TestQueueSummaryAggregatesStatesByBucket(t *testing.T) {
 	_, err = s.db.Exec("UPDATE shares SET state = 2, received_at = ? WHERE share_index = 4", start+2*3600)
 	require.NoError(t, err)
 
-	summary, err := s.QueueSummary(roundID, now)
+	summary, err := s.QueueSummary(roundID, now, DefaultCompletedRoundDataServeSeconds)
 	require.NoError(t, err)
 	require.Len(t, summary.Buckets, 48)
 	assert.Equal(t, uint64(3600), summary.BucketSeconds)
@@ -265,7 +301,7 @@ func TestQueueSummaryAggregatesStatesByBucket(t *testing.T) {
 
 func TestQueueSummaryReportsCurrentBucketStates(t *testing.T) {
 	const roundID = "2222222222222222222222222222222222222222222222222222222222222222"
-	start := uint64(1700000000)
+	start := uint64(time.Now().Add(time.Hour).Unix())
 	end := start + 10*60
 
 	fetcher := func(roundID string) (RoundInfo, error) {
@@ -292,44 +328,80 @@ func TestQueueSummaryReportsCurrentBucketStates(t *testing.T) {
 	insert(3, start+170)
 	insert(4, start+160)
 	insert(5, start+250)
+	insert(6, start+155)
+	insert(7, start+158)
 
 	setState(0, ShareStateSubmitted)
 	setState(1, ShareStateWitnessed)
 	setState(4, ShareStateFailed)
 	setState(5, ShareStateSubmitted)
+	setState(6, ShareStateObservedOnChain)
+	setState(7, ShareStateMissedDeadline)
 
-	current, err := s.QueueSummary(roundID, time.Unix(int64(start+150), 0))
+	current, err := s.QueueSummary(roundID, time.Unix(int64(start+150), 0), DefaultCompletedRoundDataServeSeconds)
 	require.NoError(t, err)
 	require.Len(t, current.Buckets, 10)
 	assert.Equal(t, uint64(60), current.BucketSeconds)
 
 	currentBucket := current.Buckets[2]
 	assert.Equal(t, 1, currentBucket.Submitted)
+	assert.Equal(t, 1, currentBucket.ObservedOnChain)
 	assert.Equal(t, 1, currentBucket.PendingFuture)
 	assert.Equal(t, 1, currentBucket.OverduePending)
 	assert.Equal(t, 1, currentBucket.Processing)
 	assert.Equal(t, 1, currentBucket.Failed)
-	assert.Equal(t, 5, currentBucket.Total)
+	assert.Equal(t, 1, currentBucket.MissedDeadline)
+	assert.Equal(t, 7, currentBucket.Total)
 
 	futureBucket := current.Buckets[4]
 	assert.Equal(t, 1, futureBucket.Submitted)
 	assert.Equal(t, 0, futureBucket.PendingFuture)
 	assert.Equal(t, 1, futureBucket.Total)
 
-	afterCurrent, err := s.QueueSummary(roundID, time.Unix(int64(start+181), 0))
+	afterCurrent, err := s.QueueSummary(roundID, time.Unix(int64(start+181), 0), DefaultCompletedRoundDataServeSeconds)
 	require.NoError(t, err)
 	elapsedBucket := afterCurrent.Buckets[2]
 	assert.Equal(t, 1, elapsedBucket.Submitted)
+	assert.Equal(t, 1, elapsedBucket.ObservedOnChain)
 	assert.Equal(t, 0, elapsedBucket.PendingFuture)
 	assert.Equal(t, 2, elapsedBucket.OverduePending)
 	assert.Equal(t, 1, elapsedBucket.Processing)
 	assert.Equal(t, 1, elapsedBucket.Failed)
-	assert.Equal(t, 5, elapsedBucket.Total)
+	assert.Equal(t, 1, elapsedBucket.MissedDeadline)
+	assert.Equal(t, 7, elapsedBucket.Total)
 
-	afterFuture, err := s.QueueSummary(roundID, time.Unix(int64(start+301), 0))
+	afterFuture, err := s.QueueSummary(roundID, time.Unix(int64(start+301), 0), DefaultCompletedRoundDataServeSeconds)
 	require.NoError(t, err)
 	assert.Equal(t, 1, afterFuture.Buckets[4].Submitted)
 	assert.Equal(t, 0, afterFuture.Buckets[4].PendingFuture)
+}
+
+func TestQueueSummaryCompletedRoundServeWindow(t *testing.T) {
+	const roundID = "3333333333333333333333333333333333333333333333333333333333333333"
+	start := uint64(1700000000)
+	end := start + oneHourSecs
+
+	fetcher := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: start, VoteEndTime: end}, nil
+	}
+	s, err := NewShareStore(":memory:", fetcher)
+	require.NoError(t, err)
+	defer s.Close()
+
+	_, err = s.QueueSummary(roundID, time.Unix(int64(end+1), 0), DefaultCompletedRoundDataServeSeconds)
+	require.NoError(t, err)
+
+	_, err = s.QueueSummary(roundID, time.Unix(int64(end+uint64(DefaultCompletedRoundDataServeSeconds)+1), 0), DefaultCompletedRoundDataServeSeconds)
+	require.ErrorIs(t, err, ErrCompletedRoundDataExpired)
+
+	_, err = s.QueueSummary(roundID, time.Unix(int64(end+uint64(DefaultCompletedRoundDataServeSeconds)+1), 0), -1)
+	require.NoError(t, err)
+
+	_, err = s.QueueSummary(roundID, time.Unix(int64(end+uint64(DefaultCompletedRoundDataServeSeconds)+1), 0), -2)
+	require.ErrorIs(t, err, ErrCompletedRoundDataExpired)
+
+	_, err = s.QueueSummary(roundID, time.Unix(int64(end+1), 0), 0)
+	require.ErrorIs(t, err, ErrCompletedRoundDataExpired)
 }
 
 func TestDuplicateEnqueue(t *testing.T) {
@@ -509,40 +581,73 @@ func TestEnqueue_SubmitAtValidation(t *testing.T) {
 	})
 }
 
-func TestPurgeExpiredRounds(t *testing.T) {
+func TestEnqueue_RoundClosedRejected(t *testing.T) {
+	now := uint64(time.Now().Unix())
 	fetcher := func(roundID string) (RoundInfo, error) {
-		if roundID == "expired_round" {
-			end := uint64(time.Now().Add(-time.Hour).Unix())
-			return RoundInfo{CreatedAtTime: end - oneHourSecs, VoteEndTime: end}, nil
-		}
-		now := uint64(time.Now().Unix())
-		return RoundInfo{CreatedAtTime: now - oneHourSecs, VoteEndTime: now + oneHourSecs}, nil
+		return RoundInfo{CreatedAtTime: now - 2*oneHourSecs, VoteEndTime: now - oneHourSecs}, nil
 	}
 
 	s, err := NewShareStore(":memory:", fetcher)
 	require.NoError(t, err)
 	defer s.Close()
 
-	// Enqueue a share for an expired round and an active round.
-	enqueueAndRequireInserted(t, s, testPayload("expired_round", 0))
-	enqueueAndRequireInserted(t, s, testPayload("active_round", 0))
+	_, err = s.Enqueue(testPayload("closed_round", 0))
+	require.ErrorIs(t, err, ErrRoundClosed)
+}
+
+func TestCloseoutShareRetainsRowsAndScrubsWitness(t *testing.T) {
+	s := newTestStore(t)
+
+	roundID := "expired_round"
+	enqueueAndRequireInserted(t, s, testPayload(roundID, 0))
+	end := uint64(time.Now().Add(-time.Hour).Unix())
+	expireRoundRowsForTest(t, s, roundID, end)
+
+	roundIDs, err := s.ExpiredRoundIDsForCloseout(time.Now())
+	require.NoError(t, err)
+	require.Equal(t, []string{roundID}, roundIDs)
+
+	processable, err := s.ProcessableSharesForRound(roundID)
+	require.NoError(t, err)
+	require.Len(t, processable, 1)
+
+	nullifier := []byte{0xAA, 0xBB}
+	closedAt := uint64(time.Now().Unix())
+	require.NoError(t, s.CloseoutShare(roundID, 0, 1, 0, ShareStateMissedDeadline, nullifier, closedAt))
+	require.NoError(t, s.MarkRoundClosed(roundID, closedAt))
 
 	status := s.Status()
-	assert.Equal(t, 1, status["expired_round"].Total)
-	assert.Equal(t, 1, status["active_round"].Total)
+	assert.Equal(t, 1, status[roundID].Total)
+	assert.Equal(t, 0, status[roundID].Pending)
+	assert.Equal(t, 1, status[roundID].MissedDeadline)
 
-	deleted := s.PurgeExpiredRounds()
-	assert.Equal(t, int64(1), deleted)
+	var state int
+	var c1, c2, comms, blind, shareNullifier string
+	var gotClosedAt uint64
+	err = s.db.QueryRow(
+		`SELECT state, enc_share_c1, enc_share_c2, share_comms, primary_blind, share_nullifier, closed_at
+		   FROM shares
+		  WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
+		roundID, 0, 1, 0,
+	).Scan(&state, &c1, &c2, &comms, &blind, &shareNullifier, &gotClosedAt)
+	require.NoError(t, err)
+	assert.Equal(t, int(ShareStateMissedDeadline), state)
+	assert.Empty(t, c1)
+	assert.Empty(t, c2)
+	assert.Equal(t, "[]", comms)
+	assert.Empty(t, blind)
+	assert.Equal(t, "aabb", shareNullifier)
+	assert.Equal(t, closedAt, gotClosedAt)
 
-	status = s.Status()
-	assert.Equal(t, 0, status["expired_round"].Total)
-	assert.Equal(t, 1, status["active_round"].Total)
+	roundIDs, err = s.ExpiredRoundIDsForCloseout(time.Now())
+	require.NoError(t, err)
+	assert.Empty(t, roundIDs)
 }
 
 func TestExpiredRoundSummaries(t *testing.T) {
 	fetcher := func(roundID string) (RoundInfo, error) {
-		end := uint64(time.Now().Add(-time.Hour).Unix())
-		return RoundInfo{CreatedAtTime: end - oneHourSecs, VoteEndTime: end}, nil
+		now := uint64(time.Now().Unix())
+		return RoundInfo{CreatedAtTime: now - oneHourSecs, VoteEndTime: now + oneHourSecs}, nil
 	}
 
 	s, err := NewShareStore(":memory:", fetcher)
@@ -556,6 +661,8 @@ func TestExpiredRoundSummaries(t *testing.T) {
 	require.Len(t, ready, 2)
 	s.MarkSubmitted("expired_round", 0, 1, 0)
 	s.MarkFailed("expired_round", 1, 1, 0)
+	end := uint64(time.Now().Add(-time.Hour).Unix())
+	expireRoundRowsForTest(t, s, "expired_round", end)
 
 	summaries, err := s.ExpiredRoundSummaries(time.Now())
 	require.NoError(t, err)
@@ -633,7 +740,7 @@ func TestQueueSummaryRefreshesLegacyRoundCache(t *testing.T) {
 	require.NoError(t, err)
 	defer s.Close()
 
-	summary, err := s.QueueSummary(roundID, time.Unix(int64(start+60), 0))
+	summary, err := s.QueueSummary(roundID, time.Unix(int64(start+60), 0), DefaultCompletedRoundDataServeSeconds)
 	require.NoError(t, err)
 	assert.Equal(t, start, summary.CreatedAtTime)
 	assert.Equal(t, end, summary.VoteEndTime)
@@ -644,7 +751,7 @@ func TestQueueSummaryRefreshesLegacyRoundCache(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, start, cachedCreatedAt)
 
-	_, err = s.QueueSummary(roundID, time.Unix(int64(start+120), 0))
+	_, err = s.QueueSummary(roundID, time.Unix(int64(start+120), 0), DefaultCompletedRoundDataServeSeconds)
 	require.NoError(t, err)
 	assert.Equal(t, 1, fetchCalls, "refreshed metadata should stay cached")
 }
@@ -682,7 +789,6 @@ func TestMigrateOldSchema(t *testing.T) {
 	}
 	s, err := NewShareStore(dbPath, fetcher)
 	require.NoError(t, err)
-	defer s.Close()
 
 	// vote_end_time column should now exist.
 	hasVoteEndTime, err := tableHasColumn(s.db, "shares", "vote_end_time")
@@ -698,6 +804,14 @@ func TestMigrateOldSchema(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, hasReceivedAt)
 
+	hasShareNullifier, err := tableHasColumn(s.db, "shares", "share_nullifier")
+	require.NoError(t, err)
+	assert.True(t, hasShareNullifier)
+
+	hasClosedAt, err := tableHasColumn(s.db, "shares", "closed_at")
+	require.NoError(t, err)
+	assert.True(t, hasClosedAt)
+
 	hasOriginalSubmitAt, err := tableHasColumn(s.db, "shares", "original_submit_at")
 	require.NoError(t, err)
 	assert.True(t, hasOriginalSubmitAt)
@@ -705,6 +819,10 @@ func TestMigrateOldSchema(t *testing.T) {
 	hasRoundCreatedAtTime, err := tableHasColumn(s.db, "rounds", "created_at_time")
 	require.NoError(t, err)
 	assert.True(t, hasRoundCreatedAtTime)
+
+	hasRoundClosedAt, err := tableHasColumn(s.db, "rounds", "closed_at")
+	require.NoError(t, err)
+	assert.True(t, hasRoundClosedAt)
 
 	// tree_position should now be part of the primary key.
 	notInPK, err := columnNotInPK(s.db, "shares", "tree_position")
@@ -731,6 +849,116 @@ func TestMigrateOldSchema(t *testing.T) {
 	result, err = s.Enqueue(p2)
 	require.NoError(t, err)
 	assert.Equal(t, EnqueueInserted, result)
+
+	require.NoError(t, s.Close())
+	reopened, err := NewShareStore(dbPath, fetcher)
+	require.NoError(t, err)
+	defer reopened.Close()
+	status := reopened.Status()
+	assert.Equal(t, 2, status["round1"].Pending)
+}
+
+func TestMigrateOldPKPreservesQueueMetadata(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "old_helper_metadata.db")
+
+	oldDB, err := sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+	_, err = oldDB.Exec(`
+		CREATE TABLE shares (
+			round_id        TEXT NOT NULL,
+			share_index     INTEGER NOT NULL,
+			shares_hash     TEXT NOT NULL,
+			proposal_id     INTEGER NOT NULL,
+			vote_decision   INTEGER NOT NULL,
+			enc_share_c1    TEXT NOT NULL,
+			enc_share_c2    TEXT NOT NULL,
+			tree_position   INTEGER NOT NULL,
+			share_comms     TEXT NOT NULL DEFAULT '[]',
+			primary_blind   TEXT NOT NULL DEFAULT '',
+			state           INTEGER NOT NULL DEFAULT 0,
+			attempts        INTEGER NOT NULL DEFAULT 0,
+			vote_end_time   INTEGER NOT NULL DEFAULT 0,
+			submit_at       INTEGER NOT NULL DEFAULT 0,
+			original_submit_at INTEGER NOT NULL DEFAULT 0,
+			received_at     INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (round_id, share_index, proposal_id)
+		)
+	`)
+	require.NoError(t, err)
+	_, err = oldDB.Exec(
+		`INSERT INTO shares (
+			round_id, share_index, shares_hash, proposal_id, vote_decision,
+			enc_share_c1, enc_share_c2, tree_position, share_comms, primary_blind,
+			state, attempts, vote_end_time, submit_at, original_submit_at, received_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"round1", 7, "shares-hash", 11, 1,
+		"c1", "c2", 99, `["comm"]`, "blind",
+		int(ShareStateReceived), 3, uint64(2000), uint64(1500), uint64(1400), uint64(1300),
+	)
+	require.NoError(t, err)
+	require.NoError(t, oldDB.Close())
+
+	s, err := NewShareStore(dbPath, nil)
+	require.NoError(t, err)
+	defer s.Close()
+
+	var row struct {
+		sharesHash       string
+		proposalID       uint32
+		voteDecision     uint32
+		c1               string
+		c2               string
+		shareComms       string
+		primaryBlind     string
+		state            int
+		attempts         int
+		voteEndTime      uint64
+		submitAt         uint64
+		originalSubmitAt uint64
+		receivedAt       uint64
+		shareNullifier   string
+		closedAt         uint64
+	}
+	err = s.db.QueryRow(
+		`SELECT shares_hash, proposal_id, vote_decision, enc_share_c1, enc_share_c2,
+		        share_comms, primary_blind, state, attempts, vote_end_time,
+		        submit_at, original_submit_at, received_at, share_nullifier, closed_at
+		   FROM shares
+		  WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
+		"round1", 7, 11, 99,
+	).Scan(
+		&row.sharesHash,
+		&row.proposalID,
+		&row.voteDecision,
+		&row.c1,
+		&row.c2,
+		&row.shareComms,
+		&row.primaryBlind,
+		&row.state,
+		&row.attempts,
+		&row.voteEndTime,
+		&row.submitAt,
+		&row.originalSubmitAt,
+		&row.receivedAt,
+		&row.shareNullifier,
+		&row.closedAt,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "shares-hash", row.sharesHash)
+	assert.Equal(t, uint32(11), row.proposalID)
+	assert.Equal(t, uint32(1), row.voteDecision)
+	assert.Equal(t, "c1", row.c1)
+	assert.Equal(t, "c2", row.c2)
+	assert.Equal(t, `["comm"]`, row.shareComms)
+	assert.Equal(t, "blind", row.primaryBlind)
+	assert.Equal(t, int(ShareStateReceived), row.state)
+	assert.Equal(t, 3, row.attempts)
+	assert.Equal(t, uint64(2000), row.voteEndTime)
+	assert.Equal(t, uint64(1500), row.submitAt)
+	assert.Equal(t, uint64(1400), row.originalSubmitAt)
+	assert.Equal(t, uint64(1300), row.receivedAt)
+	assert.Empty(t, row.shareNullifier)
+	assert.Zero(t, row.closedAt)
 }
 
 func TestNextScheduledTimeEmptyAndReadyRemoval(t *testing.T) {
@@ -819,13 +1047,23 @@ func TestExportQueueIncludesTerminalRows(t *testing.T) {
 	require.Len(t, ready, 1)
 	s.MarkSubmitted("round1", 1, 1, 11)
 
+	missed := testPayload("round1", 2)
+	missed.TreePosition = 22
+	enqueueAndRequireInserted(t, s, missed)
+	require.NoError(t, s.CloseoutShare("round1", 2, 1, 22, ShareStateMissedDeadline, nil, 1200))
+
+	observed := testPayload("round1", 3)
+	observed.TreePosition = 33
+	enqueueAndRequireInserted(t, s, observed)
+	require.NoError(t, s.CloseoutShare("round1", 3, 1, 33, ShareStateObservedOnChain, []byte{0xAA, 0xBB}, 1300))
+
 	export, err := s.ExportQueue("round1", time.Unix(1234, 0))
 	require.NoError(t, err)
-	require.Len(t, export.Rows, 2)
+	require.Len(t, export.Rows, 4)
 	assert.Equal(t, QueueExportVersion, export.Version)
 	assert.Equal(t, uint64(1234), export.ExportedAt)
 
-	var sawPending, sawSubmitted bool
+	var sawPending, sawSubmitted, sawMissed, sawObserved bool
 	for _, row := range export.Rows {
 		switch row.ShareIndex {
 		case 0:
@@ -841,10 +1079,28 @@ func TestExportQueueIncludesTerminalRows(t *testing.T) {
 			assert.Empty(t, row.EncShare.C1)
 			assert.Empty(t, row.PrimaryBlind)
 			assert.Empty(t, row.ShareComms)
+		case 2:
+			sawMissed = true
+			assert.False(t, row.Processable)
+			assert.Equal(t, ShareStateMissedDeadline, row.State)
+			assert.Empty(t, row.EncShare.C1)
+			assert.Empty(t, row.PrimaryBlind)
+			assert.Empty(t, row.ShareNullifier)
+			assert.Equal(t, uint64(1200), row.ClosedAt)
+		case 3:
+			sawObserved = true
+			assert.False(t, row.Processable)
+			assert.Equal(t, ShareStateObservedOnChain, row.State)
+			assert.Empty(t, row.EncShare.C1)
+			assert.Empty(t, row.PrimaryBlind)
+			assert.Equal(t, "aabb", row.ShareNullifier)
+			assert.Equal(t, uint64(1300), row.ClosedAt)
 		}
 	}
 	assert.True(t, sawPending)
 	assert.True(t, sawSubmitted)
+	assert.True(t, sawMissed)
+	assert.True(t, sawObserved)
 }
 
 func TestImportQueueSkipsTerminalAndRoundTripsProcessableRows(t *testing.T) {
@@ -858,6 +1114,14 @@ func TestImportQueueSkipsTerminalAndRoundTripsProcessableRows(t *testing.T) {
 	require.Len(t, ready, 2)
 	source.MarkSubmitted("round1", 1, 1, 11)
 	source.MarkFailed("round1", 0, 1, 0)
+	missed := testPayload("round1", 2)
+	missed.TreePosition = 22
+	enqueueAndRequireInserted(t, source, missed)
+	require.NoError(t, source.CloseoutShare("round1", 2, 1, 22, ShareStateMissedDeadline, nil, 1200))
+	observed := testPayload("round1", 3)
+	observed.TreePosition = 33
+	enqueueAndRequireInserted(t, source, observed)
+	require.NoError(t, source.CloseoutShare("round1", 3, 1, 33, ShareStateObservedOnChain, []byte{0xAA, 0xBB}, 1300))
 
 	export, err := source.ExportQueue("round1", time.Now())
 	require.NoError(t, err)
@@ -866,7 +1130,7 @@ func TestImportQueueSkipsTerminalAndRoundTripsProcessableRows(t *testing.T) {
 	result, err := dest.ImportQueue(export, QueueImportOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, 1, result.Inserted)
-	assert.Equal(t, 1, result.SkippedTerminal)
+	assert.Equal(t, 3, result.SkippedTerminal)
 
 	status := dest.Status()
 	assert.Equal(t, 1, status["round1"].Total)
@@ -882,7 +1146,7 @@ func TestImportQueueSkipsTerminalAndRoundTripsProcessableRows(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, result.Inserted)
 	assert.Equal(t, 1, result.Duplicates)
-	assert.Equal(t, 1, result.SkippedTerminal)
+	assert.Equal(t, 3, result.SkippedTerminal)
 }
 
 func TestImportQueueRejectsUnsupportedVersion(t *testing.T) {

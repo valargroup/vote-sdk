@@ -11,8 +11,10 @@ are intentionally not exposed over HTTP.
   payloads, share commitments, and blind material.
 - Move export files only over a trusted channel. Delete them after the rescue is
   complete.
-- Queue data is purged after vote end time by the helper processor. Export
-  before the vote closes if the queue may need rescue.
+- Processable queue rows are closed out after vote end time by the helper
+  processor. Export before the vote closes if the queue may need rescue.
+  Closeout keeps accounting rows, but it clears the witness material needed to
+  retry submission.
 
 ## Export
 

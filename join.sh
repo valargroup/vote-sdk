@@ -1172,6 +1172,11 @@ chain_api_port = 1317
 # Maximum concurrent proof generation goroutines.
 max_concurrent_proofs = 8
 
+# Seconds after vote_end_time to serve completed-round queue summaries.
+# Use -1 to serve completed rounds indefinitely, or 0 to stop immediately.
+# Values below -1 fall back to the default.
+completed_round_data_serve_seconds = 1209600
+
 HELPERCFG
 
 echo "Node configured."

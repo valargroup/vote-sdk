@@ -387,6 +387,12 @@ func (app *SvoteApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIC
 			return nil
 		}
 		return h.ShareNullifierChecker
+	}, func() int64 {
+		h := app.GetHelper()
+		if h == nil {
+			return helper.DefaultCompletedRoundDataServeSeconds
+		}
+		return h.CompletedRoundDataServeSeconds
 	}, app.Logger().With("module", "helper"))
 
 	// Register admin server routes (voting-config proxy from GitHub Pages CDN).

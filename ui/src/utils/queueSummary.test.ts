@@ -138,13 +138,49 @@ describe("queue summary helpers", () => {
     const s = summary();
     expect(queueSummaryTotals(s)).toEqual({
       submitted: 3,
+      observed_on_chain: 0,
       pending_future: 4,
       overdue_pending: 2,
       processing: 3,
       failed: 1,
+      missed_deadline: 0,
       total: 13,
     });
     expect(queueSummaryMaxBucketTotal([s])).toBe(7);
+  });
+
+  it("includes closeout states in totals and aggregates", () => {
+    const s = summary({
+      buckets: [
+        {
+          start: 1000,
+          end: 1060,
+          submitted: 1,
+          observed_on_chain: 2,
+          pending_future: 0,
+          overdue_pending: 0,
+          processing: 0,
+          failed: 1,
+          missed_deadline: 3,
+          total: 7,
+        },
+      ],
+    });
+    const result: QueueServerOK = { state: "ok", server: serverA, summary: s };
+    const [bucket] = aggregateQueueBuckets([result]);
+
+    expect(queueSummaryTotals(s)).toEqual({
+      submitted: 1,
+      observed_on_chain: 2,
+      pending_future: 0,
+      overdue_pending: 0,
+      processing: 0,
+      failed: 1,
+      missed_deadline: 3,
+      total: 7,
+    });
+    expect(bucket.observed_on_chain).toBe(2);
+    expect(bucket.missed_deadline).toBe(3);
   });
 
   it("uses the capped single-share window policy", () => {

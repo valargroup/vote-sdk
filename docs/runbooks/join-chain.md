@@ -180,10 +180,14 @@ The primary validator serves the admin UI [here](https://svote.valargroup.org/vo
 | `db_path` | `""` (= `~/.svoted/helper.db`) | SQLite path for queued shares. |
 | `chain_api_port` | `1317` | REST port the helper submits `MsgRevealShare` to. |
 | `max_concurrent_proofs` | `8` | Parallel proof goroutines (~500 MB each). |
+| `completed_round_data_serve_seconds` | `1209600` | Seconds after `vote_end_time` to serve completed-round queue summaries. Use `-1` to serve indefinitely, or `0` to stop immediately. Values below `-1` fall back to the default. |
 
 Queue summaries omit proposal IDs, vote decisions, share indices, nullifiers,
 tree positions, and exact submit times. Failed rows are reported immediately,
 including in open buckets, so operators can detect broken share processing.
+When a round closes, processable rows are marked `missed_deadline` or
+`observed_on_chain`, witness material is scrubbed, and the helper keeps
+the accounting rows in SQLite.
 
 The production reference is [deploy-setup.md § Helper server configuration](../deploy-setup.md#helper-server-configuration). `[admin]` and the admin UI are disabled for joining validators; only the primary runs them.
 

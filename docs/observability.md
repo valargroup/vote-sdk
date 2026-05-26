@@ -168,9 +168,18 @@ payload material. The helper chooses the bucket size from the vote duration:
 | 1 hour or more | 15 minutes |
 | Less than 1 hour | 1 minute |
 
-Each bucket reports `submitted`, `pending_future`, `overdue_pending`,
-`processing`, `failed`, and `total`. `overdue_pending` means a share is still
-waiting in the helper DB even though its `submit_at` time has passed.
+Each bucket reports `submitted`, `observed_on_chain`, `pending_future`,
+`overdue_pending`, `processing`, `failed`, `missed_deadline`, and `total`.
+`observed_on_chain` means the share nullifier was already accepted on-chain
+before this helper recorded a local submission.
+`overdue_pending` means a share is still waiting in the helper DB even though
+its `submit_at` time has passed.
+
+Completed-round summaries are served for
+`[helper].completed_round_data_serve_seconds` after `vote_end_time`, defaulting
+to 14 days. Use `-1` to serve completed rounds indefinitely, or `0` to stop
+serving summaries immediately after round close. Values below `-1` fall back
+to the 14 day default.
 
 The admin UI has a monitor route at `/queue-monitor` that reads `vote_servers[]`
 from `/api/voting-config`, queries each helper's queue summary, and overlays the

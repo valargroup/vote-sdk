@@ -26,16 +26,16 @@ the wallet's intended schedule exactly.
 
 `Processor.Run()` is deterministic:
 
-1. emit alerts for expired rounds with unsubmitted shares,
-2. purge expired round data,
+1. close out expired rounds and emit alerts for unsubmitted shares,
+2. clear witness material for expired processable rows,
 3. process all ready shares,
 4. wait for the earliest scheduled `submit_at`, a schedule-change notification,
    cancellation, or a 30 second maintenance wake.
 
-The maintenance wake exists only so expiry alerts and purging still run when no
-shares are scheduled. Enqueue and retry scheduling changes signal the processor
-through a buffered channel so new immediate shares do not wait for the
-maintenance wake.
+The maintenance wake exists only so expiry alerts and closeout still run when
+no shares are scheduled. Enqueue and retry scheduling changes signal the
+processor through a buffered channel so new immediate shares do not wait for
+the maintenance wake.
 
 ## Crash Recovery
 
@@ -59,6 +59,8 @@ same schedule the wallet provided.
 | Witnessed (1) - mid-processing | Reset to Received, re-enters schedule | No |
 | Submitted (2) - on chain | Terminal, no action needed | No |
 | Failed (3) - permanent failure | Terminal, no action needed | N/A |
+| MissedDeadline (4) - not on-chain at closeout | Terminal, no action needed | N/A |
+| ObservedOnChain (5) - accepted on-chain before local submission was recorded | Terminal, no action needed | No |
 
 ## Wallet Retry Safety
 

@@ -29,6 +29,7 @@ func RegisterRoutes(router *mux.Router, store *ShareStore, logger log.Logger) {
 		nil,
 		nil,
 		nil,
+		nil,
 		logger,
 	)
 }
@@ -37,7 +38,7 @@ func RegisterRoutes(router *mux.Router, store *ShareStore, logger log.Logger) {
 // mux router, resolving the store at request time. This allows routes to be
 // mounted before the helper is fully initialized.
 func RegisterRoutesWithStoreGetter(router *mux.Router, getStore func() *ShareStore, logger log.Logger) {
-	RegisterRoutesWithGetters(router, getStore, func() string { return "" }, func() bool { return false }, nil, nil, nil, logger)
+	RegisterRoutesWithGetters(router, getStore, func() string { return "" }, func() bool { return false }, nil, nil, nil, nil, logger)
 }
 
 // ErrInvalidCommitment is returned when the share's recomputed vote commitment
@@ -54,6 +55,7 @@ func RegisterRoutesWithGetters(
 	getTree func() TreeReader,
 	getVCHash func() VCHashFunc,
 	getShareNullifier ShareNullifierCheckerGetter,
+	getCompletedRoundDataServeSeconds func() int64,
 	logger log.Logger,
 ) {
 	RegisterRoutesWithQueueSummaryGetters(
@@ -65,6 +67,7 @@ func RegisterRoutesWithGetters(
 		getTree,
 		getVCHash,
 		getShareNullifier,
+		getCompletedRoundDataServeSeconds,
 		logger,
 	)
 }
@@ -80,17 +83,19 @@ func RegisterRoutesWithQueueSummaryGetters(
 	getTree func() TreeReader,
 	getVCHash func() VCHashFunc,
 	getShareNullifier ShareNullifierCheckerGetter,
+	getCompletedRoundDataServeSeconds func() int64,
 	logger log.Logger,
 ) {
 	h := &apiHandler{
-		getStore:              getStore,
-		getAPIToken:           getAPIToken,
-		getExposeQueueStatus:  getExposeQueueStatus,
-		getExposeQueueSummary: getExposeQueueSummary,
-		getTree:               getTree,
-		getVCHash:             getVCHash,
-		getShareNullifier:     getShareNullifier,
-		logger:                logger,
+		getStore:                          getStore,
+		getAPIToken:                       getAPIToken,
+		getExposeQueueStatus:              getExposeQueueStatus,
+		getExposeQueueSummary:             getExposeQueueSummary,
+		getTree:                           getTree,
+		getVCHash:                         getVCHash,
+		getShareNullifier:                 getShareNullifier,
+		getCompletedRoundDataServeSeconds: getCompletedRoundDataServeSeconds,
+		logger:                            logger,
 	}
 	recover := sentryhttp.New(sentryhttp.Options{Repanic: false}).Handle
 	router.Handle("/shielded-vote/v1/shares", recover(http.HandlerFunc(h.handleSubmitShare))).Methods("POST")
@@ -104,14 +109,15 @@ func RegisterRoutesWithQueueSummaryGetters(
 type ShareNullifierCheckerGetter func() ShareNullifierChecker
 
 type apiHandler struct {
-	getStore              func() *ShareStore
-	getAPIToken           func() string
-	getExposeQueueStatus  func() bool
-	getExposeQueueSummary func() bool
-	getTree               func() TreeReader
-	getVCHash             func() VCHashFunc
-	getShareNullifier     ShareNullifierCheckerGetter
-	logger                log.Logger
+	getStore                          func() *ShareStore
+	getAPIToken                       func() string
+	getExposeQueueStatus              func() bool
+	getExposeQueueSummary             func() bool
+	getTree                           func() TreeReader
+	getVCHash                         func() VCHashFunc
+	getShareNullifier                 ShareNullifierCheckerGetter
+	getCompletedRoundDataServeSeconds func() int64
+	logger                            log.Logger
 }
 
 type submitResponse struct {
@@ -178,6 +184,10 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, ErrInvalidSubmitAt) {
 			jsonError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, ErrRoundClosed) {
+			jsonError(w, err.Error(), http.StatusGone)
 			return
 		}
 		h.logger.Error("failed to enqueue share", "error", err)
@@ -338,10 +348,18 @@ func (h *apiHandler) handleQueueSummary(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	summary, err := store.QueueSummary(roundID, time.Now())
+	completedRoundDataServeSeconds := DefaultCompletedRoundDataServeSeconds
+	if h.getCompletedRoundDataServeSeconds != nil {
+		completedRoundDataServeSeconds = h.getCompletedRoundDataServeSeconds()
+	}
+	summary, err := store.QueueSummary(roundID, time.Now(), completedRoundDataServeSeconds)
 	if err != nil {
 		if errors.Is(err, ErrUnknownRound) {
 			jsonError(w, "round not found", http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, ErrCompletedRoundDataExpired) {
+			jsonError(w, err.Error(), http.StatusGone)
 			return
 		}
 		if errors.Is(err, ErrInvalidRoundInfo) {

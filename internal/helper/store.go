@@ -2,6 +2,7 @@ package helper
 
 import (
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,9 +25,16 @@ var ErrUnknownRound = errors.New("unknown voting round")
 // ErrInvalidSubmitAt is returned when submit_at is after vote end time.
 var ErrInvalidSubmitAt = errors.New("invalid submit_at")
 
+// ErrRoundClosed is returned when a share arrives after the vote window closed.
+var ErrRoundClosed = errors.New("voting round closed")
+
 // ErrInvalidRoundInfo is returned when cached round metadata cannot produce a
 // valid queue summary.
 var ErrInvalidRoundInfo = errors.New("invalid voting round metadata")
+
+// ErrCompletedRoundDataExpired is returned when public completed-round helper
+// data is outside the configured serving window.
+var ErrCompletedRoundDataExpired = errors.New("completed round data expired")
 
 // ShareStore is a SQLite-backed share queue with ephemeral in-memory scheduling.
 // Payload data and processing state are persisted; client-provided submit_at
@@ -157,6 +165,8 @@ func migrate(db *sql.DB) error {
 			submit_at       INTEGER NOT NULL DEFAULT 0,
 			original_submit_at INTEGER NOT NULL DEFAULT 0,
 			received_at     INTEGER NOT NULL DEFAULT 0,
+			share_nullifier TEXT NOT NULL DEFAULT '',
+			closed_at       INTEGER NOT NULL DEFAULT 0,
 			PRIMARY KEY (round_id, share_index, proposal_id, tree_position)
 		)
 	`); err != nil {
@@ -255,6 +265,36 @@ func migrate(db *sql.DB) error {
 		}
 	}
 
+	hasShareNullifier, err := tableHasColumn(db, "shares", "share_nullifier")
+	if err != nil {
+		return fmt.Errorf("check shares schema: %w", err)
+	}
+	if !hasShareNullifier {
+		if _, err := db.Exec("ALTER TABLE shares ADD COLUMN share_nullifier TEXT NOT NULL DEFAULT ''"); err != nil {
+			return fmt.Errorf("add shares.share_nullifier: %w", err)
+		}
+	}
+
+	hasClosedAt, err := tableHasColumn(db, "shares", "closed_at")
+	if err != nil {
+		return fmt.Errorf("check shares schema: %w", err)
+	}
+	if !hasClosedAt {
+		if _, err := db.Exec("ALTER TABLE shares ADD COLUMN closed_at INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return fmt.Errorf("add shares.closed_at: %w", err)
+		}
+	}
+
+	hasRoundsClosedAt, err := tableHasColumn(db, "rounds", "closed_at")
+	if err != nil {
+		return fmt.Errorf("check rounds schema: %w", err)
+	}
+	if !hasRoundsClosedAt {
+		if _, err := db.Exec("ALTER TABLE rounds ADD COLUMN closed_at INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return fmt.Errorf("add rounds.closed_at: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -312,17 +352,42 @@ func columnNotInPK(db *sql.DB, tableName, columnName string) (bool, error) {
 }
 
 // migrateSharesPK recreates the shares table with the new 4-column primary key
-// (round_id, share_index, proposal_id, tree_position). Handles old schemas
-// that may lack the vote_end_time column.
+// (round_id, share_index, proposal_id, tree_position). It first adds any
+// missing queue metadata columns so existing scheduling and audit data survives
+// the table rebuild.
 func migrateSharesPK(db *sql.DB) error {
-	// Ensure vote_end_time exists before copying (old schemas may lack it).
-	hasVET, err := tableHasColumn(db, "shares", "vote_end_time")
-	if err != nil {
-		return fmt.Errorf("check vote_end_time column: %w", err)
+	columns := []struct {
+		name       string
+		definition string
+		backfill   string
+	}{
+		{name: "share_comms", definition: "TEXT NOT NULL DEFAULT '[]'"},
+		{name: "primary_blind", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "vote_end_time", definition: "INTEGER NOT NULL DEFAULT 0"},
+		{name: "submit_at", definition: "INTEGER NOT NULL DEFAULT 0"},
+		{
+			name:       "original_submit_at",
+			definition: "INTEGER NOT NULL DEFAULT 0",
+			backfill:   "UPDATE shares SET original_submit_at = submit_at WHERE original_submit_at = 0 AND submit_at != 0",
+		},
+		{name: "received_at", definition: "INTEGER NOT NULL DEFAULT 0"},
+		{name: "share_nullifier", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "closed_at", definition: "INTEGER NOT NULL DEFAULT 0"},
 	}
-	if !hasVET {
-		if _, err := db.Exec("ALTER TABLE shares ADD COLUMN vote_end_time INTEGER NOT NULL DEFAULT 0"); err != nil {
-			return fmt.Errorf("add vote_end_time: %w", err)
+	for _, column := range columns {
+		hasColumn, err := tableHasColumn(db, "shares", column.name)
+		if err != nil {
+			return fmt.Errorf("check %s column: %w", column.name, err)
+		}
+		if !hasColumn {
+			if _, err := db.Exec(fmt.Sprintf("ALTER TABLE shares ADD COLUMN %s %s", column.name, column.definition)); err != nil {
+				return fmt.Errorf("add %s before PK migration: %w", column.name, err)
+			}
+			if column.backfill != "" {
+				if _, err := db.Exec(column.backfill); err != nil {
+					return fmt.Errorf("backfill %s before PK migration: %w", column.name, err)
+				}
+			}
 		}
 	}
 
@@ -332,30 +397,10 @@ func migrateSharesPK(db *sql.DB) error {
 	}
 	defer tx.Rollback()
 
-	// Ensure share_comms and primary_blind columns exist before migration.
-	hasComms, err := tableHasColumn(db, "shares", "share_comms")
-	if err != nil {
-		return fmt.Errorf("check share_comms column: %w", err)
-	}
-	if !hasComms {
-		if _, errA := db.Exec("ALTER TABLE shares ADD COLUMN share_comms TEXT NOT NULL DEFAULT '[]'"); errA != nil {
-			return fmt.Errorf("add share_comms before PK migration: %w", errA)
-		}
-	}
-	hasBlind, err := tableHasColumn(db, "shares", "primary_blind")
-	if err != nil {
-		return fmt.Errorf("check primary_blind column: %w", err)
-	}
-	if !hasBlind {
-		if _, errA := db.Exec("ALTER TABLE shares ADD COLUMN primary_blind TEXT NOT NULL DEFAULT ''"); errA != nil {
-			return fmt.Errorf("add primary_blind before PK migration: %w", errA)
-		}
-	}
-
 	if _, err := tx.Exec(`CREATE TABLE shares_new (
-		round_id        TEXT NOT NULL,
-		share_index     INTEGER NOT NULL,
-		shares_hash     TEXT NOT NULL,
+			round_id        TEXT NOT NULL,
+			share_index     INTEGER NOT NULL,
+			shares_hash     TEXT NOT NULL,
 		proposal_id     INTEGER NOT NULL,
 		vote_decision   INTEGER NOT NULL,
 		enc_share_c1    TEXT NOT NULL,
@@ -363,19 +408,25 @@ func migrateSharesPK(db *sql.DB) error {
 		tree_position   INTEGER NOT NULL,
 		share_comms     TEXT NOT NULL DEFAULT '[]',
 		primary_blind   TEXT NOT NULL DEFAULT '',
-		state           INTEGER NOT NULL DEFAULT 0,
-		attempts        INTEGER NOT NULL DEFAULT 0,
-		vote_end_time   INTEGER NOT NULL DEFAULT 0,
-		PRIMARY KEY (round_id, share_index, proposal_id, tree_position)
-	)`); err != nil {
+			state           INTEGER NOT NULL DEFAULT 0,
+			attempts        INTEGER NOT NULL DEFAULT 0,
+			vote_end_time   INTEGER NOT NULL DEFAULT 0,
+			submit_at       INTEGER NOT NULL DEFAULT 0,
+			original_submit_at INTEGER NOT NULL DEFAULT 0,
+			received_at     INTEGER NOT NULL DEFAULT 0,
+			share_nullifier TEXT NOT NULL DEFAULT '',
+			closed_at       INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (round_id, share_index, proposal_id, tree_position)
+		)`); err != nil {
 		return err
 	}
 
 	if _, err := tx.Exec(`INSERT INTO shares_new SELECT
-		round_id, share_index, shares_hash, proposal_id, vote_decision,
-		enc_share_c1, enc_share_c2, tree_position, share_comms,
-		primary_blind, state, attempts, vote_end_time
-	FROM shares`); err != nil {
+			round_id, share_index, shares_hash, proposal_id, vote_decision,
+			enc_share_c1, enc_share_c2, tree_position, share_comms,
+			primary_blind, state, attempts, vote_end_time, submit_at,
+			original_submit_at, received_at, share_nullifier, closed_at
+		FROM shares`); err != nil {
 		return err
 	}
 
@@ -419,6 +470,9 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 		return EnqueueConflict, fmt.Errorf("%w: submit_at (%d) > vote_end_time (%d)", ErrInvalidSubmitAt, payload.SubmitAt, roundInfo.VoteEndTime)
 	}
 	receivedAt := uint64(time.Now().Unix())
+	if roundInfo.VoteEndTime != 0 && receivedAt >= roundInfo.VoteEndTime {
+		return EnqueueConflict, fmt.Errorf("%w: vote_end_time %d <= now %d", ErrRoundClosed, roundInfo.VoteEndTime, receivedAt)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -611,9 +665,15 @@ func (s *ShareStore) MarkSubmitted(roundID string, shareIndex, proposalID uint32
 }
 
 // MarkFailed marks a share processing attempt as failed, with retry or
-// permanent failure after max attempts.
-func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, treePosition uint64) {
+// permanent failure after max attempts. If a share nullifier is supplied, it is
+// retained on permanent failure so closeout can later detect whether another
+// helper accepted the share on-chain.
+func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, treePosition uint64, shareNullifier ...[]byte) {
 	const maxAttempts = 5
+	shareNullifierHex := ""
+	if len(shareNullifier) > 0 && len(shareNullifier[0]) > 0 {
+		shareNullifierHex = hex.EncodeToString(shareNullifier[0])
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -634,10 +694,14 @@ func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, t
 		// Permanently failed — clear witness data.
 		if _, err := s.db.Exec(
 			`UPDATE shares SET state = 3, attempts = ?,
-			        enc_share_c1 = '', enc_share_c2 = '',
-			        share_comms = '[]', primary_blind = ''
-			 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
-			newAttempts, roundID, shareIndex, proposalID, treePosition,
+				        share_nullifier = CASE
+				          WHEN share_nullifier = '' THEN ?
+				          ELSE share_nullifier
+				        END,
+				        enc_share_c1 = '', enc_share_c2 = '',
+				        share_comms = '[]', primary_blind = ''
+				 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
+			newAttempts, shareNullifierHex, roundID, shareIndex, proposalID, treePosition,
 		); err != nil {
 			s.logError("MarkFailed: db update (permanent) failed", "error", err)
 		}
@@ -730,6 +794,10 @@ func (s *ShareStore) Status() map[string]QueueStatus {
 			entry.Submitted += count
 		case 3:
 			entry.Failed += count
+		case 4:
+			entry.MissedDeadline += count
+		case 5:
+			entry.ObservedOnChain += count
 		}
 		result[roundID] = entry
 	}
@@ -766,7 +834,7 @@ func (s *ShareStore) ExportQueue(roundID string, now time.Time) (QueueExport, er
 		`SELECT share_index, shares_hash, proposal_id, vote_decision,
 		        enc_share_c1, enc_share_c2, tree_position, share_comms,
 		        primary_blind, state, attempts, vote_end_time, submit_at,
-		        original_submit_at, received_at
+		        original_submit_at, received_at, share_nullifier, closed_at
 		   FROM shares
 		  WHERE round_id = ?
 		  ORDER BY submit_at, received_at, proposal_id, vote_decision, share_index, tree_position`,
@@ -797,6 +865,8 @@ func (s *ShareStore) ExportQueue(roundID string, now time.Time) (QueueExport, er
 			&row.SubmitAt,
 			&row.OriginalSubmitAt,
 			&row.ReceivedAt,
+			&row.ShareNullifier,
+			&row.ClosedAt,
 		); err != nil {
 			return QueueExport{}, fmt.Errorf("scan queue row: %w", err)
 		}
@@ -1120,7 +1190,9 @@ func queueSummaryBucketIndex(ts, createdAtTime, voteEndTime, bucketSeconds uint6
 
 // QueueSummary returns a public, coarse histogram for one round across all
 // proposals handled by this helper.
-func (s *ShareStore) QueueSummary(roundID string, now time.Time) (QueueSummary, error) {
+func (s *ShareStore) QueueSummary(roundID string, now time.Time, completedRoundDataServeSeconds int64) (QueueSummary, error) {
+	completedRoundDataServeSeconds = NormalizeCompletedRoundDataServeSeconds(completedRoundDataServeSeconds)
+
 	info, err := s.getRoundInfo(roundID)
 	if err != nil {
 		return QueueSummary{}, err
@@ -1133,6 +1205,12 @@ func (s *ShareStore) QueueSummary(roundID string, now time.Time) (QueueSummary, 
 	}
 
 	generatedAt := uint64(now.Unix())
+	if completedRoundDataServeSeconds >= 0 && generatedAt > info.VoteEndTime {
+		serveUntil := info.VoteEndTime + uint64(completedRoundDataServeSeconds)
+		if generatedAt > serveUntil {
+			return QueueSummary{}, fmt.Errorf("%w: round %s expired at %d", ErrCompletedRoundDataExpired, roundID, serveUntil)
+		}
+	}
 	duration := info.VoteEndTime - info.CreatedAtTime
 	bucketSeconds := queueSummaryPolicyBucketSeconds(duration)
 	bucketCount64 := duration / bucketSeconds
@@ -1211,6 +1289,10 @@ func (s *ShareStore) QueueSummary(roundID string, now time.Time) (QueueSummary, 
 			bucket.Submitted += count
 		case ShareStateFailed:
 			bucket.Failed += count
+		case ShareStateMissedDeadline:
+			bucket.MissedDeadline += count
+		case ShareStateObservedOnChain:
+			bucket.ObservedOnChain += count
 		}
 		bucket.Total += count
 	}
@@ -1222,17 +1304,19 @@ func (s *ShareStore) QueueSummary(roundID string, now time.Time) (QueueSummary, 
 }
 
 // ExpiredRoundSummaries returns per-round queue counts for rounds whose voting
-// window has ended. Call this before PurgeExpiredRounds so unsubmitted share
-// alerts can be emitted without retaining witness data.
+// window has ended and have not been closed out yet.
 func (s *ShareStore) ExpiredRoundSummaries(now time.Time) ([]ExpiredRoundSummary, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	rows, err := s.db.Query(
-		`SELECT round_id, state, COUNT(*)
+		`SELECT shares.round_id, shares.state, COUNT(*)
 		   FROM shares
-		  WHERE vote_end_time > 0 AND vote_end_time < ?
-		  GROUP BY round_id, state`,
+		   LEFT JOIN rounds ON rounds.round_id = shares.round_id
+		  WHERE shares.vote_end_time > 0
+		    AND shares.vote_end_time < ?
+		    AND COALESCE(rounds.closed_at, 0) = 0
+		  GROUP BY shares.round_id, shares.state`,
 		now.Unix(),
 	)
 	if err != nil {
@@ -1264,6 +1348,10 @@ func (s *ShareStore) ExpiredRoundSummaries(now time.Time) ([]ExpiredRoundSummary
 			summary.Submitted += count
 		case ShareStateFailed:
 			summary.Failed += count
+		case ShareStateMissedDeadline:
+			summary.MissedDeadline += count
+		case ShareStateObservedOnChain:
+			summary.ObservedOnChain += count
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -1278,50 +1366,283 @@ func (s *ShareStore) ExpiredRoundSummaries(now time.Time) ([]ExpiredRoundSummary
 	return summaries, nil
 }
 
+// RoundCloseoutSummary returns queue counts for one round after closeout
+// classification has updated any processable rows.
+func (s *ShareStore) RoundCloseoutSummary(roundID string) (ExpiredRoundSummary, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rows, err := s.db.Query(
+		`SELECT state, COUNT(*)
+		   FROM shares
+		  WHERE round_id = ?
+		  GROUP BY state`,
+		roundID,
+	)
+	if err != nil {
+		return ExpiredRoundSummary{}, fmt.Errorf("query round closeout summary: %w", err)
+	}
+	defer rows.Close()
+
+	summary := ExpiredRoundSummary{RoundID: roundID}
+	for rows.Next() {
+		var state, count int
+		if err := rows.Scan(&state, &count); err != nil {
+			return ExpiredRoundSummary{}, fmt.Errorf("scan round closeout summary: %w", err)
+		}
+		summary.Total += count
+		switch ShareState(state) {
+		case ShareStateReceived, ShareStateWitnessed:
+			summary.Pending += count
+		case ShareStateSubmitted:
+			summary.Submitted += count
+		case ShareStateFailed:
+			summary.Failed += count
+		case ShareStateMissedDeadline:
+			summary.MissedDeadline += count
+		case ShareStateObservedOnChain:
+			summary.ObservedOnChain += count
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return ExpiredRoundSummary{}, fmt.Errorf("iterate round closeout summary: %w", err)
+	}
+	return summary, nil
+}
+
+// ExpiredRoundIDsForCloseout returns round IDs whose voting window has ended
+// and whose helper rows have not been terminally closed out yet.
+func (s *ShareStore) ExpiredRoundIDsForCloseout(now time.Time) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rows, err := s.db.Query(
+		`SELECT round_id
+		   FROM rounds
+		  WHERE vote_end_time > 0
+		    AND vote_end_time < ?
+		    AND closed_at = 0
+		 UNION
+		 SELECT shares.round_id
+		   FROM shares
+		   LEFT JOIN rounds ON rounds.round_id = shares.round_id
+		  WHERE shares.vote_end_time > 0
+		    AND shares.vote_end_time < ?
+		    AND COALESCE(rounds.closed_at, 0) = 0
+		  ORDER BY round_id`,
+		now.Unix(),
+		now.Unix(),
+	)
+	if err != nil {
+		s.logError("ExpiredRoundIDsForCloseout: query failed", "error", err)
+		return nil, err
+	}
+	defer rows.Close()
+
+	var roundIDs []string
+	for rows.Next() {
+		var roundID string
+		if err := rows.Scan(&roundID); err != nil {
+			s.logError("ExpiredRoundIDsForCloseout: scan failed", "error", err)
+			return nil, err
+		}
+		roundIDs = append(roundIDs, roundID)
+	}
+	if err := rows.Err(); err != nil {
+		s.logError("ExpiredRoundIDsForCloseout: rows failed", "error", err)
+		return nil, err
+	}
+	return roundIDs, nil
+}
+
 // Close closes the database connection.
 func (s *ShareStore) Close() error {
 	return errors.Join(s.db.Close(), releaseShareStoreLock(s.lockFile))
 }
 
-// PurgeExpiredRounds deletes all share data for rounds whose vote_end_time
-// has passed, and removes the corresponding entries from the in-memory
-// schedule and round cache. Returns the number of rows deleted.
-func (s *ShareStore) PurgeExpiredRounds() int64 {
+// ProcessableSharesForRound returns rows that closeout can classify for a round.
+func (s *ShareStore) ProcessableSharesForRound(roundID string) ([]QueuedShare, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	now := time.Now().Unix()
-
-	res, err := s.db.Exec(
-		"DELETE FROM shares WHERE vote_end_time > 0 AND vote_end_time < ?", now,
+	rows, err := s.db.Query(
+		`SELECT share_index, shares_hash, proposal_id, vote_decision,
+		        tree_position, primary_blind, state, attempts, vote_end_time,
+		        submit_at, share_nullifier
+			   FROM shares
+			  WHERE round_id = ?
+			    AND closed_at = 0
+			    AND (
+			      state IN (?, ?)
+			      OR (state = ? AND share_nullifier != '')
+		    )
+		  ORDER BY submit_at, received_at, proposal_id, vote_decision, share_index, tree_position`,
+		roundID,
+		ShareStateReceived,
+		ShareStateWitnessed,
+		ShareStateFailed,
 	)
 	if err != nil {
-		s.logError("PurgeExpiredRounds: delete shares failed", "error", err)
-		return 0
+		return nil, fmt.Errorf("query processable shares: %w", err)
 	}
-	deleted, _ := res.RowsAffected()
+	defer rows.Close()
 
-	// Also clean the rounds metadata table.
-	if _, err := s.db.Exec(
-		"DELETE FROM rounds WHERE vote_end_time > 0 AND vote_end_time < ?", now,
-	); err != nil {
-		s.logError("PurgeExpiredRounds: delete rounds failed", "error", err)
-	}
-
-	// Prune in-memory caches for expired rounds.
-	for roundID, info := range s.roundCache {
-		if info.VoteEndTime > 0 && info.VoteEndTime < uint64(now) {
-			delete(s.roundCache, roundID)
+	var shares []QueuedShare
+	for rows.Next() {
+		var q QueuedShare
+		var state, attempts int
+		var shareNullifierHex string
+		if err := rows.Scan(
+			&q.Payload.EncShare.ShareIndex,
+			&q.Payload.SharesHash,
+			&q.Payload.ProposalID,
+			&q.Payload.VoteDecision,
+			&q.Payload.TreePosition,
+			&q.Payload.PrimaryBlind,
+			&state,
+			&attempts,
+			&q.VoteEndTime,
+			&q.Payload.SubmitAt,
+			&shareNullifierHex,
+		); err != nil {
+			return nil, fmt.Errorf("scan processable share: %w", err)
 		}
+		if shareNullifierHex != "" {
+			shareNullifier, err := hex.DecodeString(shareNullifierHex)
+			if err != nil {
+				return nil, fmt.Errorf("decode stored share nullifier for share_index %d proposal_id %d tree_position %d: %w", q.Payload.EncShare.ShareIndex, q.Payload.ProposalID, q.Payload.TreePosition, err)
+			}
+			q.ShareNullifier = shareNullifier
+		}
+		q.Payload.VoteRoundID = roundID
+		q.State = ShareState(state)
+		q.Attempts = attempts
+		shares = append(shares, q)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate processable shares: %w", err)
+	}
+	return shares, nil
+}
+
+// MarkFailedCloseoutChecked records that a failed row with a known share
+// nullifier was checked during round closeout and was still absent on-chain.
+func (s *ShareStore) MarkFailedCloseoutChecked(roundID string, shareIndex, proposalID uint32, treePosition uint64, closedAt uint64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, err := s.db.Exec(
+		`UPDATE shares
+		    SET closed_at = ?
+		  WHERE round_id = ?
+		    AND share_index = ?
+		    AND proposal_id = ?
+		    AND tree_position = ?
+		    AND state = ?
+		    AND closed_at = 0`,
+		closedAt,
+		roundID,
+		shareIndex,
+		proposalID,
+		treePosition,
+		ShareStateFailed,
+	); err != nil {
+		return fmt.Errorf("mark failed closeout checked: %w", err)
+	}
+	return nil
+}
+
+// MarkObservedOnChain records that a processable row was already accepted on-chain.
+func (s *ShareStore) MarkObservedOnChain(roundID string, shareIndex, proposalID uint32, treePosition uint64, shareNullifier []byte) error {
+	return s.markTerminalObserved(roundID, shareIndex, proposalID, treePosition, ShareStateObservedOnChain, shareNullifier, 0)
+}
+
+// CloseoutShare makes a processable row terminal at round close and clears
+// witness material while preserving timing and coarse audit state.
+func (s *ShareStore) CloseoutShare(roundID string, shareIndex, proposalID uint32, treePosition uint64, state ShareState, shareNullifier []byte, closedAt uint64) error {
+	if state != ShareStateMissedDeadline && state != ShareStateObservedOnChain {
+		return fmt.Errorf("invalid closeout state %d", state)
+	}
+	return s.markTerminalObserved(roundID, shareIndex, proposalID, treePosition, state, shareNullifier, closedAt)
+}
+
+func (s *ShareStore) markTerminalObserved(roundID string, shareIndex, proposalID uint32, treePosition uint64, state ShareState, shareNullifier []byte, closedAt uint64) error {
+	shareNullifierHex := ""
+	if len(shareNullifier) > 0 {
+		shareNullifierHex = hex.EncodeToString(shareNullifier)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	stateFilter := "AND state IN (?, ?)"
+	args := []any{
+		state,
+		shareNullifierHex,
+		closedAt,
+		roundID,
+		shareIndex,
+		proposalID,
+		treePosition,
+		ShareStateReceived,
+		ShareStateWitnessed,
+	}
+	if state == ShareStateObservedOnChain {
+		stateFilter = "AND state IN (?, ?, ?)"
+		args = append(args, ShareStateFailed)
+	}
+
+	_, err := s.db.Exec(
+		fmt.Sprintf(`UPDATE shares
+			    SET state = ?,
+			        share_nullifier = ?,
+			        closed_at = ?,
+		        enc_share_c1 = '',
+		        enc_share_c2 = '',
+		        share_comms = '[]',
+		        primary_blind = ''
+			  WHERE round_id = ?
+			    AND share_index = ?
+			    AND proposal_id = ?
+			    AND tree_position = ?
+			    %s`, stateFilter),
+		args...,
+	)
+	if err != nil {
+		return fmt.Errorf("close out share: %w", err)
+	}
+
+	key := schedKey(roundID, shareIndex, proposalID, treePosition)
+	if _, ok := s.schedule[key]; ok {
+		delete(s.schedule, key)
+		s.notifyScheduleChangedLocked()
+	}
+	return nil
+}
+
+// MarkRoundClosed records that closeout has completed for a round.
+func (s *ShareStore) MarkRoundClosed(roundID string, closedAt uint64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, err := s.db.Exec(
+		`INSERT INTO rounds (round_id, vote_end_time, created_at_time, closed_at)
+		 VALUES (?, 0, 0, ?)
+		 ON CONFLICT(round_id) DO UPDATE SET
+		   closed_at = CASE
+		     WHEN rounds.closed_at = 0 THEN excluded.closed_at
+		     ELSE rounds.closed_at
+		   END`,
+		roundID,
+		closedAt,
+	); err != nil {
+		return fmt.Errorf("mark round closed: %w", err)
+	}
+
 	schedulePruned := false
 	for key := range s.schedule {
 		parts := strings.SplitN(key, ":", 4)
-		if len(parts) < 1 {
-			continue
-		}
-		roundID := parts[0]
-		if _, ok := s.roundCache[roundID]; !ok {
+		if len(parts) > 0 && parts[0] == roundID {
 			delete(s.schedule, key)
 			schedulePruned = true
 		}
@@ -1329,13 +1650,7 @@ func (s *ShareStore) PurgeExpiredRounds() int64 {
 	if schedulePruned {
 		s.notifyScheduleChangedLocked()
 	}
-
-	if deleted > 0 {
-		if s.logInfo != nil {
-			s.logInfo("purged expired round data", "rows_deleted", deleted)
-		}
-	}
-	return deleted
+	return nil
 }
 
 // recover resets in-flight shares and restores their submit_at schedule.

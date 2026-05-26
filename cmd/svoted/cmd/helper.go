@@ -143,6 +143,18 @@ func readHelperConfig(v *viper.Viper, logger log.Logger) helper.Config {
 	if v.IsSet("helper.max_concurrent_proofs") {
 		cfg.MaxConcurrentProofs = v.GetInt("helper.max_concurrent_proofs")
 	}
+	if v.IsSet("helper.completed_round_data_serve_seconds") {
+		cfg.CompletedRoundDataServeSeconds = v.GetInt64("helper.completed_round_data_serve_seconds")
+	}
+	if cfg.CompletedRoundDataServeSeconds < -1 {
+		normalized := helper.NormalizeCompletedRoundDataServeSeconds(cfg.CompletedRoundDataServeSeconds)
+		logger.Info(
+			"invalid helper.completed_round_data_serve_seconds, using fallback",
+			"configured", cfg.CompletedRoundDataServeSeconds,
+			"fallback", normalized,
+		)
+		cfg.CompletedRoundDataServeSeconds = normalized
+	}
 	if v.IsSet("helper.sentry_dsn") {
 		cfg.SentryDSN = v.GetString("helper.sentry_dsn")
 	}

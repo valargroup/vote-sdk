@@ -19,6 +19,7 @@ import {
   isQueueSummaryStale,
   queueAggregateMaxBucketTotal,
   queueNextBucketRefreshAt,
+  queueStateCount,
   queueSummaryDomain,
   queueSummaryTotals,
   splitQueueResults,
@@ -148,12 +149,14 @@ function sameStrings(a: string[], b: string[]): boolean {
 // Bottom-to-top stacking order follows the share lifecycle:
 // submitted (already delivered) → future (window not open yet) → processing
 // (helper has started work) → overdue (window passed without delivery) →
-// failed (terminal). Alarm states climb toward the top.
+// missed/failed terminal states. Alarm states climb toward the top.
 const STATE_STACK_ORDER: QueueStateKey[] = [
   "submitted",
+  "observed_on_chain",
   "pending_future",
   "processing",
   "overdue_pending",
+  "missed_deadline",
   "failed",
 ];
 
@@ -220,13 +223,13 @@ function BucketTooltip({
       <div className="space-y-2">
         {[...STATE_STACK_ORDER]
           .reverse()
-          .filter((state) => bucket[state] > 0)
+          .filter((state) => queueStateCount(bucket, state) > 0)
           .map((state) => {
-            const value = bucket[state];
+            const value = queueStateCount(bucket, state);
             const contribs = results
               .map((result) => {
                 const sb = bucket.byServer[result.server.url];
-                const count = sb ? sb[state] : 0;
+                const count = sb ? queueStateCount(sb, state) : 0;
                 return count > 0 ? { label: serverLabel(result.server), count } : null;
               })
               .filter((c): c is { label: string; count: number } => c !== null);
@@ -526,7 +529,7 @@ function QueueHistogram({
             const signal = signalKeys.has(`${bucket.start}:${bucket.end}`);
 
             const segments = STATE_STACK_ORDER.map((state) => {
-              const value = bucket[state];
+              const value = queueStateCount(bucket, state);
               if (value <= 0) return null;
               const h = Math.max(1, margin.top + plotH - yForValue(value));
               y -= h;
@@ -747,6 +750,10 @@ function ServerStatusRow({
           {totals.submitted.toLocaleString()}
         </span>
         <span>
+          <span className="mr-1 font-sans text-text-muted">observed</span>
+          {totals.observed_on_chain.toLocaleString()}
+        </span>
+        <span>
           <span className="mr-1 font-sans text-text-muted">future</span>
           {totals.pending_future.toLocaleString()}
         </span>
@@ -761,6 +768,10 @@ function ServerStatusRow({
         <span className={totals.failed > 0 ? "text-danger" : ""}>
           <span className="mr-1 font-sans text-text-muted">failed</span>
           {totals.failed.toLocaleString()}
+        </span>
+        <span className={totals.missed_deadline > 0 ? "text-danger" : ""}>
+          <span className="mr-1 font-sans text-text-muted">missed</span>
+          {totals.missed_deadline.toLocaleString()}
         </span>
         {stale && (
           <span className="rounded-full bg-warning/10 px-2 py-0.5 font-sans text-[10px] text-warning">
@@ -1286,6 +1297,9 @@ export function QueueMonitorPage() {
                           {QUEUE_STATE_META.submitted.label}
                         </th>
                         <th className="px-2 py-2 text-right font-medium">
+                          {QUEUE_STATE_META.observed_on_chain.label}
+                        </th>
+                        <th className="px-2 py-2 text-right font-medium">
                           {QUEUE_STATE_META.pending_future.label}
                         </th>
                         <th className="px-2 py-2 text-right font-medium">
@@ -1296,6 +1310,9 @@ export function QueueMonitorPage() {
                         </th>
                         <th className="px-2 py-2 text-right font-medium">
                           {QUEUE_STATE_META.failed.label}
+                        </th>
+                        <th className="px-2 py-2 text-right font-medium">
+                          {QUEUE_STATE_META.missed_deadline.label}
                         </th>
                       </tr>
                     </thead>
@@ -1319,6 +1336,9 @@ export function QueueMonitorPage() {
                               {bucket.submitted.toLocaleString()}
                             </td>
                             <td className="px-2 py-1.5 text-right font-mono text-text-secondary">
+                              {(bucket.observed_on_chain ?? 0).toLocaleString()}
+                            </td>
+                            <td className="px-2 py-1.5 text-right font-mono text-text-secondary">
                               {bucket.pending_future.toLocaleString()}
                             </td>
                             <td className="px-2 py-1.5 text-right font-mono text-text-secondary">
@@ -1329,6 +1349,9 @@ export function QueueMonitorPage() {
                             </td>
                             <td className="px-2 py-1.5 text-right font-mono text-text-secondary">
                               {bucket.failed.toLocaleString()}
+                            </td>
+                            <td className="px-2 py-1.5 text-right font-mono text-text-secondary">
+                              {(bucket.missed_deadline ?? 0).toLocaleString()}
                             </td>
                           </tr>
                         );

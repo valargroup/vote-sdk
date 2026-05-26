@@ -38,22 +38,41 @@ type Config struct {
 	// MaxConcurrentProofs limits concurrent proof generation goroutines.
 	MaxConcurrentProofs int `mapstructure:"max_concurrent_proofs"`
 
+	// CompletedRoundDataServeSeconds controls how long public completed-round
+	// queue summaries remain available after vote_end_time. Use -1 to serve
+	// completed rounds indefinitely, or 0 to stop at vote_end_time. Values below
+	// -1 fall back to the default.
+	CompletedRoundDataServeSeconds int64 `mapstructure:"completed_round_data_serve_seconds"`
+
 	// SentryDSN is the Sentry DSN for error tracking. When empty, Sentry is
 	// disabled. Can also be set via the SENTRY_DSN environment variable at
 	// runtime (app.toml takes precedence if set).
 	SentryDSN string `mapstructure:"sentry_dsn"`
 }
 
+const DefaultCompletedRoundDataServeSeconds int64 = 14 * 24 * 60 * 60
+
+// NormalizeCompletedRoundDataServeSeconds returns a safe completed-round serving
+// window. Only -1 has indefinite retention semantics; lower negative values fall
+// back to the default so config typos cannot silently remove the retention cap.
+func NormalizeCompletedRoundDataServeSeconds(value int64) int64 {
+	if value < -1 {
+		return DefaultCompletedRoundDataServeSeconds
+	}
+	return value
+}
+
 // DefaultConfig returns the default helper configuration.
 func DefaultConfig() Config {
 	return Config{
-		Disable:             false,
-		APIToken:            "",
-		ExposeQueueStatus:   false,
-		ExposeQueueSummary:  true,
-		DBPath:              "",
-		ChainAPIPort:        1317,
-		MaxConcurrentProofs: 2,
+		Disable:                        false,
+		APIToken:                       "",
+		ExposeQueueStatus:              false,
+		ExposeQueueSummary:             true,
+		DBPath:                         "",
+		ChainAPIPort:                   1317,
+		MaxConcurrentProofs:            2,
+		CompletedRoundDataServeSeconds: DefaultCompletedRoundDataServeSeconds,
 	}
 }
 
@@ -111,26 +130,31 @@ type SharePayload struct {
 type ShareState int
 
 const (
-	ShareStateReceived  ShareState = 0 // waiting for submit_at
-	ShareStateWitnessed ShareState = 1 // ready for proof generation
-	ShareStateSubmitted ShareState = 2 // submitted to chain
-	ShareStateFailed    ShareState = 3 // permanently failed
+	ShareStateReceived        ShareState = 0 // waiting for submit_at
+	ShareStateWitnessed       ShareState = 1 // ready for proof generation
+	ShareStateSubmitted       ShareState = 2 // submitted to chain by this helper
+	ShareStateFailed          ShareState = 3 // permanently failed before close
+	ShareStateMissedDeadline  ShareState = 4 // not submitted by any helper before closeout
+	ShareStateObservedOnChain ShareState = 5 // confirmed on-chain before local submission
 )
 
 // QueuedShare is a share payload with processing metadata.
 type QueuedShare struct {
-	Payload     SharePayload
-	State       ShareState
-	Attempts    int
-	VoteEndTime uint64 // unix seconds; 0 if unknown
+	Payload        SharePayload
+	State          ShareState
+	Attempts       int
+	VoteEndTime    uint64 // unix seconds; 0 if unknown
+	ShareNullifier []byte
 }
 
 // QueueStatus holds per-round queue statistics.
 type QueueStatus struct {
-	Total     int `json:"total"`
-	Pending   int `json:"pending"`
-	Submitted int `json:"submitted"`
-	Failed    int `json:"failed"`
+	Total           int `json:"total"`
+	Pending         int `json:"pending"`
+	Submitted       int `json:"submitted"`
+	ObservedOnChain int `json:"observed_on_chain,omitempty"`
+	Failed          int `json:"failed"`
+	MissedDeadline  int `json:"missed_deadline,omitempty"`
 }
 
 // QueueSummary holds the public, round-level helper queue histogram.
@@ -151,28 +175,33 @@ type QueueSummary struct {
 // Failed rows are reported immediately so operators can detect broken share
 // processing without waiting for a later summary refresh.
 type QueueSummaryBucket struct {
-	Start          uint64 `json:"start"`
-	End            uint64 `json:"end"`
-	Submitted      int    `json:"submitted"`
-	PendingFuture  int    `json:"pending_future"`
-	OverduePending int    `json:"overdue_pending"`
-	Processing     int    `json:"processing"`
-	Failed         int    `json:"failed"`
-	Total          int    `json:"total"`
+	Start           uint64 `json:"start"`
+	End             uint64 `json:"end"`
+	Submitted       int    `json:"submitted"`
+	ObservedOnChain int    `json:"observed_on_chain,omitempty"`
+	PendingFuture   int    `json:"pending_future"`
+	OverduePending  int    `json:"overdue_pending"`
+	Processing      int    `json:"processing"`
+	Failed          int    `json:"failed"`
+	MissedDeadline  int    `json:"missed_deadline,omitempty"`
+	Total           int    `json:"total"`
 }
 
 // ExpiredRoundSummary holds queue counts for a round whose voting window has
-// closed. Pending and Failed are both unsubmitted from the chain's perspective.
+// closed. Pending, Failed, and MissedDeadline are unsubmitted from the chain's
+// perspective.
 type ExpiredRoundSummary struct {
-	RoundID   string
-	Total     int
-	Pending   int
-	Submitted int
-	Failed    int
+	RoundID         string
+	Total           int
+	Pending         int
+	Submitted       int
+	ObservedOnChain int
+	Failed          int
+	MissedDeadline  int
 }
 
 func (s ExpiredRoundSummary) Unsubmitted() int {
-	return s.Pending + s.Failed
+	return s.Pending + s.Failed + s.MissedDeadline
 }
 
 // QueueExportVersion is the current JSON schema version for queue rescue artifacts.
@@ -212,6 +241,8 @@ type QueueExportRow struct {
 	SubmitAt         uint64             `json:"submit_at"`
 	OriginalSubmitAt uint64             `json:"original_submit_at,omitempty"`
 	ReceivedAt       uint64             `json:"received_at"`
+	ShareNullifier   string             `json:"share_nullifier,omitempty"`
+	ClosedAt         uint64             `json:"closed_at,omitempty"`
 	Processable      bool               `json:"processable"`
 }
 

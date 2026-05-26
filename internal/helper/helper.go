@@ -11,14 +11,15 @@ import (
 
 // Helper manages the share processing pipeline lifecycle.
 type Helper struct {
-	Store                 *ShareStore
-	Processor             *Processor
-	APIToken              string
-	ExposeQueueStatus     bool
-	ExposeQueueSummary    bool
-	VCHash                VCHashFunc
-	ShareNullifierChecker ShareNullifierChecker
-	Logger                log.Logger
+	Store                          *ShareStore
+	Processor                      *Processor
+	APIToken                       string
+	ExposeQueueStatus              bool
+	ExposeQueueSummary             bool
+	CompletedRoundDataServeSeconds int64
+	VCHash                         VCHashFunc
+	ShareNullifierChecker          ShareNullifierChecker
+	Logger                         log.Logger
 }
 
 // New creates a new Helper from the given configuration.
@@ -73,6 +74,15 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundI
 		)
 		cfg.MaxConcurrentProofs = 1
 	}
+	if cfg.CompletedRoundDataServeSeconds < -1 {
+		normalized := NormalizeCompletedRoundDataServeSeconds(cfg.CompletedRoundDataServeSeconds)
+		logger.Info(
+			"invalid helper.completed_round_data_serve_seconds, using fallback",
+			"configured", cfg.CompletedRoundDataServeSeconds,
+			"fallback", normalized,
+		)
+		cfg.CompletedRoundDataServeSeconds = normalized
+	}
 
 	processor := NewProcessor(
 		store,
@@ -86,14 +96,15 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundI
 	)
 
 	return &Helper{
-		Store:                 store,
-		Processor:             processor,
-		APIToken:              cfg.APIToken,
-		ExposeQueueStatus:     cfg.ExposeQueueStatus,
-		ExposeQueueSummary:    cfg.ExposeQueueSummary,
-		VCHash:                vcHash,
-		ShareNullifierChecker: shareNF,
-		Logger:                logger,
+		Store:                          store,
+		Processor:                      processor,
+		APIToken:                       cfg.APIToken,
+		ExposeQueueStatus:              cfg.ExposeQueueStatus,
+		ExposeQueueSummary:             cfg.ExposeQueueSummary,
+		CompletedRoundDataServeSeconds: cfg.CompletedRoundDataServeSeconds,
+		VCHash:                         vcHash,
+		ShareNullifierChecker:          shareNF,
+		Logger:                         logger,
 	}, nil
 }
 
@@ -108,6 +119,7 @@ func (h *Helper) RegisterRoutes(router *mux.Router) {
 		func() TreeReader { return h.Processor.tree },
 		func() VCHashFunc { return h.VCHash },
 		func() ShareNullifierChecker { return h.ShareNullifierChecker },
+		func() int64 { return h.CompletedRoundDataServeSeconds },
 		h.Logger,
 	)
 }

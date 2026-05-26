@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -281,8 +283,8 @@ func TestProcessor_ProcessBatch_DuplicateNullifierTreatedAsSuccess(t *testing.T)
 	prover := &mockProver{}
 	tree := newMockTreeReader()
 
-	// Chain rejects with duplicate nullifier — another helper already
-	// revealed this share (quorum mode).
+	// Chain rejects with duplicate nullifier because the share is already
+	// revealed on-chain.
 	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnprocessableEntity)
@@ -300,11 +302,20 @@ func TestProcessor_ProcessBatch_DuplicateNullifierTreatedAsSuccess(t *testing.T)
 
 	proc.processBatch(context.Background())
 
-	// Share should be marked as submitted (not retried), because the
-	// duplicate nullifier means the vote was already revealed on-chain.
+	// Share should be terminal (not retried), because the duplicate nullifier
+	// means the vote was already revealed on-chain.
 	status := store.Status()
-	assert.Equal(t, 1, status[roundID].Submitted)
+	assert.Equal(t, 0, status[roundID].Submitted)
+	assert.Equal(t, 1, status[roundID].ObservedOnChain)
 	assert.Equal(t, 0, status[roundID].Pending)
+
+	var shareNullifier string
+	err := store.db.QueryRow(
+		"SELECT share_nullifier FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
+		roundID, 0, 1, 0,
+	).Scan(&shareNullifier)
+	require.NoError(t, err)
+	assert.Equal(t, "bb"+strings.Repeat("0", 62), shareNullifier)
 }
 
 func TestProcessor_PreProofDuplicateNullifierSkipsProof(t *testing.T) {
@@ -367,8 +378,17 @@ func TestProcessor_PreProofDuplicateNullifierSkipsProof(t *testing.T) {
 	assert.Equal(t, int32(1), checkerCalls.Load())
 	assert.Equal(t, int32(0), prover.callCount.Load())
 	status := store.Status()
-	assert.Equal(t, 1, status[roundID].Submitted)
+	assert.Equal(t, 0, status[roundID].Submitted)
+	assert.Equal(t, 1, status[roundID].ObservedOnChain)
 	assert.Equal(t, 0, status[roundID].Pending)
+
+	var shareNullifier string
+	err := store.db.QueryRow(
+		"SELECT share_nullifier FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
+		roundID, 0, 1, 100,
+	).Scan(&shareNullifier)
+	require.NoError(t, err)
+	assert.Equal(t, hex.EncodeToString(expectedNullifier[:]), shareNullifier)
 }
 
 func TestProcessor_PreProofNullifierNotRevealedFallsThroughToProof(t *testing.T) {
@@ -557,7 +577,7 @@ func TestProcessor_TreePositionOutOfRange(t *testing.T) {
 
 	// Directly call processShare.
 	share := QueuedShare{Payload: p}
-	err := proc.processShare(context.Background(), share)
+	_, err := proc.processShare(context.Background(), share)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "out of range")
 }
@@ -659,6 +679,344 @@ func TestProcessor_ProcessBatch_ConcurrentRoundsUseScopedTreeReaders(t *testing.
 	status := store.Status()
 	assert.Equal(t, 1, status[roundA].Submitted)
 	assert.Equal(t, 1, status[roundB].Submitted)
+}
+
+func TestProcessor_CloseoutExpiredRoundClassifiesOnChainShares(t *testing.T) {
+	store := newTestStore(t)
+	roundID := strings.Repeat("1", 64)
+	enqueueAndRequireInserted(t, store, testPayload(roundID, 0))
+	enqueueAndRequireInserted(t, store, testPayload(roundID, 1))
+	end := uint64(time.Now().Add(-time.Hour).Unix())
+	expireRoundRowsForTest(t, store, roundID, end)
+
+	vcHash := func(roundID, sharesHash [32]byte, proposalID, voteDecision uint32) ([32]byte, error) {
+		var out [32]byte
+		out[0] = 0x11
+		return out, nil
+	}
+	shareNFHash := func(voteCommitment [32]byte, shareIndex uint32, primaryBlind [32]byte) ([32]byte, error) {
+		var out [32]byte
+		out[0] = 0xCC
+		out[1] = byte(shareIndex)
+		return out, nil
+	}
+	checker := func(roundIDHex string, shareNullifier []byte) (bool, error) {
+		require.Equal(t, roundID, roundIDHex)
+		return len(shareNullifier) > 1 && shareNullifier[1] == 0, nil
+	}
+
+	proc := NewProcessor(
+		store,
+		newMockTreeReader(),
+		&mockProver{},
+		NewChainSubmitter("http://localhost:0"),
+		log.NewNopLogger(),
+		2,
+		nil,
+		WithPreProofShareDeduper(vcHash, shareNFHash, checker),
+	)
+
+	proc.closeoutExpiredRounds(context.Background())
+
+	status := store.Status()
+	require.Equal(t, 2, status[roundID].Total)
+	assert.Equal(t, 0, status[roundID].Submitted)
+	assert.Equal(t, 1, status[roundID].ObservedOnChain)
+	assert.Equal(t, 1, status[roundID].MissedDeadline)
+	assert.Equal(t, 0, status[roundID].Pending)
+
+	rows, err := store.db.Query(
+		`SELECT share_index, state, share_nullifier, primary_blind, closed_at
+		   FROM shares
+		  WHERE round_id = ?
+		  ORDER BY share_index`,
+		roundID,
+	)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	type gotRow struct {
+		shareIndex     uint32
+		state          ShareState
+		shareNullifier string
+		primaryBlind   string
+		closedAt       uint64
+	}
+	var got []gotRow
+	for rows.Next() {
+		var row gotRow
+		var state int
+		require.NoError(t, rows.Scan(&row.shareIndex, &state, &row.shareNullifier, &row.primaryBlind, &row.closedAt))
+		row.state = ShareState(state)
+		got = append(got, row)
+	}
+	require.NoError(t, rows.Err())
+	require.Len(t, got, 2)
+	assert.Equal(t, ShareStateObservedOnChain, got[0].state)
+	assert.Equal(t, "cc00"+strings.Repeat("0", 60), got[0].shareNullifier)
+	assert.Empty(t, got[0].primaryBlind)
+	assert.NotZero(t, got[0].closedAt)
+	assert.Equal(t, ShareStateMissedDeadline, got[1].state)
+	assert.Equal(t, "cc01"+strings.Repeat("0", 60), got[1].shareNullifier)
+	assert.Empty(t, got[1].primaryBlind)
+	assert.NotZero(t, got[1].closedAt)
+
+	roundIDs, err := store.ExpiredRoundIDsForCloseout(time.Now())
+	require.NoError(t, err)
+	assert.Empty(t, roundIDs)
+}
+
+func TestProcessor_CloseoutRetriesOnShareNullifierCheckerError(t *testing.T) {
+	store := newTestStore(t)
+	roundID := strings.Repeat("4", 64)
+	enqueueAndRequireInserted(t, store, testPayload(roundID, 0))
+	end := uint64(time.Now().Add(-time.Hour).Unix())
+	expireRoundRowsForTest(t, store, roundID, end)
+
+	vcHash := func(roundID, sharesHash [32]byte, proposalID, voteDecision uint32) ([32]byte, error) {
+		return [32]byte{0x11}, nil
+	}
+	shareNFHash := func(voteCommitment [32]byte, shareIndex uint32, primaryBlind [32]byte) ([32]byte, error) {
+		return [32]byte{0xEE}, nil
+	}
+	checkerErr := true
+	checker := func(roundIDHex string, shareNullifier []byte) (bool, error) {
+		if checkerErr {
+			return false, errors.New("temporary checker failure")
+		}
+		return false, nil
+	}
+	proc := NewProcessor(
+		store,
+		newMockTreeReader(),
+		&mockProver{},
+		NewChainSubmitter("http://localhost:0"),
+		log.NewNopLogger(),
+		2,
+		nil,
+		WithPreProofShareDeduper(vcHash, shareNFHash, checker),
+	)
+
+	proc.closeoutExpiredRounds(context.Background())
+
+	status := store.Status()
+	assert.Equal(t, 1, status[roundID].Pending)
+	assert.Equal(t, 0, status[roundID].MissedDeadline)
+	roundIDs, err := store.ExpiredRoundIDsForCloseout(time.Now())
+	require.NoError(t, err)
+	assert.Contains(t, roundIDs, roundID)
+
+	var closedAt uint64
+	err = store.db.QueryRow("SELECT closed_at FROM rounds WHERE round_id = ?", roundID).Scan(&closedAt)
+	require.NoError(t, err)
+	assert.Zero(t, closedAt)
+
+	checkerErr = false
+	proc.closeoutExpiredRounds(context.Background())
+
+	status = store.Status()
+	assert.Equal(t, 0, status[roundID].Pending)
+	assert.Equal(t, 1, status[roundID].MissedDeadline)
+	roundIDs, err = store.ExpiredRoundIDsForCloseout(time.Now())
+	require.NoError(t, err)
+	assert.NotContains(t, roundIDs, roundID)
+}
+
+func TestProcessor_CloseoutRechecksFailedRowsWithStoredNullifier(t *testing.T) {
+	store := newTestStore(t)
+	roundID := strings.Repeat("5", 64)
+	enqueueAndRequireInserted(t, store, testPayload(roundID, 0))
+	ready := store.TakeReady()
+	require.Len(t, ready, 1)
+
+	knownNullifier := make([]byte, 32)
+	knownNullifier[0] = 0xFA
+	for i := 0; i < 5; i++ {
+		store.MarkFailed(roundID, 0, 1, 0, knownNullifier)
+		store.mu.Lock()
+		store.schedule[schedKey(roundID, 0, 1, 0)] = time.Now().Add(-time.Second)
+		store.mu.Unlock()
+		if i < 4 {
+			ready = store.TakeReady()
+			require.Len(t, ready, 1)
+		}
+	}
+	status := store.Status()
+	require.Equal(t, 1, status[roundID].Failed)
+
+	end := uint64(time.Now().Add(-time.Hour).Unix())
+	expireRoundRowsForTest(t, store, roundID, end)
+
+	checker := func(roundIDHex string, shareNullifier []byte) (bool, error) {
+		require.Equal(t, roundID, roundIDHex)
+		require.Equal(t, knownNullifier, shareNullifier)
+		return true, nil
+	}
+	proc := NewProcessor(
+		store,
+		newMockTreeReader(),
+		&mockProver{},
+		NewChainSubmitter("http://localhost:0"),
+		log.NewNopLogger(),
+		2,
+		nil,
+		WithPreProofShareDeduper(
+			func(roundID, sharesHash [32]byte, proposalID, voteDecision uint32) ([32]byte, error) {
+				return [32]byte{}, nil
+			},
+			func(voteCommitment [32]byte, shareIndex uint32, primaryBlind [32]byte) ([32]byte, error) {
+				return [32]byte{}, nil
+			},
+			checker,
+		),
+	)
+
+	proc.closeoutExpiredRounds(context.Background())
+
+	status = store.Status()
+	assert.Equal(t, 0, status[roundID].Failed)
+	assert.Equal(t, 1, status[roundID].ObservedOnChain)
+
+	var state int
+	var closedAt uint64
+	var shareNullifier string
+	err := store.db.QueryRow(
+		"SELECT state, closed_at, share_nullifier FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
+		roundID, 0, 1, 0,
+	).Scan(&state, &closedAt, &shareNullifier)
+	require.NoError(t, err)
+	assert.Equal(t, int(ShareStateObservedOnChain), state)
+	assert.NotZero(t, closedAt)
+	assert.Equal(t, hex.EncodeToString(knownNullifier), shareNullifier)
+}
+
+func TestProcessor_CloseoutExpiredRoundContinuesAfterMalformedRow(t *testing.T) {
+	store := newTestStore(t)
+	roundID := strings.Repeat("2", 64)
+	enqueueAndRequireInserted(t, store, testPayload(roundID, 0))
+	enqueueAndRequireInserted(t, store, testPayload(roundID, 1))
+	_, err := store.db.Exec(
+		"UPDATE shares SET shares_hash = ? WHERE round_id = ? AND share_index = ?",
+		"not-base64",
+		roundID,
+		0,
+	)
+	require.NoError(t, err)
+	end := uint64(time.Now().Add(-time.Hour).Unix())
+	expireRoundRowsForTest(t, store, roundID, end)
+
+	vcHash := func(roundID, sharesHash [32]byte, proposalID, voteDecision uint32) ([32]byte, error) {
+		return [32]byte{0x11}, nil
+	}
+	shareNFHash := func(voteCommitment [32]byte, shareIndex uint32, primaryBlind [32]byte) ([32]byte, error) {
+		var out [32]byte
+		out[0] = 0xDD
+		out[1] = byte(shareIndex)
+		return out, nil
+	}
+	checker := func(roundIDHex string, shareNullifier []byte) (bool, error) {
+		return false, nil
+	}
+	proc := NewProcessor(
+		store,
+		newMockTreeReader(),
+		&mockProver{},
+		NewChainSubmitter("http://localhost:0"),
+		log.NewNopLogger(),
+		2,
+		nil,
+		WithPreProofShareDeduper(vcHash, shareNFHash, checker),
+	)
+
+	proc.closeoutExpiredRounds(context.Background())
+
+	status := store.Status()
+	require.Equal(t, 2, status[roundID].Total)
+	assert.Equal(t, 2, status[roundID].MissedDeadline)
+	assert.Equal(t, 0, status[roundID].Pending)
+
+	rows, err := store.db.Query(
+		"SELECT share_index, share_nullifier, primary_blind FROM shares WHERE round_id = ? ORDER BY share_index",
+		roundID,
+	)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	var seen int
+	for rows.Next() {
+		var idx int
+		var shareNullifier, primaryBlind string
+		require.NoError(t, rows.Scan(&idx, &shareNullifier, &primaryBlind))
+		seen++
+		assert.Empty(t, primaryBlind)
+		if idx == 0 {
+			assert.Empty(t, shareNullifier)
+		} else {
+			assert.Equal(t, "dd01"+strings.Repeat("0", 60), shareNullifier)
+		}
+	}
+	require.NoError(t, rows.Err())
+	assert.Equal(t, 2, seen)
+}
+
+func TestProcessor_CloseoutPersistsAcrossRestart(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "helper.db")
+	now := uint64(time.Now().Unix())
+	fetcher := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: now - oneHourSecs, VoteEndTime: now + oneHourSecs}, nil
+	}
+	store, err := NewShareStore(dbPath, fetcher)
+	require.NoError(t, err)
+
+	roundID := strings.Repeat("3", 64)
+	enqueueAndRequireInserted(t, store, testPayload(roundID, 0))
+	end := uint64(time.Now().Add(-time.Hour).Unix())
+	expireRoundRowsForTest(t, store, roundID, end)
+
+	proc := NewProcessor(
+		store,
+		newMockTreeReader(),
+		&mockProver{},
+		NewChainSubmitter("http://localhost:0"),
+		log.NewNopLogger(),
+		2,
+		nil,
+	)
+	proc.closeoutExpiredRounds(context.Background())
+	require.NoError(t, store.Close())
+
+	reopened, err := NewShareStore(dbPath, nil)
+	require.NoError(t, err)
+	defer reopened.Close()
+
+	roundIDs, err := reopened.ExpiredRoundIDsForCloseout(time.Now())
+	require.NoError(t, err)
+	assert.Empty(t, roundIDs)
+	assert.Empty(t, reopened.TakeReady())
+
+	processable, err := reopened.ProcessableSharesForRound(roundID)
+	require.NoError(t, err)
+	assert.Empty(t, processable)
+
+	summary, err := reopened.QueueSummary(roundID, time.Now(), DefaultCompletedRoundDataServeSeconds)
+	require.NoError(t, err)
+	require.NotEmpty(t, summary.Buckets)
+	var missed int
+	for _, bucket := range summary.Buckets {
+		missed += bucket.MissedDeadline
+	}
+	assert.Equal(t, 1, missed)
+
+	var c1, c2, comms, blind string
+	err = reopened.db.QueryRow(
+		"SELECT enc_share_c1, enc_share_c2, share_comms, primary_blind FROM shares WHERE round_id = ?",
+		roundID,
+	).Scan(&c1, &c2, &comms, &blind)
+	require.NoError(t, err)
+	assert.Empty(t, c1)
+	assert.Empty(t, c2)
+	assert.Equal(t, "[]", comms)
+	assert.Empty(t, blind)
 }
 
 func TestValidatePayload(t *testing.T) {
