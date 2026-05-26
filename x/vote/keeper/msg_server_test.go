@@ -372,6 +372,37 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 			errContains: "at least 2 validators",
 		},
 		{
+			name: "rejected: 5 validators below min_ceremony_validators=6",
+			setup: func() {
+				s.seedEligibleValidators(5)
+				s.seedVoteManagers(svtest.DefaultVoteManagerAddress)
+				kv := s.keeper.OpenKVStore(s.ctx)
+				s.Require().NoError(s.keeper.SetMinCeremonyValidators(kv, 6))
+			},
+			msg:         msg,
+			expectErr:   true,
+			errContains: "at least 6 validators",
+		},
+		{
+			name: "happy path: exactly 6 validators with min_ceremony_validators=6",
+			setup: func() {
+				s.seedEligibleValidators(6)
+				s.seedVoteManagers(svtest.DefaultVoteManagerAddress)
+				kv := s.keeper.OpenKVStore(s.ctx)
+				s.Require().NoError(s.keeper.SetMinCeremonyValidators(kv, 6))
+			},
+			msg: msg,
+			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
+				expectedID := computeExpectedRoundID(msg, uint64(s.ctx.BlockHeight()))
+				s.Require().Equal(expectedID, resp.VoteRoundId)
+
+				kv := s.keeper.OpenKVStore(s.ctx)
+				round, err := s.keeper.GetVoteRound(kv, expectedID)
+				s.Require().NoError(err)
+				s.Require().Len(round.CeremonyValidators, 6)
+			},
+		},
+		{
 			name: "happy path: 1 validator with default min_ceremony_validators=1",
 			setup: func() {
 				s.seedEligibleValidators(1)

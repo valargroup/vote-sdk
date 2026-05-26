@@ -94,6 +94,23 @@ func TestVoteFundingMigrationUpgradeSkipsNonStageChain(t *testing.T) {
 	require.Equal(t, sdkmath.NewInt(500_000_000), balanceForAddress(t, ta, ctx, manager).Amount)
 }
 
+func TestMinCeremonyValidatorsUpgradeSetsMinimumToSix(t *testing.T) {
+	ta := testutil.SetupTestApp(t)
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	kvStore := ta.SvoteApp.VoteKeeper.OpenKVStore(ctx)
+	before, err := ta.SvoteApp.VoteKeeper.GetMinCeremonyValidators(kvStore)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, before)
+
+	runMinCeremonyValidatorsUpgrade(t, ta)
+
+	ctx = ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	kvStore = ta.SvoteApp.VoteKeeper.OpenKVStore(ctx)
+	after, err := ta.SvoteApp.VoteKeeper.GetMinCeremonyValidators(kvStore)
+	require.NoError(t, err)
+	require.EqualValues(t, 6, after)
+}
+
 func TestVoteManagerScheduleUpgradeStoresPlan(t *testing.T) {
 	ta := testutil.SetupTestApp(t)
 	voteManager := ta.ValidatorAccAddr()
@@ -206,6 +223,21 @@ func runVoteFundingMigrationUpgrade(t *testing.T, ta *testutil.TestApp) {
 	dueHeight := ta.Height + 1
 	require.NoError(t, ta.SvoteApp.UpgradeKeeper.ScheduleUpgrade(ctx, types.Plan{
 		Name:   svoteapp.VoteFundingMigrationUpgradeName,
+		Height: dueHeight,
+	}))
+
+	ta.NextBlock()
+	require.Equal(t, dueHeight, ta.Height)
+}
+
+// runMinCeremonyValidatorsUpgrade schedules and executes the production
+// min_ceremony_validators migration handler.
+func runMinCeremonyValidatorsUpgrade(t *testing.T, ta *testutil.TestApp) {
+	t.Helper()
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	dueHeight := ta.Height + 1
+	require.NoError(t, ta.SvoteApp.UpgradeKeeper.ScheduleUpgrade(ctx, types.Plan{
+		Name:   svoteapp.MinCeremonyValidatorsUpgradeName,
 		Height: dueHeight,
 	}))
 

@@ -2,7 +2,7 @@
 
 This document describes the threshold secret sharing (TSS) ceremony for establishing the election authority public key `ea_pk` for each voting round. The ceremony uses Joint-Feldman distributed key generation (DKG) so that `ea_sk` is never known to any single party — only the aggregate tally is recoverable, and only with cooperation from at least `t` validators.
 
-The minimum number of eligible validators is controlled by the `min_ceremony_validators` genesis parameter (stored as a KV singleton, default: 1). `CreateVotingSession` rejects rounds when fewer than `min_ceremony_validators` validators have registered Pallas keys. Set to 2 or higher on mainnet for real threshold security.
+The minimum number of eligible validators is controlled by the `min_ceremony_validators` genesis parameter (stored as a KV singleton, default: 1). `CreateVotingSession` rejects rounds when fewer than `min_ceremony_validators` validators have registered Pallas keys. Production upgrades can raise this singleton; the `raise-min-ceremony-validators` handler sets it to 6 to avoid five-validator rounds with no post-activation tally slack.
 
 ## Threshold Secret Sharing
 

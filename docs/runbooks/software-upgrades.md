@@ -72,6 +72,18 @@ For each future state-breaking release:
 The completed handler records the applied plan in `x/upgrade`, so later queries
 can confirm the upgrade height.
 
+## Minimum Ceremony Validator Upgrade
+
+The TSS threshold rollout adds a production upgrade handler named
+`raise-min-ceremony-validators`. It sets the vote module's
+`min_ceremony_validators` KV singleton to `6` so new rounds cannot start with
+the five-validator shape where `ceil(2n/3)` equals the `ceil(4n/5)` activation
+quorum and leaves no post-activation tally slack.
+
+Before scheduling this plan, verify the target chain has at least six bonded
+validators with registered Pallas keys. After the handler runs, round creation
+is rejected until that eligibility floor is met.
+
 ## Current Testnet Funding Migration
 
 The module-funded authorized-send rollout adds one testnet only upgrade handler
