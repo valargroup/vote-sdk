@@ -184,6 +184,9 @@ The primary validator serves the admin UI [here](https://svote.valargroup.org/vo
 Queue summaries omit proposal IDs, vote decisions, share indices, nullifiers,
 tree positions, and exact submit times. Failed rows are reported immediately,
 including in open buckets, so operators can detect broken share processing.
+Upgraded helpers also include optional round-level accounting totals for
+accepted, active, complete, broadcast, duplicate, pre-proof dedupe, and failed
+shares. Older helpers omit those fields until upgraded.
 
 The production reference is [deploy-setup.md § Helper server configuration](../deploy-setup.md#helper-server-configuration). `[admin]` and the admin UI are disabled for joining validators; only the primary runs them.
 

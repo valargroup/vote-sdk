@@ -399,6 +399,13 @@ export interface QueueSummaryResponse {
   vote_end_time: number;
   generated_at: number;
   last_minute_start: number;
+  accepted_total?: number;
+  active_total?: number;
+  complete_total?: number;
+  completed_by_broadcast_total?: number;
+  completed_by_duplicate_total?: number;
+  completed_by_preproof_dedupe_total?: number;
+  failed_total?: number;
   buckets: QueueSummaryBucket[];
 }
 

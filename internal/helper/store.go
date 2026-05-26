@@ -53,6 +53,24 @@ const (
 	EnqueueConflict
 )
 
+const (
+	shareAccountingAcceptedColumn       = "accepted_total"
+	shareAccountingCompleteColumn       = "complete_total"
+	shareAccountingBroadcastColumn      = "completed_by_broadcast_total"
+	shareAccountingDuplicateColumn      = "completed_by_duplicate_total"
+	shareAccountingPreproofDedupeColumn = "completed_by_preproof_dedupe_total"
+	shareAccountingFailedColumn         = "failed_total"
+)
+
+type shareAccounting struct {
+	AcceptedTotal                  int
+	CompleteTotal                  int
+	CompletedByBroadcastTotal      int
+	CompletedByDuplicateTotal      int
+	CompletedByPreproofDedupeTotal int
+	FailedTotal                    int
+}
+
 // NewShareStore opens (or creates) a SQLite database and runs migrations.
 func NewShareStore(dbPath string, fetcher RoundInfoFetcher) (*ShareStore, error) {
 	lockFile, err := acquireShareStoreLock(dbPath)
@@ -255,6 +273,44 @@ func migrate(db *sql.DB) error {
 		}
 	}
 
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS share_accounting (
+			round_id                              TEXT PRIMARY KEY,
+			accepted_total                        INTEGER NOT NULL DEFAULT 0,
+			complete_total                        INTEGER NOT NULL DEFAULT 0,
+			completed_by_broadcast_total          INTEGER NOT NULL DEFAULT 0,
+			completed_by_duplicate_total          INTEGER NOT NULL DEFAULT 0,
+			completed_by_preproof_dedupe_total    INTEGER NOT NULL DEFAULT 0,
+			failed_total                          INTEGER NOT NULL DEFAULT 0
+		)
+	`); err != nil {
+		return fmt.Errorf("create share_accounting table: %w", err)
+	}
+
+	if _, err := db.Exec(`
+		INSERT OR IGNORE INTO share_accounting (
+			round_id,
+			accepted_total,
+			complete_total,
+			completed_by_broadcast_total,
+			completed_by_duplicate_total,
+			completed_by_preproof_dedupe_total,
+			failed_total
+		)
+		SELECT
+			round_id,
+			COUNT(*),
+			SUM(CASE WHEN state IN (2, 3) THEN 1 ELSE 0 END),
+			0,
+			0,
+			0,
+			SUM(CASE WHEN state = 3 THEN 1 ELSE 0 END)
+		  FROM shares
+		 GROUP BY round_id
+	`); err != nil {
+		return fmt.Errorf("backfill share_accounting: %w", err)
+	}
+
 	return nil
 }
 
@@ -389,6 +445,86 @@ func migrateSharesPK(db *sql.DB) error {
 	return tx.Commit()
 }
 
+// completionCounterColumn returns the accounting column for a completion reason.
+func completionCounterColumn(reason ShareCompletionReason) (string, error) {
+	switch reason {
+	case ShareCompletedByBroadcast:
+		return shareAccountingBroadcastColumn, nil
+	case ShareCompletedByDuplicate:
+		return shareAccountingDuplicateColumn, nil
+	case ShareCompletedByPreproofDedupe:
+		return shareAccountingPreproofDedupeColumn, nil
+	default:
+		return "", fmt.Errorf("unknown share completion reason %q", reason)
+	}
+}
+
+// ensureShareAccountingRowTx creates the accounting row for a round if needed.
+func ensureShareAccountingRowTx(tx *sql.Tx, roundID string) error {
+	if _, err := tx.Exec(
+		"INSERT INTO share_accounting (round_id) VALUES (?) ON CONFLICT(round_id) DO NOTHING",
+		roundID,
+	); err != nil {
+		return fmt.Errorf("ensure share accounting row: %w", err)
+	}
+	return nil
+}
+
+// incrementShareAccountingTx adds delta to one whitelisted accounting column.
+func incrementShareAccountingTx(tx *sql.Tx, roundID string, column string, delta int) error {
+	if delta == 0 {
+		return nil
+	}
+	switch column {
+	case shareAccountingAcceptedColumn,
+		shareAccountingCompleteColumn,
+		shareAccountingBroadcastColumn,
+		shareAccountingDuplicateColumn,
+		shareAccountingPreproofDedupeColumn,
+		shareAccountingFailedColumn:
+	default:
+		return fmt.Errorf("unknown share accounting column %q", column)
+	}
+	if err := ensureShareAccountingRowTx(tx, roundID); err != nil {
+		return err
+	}
+	query := fmt.Sprintf("UPDATE share_accounting SET %s = %s + ? WHERE round_id = ?", column, column)
+	if _, err := tx.Exec(query, delta, roundID); err != nil {
+		return fmt.Errorf("increment %s: %w", column, err)
+	}
+	return nil
+}
+
+// loadShareAccountingLocked returns monotonic counters for a round.
+func (s *ShareStore) loadShareAccountingLocked(roundID string) (shareAccounting, error) {
+	var accounting shareAccounting
+	err := s.db.QueryRow(
+		`SELECT accepted_total,
+		        complete_total,
+		        completed_by_broadcast_total,
+		        completed_by_duplicate_total,
+		        completed_by_preproof_dedupe_total,
+		        failed_total
+		   FROM share_accounting
+		  WHERE round_id = ?`,
+		roundID,
+	).Scan(
+		&accounting.AcceptedTotal,
+		&accounting.CompleteTotal,
+		&accounting.CompletedByBroadcastTotal,
+		&accounting.CompletedByDuplicateTotal,
+		&accounting.CompletedByPreproofDedupeTotal,
+		&accounting.FailedTotal,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return accounting, nil
+	}
+	if err != nil {
+		return shareAccounting{}, fmt.Errorf("load share accounting: %w", err)
+	}
+	return accounting, nil
+}
+
 // schedKey builds a colon-delimited schedule key.
 // roundID must be hex-encoded (no colons), so the delimiter is unambiguous.
 func schedKey(roundID string, shareIndex, proposalID uint32, treePosition uint64) string {
@@ -422,7 +558,13 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	res, err := s.db.Exec(
+	tx, err := s.db.Begin()
+	if err != nil {
+		return EnqueueConflict, fmt.Errorf("begin enqueue: %w", err)
+	}
+	defer tx.Rollback()
+
+	res, err := tx.Exec(
 		`INSERT INTO shares
 		 (round_id, share_index, shares_hash, proposal_id, vote_decision,
 		  enc_share_c1, enc_share_c2, tree_position, share_comms, primary_blind, state, attempts, vote_end_time, submit_at, original_submit_at, received_at)
@@ -449,6 +591,15 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 
 	// Only schedule if the row was actually inserted (not a duplicate).
 	affected, _ := res.RowsAffected()
+	if affected > 0 {
+		if err := incrementShareAccountingTx(tx, payload.VoteRoundID, shareAccountingAcceptedColumn, 1); err != nil {
+			return EnqueueConflict, fmt.Errorf("record accepted share: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return EnqueueConflict, fmt.Errorf("commit enqueue: %w", err)
+	}
+
 	if affected > 0 {
 		var schedTime time.Time
 		if payload.SubmitAt == 0 {
@@ -591,17 +742,52 @@ func (s *ShareStore) TakeReady() []QueuedShare {
 
 // MarkSubmitted marks a share as successfully submitted to the chain.
 func (s *ShareStore) MarkSubmitted(roundID string, shareIndex, proposalID uint32, treePosition uint64) {
+	s.MarkComplete(roundID, shareIndex, proposalID, treePosition, ShareCompletedByBroadcast)
+}
+
+// MarkComplete marks a share as complete and records the completion reason.
+func (s *ShareStore) MarkComplete(roundID string, shareIndex, proposalID uint32, treePosition uint64, reason ShareCompletionReason) {
+	column, err := completionCounterColumn(reason)
+	if err != nil {
+		s.logError("MarkComplete: invalid completion reason", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
+		return
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, err := s.db.Exec(
+	tx, err := s.db.Begin()
+	if err != nil {
+		s.logError("MarkComplete: begin failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
+		return
+	}
+	defer tx.Rollback()
+
+	res, err := tx.Exec(
 		`UPDATE shares SET state = 2,
 		        enc_share_c1 = '', enc_share_c2 = '',
 		        share_comms = '[]', primary_blind = ''
 		 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = 1`,
 		roundID, shareIndex, proposalID, treePosition,
-	); err != nil {
-		s.logError("MarkSubmitted: db update failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
+	)
+	if err != nil {
+		s.logError("MarkComplete: db update failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
+		return
+	}
+	affected, _ := res.RowsAffected()
+	if affected > 0 {
+		if err := incrementShareAccountingTx(tx, roundID, shareAccountingCompleteColumn, 1); err != nil {
+			s.logError("MarkComplete: accounting update failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
+			return
+		}
+		if err := incrementShareAccountingTx(tx, roundID, column, 1); err != nil {
+			s.logError("MarkComplete: accounting update failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		s.logError("MarkComplete: commit failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
+		return
 	}
 	key := schedKey(roundID, shareIndex, proposalID, treePosition)
 	if _, ok := s.schedule[key]; ok {
@@ -618,8 +804,15 @@ func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, t
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	tx, err := s.db.Begin()
+	if err != nil {
+		s.logError("MarkFailed: begin failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
+		return
+	}
+	defer tx.Rollback()
+
 	var attempts int
-	if err := s.db.QueryRow(
+	if err := tx.QueryRow(
 		"SELECT attempts FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
 		roundID, shareIndex, proposalID, treePosition,
 	).Scan(&attempts); err != nil {
@@ -632,14 +825,32 @@ func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, t
 
 	if newAttempts >= maxAttempts {
 		// Permanently failed — clear witness data.
-		if _, err := s.db.Exec(
+		res, err := tx.Exec(
 			`UPDATE shares SET state = 3, attempts = ?,
 			        enc_share_c1 = '', enc_share_c2 = '',
 			        share_comms = '[]', primary_blind = ''
-			 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
-			newAttempts, roundID, shareIndex, proposalID, treePosition,
-		); err != nil {
+			 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?
+			   AND state IN (?, ?)`,
+			newAttempts, roundID, shareIndex, proposalID, treePosition, ShareStateReceived, ShareStateWitnessed,
+		)
+		if err != nil {
 			s.logError("MarkFailed: db update (permanent) failed", "error", err)
+			return
+		}
+		affected, _ := res.RowsAffected()
+		if affected > 0 {
+			if err := incrementShareAccountingTx(tx, roundID, shareAccountingCompleteColumn, 1); err != nil {
+				s.logError("MarkFailed: accounting update failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
+				return
+			}
+			if err := incrementShareAccountingTx(tx, roundID, shareAccountingFailedColumn, 1); err != nil {
+				s.logError("MarkFailed: accounting update failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
+				return
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			s.logError("MarkFailed: commit (permanent) failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
+			return
 		}
 		if _, ok := s.schedule[key]; ok {
 			delete(s.schedule, key)
@@ -647,11 +858,24 @@ func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, t
 		}
 	} else {
 		// Re-schedule with exponential backoff.
-		if _, err := s.db.Exec(
-			"UPDATE shares SET state = 0, attempts = ? WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
-			newAttempts, roundID, shareIndex, proposalID, treePosition,
-		); err != nil {
+		res, err := tx.Exec(
+			`UPDATE shares
+			    SET state = 0, attempts = ?
+			  WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?
+			    AND state IN (?, ?)`,
+			newAttempts, roundID, shareIndex, proposalID, treePosition, ShareStateReceived, ShareStateWitnessed,
+		)
+		if err != nil {
 			s.logError("MarkFailed: db update (retry) failed", "error", err)
+			return
+		}
+		affected, _ := res.RowsAffected()
+		if err := tx.Commit(); err != nil {
+			s.logError("MarkFailed: commit (retry) failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
+			return
+		}
+		if affected == 0 {
+			return
 		}
 		backoff := time.Duration(1<<uint(min(newAttempts, 6))) * time.Second
 		s.schedule[key] = time.Now().Add(backoff)
@@ -937,6 +1161,12 @@ func (s *ShareStore) ImportQueue(export QueueExport, opts QueueImportOptions) (Q
 		}
 	}
 
+	if result.Inserted > 0 {
+		if err := incrementShareAccountingTx(tx, export.RoundID, shareAccountingAcceptedColumn, result.Inserted); err != nil {
+			return QueueImportResult{}, fmt.Errorf("record imported accepted shares: %w", err)
+		}
+	}
+
 	var importedRoundInfo *RoundInfo
 	if exportedRoundInfo != nil && result.Inserted+result.Duplicates > 0 {
 		if _, err := tx.Exec(
@@ -1200,12 +1430,14 @@ func (s *ShareStore) QueueSummary(roundID string, now time.Time) (QueueSummary, 
 		bucket := &summary.Buckets[idx]
 		switch ShareState(state) {
 		case ShareStateReceived:
+			summary.ActiveTotal += count
 			if effectiveTime <= generatedAt {
 				bucket.OverduePending += count
 			} else {
 				bucket.PendingFuture += count
 			}
 		case ShareStateWitnessed:
+			summary.ActiveTotal += count
 			bucket.Processing += count
 		case ShareStateSubmitted:
 			bucket.Submitted += count
@@ -1217,6 +1449,17 @@ func (s *ShareStore) QueueSummary(roundID string, now time.Time) (QueueSummary, 
 	if err := rows.Err(); err != nil {
 		return QueueSummary{}, err
 	}
+
+	accounting, err := s.loadShareAccountingLocked(roundID)
+	if err != nil {
+		return QueueSummary{}, err
+	}
+	summary.AcceptedTotal = accounting.AcceptedTotal
+	summary.CompleteTotal = accounting.CompleteTotal
+	summary.CompletedByBroadcastTotal = accounting.CompletedByBroadcastTotal
+	summary.CompletedByDuplicateTotal = accounting.CompletedByDuplicateTotal
+	summary.CompletedByPreproofDedupeTotal = accounting.CompletedByPreproofDedupeTotal
+	summary.FailedTotal = accounting.FailedTotal
 
 	return summary, nil
 }

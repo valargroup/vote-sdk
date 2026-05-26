@@ -161,7 +161,10 @@ The queue summary endpoint reports only per-round bucketed counts across all
 proposals. It omits proposal IDs, vote decisions, share indices, nullifiers,
 tree positions, and exact submit times. Failed rows are reported immediately,
 including in open buckets, so operators can detect broken share processing
-without waiting for a bucket to close.
+without waiting for a bucket to close. Upgraded helpers also include optional
+round-level accounting totals for accepted, active, complete, broadcast,
+duplicate, pre-proof dedupe, and failed shares. Older helpers omit those fields
+until upgraded.
 
 ## Admin UI
 

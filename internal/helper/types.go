@@ -117,6 +117,18 @@ const (
 	ShareStateFailed    ShareState = 3 // permanently failed
 )
 
+// ShareCompletionReason records why a helper stopped processing a share.
+type ShareCompletionReason string
+
+const (
+	// ShareCompletedByBroadcast means this helper broadcast the reveal tx.
+	ShareCompletedByBroadcast ShareCompletionReason = "broadcast"
+	// ShareCompletedByDuplicate means the chain already had the reveal.
+	ShareCompletedByDuplicate ShareCompletionReason = "duplicate"
+	// ShareCompletedByPreproofDedupe means the pre-proof nullifier check found the reveal.
+	ShareCompletedByPreproofDedupe ShareCompletionReason = "preproof_dedupe"
+)
+
 // QueuedShare is a share payload with processing metadata.
 type QueuedShare struct {
 	Payload     SharePayload
@@ -137,13 +149,20 @@ type QueueStatus struct {
 // It intentionally omits proposal IDs, share indices, vote choices, nullifiers,
 // tree positions, and exact submit times.
 type QueueSummary struct {
-	RoundID         string               `json:"round_id"`
-	BucketSeconds   uint64               `json:"bucket_seconds"`
-	CreatedAtTime   uint64               `json:"created_at_time"`
-	VoteEndTime     uint64               `json:"vote_end_time"`
-	GeneratedAt     uint64               `json:"generated_at"`
-	LastMinuteStart uint64               `json:"last_minute_start"`
-	Buckets         []QueueSummaryBucket `json:"buckets"`
+	RoundID                        string               `json:"round_id"`
+	BucketSeconds                  uint64               `json:"bucket_seconds"`
+	CreatedAtTime                  uint64               `json:"created_at_time"`
+	VoteEndTime                    uint64               `json:"vote_end_time"`
+	GeneratedAt                    uint64               `json:"generated_at"`
+	LastMinuteStart                uint64               `json:"last_minute_start"`
+	AcceptedTotal                  int                  `json:"accepted_total"`
+	ActiveTotal                    int                  `json:"active_total"`
+	CompleteTotal                  int                  `json:"complete_total"`
+	CompletedByBroadcastTotal      int                  `json:"completed_by_broadcast_total"`
+	CompletedByDuplicateTotal      int                  `json:"completed_by_duplicate_total"`
+	CompletedByPreproofDedupeTotal int                  `json:"completed_by_preproof_dedupe_total"`
+	FailedTotal                    int                  `json:"failed_total"`
+	Buckets                        []QueueSummaryBucket `json:"buckets"`
 }
 
 // QueueSummaryBucket is one coarse time interval within a queue summary.

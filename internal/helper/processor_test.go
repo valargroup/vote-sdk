@@ -221,6 +221,12 @@ func TestProcessor_ProcessBatch_Success(t *testing.T) {
 	// Verify share is marked submitted.
 	status := store.Status()
 	assert.Equal(t, 1, status[roundID].Submitted)
+
+	summary, err := store.QueueSummary(roundID, time.Now())
+	require.NoError(t, err)
+	assert.Equal(t, 1, summary.AcceptedTotal)
+	assert.Equal(t, 1, summary.CompleteTotal)
+	assert.Equal(t, 1, summary.CompletedByBroadcastTotal)
 }
 
 func TestProcessor_ProcessBatch_ProofFailure(t *testing.T) {
@@ -305,6 +311,13 @@ func TestProcessor_ProcessBatch_DuplicateNullifierTreatedAsSuccess(t *testing.T)
 	status := store.Status()
 	assert.Equal(t, 1, status[roundID].Submitted)
 	assert.Equal(t, 0, status[roundID].Pending)
+
+	summary, err := store.QueueSummary(roundID, time.Now())
+	require.NoError(t, err)
+	assert.Equal(t, 1, summary.AcceptedTotal)
+	assert.Equal(t, 0, summary.ActiveTotal)
+	assert.Equal(t, 1, summary.CompleteTotal)
+	assert.Equal(t, 1, summary.CompletedByDuplicateTotal)
 }
 
 func TestProcessor_PreProofDuplicateNullifierSkipsProof(t *testing.T) {
@@ -369,6 +382,13 @@ func TestProcessor_PreProofDuplicateNullifierSkipsProof(t *testing.T) {
 	status := store.Status()
 	assert.Equal(t, 1, status[roundID].Submitted)
 	assert.Equal(t, 0, status[roundID].Pending)
+
+	summary, err := store.QueueSummary(roundID, time.Now())
+	require.NoError(t, err)
+	assert.Equal(t, 1, summary.AcceptedTotal)
+	assert.Equal(t, 0, summary.ActiveTotal)
+	assert.Equal(t, 1, summary.CompleteTotal)
+	assert.Equal(t, 1, summary.CompletedByPreproofDedupeTotal)
 }
 
 func TestProcessor_PreProofNullifierNotRevealedFallsThroughToProof(t *testing.T) {
@@ -557,7 +577,7 @@ func TestProcessor_TreePositionOutOfRange(t *testing.T) {
 
 	// Directly call processShare.
 	share := QueuedShare{Payload: p}
-	err := proc.processShare(context.Background(), share)
+	_, err := proc.processShare(context.Background(), share)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "out of range")
 }

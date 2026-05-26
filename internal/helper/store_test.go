@@ -112,6 +112,40 @@ func TestMarkSubmitted(t *testing.T) {
 	assert.Empty(t, c2, "enc_share_c2 should be cleared")
 	assert.Equal(t, "[]", comms, "share_comms should be reset to empty array")
 	assert.Empty(t, blind, "primary_blind should be cleared")
+
+	summary, err := s.QueueSummary("round1", time.Now())
+	require.NoError(t, err)
+	assert.Equal(t, 1, summary.AcceptedTotal)
+	assert.Equal(t, 0, summary.ActiveTotal)
+	assert.Equal(t, 1, summary.CompleteTotal)
+	assert.Equal(t, 1, summary.CompletedByBroadcastTotal)
+}
+
+func TestMarkCompleteAccountingReasons(t *testing.T) {
+	s := newTestStore(t)
+
+	for i := 0; i < 3; i++ {
+		p := testPayload("round1", uint32(i))
+		p.TreePosition = uint64(i)
+		enqueueAndRequireInserted(t, s, p)
+	}
+
+	ready := s.TakeReady()
+	require.Len(t, ready, 3)
+
+	s.MarkComplete("round1", 0, 1, 0, ShareCompletedByBroadcast)
+	s.MarkComplete("round1", 1, 1, 1, ShareCompletedByDuplicate)
+	s.MarkComplete("round1", 2, 1, 2, ShareCompletedByPreproofDedupe)
+
+	summary, err := s.QueueSummary("round1", time.Now())
+	require.NoError(t, err)
+	assert.Equal(t, 3, summary.AcceptedTotal)
+	assert.Equal(t, 0, summary.ActiveTotal)
+	assert.Equal(t, 3, summary.CompleteTotal)
+	assert.Equal(t, 1, summary.CompletedByBroadcastTotal)
+	assert.Equal(t, 1, summary.CompletedByDuplicateTotal)
+	assert.Equal(t, 1, summary.CompletedByPreproofDedupeTotal)
+	assert.Equal(t, 0, summary.FailedTotal)
 }
 
 func TestMarkFailed_RetryAndPermanent(t *testing.T) {
@@ -151,6 +185,13 @@ func TestMarkFailed_RetryAndPermanent(t *testing.T) {
 	assert.Empty(t, c2, "enc_share_c2 should be cleared after permanent failure")
 	assert.Equal(t, "[]", comms, "share_comms should be reset after permanent failure")
 	assert.Empty(t, blind, "primary_blind should be cleared after permanent failure")
+
+	summary, err := s.QueueSummary("round1", time.Now())
+	require.NoError(t, err)
+	assert.Equal(t, 1, summary.AcceptedTotal)
+	assert.Equal(t, 0, summary.ActiveTotal)
+	assert.Equal(t, 1, summary.CompleteTotal)
+	assert.Equal(t, 1, summary.FailedTotal)
 }
 
 func TestStatus(t *testing.T) {
@@ -261,6 +302,74 @@ func TestQueueSummaryAggregatesStatesByBucket(t *testing.T) {
 		total += bucket.Total
 	}
 	assert.Equal(t, 6, total)
+}
+
+func TestQueueSummaryBackfillsAccountingForExistingShares(t *testing.T) {
+	const roundID = "1212121212121212121212121212121212121212121212121212121212121212"
+	start := uint64(1700000000)
+	end := start + 3600
+	dbPath := filepath.Join(t.TempDir(), "helper.db")
+
+	db, err := sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+	_, err = db.Exec(`
+		CREATE TABLE shares (
+			round_id        TEXT NOT NULL,
+			share_index     INTEGER NOT NULL,
+			shares_hash     TEXT NOT NULL,
+			proposal_id     INTEGER NOT NULL,
+			vote_decision   INTEGER NOT NULL,
+			enc_share_c1    TEXT NOT NULL,
+			enc_share_c2    TEXT NOT NULL,
+			tree_position   INTEGER NOT NULL,
+			share_comms     TEXT NOT NULL DEFAULT '[]',
+			primary_blind   TEXT NOT NULL DEFAULT '',
+			state           INTEGER NOT NULL DEFAULT 0,
+			attempts        INTEGER NOT NULL DEFAULT 0,
+			vote_end_time   INTEGER NOT NULL DEFAULT 0,
+			submit_at       INTEGER NOT NULL DEFAULT 0,
+			original_submit_at INTEGER NOT NULL DEFAULT 0,
+			received_at     INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (round_id, share_index, proposal_id, tree_position)
+		)
+	`)
+	require.NoError(t, err)
+	for i, state := range []ShareState{ShareStateReceived, ShareStateWitnessed, ShareStateSubmitted, ShareStateFailed} {
+		_, err = db.Exec(
+			`INSERT INTO shares
+			 (round_id, share_index, shares_hash, proposal_id, vote_decision,
+			  enc_share_c1, enc_share_c2, tree_position, share_comms, primary_blind,
+			  state, attempts, vote_end_time, submit_at, original_submit_at, received_at)
+			 VALUES (?, ?, 'hash', 1, 0, 'c1', 'c2', ?, '[]', 'blind', ?, 0, ?, ?, ?, ?)`,
+			roundID,
+			i,
+			i,
+			state,
+			end,
+			start+uint64(i)*60,
+			start+uint64(i)*60,
+			start,
+		)
+		require.NoError(t, err)
+	}
+	require.NoError(t, db.Close())
+
+	fetcher := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: start, VoteEndTime: end}, nil
+	}
+	s, err := NewShareStore(dbPath, fetcher)
+	require.NoError(t, err)
+	defer s.Close()
+
+	summary, err := s.QueueSummary(roundID, time.Unix(int64(start+10*60), 0))
+	require.NoError(t, err)
+	assert.Equal(t, 4, summary.AcceptedTotal)
+	assert.Equal(t, 2, summary.ActiveTotal)
+	assert.Equal(t, 2, summary.CompleteTotal)
+	assert.Equal(t, 0, summary.CompletedByBroadcastTotal)
+	assert.Equal(t, 0, summary.CompletedByDuplicateTotal)
+	assert.Equal(t, 0, summary.CompletedByPreproofDedupeTotal)
+	assert.Equal(t, 1, summary.FailedTotal)
 }
 
 func TestQueueSummaryReportsCurrentBucketStates(t *testing.T) {

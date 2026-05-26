@@ -172,6 +172,20 @@ Each bucket reports `submitted`, `pending_future`, `overdue_pending`,
 `processing`, `failed`, and `total`. `overdue_pending` means a share is still
 waiting in the helper DB even though its `submit_at` time has passed.
 
+Upgraded helpers also include round-level accounting totals. These are
+helper-local SQLite counters, not chain or consensus state. `accepted_total`
+counts new rows accepted into that helper's queue. `active_total` is derived
+from the current non-terminal rows in the helper DB. `complete_total` counts
+rows that reached a final local outcome. For shares accepted after this upgrade,
+the completion reason is split across `completed_by_broadcast_total`,
+`completed_by_duplicate_total`, `completed_by_preproof_dedupe_total`, and
+`failed_total`. Operators can use
+`accepted_total == active_total + complete_total` as the main per-helper
+integrity check. Shares that were already submitted before the upgrade only
+contribute to `complete_total`; the helper did not record whether those
+submissions were broadcast, duplicate, or pre-proof dedupe completions. Older
+helpers omit these fields until upgraded.
+
 The admin UI has a monitor route at `/queue-monitor` that reads `vote_servers[]`
 from `/api/voting-config`, queries each helper's queue summary, and overlays the
 bucket histograms across the vote period. It also highlights unavailable
