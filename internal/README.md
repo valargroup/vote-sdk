@@ -60,6 +60,14 @@ same schedule the wallet provided.
 | Submitted (2) - on chain | Terminal, no action needed | No |
 | Failed (3) - permanent failure | Terminal, no action needed | N/A |
 
+Submitted rows have their witness material cleared as soon as the helper marks
+them submitted. Permanently failed rows retain `enc_share_c1`, `enc_share_c2`,
+`share_comms`, and `primary_blind` until the helper purges the round after
+`vote_end_time`, so local queue exports remain sensitive while a failed round is
+still present in `helper.db`. Legacy or imported rows without a known
+`vote_end_time` are scrubbed when they become permanently failed because there
+is no reliable purge deadline.
+
 ## Wallet Retry Safety
 
 If the server crashes between receiving the HTTP POST and completing the SQLite
@@ -71,7 +79,8 @@ duplicate payloads return `"duplicate"`, and conflicting payloads for the same
 
 - Retry budget: `MarkFailed` allows 5 attempts with exponential backoff (2 s,
   4 s, 8 s, 16 s, 32 s). If the chain is unreachable for longer, shares become
-  permanently failed. Attempt counts survive recovery.
+  permanently failed. Attempt counts survive recovery, and failed-row witness
+  material is retained until expired-round purge.
 - Almost-submitted race: if the chain accepted a share but the server crashed
   before `MarkSubmitted`, recovery will retry it. The chain-side share nullifier
   makes the duplicate reveal idempotent.
