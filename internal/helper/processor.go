@@ -324,6 +324,23 @@ func (p *Processor) processBatch(ctx context.Context) {
 				return nil
 			}
 
+			if p.shareNF == nil && !broadcast.Confirmed {
+				err := fmt.Errorf("share confirmation checker not configured")
+				spanErr = err
+				shareSpan.SetData("outcome", "confirmation_checker_missing")
+				p.logger.Error("share confirmation checker missing after broadcast",
+					"round_id", share.Payload.VoteRoundID,
+					"share_index", share.Payload.EncShare.ShareIndex,
+				)
+				CaptureErr(err, map[string]string{
+					"round_id":    share.Payload.VoteRoundID,
+					"share_index": strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
+					"stage":       "confirmation_checker_missing",
+				})
+				p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+				return nil
+			}
+
 			if ok := p.store.MarkConfirming(
 				share.Payload.VoteRoundID,
 				share.Payload.EncShare.ShareIndex,

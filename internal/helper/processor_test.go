@@ -280,6 +280,47 @@ func TestProcessor_ProcessBatch_DoesNotWaitForConfirmation(t *testing.T) {
 	assert.Equal(t, 1, status[roundID].Pending)
 }
 
+func TestProcessor_ProcessBatch_MissingConfirmationCheckerDoesNotStickConfirming(t *testing.T) {
+	store := newTestStore(t)
+	prover := &mockProver{}
+	tree := newMockTreeReader()
+
+	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"tx_hash":"AABB","code":0,"log":""}`))
+	}))
+	defer chainServer.Close()
+
+	submitter := NewChainSubmitter(chainServer.URL)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
+
+	roundID := hex.EncodeToString(make([]byte, 32))
+	p := testPayload(roundID, 0)
+	p.TreePosition = 0
+	enqueueAndRequireInserted(t, store, p)
+
+	proc.processBatch(context.Background())
+
+	assert.Equal(t, int32(1), prover.callCount.Load())
+	status := store.Status()
+	assert.Equal(t, 0, status[roundID].Submitted)
+	assert.Equal(t, 1, status[roundID].Pending)
+
+	var state, attempts int
+	var shareNullifier string
+	err := store.db.QueryRow(
+		`SELECT state, attempts, share_nullifier
+		   FROM shares
+		  WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
+		roundID, 0, 1, 0,
+	).Scan(&state, &attempts, &shareNullifier)
+	require.NoError(t, err)
+	assert.Equal(t, int(ShareStateReceived), state)
+	assert.Equal(t, 1, attempts)
+	assert.Empty(t, shareNullifier)
+	assert.Empty(t, store.TakeConfirmingReady(time.Now(), 10))
+}
+
 func TestProcessor_ConfirmBroadcasts_UnconfirmedTimeoutRetries(t *testing.T) {
 	store := newTestStore(t)
 	prover := &mockProver{}
@@ -521,6 +562,7 @@ func TestProcessor_PreProofNullifierNotRevealedFallsThroughToProof(t *testing.T)
 		log.NewNopLogger(),
 		2,
 		nil,
+		WithShareConfirmationChecker(alwaysConfirmedShare),
 		WithPreProofShareDeduper(
 			func(roundID, sharesHash [32]byte, proposalID, voteDecision uint32) ([32]byte, error) {
 				return expectedCommitment, nil
@@ -549,7 +591,6 @@ func TestProcessor_PreProofNullifierNotRevealedFallsThroughToProof(t *testing.T)
 	assert.Equal(t, 0, status[roundID].Submitted)
 	assert.Equal(t, 1, status[roundID].Pending)
 
-	proc.shareNF = alwaysConfirmedShare
 	forceConfirmingDue(t, store)
 	proc.confirmBroadcasts(context.Background())
 
@@ -580,6 +621,7 @@ func TestProcessor_PreProofNullifierCheckErrorFallsThroughToProof(t *testing.T) 
 		log.NewNopLogger(),
 		2,
 		nil,
+		WithShareConfirmationChecker(alwaysConfirmedShare),
 		WithPreProofShareDeduper(
 			func(roundID, sharesHash [32]byte, proposalID, voteDecision uint32) ([32]byte, error) {
 				return expectedCommitment, nil
@@ -608,7 +650,6 @@ func TestProcessor_PreProofNullifierCheckErrorFallsThroughToProof(t *testing.T) 
 	assert.Equal(t, 0, status[roundID].Submitted)
 	assert.Equal(t, 1, status[roundID].Pending)
 
-	proc.shareNF = alwaysConfirmedShare
 	forceConfirmingDue(t, store)
 	proc.confirmBroadcasts(context.Background())
 
