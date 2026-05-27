@@ -20,5 +20,5 @@
   ],
   "chain_id": "svote-1",
   "pretty_name": "Zcash Vote (local)",
-  "features": ["blocks", "tx", "staking", "governance", "supply", "parameters", "consensus"]
+  "features": ["blocks", "tx", "staking", "governance", "supply", "parameters", "consensus", "uptime"]
 }
