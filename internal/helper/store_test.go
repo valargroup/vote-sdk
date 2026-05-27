@@ -117,6 +117,21 @@ func requireScheduleChanged(t *testing.T, s *ShareStore) {
 	}
 }
 
+func markConfirmingForTest(t *testing.T, s *ShareStore, roundID string, shareIndex, proposalID uint32, treePosition uint64) []byte {
+	t.Helper()
+	nullifier := make([]byte, 32)
+	nullifier[0] = byte(shareIndex + proposalID)
+	nullifier[1] = byte(treePosition)
+	require.True(t, s.MarkConfirming(roundID, shareIndex, proposalID, treePosition, nullifier, "AABB", time.Now(), 0))
+	return nullifier
+}
+
+func markConfirmedForTest(t *testing.T, s *ShareStore, roundID string, shareIndex, proposalID uint32, treePosition uint64) {
+	t.Helper()
+	markConfirmingForTest(t, s, roundID, shareIndex, proposalID, treePosition)
+	s.MarkSubmitted(roundID, shareIndex, proposalID, treePosition)
+}
+
 func TestEnqueueAndTakeReady(t *testing.T) {
 	s := newTestStore(t)
 
@@ -133,7 +148,7 @@ func TestEnqueueAndTakeReady(t *testing.T) {
 	assert.Empty(t, ready)
 }
 
-func TestMarkSubmitted(t *testing.T) {
+func TestMarkSubmittedRequiresConfirming(t *testing.T) {
 	s := newTestStore(t)
 
 	enqueueAndRequireInserted(t, s, testPayload("round1", 0))
@@ -144,12 +159,56 @@ func TestMarkSubmitted(t *testing.T) {
 	s.MarkSubmitted("round1", 0, 1, 0)
 
 	status := s.Status()
+	assert.Equal(t, 0, status["round1"].Submitted)
+	assert.Equal(t, 1, status["round1"].Pending)
+
+	var c1, c2, comms, blind string
+	err := s.db.QueryRow(
+		"SELECT enc_share_c1, enc_share_c2, share_comms, primary_blind FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
+		"round1", 0, 1, 0,
+	).Scan(&c1, &c2, &comms, &blind)
+	require.NoError(t, err)
+	assert.NotEmpty(t, c1, "enc_share_c1 should be retained")
+	assert.NotEmpty(t, c2, "enc_share_c2 should be retained")
+	assert.NotEmpty(t, comms, "share_comms should be retained")
+	assert.NotEmpty(t, blind, "primary_blind should be retained")
+}
+
+func TestMarkConfirmingThenSubmitted(t *testing.T) {
+	s := newTestStore(t)
+
+	enqueueAndRequireInserted(t, s, testPayload("round1", 0))
+	ready := s.TakeReady()
+	require.Len(t, ready, 1)
+
+	nullifier := markConfirmingForTest(t, s, "round1", 0, 1, 0)
+
+	status := s.Status()
+	assert.Equal(t, 1, status["round1"].Pending)
+	assert.Equal(t, 0, status["round1"].Submitted)
+
+	confirming := s.TakeConfirmingReady(time.Now(), 10)
+	require.Len(t, confirming, 1)
+	assert.Equal(t, nullifier, confirming[0].ShareNullifier)
+
+	var c1, c2, comms, blind string
+	err := s.db.QueryRow(
+		"SELECT enc_share_c1, enc_share_c2, share_comms, primary_blind FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
+		"round1", 0, 1, 0,
+	).Scan(&c1, &c2, &comms, &blind)
+	require.NoError(t, err)
+	assert.NotEmpty(t, c1)
+	assert.NotEmpty(t, c2)
+	assert.NotEmpty(t, comms)
+	assert.NotEmpty(t, blind)
+
+	s.MarkSubmitted("round1", 0, 1, 0)
+
+	status = s.Status()
 	assert.Equal(t, 1, status["round1"].Submitted)
 	assert.Equal(t, 0, status["round1"].Pending)
 
-	// Witness data must be scrubbed from the row after submission.
-	var c1, c2, comms, blind string
-	err := s.db.QueryRow(
+	err = s.db.QueryRow(
 		"SELECT enc_share_c1, enc_share_c2, share_comms, primary_blind FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
 		"round1", 0, 1, 0,
 	).Scan(&c1, &c2, &comms, &blind)
@@ -491,12 +550,12 @@ func TestSameShareIndexDifferentProposals(t *testing.T) {
 	status := s.Status()
 	assert.Equal(t, 2, status["round1"].Total)
 
-	// Both should be independently takeable and submittable.
+	// Both should be independently takeable and confirmable.
 	ready := s.TakeReady()
 	assert.Len(t, ready, 2)
 
-	s.MarkSubmitted("round1", 0, 1, 0)
-	s.MarkSubmitted("round1", 0, 2, 0)
+	markConfirmedForTest(t, s, "round1", 0, 1, 0)
+	markConfirmedForTest(t, s, "round1", 0, 2, 0)
 
 	status = s.Status()
 	assert.Equal(t, 2, status["round1"].Submitted)
@@ -518,12 +577,12 @@ func TestSameShareIndexDifferentTreePositions(t *testing.T) {
 	status := s.Status()
 	assert.Equal(t, 2, status["round1"].Total)
 
-	// Both should be independently takeable and submittable.
+	// Both should be independently takeable and confirmable.
 	ready := s.TakeReady()
 	assert.Len(t, ready, 2)
 
-	s.MarkSubmitted("round1", 0, 1, 10)
-	s.MarkSubmitted("round1", 0, 1, 20)
+	markConfirmedForTest(t, s, "round1", 0, 1, 10)
+	markConfirmedForTest(t, s, "round1", 0, 1, 20)
 
 	status = s.Status()
 	assert.Equal(t, 2, status["round1"].Submitted)
@@ -556,6 +615,45 @@ func TestRecovery(t *testing.T) {
 
 	ready = s2.TakeReady()
 	assert.Len(t, ready, 1, "recovered share should be ready again")
+}
+
+func TestRecovery_ConfirmingRowsRemainConfirming(t *testing.T) {
+	dbPath := t.TempDir() + "/helper_test.db"
+	now := uint64(time.Now().Unix())
+	fetcher := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: now, VoteEndTime: now + 12*3600}, nil
+	}
+
+	s1, err := NewShareStore(dbPath, fetcher)
+	require.NoError(t, err)
+
+	enqueueAndRequireInserted(t, s1, testPayload("round1", 0))
+	ready := s1.TakeReady()
+	require.Len(t, ready, 1)
+	expectedNullifier := markConfirmingForTest(t, s1, "round1", 0, 1, 0)
+	require.NoError(t, s1.Close())
+
+	s2, err := NewShareStore(dbPath, fetcher)
+	require.NoError(t, err)
+	defer s2.Close()
+
+	assert.Empty(t, s2.TakeReady(), "confirming shares should not be rescheduled as received")
+
+	status := s2.Status()
+	assert.Equal(t, 1, status["round1"].Pending)
+	assert.Equal(t, 0, status["round1"].Submitted)
+
+	confirming := s2.TakeConfirmingReady(time.Now(), 10)
+	require.Len(t, confirming, 1)
+	assert.Equal(t, expectedNullifier, confirming[0].ShareNullifier)
+
+	var state int
+	err = s2.db.QueryRow(
+		"SELECT state FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
+		"round1", 0, 1, 0,
+	).Scan(&state)
+	require.NoError(t, err)
+	assert.Equal(t, int(ShareStateConfirming), state)
 }
 
 func TestRecovery_FutureSubmitAt(t *testing.T) {
@@ -699,6 +797,36 @@ func TestPurgeExpiredRoundsTruncatesWALWithFailedWitnessMaterial(t *testing.T) {
 	assert.False(t, containsSensitiveField(walAfter, failed), "failed-row witness material should not remain in WAL after purge")
 }
 
+func TestPurgeExpiredRoundsKeepsConfirmingRows(t *testing.T) {
+	fetcher := func(roundID string) (RoundInfo, error) {
+		end := uint64(time.Now().Add(-time.Hour).Unix())
+		return RoundInfo{CreatedAtTime: end - oneHourSecs, VoteEndTime: end}, nil
+	}
+
+	s, err := NewShareStore(":memory:", fetcher)
+	require.NoError(t, err)
+	defer s.Close()
+
+	enqueueAndRequireInserted(t, s, testPayload("expired_round", 0))
+	ready := s.TakeReady()
+	require.Len(t, ready, 1)
+	markConfirmingForTest(t, s, "expired_round", 0, 1, 0)
+
+	deleted := s.PurgeExpiredRounds()
+	assert.Equal(t, int64(0), deleted)
+
+	status := s.Status()
+	assert.Equal(t, 1, status["expired_round"].Total)
+	assert.Equal(t, 1, status["expired_round"].Pending)
+
+	s.MarkSubmitted("expired_round", 0, 1, 0)
+	deleted = s.PurgeExpiredRounds()
+	assert.Equal(t, int64(1), deleted)
+
+	status = s.Status()
+	assert.Equal(t, 0, status["expired_round"].Total)
+}
+
 func TestExpiredRoundSummaries(t *testing.T) {
 	fetcher := func(roundID string) (RoundInfo, error) {
 		end := uint64(time.Now().Add(-time.Hour).Unix())
@@ -714,7 +842,7 @@ func TestExpiredRoundSummaries(t *testing.T) {
 
 	ready := s.TakeReady()
 	require.Len(t, ready, 2)
-	s.MarkSubmitted("expired_round", 0, 1, 0)
+	markConfirmedForTest(t, s, "expired_round", 0, 1, 0)
 	s.MarkFailed("expired_round", 1, 1, 0)
 
 	summaries, err := s.ExpiredRoundSummaries(time.Now())
@@ -862,6 +990,12 @@ func TestMigrateOldSchema(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, hasOriginalSubmitAt)
 
+	for _, column := range []string{"share_nullifier", "tx_hash", "broadcast_at", "confirm_after"} {
+		hasColumn, err := tableHasColumn(s.db, "shares", column)
+		require.NoError(t, err)
+		assert.True(t, hasColumn)
+	}
+
 	hasRoundCreatedAtTime, err := tableHasColumn(s.db, "rounds", "created_at_time")
 	require.NoError(t, err)
 	assert.True(t, hasRoundCreatedAtTime)
@@ -891,6 +1025,92 @@ func TestMigrateOldSchema(t *testing.T) {
 	result, err = s.Enqueue(p2)
 	require.NoError(t, err)
 	assert.Equal(t, EnqueueInserted, result)
+}
+
+func TestMigrateOldPKPreservesConfirmingMetadata(t *testing.T) {
+	dbPath := t.TempDir() + "/old_helper.db"
+	roundID := strings.Repeat("a", 64)
+	nullifierHex := strings.Repeat("b", 64)
+	broadcastAt := uint64(1_700_000_100)
+	confirmAfter := uint64(1_700_000_200)
+
+	oldDB, err := sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+	_, err = oldDB.Exec(`
+		CREATE TABLE shares (
+			round_id        TEXT NOT NULL,
+			share_index     INTEGER NOT NULL,
+			shares_hash     TEXT NOT NULL,
+			proposal_id     INTEGER NOT NULL,
+			vote_decision   INTEGER NOT NULL,
+			enc_share_c1    TEXT NOT NULL,
+			enc_share_c2    TEXT NOT NULL,
+			tree_position   INTEGER NOT NULL,
+			share_comms     TEXT NOT NULL DEFAULT '[]',
+			primary_blind   TEXT NOT NULL DEFAULT '',
+			state           INTEGER NOT NULL DEFAULT 0,
+			attempts        INTEGER NOT NULL DEFAULT 0,
+			vote_end_time   INTEGER NOT NULL DEFAULT 0,
+			submit_at       INTEGER NOT NULL DEFAULT 0,
+			original_submit_at INTEGER NOT NULL DEFAULT 0,
+			received_at     INTEGER NOT NULL DEFAULT 0,
+			share_nullifier TEXT NOT NULL DEFAULT '',
+			tx_hash         TEXT NOT NULL DEFAULT '',
+			broadcast_at    INTEGER NOT NULL DEFAULT 0,
+			confirm_after   INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (round_id, share_index, proposal_id)
+		)
+	`)
+	require.NoError(t, err)
+	_, err = oldDB.Exec(
+		`INSERT INTO shares
+		 (round_id, share_index, shares_hash, proposal_id, vote_decision,
+		  enc_share_c1, enc_share_c2, tree_position, share_comms, primary_blind,
+		  state, attempts, vote_end_time, submit_at, original_submit_at,
+		  received_at, share_nullifier, tx_hash, broadcast_at, confirm_after)
+		 VALUES (?, 0, ?, 1, 0, ?, ?, 7, ?, ?, ?, 2, 0, 0, 0, 0, ?, ?, ?, ?)`,
+		roundID,
+		testPayload(roundID, 0).SharesHash,
+		testPayload(roundID, 0).EncShare.C1,
+		testPayload(roundID, 0).EncShare.C2,
+		`[]`,
+		testPayload(roundID, 0).PrimaryBlind,
+		ShareStateConfirming,
+		nullifierHex,
+		"AABB",
+		broadcastAt,
+		confirmAfter,
+	)
+	require.NoError(t, err)
+	require.NoError(t, oldDB.Close())
+
+	now := uint64(time.Now().Unix())
+	fetcher := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: now, VoteEndTime: now + 12*3600}, nil
+	}
+	s, err := NewShareStore(dbPath, fetcher)
+	require.NoError(t, err)
+	defer s.Close()
+
+	var state int
+	var gotNullifier, txHash string
+	var gotBroadcastAt, gotConfirmAfter uint64
+	err = s.db.QueryRow(
+		`SELECT state, share_nullifier, tx_hash, broadcast_at, confirm_after
+		   FROM shares
+		  WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
+		roundID, 0, 1, 7,
+	).Scan(&state, &gotNullifier, &txHash, &gotBroadcastAt, &gotConfirmAfter)
+	require.NoError(t, err)
+	assert.Equal(t, int(ShareStateConfirming), state)
+	assert.Equal(t, nullifierHex, gotNullifier)
+	assert.Equal(t, "AABB", txHash)
+	assert.Equal(t, broadcastAt, gotBroadcastAt)
+	assert.Equal(t, confirmAfter, gotConfirmAfter)
+
+	notInPK, err := columnNotInPK(s.db, "shares", "tree_position")
+	require.NoError(t, err)
+	assert.False(t, notInPK, "tree_position should be in the PK after migration")
 }
 
 func TestNextScheduledTimeEmptyAndReadyRemoval(t *testing.T) {
@@ -977,7 +1197,7 @@ func TestExportQueueIncludesTerminalRows(t *testing.T) {
 	enqueueAndRequireInserted(t, s, submitted)
 	ready := s.TakeReady()
 	require.Len(t, ready, 1)
-	s.MarkSubmitted("round1", 1, 1, 11)
+	markConfirmedForTest(t, s, "round1", 1, 1, 11)
 
 	export, err := s.ExportQueue("round1", time.Unix(1234, 0))
 	require.NoError(t, err)
@@ -1043,7 +1263,7 @@ func TestImportQueueSkipsTerminalAndRoundTripsProcessableRows(t *testing.T) {
 	enqueueAndRequireInserted(t, source, submitted)
 	ready := source.TakeReady()
 	require.Len(t, ready, 2)
-	source.MarkSubmitted("round1", 1, 1, 11)
+	markConfirmedForTest(t, source, "round1", 1, 1, 11)
 	source.MarkFailed("round1", 0, 1, 0)
 
 	export, err := source.ExportQueue("round1", time.Now())
@@ -1293,6 +1513,53 @@ func TestImportQueueForceReadyReschedulesDuplicate(t *testing.T) {
 	assert.Equal(t, 0, result.Inserted)
 	assert.Equal(t, 1, result.Duplicates)
 	assert.Equal(t, 0, result.Conflicts)
+}
+
+func TestImportQueueForceReadyReschedulesConfirmingDuplicate(t *testing.T) {
+	payload := testPayload("round1", 0)
+	export := QueueExport{
+		Version: QueueExportVersion,
+		RoundID: "round1",
+		Round: QueueExportRound{
+			CreatedAtTime: uint64(time.Now().Add(-time.Hour).Unix()),
+			VoteEndTime:   uint64(time.Now().Add(time.Hour).Unix()),
+		},
+		Rows: []QueueExportRow{
+			queueExportRowFromPayload(payload, ShareStateConfirming, uint64(time.Now().Add(time.Hour).Unix())),
+		},
+	}
+
+	dest := newTestStore(t)
+	enqueueAndRequireInserted(t, dest, payload)
+	ready := dest.TakeReady()
+	require.Len(t, ready, 1)
+	markConfirmingForTest(t, dest, "round1", 0, 1, 0)
+
+	result, err := dest.ImportQueue(export, QueueImportOptions{ForceReady: true})
+	require.NoError(t, err)
+	assert.Equal(t, 0, result.Inserted)
+	assert.Equal(t, 1, result.Duplicates)
+	assert.Equal(t, 0, result.Conflicts)
+
+	ready = dest.TakeReady()
+	require.Len(t, ready, 1)
+	assert.Equal(t, uint32(0), ready[0].Payload.EncShare.ShareIndex)
+
+	var state int
+	var shareNullifier, txHash string
+	var broadcastAt, confirmAfter uint64
+	err = dest.db.QueryRow(
+		`SELECT state, share_nullifier, tx_hash, broadcast_at, confirm_after
+		   FROM shares
+		  WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
+		"round1", 0, 1, 0,
+	).Scan(&state, &shareNullifier, &txHash, &broadcastAt, &confirmAfter)
+	require.NoError(t, err)
+	assert.Equal(t, int(ShareStateWitnessed), state)
+	assert.Empty(t, shareNullifier)
+	assert.Empty(t, txHash)
+	assert.Equal(t, uint64(0), broadcastAt)
+	assert.Equal(t, uint64(0), confirmAfter)
 }
 
 func queueExportRowFromPayload(payload SharePayload, state ShareState, voteEndTime uint64) QueueExportRow {

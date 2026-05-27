@@ -24,7 +24,8 @@ the wallet's intended schedule exactly.
 
 ## Processor wakeups
 
-`Processor.Run()` is deterministic:
+`Processor.Run()` starts a processing loop and a separate confirmation loop.
+The processing loop is deterministic:
 
 1. emit alerts for expired rounds with unsubmitted shares,
 2. purge expired round data,
@@ -36,6 +37,12 @@ The maintenance wake exists only so expiry alerts and purging still run when no
 shares are scheduled. Enqueue and retry scheduling changes signal the processor
 through a buffered channel so new immediate shares do not wait for the
 maintenance wake.
+
+After the chain REST API accepts a reveal broadcast, the helper records the row
+as Confirming and keeps processing other ready shares. The confirmation loop
+polls committed share-nullifier state and only marks the row Submitted once the
+nullifier is visible on-chain. If the nullifier is not visible before the
+confirmation timeout, the row is retried through the normal backoff path.
 
 ## Crash Recovery
 
@@ -59,6 +66,7 @@ same schedule the wallet provided.
 | Witnessed (1) - mid-processing | Reset to Received, re-enters schedule | No |
 | Submitted (2) - on chain | Terminal, no action needed | No |
 | Failed (3) - permanent failure | Terminal, no action needed | N/A |
+| Confirming (4) - broadcast accepted, waiting for committed state | Stays Confirming; confirmation polling resumes | No |
 
 Submitted rows have their witness material cleared as soon as the helper marks
 them submitted. Permanently failed rows retain `enc_share_c1`, `enc_share_c2`,
@@ -81,6 +89,7 @@ duplicate payloads return `"duplicate"`, and conflicting payloads for the same
   4 s, 8 s, 16 s, 32 s). If the chain is unreachable for longer, shares become
   permanently failed. Attempt counts survive recovery, and failed-row witness
   material is retained until expired-round purge.
-- Almost-submitted race: if the chain accepted a share but the server crashed
-  before `MarkSubmitted`, recovery will retry it. The chain-side share nullifier
-  makes the duplicate reveal idempotent.
+- Confirmation timeout: if a broadcast is accepted but the share nullifier is
+  not observed in committed chain state before the timeout, the helper retries
+  the share. The chain-side share nullifier makes any duplicate reveal
+  idempotent.

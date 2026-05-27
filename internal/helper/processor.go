@@ -12,7 +12,27 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-const maintenanceInterval = 30 * time.Second
+const (
+	maintenanceInterval      = 30 * time.Second
+	confirmationPollDelay    = 5 * time.Second
+	confirmationTimeout      = 45 * time.Second
+	maxConfirmationsPerCycle = 100
+)
+
+type shareBroadcastResult struct {
+	ShareNullifier []byte
+	TxHash         string
+	Confirmed      bool
+}
+
+// newShareBroadcastResult returns an owned copy of the nullifier produced by the prover.
+func newShareBroadcastResult(nullifier [32]byte, txHash string, confirmed bool) *shareBroadcastResult {
+	return &shareBroadcastResult{
+		ShareNullifier: append([]byte(nil), nullifier[:]...),
+		TxHash:         txHash,
+		Confirmed:      confirmed,
+	}
+}
 
 // Processor is the background share processing loop. It checks the share queue
 // when wallet-provided submit_at times arrive, generates Merkle paths and ZKP
@@ -25,10 +45,18 @@ type Processor struct {
 	logger         log.Logger
 	maxConcurrent  int
 	isRoundActive  RoundStatusChecker
+	shareNF        ShareNullifierChecker
 	preProofDedupe *preProofShareDeduper
 }
 
 type ProcessorOption func(*Processor)
+
+// WithShareConfirmationChecker enables committed-state confirmation after broadcast.
+func WithShareConfirmationChecker(shareNF ShareNullifierChecker) ProcessorOption {
+	return func(p *Processor) {
+		p.shareNF = shareNF
+	}
+}
 
 type preProofShareDeduper struct {
 	vcHash      VCHashFunc
@@ -96,15 +124,38 @@ func NewProcessor(
 }
 
 // Run starts the processing loop. Blocks until ctx is cancelled.
-// Each cycle processes ready shares and purges share data for rounds whose
-// voting window has ended.
+// Confirmation checks run in a separate loop so they do not block proof
+// generation or broadcasting for newly ready shares.
 func (p *Processor) Run(ctx context.Context) error {
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error { return p.runProcessingLoop(gctx) })
+	g.Go(func() error { return p.runConfirmationLoop(gctx) })
+	return g.Wait()
+}
+
+// runProcessingLoop processes ready shares and purges expired round data.
+func (p *Processor) runProcessingLoop(ctx context.Context) error {
 	for {
 		p.alertExpiredUnsubmittedShares()
 		p.store.PurgeExpiredRounds()
 		p.processBatch(ctx)
 		if err := p.waitForSchedule(ctx); err != nil {
 			return err
+		}
+	}
+}
+
+// runConfirmationLoop polls committed chain state for broadcast shares.
+func (p *Processor) runConfirmationLoop(ctx context.Context) error {
+	ticker := time.NewTicker(confirmationPollDelay)
+	defer ticker.Stop()
+
+	for {
+		p.confirmBroadcasts(ctx)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
 		}
 	}
 }
@@ -256,7 +307,8 @@ func (p *Processor) processBatch(ctx context.Context) {
 				}
 			}
 
-			if err := p.processShare(shareCtx, share); err != nil {
+			broadcast, err := p.processShare(shareCtx, share)
+			if err != nil {
 				spanErr = err
 				p.logger.Warn("share processing failed",
 					"round_id", share.Payload.VoteRoundID,
@@ -272,9 +324,36 @@ func (p *Processor) processBatch(ctx context.Context) {
 				return nil
 			}
 
-			shareSpan.SetData("outcome", "submitted")
-			p.store.MarkSubmitted(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
-			p.logger.Info("share submitted",
+			if ok := p.store.MarkConfirming(
+				share.Payload.VoteRoundID,
+				share.Payload.EncShare.ShareIndex,
+				share.Payload.ProposalID,
+				share.Payload.TreePosition,
+				broadcast.ShareNullifier,
+				broadcast.TxHash,
+				time.Now(),
+				confirmationPollDelay,
+			); !ok {
+				shareSpan.SetData("outcome", "confirming_update_failed")
+				p.logger.Warn("failed to record share confirmation state, retrying later",
+					"round_id", share.Payload.VoteRoundID,
+					"share_index", share.Payload.EncShare.ShareIndex,
+				)
+				p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+				return nil
+			}
+			if broadcast.Confirmed {
+				shareSpan.SetData("outcome", "confirmed")
+				p.store.MarkSubmitted(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+				p.logger.Info("share confirmed",
+					"round_id", share.Payload.VoteRoundID,
+					"share_index", share.Payload.EncShare.ShareIndex,
+				)
+				return nil
+			}
+
+			shareSpan.SetData("outcome", "confirming")
+			p.logger.Info("share broadcast accepted",
 				"round_id", share.Payload.VoteRoundID,
 				"share_index", share.Payload.EncShare.ShareIndex,
 			)
@@ -289,21 +368,66 @@ func (p *Processor) processBatch(ctx context.Context) {
 	batchSpan.Finish(nil)
 }
 
+// confirmBroadcasts promotes broadcast shares only after committed nullifier state is visible.
+func (p *Processor) confirmBroadcasts(ctx context.Context) {
+	if p.shareNF == nil {
+		return
+	}
+
+	now := time.Now()
+	rows := p.store.TakeConfirmingReady(now, maxConfirmationsPerCycle)
+	for _, row := range rows {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		onChain, err := p.shareNF(row.RoundID, row.ShareNullifier)
+		if err != nil {
+			p.logger.Warn("share confirmation check failed",
+				"round_id", row.RoundID,
+				"share_index", row.ShareIndex,
+				"error", err,
+			)
+			p.store.RescheduleConfirmation(row, now, confirmationPollDelay)
+			continue
+		}
+		if onChain {
+			p.store.MarkSubmitted(row.RoundID, row.ShareIndex, row.ProposalID, row.TreePosition)
+			p.logger.Info("share confirmed",
+				"round_id", row.RoundID,
+				"share_index", row.ShareIndex,
+			)
+			continue
+		}
+		if row.BroadcastAt == 0 || now.Sub(time.Unix(int64(row.BroadcastAt), 0)) >= confirmationTimeout {
+			p.logger.Warn("share broadcast was not confirmed, retrying",
+				"round_id", row.RoundID,
+				"share_index", row.ShareIndex,
+			)
+			p.store.MarkFailed(row.RoundID, row.ShareIndex, row.ProposalID, row.TreePosition)
+			continue
+		}
+		p.store.RescheduleConfirmation(row, now, confirmationPollDelay)
+	}
+}
+
 // processShare handles a single share: Merkle path → proof → submit.
-func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
+func (p *Processor) processShare(ctx context.Context, share QueuedShare) (*shareBroadcastResult, error) {
 	// Scope the tree reader to this share's voting round.
 	roundBytes, err := hex.DecodeString(share.Payload.VoteRoundID)
 	if err != nil {
-		return fmt.Errorf("decode vote_round_id: %w", err)
+		return nil, fmt.Errorf("decode vote_round_id: %w", err)
 	}
 	var roundID [32]byte
 	if len(roundBytes) != 32 {
-		return fmt.Errorf("vote_round_id must be 32 bytes, got %d", len(roundBytes))
+		return nil, fmt.Errorf("vote_round_id must be 32 bytes, got %d", len(roundBytes))
 	}
 	copy(roundID[:], roundBytes)
 
 	if p.preProofDedupe != nil {
-		alreadyRevealed, err := p.preProofDedupe.shareAlreadyRevealed(ctx, share, roundID)
+		preProofResult, alreadyRevealed, err := p.preProofDedupe.shareAlreadyRevealed(ctx, share, roundID)
 		if err != nil {
 			p.logger.Warn("pre-proof share nullifier check failed, continuing with proof",
 				"round_id", share.Payload.VoteRoundID,
@@ -315,7 +439,7 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 				"round_id", share.Payload.VoteRoundID,
 				"share_index", share.Payload.EncShare.ShareIndex,
 			)
-			return nil
+			return preProofResult, nil
 		}
 	}
 
@@ -324,13 +448,13 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	// Read tree status (leaf count + anchor height) without loading leaf data.
 	status, err := tree.GetTreeStatus()
 	if err != nil {
-		return fmt.Errorf("read tree status: %w", err)
+		return nil, fmt.Errorf("read tree status: %w", err)
 	}
 	if status.LeafCount == 0 {
-		return fmt.Errorf("commitment tree is empty")
+		return nil, fmt.Errorf("commitment tree is empty")
 	}
 	if share.Payload.TreePosition >= status.LeafCount {
-		return fmt.Errorf("tree_position %d out of range (tree has %d leaves)",
+		return nil, fmt.Errorf("tree_position %d out of range (tree has %d leaves)",
 			share.Payload.TreePosition, status.LeafCount)
 	}
 	anchorHeight := status.AnchorHeight
@@ -339,21 +463,21 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	// O(depth) shard reads — no leaf replay.
 	merklePath, err := tree.MerklePath(share.Payload.TreePosition, uint32(anchorHeight))
 	if err != nil {
-		return fmt.Errorf("compute merkle path: %w", err)
+		return nil, fmt.Errorf("compute merkle path: %w", err)
 	}
 
 	// Decode share_comms.
 	var shareComms [16][32]byte
 	if len(share.Payload.ShareComms) != 16 {
-		return fmt.Errorf("expected 16 share_comms, got %d", len(share.Payload.ShareComms))
+		return nil, fmt.Errorf("expected 16 share_comms, got %d", len(share.Payload.ShareComms))
 	}
 	for i, c := range share.Payload.ShareComms {
 		cBytes, err := base64.StdEncoding.DecodeString(c)
 		if err != nil {
-			return fmt.Errorf("decode share_comms[%d]: %w", i, err)
+			return nil, fmt.Errorf("decode share_comms[%d]: %w", i, err)
 		}
 		if len(cBytes) != 32 {
-			return fmt.Errorf("share_comms[%d] must be 32 bytes, got %d", i, len(cBytes))
+			return nil, fmt.Errorf("share_comms[%d] must be 32 bytes, got %d", i, len(cBytes))
 		}
 		copy(shareComms[i][:], cBytes)
 	}
@@ -362,27 +486,27 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	var primaryBlind [32]byte
 	pbBytes, err := base64.StdEncoding.DecodeString(share.Payload.PrimaryBlind)
 	if err != nil {
-		return fmt.Errorf("decode primary_blind: %w", err)
+		return nil, fmt.Errorf("decode primary_blind: %w", err)
 	}
 	if len(pbBytes) != 32 {
-		return fmt.Errorf("primary_blind must be 32 bytes, got %d", len(pbBytes))
+		return nil, fmt.Errorf("primary_blind must be 32 bytes, got %d", len(pbBytes))
 	}
 	copy(primaryBlind[:], pbBytes)
 
 	// Decode the revealed share's C1/C2 once, reused for both the prover and the message.
 	c1Bytes, err := base64.StdEncoding.DecodeString(share.Payload.EncShare.C1)
 	if err != nil {
-		return fmt.Errorf("decode enc_share.c1: %w", err)
+		return nil, fmt.Errorf("decode enc_share.c1: %w", err)
 	}
 	if len(c1Bytes) != 32 {
-		return fmt.Errorf("enc_share.c1 must be 32 bytes, got %d", len(c1Bytes))
+		return nil, fmt.Errorf("enc_share.c1 must be 32 bytes, got %d", len(c1Bytes))
 	}
 	c2Bytes, err := base64.StdEncoding.DecodeString(share.Payload.EncShare.C2)
 	if err != nil {
-		return fmt.Errorf("decode enc_share.c2: %w", err)
+		return nil, fmt.Errorf("decode enc_share.c2: %w", err)
 	}
 	if len(c2Bytes) != 32 {
-		return fmt.Errorf("enc_share.c2 must be 32 bytes, got %d", len(c2Bytes))
+		return nil, fmt.Errorf("enc_share.c2 must be 32 bytes, got %d", len(c2Bytes))
 	}
 	var encC1, encC2 [32]byte
 	copy(encC1[:], c1Bytes)
@@ -414,7 +538,7 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	span.SetData("proof_bytes", len(proof))
 	span.Finish(err)
 	if err != nil {
-		return fmt.Errorf("generate proof: %w", err)
+		return nil, fmt.Errorf("generate proof: %w", err)
 	}
 	p.logger.Info("proof generated",
 		"round_id", share.Payload.VoteRoundID,
@@ -440,7 +564,7 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	// Submit to chain.
 	result, err := p.submitter.SubmitRevealShareContext(ctx, msg)
 	if err != nil {
-		return fmt.Errorf("submit: %w", err)
+		return nil, fmt.Errorf("submit: %w", err)
 	}
 	if result.Code != 0 {
 		if IsDuplicateNullifier(result.Code) {
@@ -448,18 +572,18 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 				"round_id", share.Payload.VoteRoundID,
 				"share_index", share.Payload.EncShare.ShareIndex,
 			)
-			return nil
+			return newShareBroadcastResult(nullifier, result.TxHash, false), nil
 		}
-		return fmt.Errorf("chain rejected tx (code %d): %s", result.Code, result.Log)
+		return nil, fmt.Errorf("chain rejected tx (code %d): %s", result.Code, result.Log)
 	}
 
 	p.logger.Debug("MsgRevealShare broadcast ok", "tx_hash", result.TxHash)
-	return nil
+	return newShareBroadcastResult(nullifier, result.TxHash, false), nil
 }
 
 // shareAlreadyRevealed computes the queued share's nullifier and checks whether
 // the chain has already recorded it for the share's voting round.
-func (d *preProofShareDeduper) shareAlreadyRevealed(ctx context.Context, share QueuedShare, roundID [32]byte) (bool, error) {
+func (d *preProofShareDeduper) shareAlreadyRevealed(ctx context.Context, share QueuedShare, roundID [32]byte) (*shareBroadcastResult, bool, error) {
 	_, span := StartTrace(ctx, "helper.dedupe", "helper.preproof_share_nullifier_check", map[string]string{
 		"round_id":    share.Payload.VoteRoundID,
 		"share_index": strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
@@ -478,29 +602,29 @@ func (d *preProofShareDeduper) shareAlreadyRevealed(ctx context.Context, share Q
 	sharesHash, err := decodeBase64Array32(share.Payload.SharesHash, "shares_hash")
 	if err != nil {
 		spanErr = err
-		return false, err
+		return nil, false, err
 	}
 	primaryBlind, err := decodeBase64Array32(share.Payload.PrimaryBlind, "primary_blind")
 	if err != nil {
 		spanErr = err
-		return false, err
+		return nil, false, err
 	}
 	voteCommitment, err := d.vcHash(roundID, sharesHash, share.Payload.ProposalID, share.Payload.VoteDecision)
 	if err != nil {
 		spanErr = err
-		return false, fmt.Errorf("compute vote commitment: %w", err)
+		return nil, false, fmt.Errorf("compute vote commitment: %w", err)
 	}
 	nullifier, err := d.shareNFHash(voteCommitment, share.Payload.EncShare.ShareIndex, primaryBlind)
 	if err != nil {
 		spanErr = err
-		return false, fmt.Errorf("compute share nullifier: %w", err)
+		return nil, false, fmt.Errorf("compute share nullifier: %w", err)
 	}
 	already, err = d.shareNF(share.Payload.VoteRoundID, nullifier[:])
 	if err != nil {
 		spanErr = err
-		return false, fmt.Errorf("check share nullifier: %w", err)
+		return nil, false, fmt.Errorf("check share nullifier: %w", err)
 	}
-	return already, nil
+	return newShareBroadcastResult(nullifier, "", already), already, nil
 }
 
 func decodeBase64Array32(value string, field string) ([32]byte, error) {

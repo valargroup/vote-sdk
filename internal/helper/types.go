@@ -74,8 +74,8 @@ type RoundStatusChecker func(roundID string) (isActive bool, err error)
 
 // ShareNullifierChecker reports whether a share nullifier is recorded on-chain
 // for the given voting round (hex-encoded 32-byte round id). Used by the
-// share-status endpoint to confirm MsgRevealShare acceptance without exposing
-// a public chain query API to wallets.
+// processor and share-status endpoint to confirm MsgRevealShare acceptance
+// against committed chain state.
 type ShareNullifierChecker func(roundIDHex string, shareNullifier []byte) (bool, error)
 
 // VCHashFunc computes the vote commitment Poseidon hash. The implementation
@@ -111,10 +111,11 @@ type SharePayload struct {
 type ShareState int
 
 const (
-	ShareStateReceived  ShareState = 0 // waiting for submit_at
-	ShareStateWitnessed ShareState = 1 // ready for proof generation
-	ShareStateSubmitted ShareState = 2 // submitted to chain
-	ShareStateFailed    ShareState = 3 // permanently failed
+	ShareStateReceived   ShareState = 0 // waiting for submit_at
+	ShareStateWitnessed  ShareState = 1 // ready for proof generation
+	ShareStateSubmitted  ShareState = 2 // confirmed on chain
+	ShareStateFailed     ShareState = 3 // permanently failed
+	ShareStateConfirming ShareState = 4 // broadcast accepted; waiting for chain state
 )
 
 // QueuedShare is a share payload with processing metadata.

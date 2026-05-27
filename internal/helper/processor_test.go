@@ -123,6 +123,16 @@ func newMockTreeReader() *mockTreeReader {
 	}
 }
 
+func alwaysConfirmedShare(_ string, _ []byte) (bool, error) {
+	return true, nil
+}
+
+func forceConfirmingDue(t *testing.T, s *ShareStore) {
+	t.Helper()
+	_, err := s.db.Exec("UPDATE shares SET confirm_after = 0 WHERE state = ?", ShareStateConfirming)
+	require.NoError(t, err)
+}
+
 type roundAwareTreeState struct {
 	leafCounts  map[string]uint64
 	pathDelay   time.Duration
@@ -204,7 +214,7 @@ func TestProcessor_ProcessBatch_Success(t *testing.T) {
 	defer chainServer.Close()
 
 	submitter := NewChainSubmitter(chainServer.URL)
-	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil, WithShareConfirmationChecker(alwaysConfirmedShare))
 
 	// Enqueue a share (zero delay in test store means immediately ready).
 	roundID := hex.EncodeToString(make([]byte, 32))
@@ -218,9 +228,119 @@ func TestProcessor_ProcessBatch_Success(t *testing.T) {
 	// Verify the prover was called.
 	assert.Equal(t, int32(1), prover.callCount.Load())
 
-	// Verify share is marked submitted.
+	// Verify share is waiting on committed chain-state confirmation.
 	status := store.Status()
+	assert.Equal(t, 0, status[roundID].Submitted)
+	assert.Equal(t, 1, status[roundID].Pending)
+
+	forceConfirmingDue(t, store)
+	proc.confirmBroadcasts(context.Background())
+
+	status = store.Status()
 	assert.Equal(t, 1, status[roundID].Submitted)
+	assert.Equal(t, 0, status[roundID].Pending)
+}
+
+func TestProcessor_ProcessBatch_DoesNotWaitForConfirmation(t *testing.T) {
+	store := newTestStore(t)
+	prover := &mockProver{}
+	tree := newMockTreeReader()
+
+	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"tx_hash":"AABB","code":0,"log":""}`))
+	}))
+	defer chainServer.Close()
+
+	submitter := NewChainSubmitter(chainServer.URL)
+	proc := NewProcessor(
+		store,
+		tree,
+		prover,
+		submitter,
+		log.NewNopLogger(),
+		2,
+		nil,
+		WithShareConfirmationChecker(func(_ string, _ []byte) (bool, error) {
+			t.Fatal("processBatch should not poll committed state inline")
+			return false, nil
+		}),
+	)
+
+	roundID := hex.EncodeToString(make([]byte, 32))
+	p := testPayload(roundID, 0)
+	p.TreePosition = 0
+	enqueueAndRequireInserted(t, store, p)
+
+	proc.processBatch(context.Background())
+
+	assert.Equal(t, int32(1), prover.callCount.Load())
+	status := store.Status()
+	assert.Equal(t, 0, status[roundID].Submitted)
+	assert.Equal(t, 1, status[roundID].Pending)
+}
+
+func TestProcessor_ConfirmBroadcasts_UnconfirmedTimeoutRetries(t *testing.T) {
+	store := newTestStore(t)
+	prover := &mockProver{}
+	tree := newMockTreeReader()
+
+	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"tx_hash":"AABB","code":0,"log":""}`))
+	}))
+	defer chainServer.Close()
+
+	submitter := NewChainSubmitter(chainServer.URL)
+	proc := NewProcessor(
+		store,
+		tree,
+		prover,
+		submitter,
+		log.NewNopLogger(),
+		2,
+		nil,
+		WithShareConfirmationChecker(func(_ string, _ []byte) (bool, error) {
+			return false, nil
+		}),
+	)
+
+	roundID := hex.EncodeToString(make([]byte, 32))
+	p := testPayload(roundID, 0)
+	p.TreePosition = 0
+	enqueueAndRequireInserted(t, store, p)
+
+	proc.processBatch(context.Background())
+
+	_, err := store.db.Exec(
+		"UPDATE shares SET confirm_after = 0, broadcast_at = ? WHERE state = ?",
+		time.Now().Add(-confirmationTimeout-time.Second).Unix(),
+		ShareStateConfirming,
+	)
+	require.NoError(t, err)
+
+	proc.confirmBroadcasts(context.Background())
+
+	status := store.Status()
+	assert.Equal(t, 0, status[roundID].Submitted)
+	assert.Equal(t, 1, status[roundID].Pending)
+
+	var state, attempts int
+	var c1, c2, comms, blind, shareNullifier string
+	err = store.db.QueryRow(
+		`SELECT state, attempts, enc_share_c1, enc_share_c2, share_comms, primary_blind, share_nullifier
+		   FROM shares
+		  WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
+		roundID, 0, 1, 0,
+	).Scan(&state, &attempts, &c1, &c2, &comms, &blind, &shareNullifier)
+	require.NoError(t, err)
+	assert.Equal(t, int(ShareStateReceived), state)
+	assert.Equal(t, 1, attempts)
+	assert.NotEmpty(t, c1)
+	assert.NotEmpty(t, c2)
+	assert.NotEmpty(t, comms)
+	assert.NotEmpty(t, blind)
+	assert.Empty(t, shareNullifier)
 }
 
 func TestProcessor_ProcessBatch_ProofFailure(t *testing.T) {
@@ -276,7 +396,7 @@ func TestProcessor_ProcessBatch_ChainRejects(t *testing.T) {
 	assert.Equal(t, 1, status[roundID].Pending) // back to pending for retry
 }
 
-func TestProcessor_ProcessBatch_DuplicateNullifierTreatedAsSuccess(t *testing.T) {
+func TestProcessor_ProcessBatch_DuplicateNullifierRequiresConfirmation(t *testing.T) {
 	store := newTestStore(t)
 	prover := &mockProver{}
 	tree := newMockTreeReader()
@@ -291,7 +411,7 @@ func TestProcessor_ProcessBatch_DuplicateNullifierTreatedAsSuccess(t *testing.T)
 	defer chainServer.Close()
 
 	submitter := NewChainSubmitter(chainServer.URL)
-	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil, WithShareConfirmationChecker(alwaysConfirmedShare))
 
 	roundID := hex.EncodeToString(make([]byte, 32))
 	p := testPayload(roundID, 0)
@@ -300,9 +420,16 @@ func TestProcessor_ProcessBatch_DuplicateNullifierTreatedAsSuccess(t *testing.T)
 
 	proc.processBatch(context.Background())
 
-	// Share should be marked as submitted (not retried), because the
-	// duplicate nullifier means the vote was already revealed on-chain.
+	// A duplicate nullifier is benign, but the helper still waits for the
+	// committed nullifier set before counting it as submitted.
 	status := store.Status()
+	assert.Equal(t, 0, status[roundID].Submitted)
+	assert.Equal(t, 1, status[roundID].Pending)
+
+	forceConfirmingDue(t, store)
+	proc.confirmBroadcasts(context.Background())
+
+	status = store.Status()
 	assert.Equal(t, 1, status[roundID].Submitted)
 	assert.Equal(t, 0, status[roundID].Pending)
 }
@@ -419,6 +546,14 @@ func TestProcessor_PreProofNullifierNotRevealedFallsThroughToProof(t *testing.T)
 	assert.Equal(t, int32(1), checkerCalls.Load())
 	assert.Equal(t, int32(1), prover.callCount.Load())
 	status := store.Status()
+	assert.Equal(t, 0, status[roundID].Submitted)
+	assert.Equal(t, 1, status[roundID].Pending)
+
+	proc.shareNF = alwaysConfirmedShare
+	forceConfirmingDue(t, store)
+	proc.confirmBroadcasts(context.Background())
+
+	status = store.Status()
 	assert.Equal(t, 1, status[roundID].Submitted)
 	assert.Equal(t, 0, status[roundID].Pending)
 }
@@ -470,6 +605,14 @@ func TestProcessor_PreProofNullifierCheckErrorFallsThroughToProof(t *testing.T) 
 	assert.Equal(t, int32(1), shareHashCalls.Load())
 	assert.Equal(t, int32(1), prover.callCount.Load())
 	status := store.Status()
+	assert.Equal(t, 0, status[roundID].Submitted)
+	assert.Equal(t, 1, status[roundID].Pending)
+
+	proc.shareNF = alwaysConfirmedShare
+	forceConfirmingDue(t, store)
+	proc.confirmBroadcasts(context.Background())
+
+	status = store.Status()
 	assert.Equal(t, 1, status[roundID].Submitted)
 	assert.Equal(t, 0, status[roundID].Pending)
 }
@@ -531,7 +674,7 @@ func TestProcessor_Run_ImmediateEnqueueWakesProcessor(t *testing.T) {
 
 	require.Eventually(t, func() bool {
 		status := store.Status()
-		return prover.callCount.Load() == 1 && status[roundID].Submitted == 1
+		return prover.callCount.Load() == 1 && status[roundID].Pending == 1 && status[roundID].Submitted == 0
 	}, time.Second, 10*time.Millisecond)
 
 	cancel()
@@ -557,7 +700,7 @@ func TestProcessor_TreePositionOutOfRange(t *testing.T) {
 
 	// Directly call processShare.
 	share := QueuedShare{Payload: p}
-	err := proc.processShare(context.Background(), share)
+	_, err := proc.processShare(context.Background(), share)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "out of range")
 }
@@ -574,7 +717,7 @@ func TestProcessor_MaxConcurrentFallback(t *testing.T) {
 	defer chainServer.Close()
 
 	submitter := NewChainSubmitter(chainServer.URL)
-	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 0, nil)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 0, nil, WithShareConfirmationChecker(alwaysConfirmedShare))
 	assert.Equal(t, 1, proc.maxConcurrent)
 
 	roundID := hex.EncodeToString(make([]byte, 32))
@@ -583,6 +726,8 @@ func TestProcessor_MaxConcurrentFallback(t *testing.T) {
 	enqueueAndRequireInserted(t, store, p)
 
 	proc.processBatch(context.Background())
+	forceConfirmingDue(t, store)
+	proc.confirmBroadcasts(context.Background())
 
 	status := store.Status()
 	assert.Equal(t, 1, status[roundID].Submitted)
@@ -601,7 +746,7 @@ func TestProcessor_ProcessBatch_Sequential(t *testing.T) {
 	defer chainServer.Close()
 
 	submitter := NewChainSubmitter(chainServer.URL)
-	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 1, nil)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 1, nil, WithShareConfirmationChecker(alwaysConfirmedShare))
 
 	roundID := hex.EncodeToString(make([]byte, 32))
 	for i := 0; i < 4; i++ {
@@ -611,6 +756,8 @@ func TestProcessor_ProcessBatch_Sequential(t *testing.T) {
 	}
 
 	proc.processBatch(context.Background())
+	forceConfirmingDue(t, store)
+	proc.confirmBroadcasts(context.Background())
 
 	maxSeen := prover.maxInFlight.Load()
 	assert.Equal(t, int32(1), maxSeen)
@@ -641,7 +788,7 @@ func TestProcessor_ProcessBatch_ConcurrentRoundsUseScopedTreeReaders(t *testing.
 	defer chainServer.Close()
 
 	submitter := NewChainSubmitter(chainServer.URL)
-	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil, WithShareConfirmationChecker(alwaysConfirmedShare))
 
 	pA := testPayload(roundA, 0)
 	pA.TreePosition = 0
@@ -652,6 +799,8 @@ func TestProcessor_ProcessBatch_ConcurrentRoundsUseScopedTreeReaders(t *testing.
 	enqueueAndRequireInserted(t, store, pB)
 
 	proc.processBatch(context.Background())
+	forceConfirmingDue(t, store)
+	proc.confirmBroadcasts(context.Background())
 
 	assert.Equal(t, int32(2), prover.callCount.Load())
 	assert.Equal(t, int32(2), tree.state.maxInFlight.Load())

@@ -2,6 +2,7 @@ package helper
 
 import (
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -157,6 +158,10 @@ func migrate(db *sql.DB) error {
 			submit_at       INTEGER NOT NULL DEFAULT 0,
 			original_submit_at INTEGER NOT NULL DEFAULT 0,
 			received_at     INTEGER NOT NULL DEFAULT 0,
+			share_nullifier TEXT NOT NULL DEFAULT '',
+			tx_hash         TEXT NOT NULL DEFAULT '',
+			broadcast_at    INTEGER NOT NULL DEFAULT 0,
+			confirm_after   INTEGER NOT NULL DEFAULT 0,
 			PRIMARY KEY (round_id, share_index, proposal_id, tree_position)
 		)
 	`); err != nil {
@@ -255,6 +260,20 @@ func migrate(db *sql.DB) error {
 		}
 	}
 
+	for _, col := range []struct {
+		name string
+		stmt string
+	}{
+		{"share_nullifier", "ALTER TABLE shares ADD COLUMN share_nullifier TEXT NOT NULL DEFAULT ''"},
+		{"tx_hash", "ALTER TABLE shares ADD COLUMN tx_hash TEXT NOT NULL DEFAULT ''"},
+		{"broadcast_at", "ALTER TABLE shares ADD COLUMN broadcast_at INTEGER NOT NULL DEFAULT 0"},
+		{"confirm_after", "ALTER TABLE shares ADD COLUMN confirm_after INTEGER NOT NULL DEFAULT 0"},
+	} {
+		if err := ensureColumn(db, "shares", col.name, col.stmt); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -285,6 +304,21 @@ func tableHasColumn(db *sql.DB, tableName, columnName string) (bool, error) {
 	return false, nil
 }
 
+// ensureColumn adds a column when the existing table does not already have it.
+func ensureColumn(db *sql.DB, tableName, columnName, alterStmt string) error {
+	hasCol, err := tableHasColumn(db, tableName, columnName)
+	if err != nil {
+		return fmt.Errorf("check %s.%s: %w", tableName, columnName, err)
+	}
+	if hasCol {
+		return nil
+	}
+	if _, err := db.Exec(alterStmt); err != nil {
+		return fmt.Errorf("add %s.%s: %w", tableName, columnName, err)
+	}
+	return nil
+}
+
 // columnNotInPK returns true if the named column exists in the table but is
 // NOT part of its primary key. Returns false (no migration needed) if the
 // column is already in the PK or doesn't exist at all (fresh table).
@@ -313,7 +347,7 @@ func columnNotInPK(db *sql.DB, tableName, columnName string) (bool, error) {
 
 // migrateSharesPK recreates the shares table with the new 4-column primary key
 // (round_id, share_index, proposal_id, tree_position). Handles old schemas
-// that may lack the vote_end_time column.
+// that may lack newer queue and confirmation columns.
 func migrateSharesPK(db *sql.DB) error {
 	// Ensure vote_end_time exists before copying (old schemas may lack it).
 	hasVET, err := tableHasColumn(db, "shares", "vote_end_time")
@@ -326,31 +360,30 @@ func migrateSharesPK(db *sql.DB) error {
 		}
 	}
 
+	for _, col := range []struct {
+		name string
+		stmt string
+	}{
+		{"share_comms", "ALTER TABLE shares ADD COLUMN share_comms TEXT NOT NULL DEFAULT '[]'"},
+		{"primary_blind", "ALTER TABLE shares ADD COLUMN primary_blind TEXT NOT NULL DEFAULT ''"},
+		{"submit_at", "ALTER TABLE shares ADD COLUMN submit_at INTEGER NOT NULL DEFAULT 0"},
+		{"original_submit_at", "ALTER TABLE shares ADD COLUMN original_submit_at INTEGER NOT NULL DEFAULT 0"},
+		{"received_at", "ALTER TABLE shares ADD COLUMN received_at INTEGER NOT NULL DEFAULT 0"},
+		{"share_nullifier", "ALTER TABLE shares ADD COLUMN share_nullifier TEXT NOT NULL DEFAULT ''"},
+		{"tx_hash", "ALTER TABLE shares ADD COLUMN tx_hash TEXT NOT NULL DEFAULT ''"},
+		{"broadcast_at", "ALTER TABLE shares ADD COLUMN broadcast_at INTEGER NOT NULL DEFAULT 0"},
+		{"confirm_after", "ALTER TABLE shares ADD COLUMN confirm_after INTEGER NOT NULL DEFAULT 0"},
+	} {
+		if err := ensureColumn(db, "shares", col.name, col.stmt); err != nil {
+			return fmt.Errorf("prepare shares.%s before PK migration: %w", col.name, err)
+		}
+	}
+
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-
-	// Ensure share_comms and primary_blind columns exist before migration.
-	hasComms, err := tableHasColumn(db, "shares", "share_comms")
-	if err != nil {
-		return fmt.Errorf("check share_comms column: %w", err)
-	}
-	if !hasComms {
-		if _, errA := db.Exec("ALTER TABLE shares ADD COLUMN share_comms TEXT NOT NULL DEFAULT '[]'"); errA != nil {
-			return fmt.Errorf("add share_comms before PK migration: %w", errA)
-		}
-	}
-	hasBlind, err := tableHasColumn(db, "shares", "primary_blind")
-	if err != nil {
-		return fmt.Errorf("check primary_blind column: %w", err)
-	}
-	if !hasBlind {
-		if _, errA := db.Exec("ALTER TABLE shares ADD COLUMN primary_blind TEXT NOT NULL DEFAULT ''"); errA != nil {
-			return fmt.Errorf("add primary_blind before PK migration: %w", errA)
-		}
-	}
 
 	if _, err := tx.Exec(`CREATE TABLE shares_new (
 		round_id        TEXT NOT NULL,
@@ -366,6 +399,13 @@ func migrateSharesPK(db *sql.DB) error {
 		state           INTEGER NOT NULL DEFAULT 0,
 		attempts        INTEGER NOT NULL DEFAULT 0,
 		vote_end_time   INTEGER NOT NULL DEFAULT 0,
+		submit_at       INTEGER NOT NULL DEFAULT 0,
+		original_submit_at INTEGER NOT NULL DEFAULT 0,
+		received_at     INTEGER NOT NULL DEFAULT 0,
+		share_nullifier TEXT NOT NULL DEFAULT '',
+		tx_hash         TEXT NOT NULL DEFAULT '',
+		broadcast_at    INTEGER NOT NULL DEFAULT 0,
+		confirm_after   INTEGER NOT NULL DEFAULT 0,
 		PRIMARY KEY (round_id, share_index, proposal_id, tree_position)
 	)`); err != nil {
 		return err
@@ -374,7 +414,9 @@ func migrateSharesPK(db *sql.DB) error {
 	if _, err := tx.Exec(`INSERT INTO shares_new SELECT
 		round_id, share_index, shares_hash, proposal_id, vote_decision,
 		enc_share_c1, enc_share_c2, tree_position, share_comms,
-		primary_blind, state, attempts, vote_end_time
+		primary_blind, state, attempts, vote_end_time,
+		submit_at, original_submit_at, received_at,
+		share_nullifier, tx_hash, broadcast_at, confirm_after
 	FROM shares`); err != nil {
 		return err
 	}
@@ -589,7 +631,125 @@ func (s *ShareStore) TakeReady() []QueuedShare {
 	return result
 }
 
-// MarkSubmitted marks a share as successfully submitted to the chain.
+type confirmingShare struct {
+	RoundID        string
+	ShareIndex     uint32
+	ProposalID     uint32
+	TreePosition   uint64
+	ShareNullifier []byte
+	BroadcastAt    uint64
+}
+
+// MarkConfirming records that a share was broadcast and now needs chain-state
+// confirmation before it can be counted as submitted.
+func (s *ShareStore) MarkConfirming(roundID string, shareIndex, proposalID uint32, treePosition uint64, shareNullifier []byte, txHash string, now time.Time, delay time.Duration) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	res, err := s.db.Exec(
+		`UPDATE shares
+		    SET state = ?, share_nullifier = ?, tx_hash = ?, broadcast_at = ?, confirm_after = ?
+		  WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = ?`,
+		ShareStateConfirming,
+		hex.EncodeToString(shareNullifier),
+		txHash,
+		now.Unix(),
+		now.Add(delay).Unix(),
+		roundID,
+		shareIndex,
+		proposalID,
+		treePosition,
+		ShareStateWitnessed,
+	)
+	if err != nil {
+		s.logError("MarkConfirming: db update failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
+		return false
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		s.logError("MarkConfirming: rows affected failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
+		return false
+	}
+	if affected == 0 {
+		s.logError("MarkConfirming: no row updated", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition)
+		return false
+	}
+
+	key := schedKey(roundID, shareIndex, proposalID, treePosition)
+	if _, ok := s.schedule[key]; ok {
+		delete(s.schedule, key)
+		s.notifyScheduleChangedLocked()
+	}
+	return true
+}
+
+// TakeConfirmingReady returns confirming rows whose next confirmation check is due.
+func (s *ShareStore) TakeConfirmingReady(now time.Time, limit int) []confirmingShare {
+	if limit <= 0 {
+		limit = 100
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rows, err := s.db.Query(
+		`SELECT round_id, share_index, proposal_id, tree_position, share_nullifier, broadcast_at
+		   FROM shares
+		  WHERE state = ? AND confirm_after <= ?
+		  ORDER BY confirm_after
+		  LIMIT ?`,
+		ShareStateConfirming,
+		now.Unix(),
+		limit,
+	)
+	if err != nil {
+		s.logError("TakeConfirmingReady: query failed", "error", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var result []confirmingShare
+	for rows.Next() {
+		var row confirmingShare
+		var nullifierHex string
+		if err := rows.Scan(&row.RoundID, &row.ShareIndex, &row.ProposalID, &row.TreePosition, &nullifierHex, &row.BroadcastAt); err != nil {
+			s.logError("TakeConfirmingReady: scan failed", "error", err)
+			continue
+		}
+		nf, err := hex.DecodeString(nullifierHex)
+		if err != nil || len(nf) != 32 {
+			s.logError("TakeConfirmingReady: invalid share nullifier", "round_id", row.RoundID, "share_index", row.ShareIndex, "error", err)
+			continue
+		}
+		row.ShareNullifier = nf
+		result = append(result, row)
+	}
+	if err := rows.Err(); err != nil {
+		s.logError("TakeConfirmingReady: row iteration failed", "error", err)
+	}
+	return result
+}
+
+// RescheduleConfirmation delays the next chain-state confirmation check.
+func (s *ShareStore) RescheduleConfirmation(row confirmingShare, now time.Time, delay time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, err := s.db.Exec(
+		`UPDATE shares SET confirm_after = ?
+		  WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = ?`,
+		now.Add(delay).Unix(),
+		row.RoundID,
+		row.ShareIndex,
+		row.ProposalID,
+		row.TreePosition,
+		ShareStateConfirming,
+	); err != nil {
+		s.logError("RescheduleConfirmation: db update failed", "round_id", row.RoundID, "share_index", row.ShareIndex, "proposal_id", row.ProposalID, "tree_position", row.TreePosition, "error", err)
+	}
+}
+
+// MarkSubmitted marks a share as confirmed on chain.
 func (s *ShareStore) MarkSubmitted(roundID string, shareIndex, proposalID uint32, treePosition uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -597,9 +757,11 @@ func (s *ShareStore) MarkSubmitted(roundID string, shareIndex, proposalID uint32
 	if _, err := s.db.Exec(
 		`UPDATE shares SET state = 2,
 		        enc_share_c1 = '', enc_share_c2 = '',
-		        share_comms = '[]', primary_blind = ''
-		 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = 1`,
+		        share_comms = '[]', primary_blind = '',
+		        share_nullifier = '', tx_hash = '', broadcast_at = 0, confirm_after = 0
+		 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = ?`,
 		roundID, shareIndex, proposalID, treePosition,
+		ShareStateConfirming,
 	); err != nil {
 		s.logError("MarkSubmitted: db update failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
 	}
@@ -638,7 +800,8 @@ func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, t
 			if _, err := s.db.Exec(
 				`UPDATE shares SET state = 3, attempts = ?,
 				        enc_share_c1 = '', enc_share_c2 = '',
-				        share_comms = '[]', primary_blind = ''
+				        share_comms = '[]', primary_blind = '',
+				        share_nullifier = '', tx_hash = '', broadcast_at = 0, confirm_after = 0
 				 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
 				newAttempts, roundID, shareIndex, proposalID, treePosition,
 			); err != nil {
@@ -650,7 +813,8 @@ func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, t
 			// Permanently failed. Keep witness data until round purge so operators
 			// can inspect or export failed rows before the voting window closes.
 			if _, err := s.db.Exec(
-				`UPDATE shares SET state = 3, attempts = ?
+				`UPDATE shares SET state = 3, attempts = ?,
+				        share_nullifier = '', tx_hash = '', broadcast_at = 0, confirm_after = 0
 				 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
 				newAttempts, roundID, shareIndex, proposalID, treePosition,
 			); err != nil {
@@ -664,7 +828,10 @@ func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, t
 	} else {
 		// Re-schedule with exponential backoff.
 		if _, err := s.db.Exec(
-			"UPDATE shares SET state = 0, attempts = ? WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
+			`UPDATE shares
+			    SET state = 0, attempts = ?,
+			        share_nullifier = '', tx_hash = '', broadcast_at = 0, confirm_after = 0
+			  WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
 			newAttempts, roundID, shareIndex, proposalID, treePosition,
 		); err != nil {
 			s.logError("MarkFailed: db update (retry) failed", "error", err)
@@ -740,7 +907,7 @@ func (s *ShareStore) Status() map[string]QueueStatus {
 		entry := result[roundID]
 		entry.Total += count
 		switch state {
-		case 0, 1:
+		case 0, 1, 4:
 			entry.Pending += count
 		case 2:
 			entry.Submitted += count
@@ -755,7 +922,7 @@ func (s *ShareStore) Status() map[string]QueueStatus {
 
 // isProcessableShareState reports whether a queue row can still be submitted.
 func isProcessableShareState(state ShareState) bool {
-	return state == ShareStateReceived || state == ShareStateWitnessed
+	return state == ShareStateReceived || state == ShareStateWitnessed || state == ShareStateConfirming
 }
 
 // ExportQueue returns every persisted row for a round. Terminal rows are
@@ -944,9 +1111,7 @@ func (s *ShareStore) ImportQueue(export QueueExport, opts QueueImportOptions) (Q
 				if err := forceReadyExistingImportRow(tx, export.RoundID, row, originalSubmitAt); err != nil {
 					return QueueImportResult{}, err
 				}
-				if existingState == ShareStateReceived {
-					schedule[schedKey(export.RoundID, row.ShareIndex, row.ProposalID, row.TreePosition)] = scheduledTime(0)
-				}
+				schedule[schedKey(export.RoundID, row.ShareIndex, row.ProposalID, row.TreePosition)] = scheduledTime(0)
 			}
 		} else {
 			result.Conflicts++
@@ -1000,13 +1165,16 @@ func scheduledTime(submitAt uint64) time.Time {
 func forceReadyExistingImportRow(tx *sql.Tx, roundID string, row QueueExportRow, originalSubmitAt uint64) error {
 	if _, err := tx.Exec(
 		`UPDATE shares
-		    SET submit_at = 0,
+		    SET state = ?,
+		        submit_at = 0,
 		        original_submit_at = CASE
 		          WHEN original_submit_at = 0 THEN ?
 		          ELSE original_submit_at
-		        END
+		        END,
+		        share_nullifier = '', tx_hash = '', broadcast_at = 0, confirm_after = 0
 		  WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?
-		    AND state IN (?, ?)`,
+		    AND state IN (?, ?, ?)`,
+		ShareStateReceived,
 		originalSubmitAt,
 		roundID,
 		row.ShareIndex,
@@ -1014,6 +1182,7 @@ func forceReadyExistingImportRow(tx *sql.Tx, roundID string, row QueueExportRow,
 		row.TreePosition,
 		ShareStateReceived,
 		ShareStateWitnessed,
+		ShareStateConfirming,
 	); err != nil {
 		return fmt.Errorf("force ready existing share_index %d proposal_id %d tree_position %d: %w", row.ShareIndex, row.ProposalID, row.TreePosition, err)
 	}
@@ -1221,7 +1390,7 @@ func (s *ShareStore) QueueSummary(roundID string, now time.Time) (QueueSummary, 
 			} else {
 				bucket.PendingFuture += count
 			}
-		case ShareStateWitnessed:
+		case ShareStateWitnessed, ShareStateConfirming:
 			bucket.Processing += count
 		case ShareStateSubmitted:
 			bucket.Submitted += count
@@ -1274,7 +1443,7 @@ func (s *ShareStore) ExpiredRoundSummaries(now time.Time) ([]ExpiredRoundSummary
 		}
 		summary.Total += count
 		switch ShareState(state) {
-		case ShareStateReceived, ShareStateWitnessed:
+		case ShareStateReceived, ShareStateWitnessed, ShareStateConfirming:
 			summary.Pending += count
 		case ShareStateSubmitted:
 			summary.Submitted += count
@@ -1299,10 +1468,10 @@ func (s *ShareStore) Close() error {
 	return errors.Join(s.db.Close(), releaseShareStoreLock(s.lockFile))
 }
 
-// PurgeExpiredRounds deletes all share data for rounds whose vote_end_time
-// has passed, checkpoints the WAL after deleting expired share rows, and
-// removes the corresponding entries from the in-memory schedule and round
-// cache. Returns the number of rows deleted.
+// PurgeExpiredRounds deletes share data for expired rounds once rows are no
+// longer waiting for committed-state confirmation, checkpoints the WAL after
+// deleting expired share rows, and removes the corresponding entries from the
+// in-memory schedule and round cache. Returns the number of rows deleted.
 func (s *ShareStore) PurgeExpiredRounds() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1310,7 +1479,9 @@ func (s *ShareStore) PurgeExpiredRounds() int64 {
 	now := time.Now().Unix()
 
 	res, err := s.db.Exec(
-		"DELETE FROM shares WHERE vote_end_time > 0 AND vote_end_time < ?", now,
+		"DELETE FROM shares WHERE vote_end_time > 0 AND vote_end_time < ? AND state != ?",
+		now,
+		ShareStateConfirming,
 	)
 	if err != nil {
 		s.logError("PurgeExpiredRounds: delete shares failed", "error", err)
@@ -1397,7 +1568,7 @@ func (s *ShareStore) recover() error {
 		s.roundCache[roundID] = info
 	}
 
-	// Load all non-terminal shares with their submit_at times.
+	// Load received shares with their submit_at times.
 	rows, err := s.db.Query("SELECT round_id, share_index, proposal_id, tree_position, submit_at FROM shares WHERE state = 0")
 	if err != nil {
 		return fmt.Errorf("query recoverable shares: %w", err)

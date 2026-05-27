@@ -82,6 +82,7 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundI
 		logger,
 		cfg.MaxConcurrentProofs,
 		isRoundActive,
+		WithShareConfirmationChecker(shareNF),
 		WithPreProofShareDeduper(vcHash, shareNFHash, shareNF),
 	)
 
