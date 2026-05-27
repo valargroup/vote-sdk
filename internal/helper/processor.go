@@ -407,6 +407,15 @@ func (p *Processor) confirmBroadcasts(ctx context.Context) {
 				"share_index", row.ShareIndex,
 				"error", err,
 			)
+			if row.BroadcastAt == 0 || now.Sub(time.Unix(int64(row.BroadcastAt), 0)) >= confirmationTimeout {
+				p.logger.Warn("share confirmation check timed out, retrying",
+					"round_id", row.RoundID,
+					"share_index", row.ShareIndex,
+					"error", err,
+				)
+				p.store.MarkFailed(row.RoundID, row.ShareIndex, row.ProposalID, row.TreePosition)
+				continue
+			}
 			p.store.RescheduleConfirmation(row, now, confirmationPollDelay)
 			continue
 		}

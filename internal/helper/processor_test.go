@@ -384,6 +384,61 @@ func TestProcessor_ConfirmBroadcasts_UnconfirmedTimeoutRetries(t *testing.T) {
 	assert.Empty(t, shareNullifier)
 }
 
+func TestProcessor_ConfirmBroadcasts_CheckerErrorTimeoutRetries(t *testing.T) {
+	store := newTestStore(t)
+	prover := &mockProver{}
+	tree := newMockTreeReader()
+
+	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"tx_hash":"AABB","code":0,"log":""}`))
+	}))
+	defer chainServer.Close()
+
+	submitter := NewChainSubmitter(chainServer.URL)
+	proc := NewProcessor(
+		store,
+		tree,
+		prover,
+		submitter,
+		log.NewNopLogger(),
+		2,
+		nil,
+		WithShareConfirmationChecker(func(_ string, _ []byte) (bool, error) {
+			return false, assert.AnError
+		}),
+	)
+
+	roundID := hex.EncodeToString(make([]byte, 32))
+	p := testPayload(roundID, 0)
+	p.TreePosition = 0
+	enqueueAndRequireInserted(t, store, p)
+
+	proc.processBatch(context.Background())
+
+	_, err := store.db.Exec(
+		"UPDATE shares SET confirm_after = 0, broadcast_at = ? WHERE state = ?",
+		time.Now().Add(-confirmationTimeout-time.Second).Unix(),
+		ShareStateConfirming,
+	)
+	require.NoError(t, err)
+
+	proc.confirmBroadcasts(context.Background())
+
+	var state, attempts int
+	var shareNullifier string
+	err = store.db.QueryRow(
+		`SELECT state, attempts, share_nullifier
+		   FROM shares
+		  WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
+		roundID, 0, 1, 0,
+	).Scan(&state, &attempts, &shareNullifier)
+	require.NoError(t, err)
+	assert.Equal(t, int(ShareStateReceived), state)
+	assert.Equal(t, 1, attempts)
+	assert.Empty(t, shareNullifier)
+}
+
 func TestProcessor_ProcessBatch_ProofFailure(t *testing.T) {
 	store := newTestStore(t)
 	prover := &mockProver{err: assert.AnError}
