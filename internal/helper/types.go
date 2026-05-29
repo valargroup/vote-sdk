@@ -180,7 +180,7 @@ const QueueExportVersion = 1
 
 // QueueExport is the local rescue artifact for one round's helper queue.
 // It is intentionally not exposed over HTTP. Treat files of this shape as
-// sensitive because processable rows contain witness material.
+// sensitive because processable and failed rows can contain witness material.
 type QueueExport struct {
 	Version    int              `json:"version"`
 	RoundID    string           `json:"round_id"`
@@ -197,6 +197,8 @@ type QueueExportRound struct {
 
 // QueueExportRow is one persisted share queue row. Terminal rows are exported
 // for debugging, but import skips them so they cannot be processed again.
+// Submitted rows should have witness material cleared. Failed rows can retain
+// it until the helper purges the round after vote_end_time.
 type QueueExportRow struct {
 	ShareIndex       uint32             `json:"share_index"`
 	SharesHash       string             `json:"shares_hash,omitempty"`
