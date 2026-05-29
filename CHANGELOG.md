@@ -9,4 +9,11 @@ Historical changes before commit `704b202e2088b91caeaf2290cef85e4a9a759542` are 
 ### Changed
 
 - Confirm helper share submissions against committed chain state before marking them submitted, retrying timed-out confirmations through the normal helper backoff path.
+
+## v0.9.7 - 2026-05-28
+
+### Changed
+
+- Enable the explorer uptime view in the deployed and local Ping.pub explorer configuration.
+- Hide the governance view from the deployed and local Ping.pub explorer configuration.
 - Retain failed share witness data until the normal purge path removes expired rounds, preserving rescue and export data after permanent failures.
