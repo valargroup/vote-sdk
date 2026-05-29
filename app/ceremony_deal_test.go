@@ -763,10 +763,11 @@ func TestDKGAckHappyPath(t *testing.T) {
 	require.Equal(t, expectedCombined.Bytes(), shareBytes,
 		"combined share must equal sum of all contributors' shares at this index")
 
-	// Coefficients file must be deleted.
+	// Coefficients must survive speculative PrepareProposal so a later proposer
+	// turn can retry the ack if this proposal does not commit.
 	coeffsPath := filepath.Join(ta.EaSkDir, "coeffs."+hex.EncodeToString(roundID))
 	_, statErr := os.Stat(coeffsPath)
-	require.True(t, os.IsNotExist(statErr), "coefficients file must be deleted after ack")
+	require.NoError(t, statErr, "coefficients file must remain until committed-state cleanup")
 }
 
 func TestDKGAckRejectsBadShare(t *testing.T) {
