@@ -1,8 +1,10 @@
 package app
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	storetypes "cosmossdk.io/store/types"
@@ -161,10 +163,7 @@ func handleVoteAnte(
 			"msg_type", fmt.Sprintf("%T", vtx.VoteMsg),
 			"error", err.Error())
 		if errors.Is(err, types.ErrInvalidProof) || errors.Is(err, types.ErrInvalidSignature) {
-			sentry.CaptureErr(err, map[string]string{
-				"handler":  "ante",
-				"msg_type": fmt.Sprintf("%T", vtx.VoteMsg),
-			})
+			sentry.CaptureErr(err, buildAnteFailureTags(vtx.VoteMsg, opts.IsRecheck, determineAnteFailureStage(err, vtx.VoteMsg)))
 		}
 		return ctx, err
 	}
@@ -173,6 +172,56 @@ func handleVoteAnte(
 		"duration_ms", elapsed.Milliseconds(),
 		"msg_type", fmt.Sprintf("%T", vtx.VoteMsg))
 	return ctx, nil
+}
+
+func determineAnteFailureStage(err error, msg types.VoteMessage) string {
+	if errors.Is(err, types.ErrInvalidSignature) {
+		return "signature_verify"
+	}
+	if errors.Is(err, types.ErrInvalidProof) {
+		switch msg.(type) {
+		case *types.MsgDelegateVote:
+			return "proof_delegation"
+		case *types.MsgCastVote:
+			return "proof_vote_commitment"
+		case *types.MsgRevealShare:
+			return "proof_vote_share"
+		default:
+			return "proof_verify"
+		}
+	}
+	return "ante_validation"
+}
+
+func buildAnteFailureTags(msg types.VoteMessage, isRecheck bool, stage string) map[string]string {
+	tags := map[string]string{
+		"handler":    "ante",
+		"stage":      stage,
+		"is_recheck": strconv.FormatBool(isRecheck),
+	}
+	if msg == nil {
+		return tags
+	}
+
+	tags["msg_type"] = fmt.Sprintf("%T", msg)
+	if roundID := msg.GetVoteRoundId(); len(roundID) > 0 {
+		tags["round_id"] = hex.EncodeToString(roundID)
+	}
+	if proposalID, ok := voteProposalID(msg); ok {
+		tags["proposal_id"] = strconv.FormatUint(uint64(proposalID), 10)
+	}
+	return tags
+}
+
+func voteProposalID(msg types.VoteMessage) (uint32, bool) {
+	switch m := msg.(type) {
+	case *types.MsgCastVote:
+		return m.ProposalId, true
+	case *types.MsgRevealShare:
+		return m.ProposalId, true
+	default:
+		return 0, false
+	}
 }
 
 // buildStandardAnteHandler creates the standard Cosmos SDK ante handler chain
