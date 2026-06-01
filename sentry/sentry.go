@@ -3,6 +3,7 @@ package sentry
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -13,6 +14,18 @@ import (
 )
 
 var sentryEnabled atomic.Bool
+
+const (
+	defaultErrorSampleRate = 1.0
+	defaultTraceSampleRate = 1.0
+)
+
+// SamplingConfig controls Sentry event and trace sampling.
+// Nil fields use conservative compatibility defaults.
+type SamplingConfig struct {
+	ErrorSampleRate *float64
+	TraceSampleRate *float64
+}
 
 // TraceSpan is a small wrapper around a Sentry span that keeps callers from
 // depending on sentry-go directly. Methods are safe to call when tracing is
@@ -34,6 +47,12 @@ var knownNoisyErrorSignatures = []string{
 // (e.g. the CometBFT moniker "val1") so events from different validators
 // can be distinguished in the Sentry dashboard.
 func InitSentry(dsn, release, serverName string, logger log.Logger) error {
+	return InitSentryWithSampling(dsn, release, serverName, logger, SamplingConfig{})
+}
+
+// InitSentryWithSampling initializes Sentry SDK with optional sampling
+// overrides from runtime configuration.
+func InitSentryWithSampling(dsn, release, serverName string, logger log.Logger, sampling SamplingConfig) error {
 	if dsn == "" {
 		return nil
 	}
@@ -41,13 +60,15 @@ func InitSentry(dsn, release, serverName string, logger log.Logger) error {
 	if env == "" {
 		env = "production"
 	}
+	errorSampleRate := resolveSampleRate(sampling.ErrorSampleRate, defaultErrorSampleRate, "error", logger)
+	traceSampleRate := resolveSampleRate(sampling.TraceSampleRate, defaultTraceSampleRate, "trace", logger)
 	err := sentrylib.Init(sentrylib.ClientOptions{
 		Dsn:              dsn,
 		Release:          release,
 		Environment:      env,
 		ServerName:       serverName,
-		SampleRate:       1.0,
-		TracesSampleRate: 1.0,
+		SampleRate:       errorSampleRate,
+		TracesSampleRate: traceSampleRate,
 		AttachStacktrace: true,
 		EnableTracing:    true,
 		BeforeSend:       filterNoisyErrorEvents,
@@ -61,9 +82,25 @@ func InitSentry(dsn, release, serverName string, logger log.Logger) error {
 		})
 	}
 	sentryEnabled.Store(true)
-	logger.Info("sentry error tracking enabled", "server_name", serverName)
+	logger.Info("sentry error tracking enabled", "server_name", serverName, "error_sample_rate", errorSampleRate, "trace_sample_rate", traceSampleRate)
 
 	return nil
+}
+
+func resolveSampleRate(raw *float64, fallback float64, sampleType string, logger log.Logger) float64 {
+	if raw == nil {
+		return fallback
+	}
+	if math.IsNaN(*raw) || math.IsInf(*raw, 0) || *raw < 0 || *raw > 1 {
+		logger.Error(
+			"invalid sentry sample rate; using fallback",
+			"sample_type", sampleType,
+			"value", *raw,
+			"fallback", fallback,
+		)
+		return fallback
+	}
+	return *raw
 }
 
 func filterNoisyErrorEvents(event *sentrylib.Event, _ *sentrylib.EventHint) *sentrylib.Event {

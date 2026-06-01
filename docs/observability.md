@@ -23,6 +23,8 @@ The Sentry DSN can be provided in three ways (highest priority first):
    ```toml
    [helper]
    sentry_dsn = "https://...@sentry.io/..."
+   sentry_error_sample_rate = 1.0
+   sentry_traces_sample_rate = 1.0
    ```
 
 2. **Init-time environment variable** -- set `SVOTE_HELPER_SENTRY_DSN` before
@@ -33,6 +35,11 @@ The Sentry DSN can be provided in three ways (highest priority first):
    SVOTE_HELPER_SENTRY_DSN="https://...@sentry.io/..." bash scripts/init.sh
    ```
 
+   Optional init-time sampling env vars:
+
+   - `SVOTE_HELPER_SENTRY_ERROR_SAMPLE_RATE` (`0.0` to `1.0`)
+   - `SVOTE_HELPER_SENTRY_TRACES_SAMPLE_RATE` (`0.0` to `1.0`)
+
 3. **Runtime environment variable** -- set `SENTRY_DSN` when starting the
    binary. This is useful for injecting the secret via Docker, systemd, or
    CI without touching config files:
@@ -41,12 +48,21 @@ The Sentry DSN can be provided in three ways (highest priority first):
    SENTRY_DSN="https://...@sentry.io/..." svoted start
    ```
 
+Optional runtime sampling overrides can be provided with:
+
+- `SENTRY_ERROR_SAMPLE_RATE` -- Sentry event sample rate (`0.0` to `1.0`)
+- `SENTRY_TRACES_SAMPLE_RATE` -- Sentry trace sample rate (`0.0` to `1.0`)
+
 If `app.toml` has a non-empty `sentry_dsn`, it takes precedence over the
-`SENTRY_DSN` environment variable.
+`SENTRY_DSN` environment variable. The same precedence applies to sampling:
+`helper.sentry_*_sample_rate` overrides runtime env vars.
 
 Set `SENTRY_ENVIRONMENT` to `staging` or `production` on managed fleets. The
 binary defaults to `production` only for local/backward-compatible starts where
 no explicit environment is available.
+
+When sampling values are not provided, `svoted` keeps compatibility defaults of
+`1.0` for both error and trace sampling.
 
 ### CI / deploy
 

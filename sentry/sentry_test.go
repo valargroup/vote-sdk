@@ -2,10 +2,12 @@ package sentry
 
 import (
 	"context"
+	"math"
 	"sync"
 	"testing"
 	"time"
 
+	"cosmossdk.io/log"
 	sentrylib "github.com/getsentry/sentry-go"
 )
 
@@ -138,6 +140,41 @@ func TestStartSpanKeepsParentTransactionName(t *testing.T) {
 	if event.Spans[0].Description != "helper.generate_share_reveal_proof" {
 		t.Fatalf("child description = %q, want helper.generate_share_reveal_proof", event.Spans[0].Description)
 	}
+}
+
+func TestResolveSampleRate(t *testing.T) {
+	logger := log.NewNopLogger()
+
+	t.Run("nil uses fallback", func(t *testing.T) {
+		got := resolveSampleRate(nil, 1.0, "trace", logger)
+		if got != 1.0 {
+			t.Fatalf("rate = %v, want 1.0", got)
+		}
+	})
+
+	t.Run("valid uses configured value", func(t *testing.T) {
+		rate := 0.25
+		got := resolveSampleRate(&rate, 1.0, "trace", logger)
+		if got != 0.25 {
+			t.Fatalf("rate = %v, want 0.25", got)
+		}
+	})
+
+	t.Run("out of range uses fallback", func(t *testing.T) {
+		rate := 1.5
+		got := resolveSampleRate(&rate, 1.0, "trace", logger)
+		if got != 1.0 {
+			t.Fatalf("rate = %v, want 1.0 fallback", got)
+		}
+	})
+
+	t.Run("nan uses fallback", func(t *testing.T) {
+		rate := math.NaN()
+		got := resolveSampleRate(&rate, 1.0, "trace", logger)
+		if got != 1.0 {
+			t.Fatalf("rate = %v, want 1.0 fallback", got)
+		}
+	})
 }
 
 func initTestSentry(t *testing.T) *captureTransport {

@@ -185,6 +185,8 @@ HELPER_EXPOSE_QUEUE_STATUS="${SVOTE_HELPER_EXPOSE_QUEUE_STATUS:-false}"
 HELPER_EXPOSE_QUEUE_SUMMARY="${SVOTE_HELPER_EXPOSE_QUEUE_SUMMARY:-true}"
 HELPER_MAX_CONCURRENT_PROOFS="${SVOTE_HELPER_MAX_CONCURRENT_PROOFS:-8}"
 HELPER_SENTRY_DSN="${SVOTE_HELPER_SENTRY_DSN:-}"
+HELPER_SENTRY_ERROR_SAMPLE_RATE="${SVOTE_HELPER_SENTRY_ERROR_SAMPLE_RATE:-1.0}"
+HELPER_SENTRY_TRACES_SAMPLE_RATE="${SVOTE_HELPER_SENTRY_TRACES_SAMPLE_RATE:-1.0}"
 
 # Append [helper] section (not in the default template).
 cat >> "$APP_TOML" <<HELPERCFG
@@ -222,6 +224,10 @@ max_concurrent_proofs = $HELPER_MAX_CONCURRENT_PROOFS
 # Sentry DSN for error tracking. Empty disables Sentry.
 # Can also be set at runtime via the SENTRY_DSN environment variable.
 sentry_dsn = "$HELPER_SENTRY_DSN"
+
+# Optional Sentry sampling rates (accepted range: 0.0..1.0).
+sentry_error_sample_rate = $HELPER_SENTRY_ERROR_SAMPLE_RATE
+sentry_traces_sample_rate = $HELPER_SENTRY_TRACES_SAMPLE_RATE
 HELPERCFG
 
 # Patch [admin] from svoted init template (do not append a second [admin] table).

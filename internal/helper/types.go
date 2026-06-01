@@ -42,6 +42,14 @@ type Config struct {
 	// disabled. Can also be set via the SENTRY_DSN environment variable at
 	// runtime (app.toml takes precedence if set).
 	SentryDSN string `mapstructure:"sentry_dsn"`
+
+	// SentryErrorSampleRate controls Sentry error event sampling.
+	// Accepted range: [0.0, 1.0]. Nil uses the shared default.
+	SentryErrorSampleRate *float64 `mapstructure:"sentry_error_sample_rate"`
+
+	// SentryTracesSampleRate controls Sentry tracing/performance sampling.
+	// Accepted range: [0.0, 1.0]. Nil uses the shared default.
+	SentryTracesSampleRate *float64 `mapstructure:"sentry_traces_sample_rate"`
 }
 
 // DefaultConfig returns the default helper configuration.

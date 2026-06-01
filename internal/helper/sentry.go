@@ -13,6 +13,15 @@ func InitSentry(dsn, release, serverName string, logger log.Logger) error {
 	return sentry.InitSentry(dsn, release, serverName, logger)
 }
 
+// SentrySamplingConfig configures Sentry event and trace sampling.
+type SentrySamplingConfig = sentry.SamplingConfig
+
+// InitSentryWithSampling delegates to the shared sentry package with sampling
+// overrides.
+func InitSentryWithSampling(dsn, release, serverName string, logger log.Logger, sampling SentrySamplingConfig) error {
+	return sentry.InitSentryWithSampling(dsn, release, serverName, logger, sampling)
+}
+
 // FlushSentry delegates to the shared sentry package.
 func FlushSentry() {
 	sentry.FlushSentry()

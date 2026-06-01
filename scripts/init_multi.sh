@@ -177,6 +177,8 @@ configure_helper() {
     local home="$1"
     local api_port="$2"
     local sentry_dsn="${SVOTE_HELPER_SENTRY_DSN:-}"
+    local sentry_error_sample_rate="${SVOTE_HELPER_SENTRY_ERROR_SAMPLE_RATE:-1.0}"
+    local sentry_traces_sample_rate="${SVOTE_HELPER_SENTRY_TRACES_SAMPLE_RATE:-1.0}"
 
     local app_toml="$home/config/app.toml"
     cat >> "$app_toml" <<HELPERCFG
@@ -208,6 +210,10 @@ max_concurrent_proofs = 8
 
 # Sentry DSN for error tracking. Empty disables Sentry.
 sentry_dsn = "${sentry_dsn}"
+
+# Optional Sentry sampling rates (accepted range: 0.0..1.0).
+sentry_error_sample_rate = ${sentry_error_sample_rate}
+sentry_traces_sample_rate = ${sentry_traces_sample_rate}
 HELPERCFG
 }
 

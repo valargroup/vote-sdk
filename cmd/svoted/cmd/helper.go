@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 
 	"cosmossdk.io/log"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
@@ -67,7 +68,25 @@ func helperPostSetup(
 		if cfg.SentryDSN == "" {
 			cfg.SentryDSN = os.Getenv("SENTRY_DSN")
 		}
-		if err := helper.InitSentry(cfg.SentryDSN, version.Version, svrCtx.Config.Moniker, logger); err != nil {
+
+		// Runtime env fallback for sampling rates (app.toml takes precedence).
+		if cfg.SentryErrorSampleRate == nil {
+			cfg.SentryErrorSampleRate = parseSampleRateEnv("SENTRY_ERROR_SAMPLE_RATE", logger)
+		}
+		if cfg.SentryTracesSampleRate == nil {
+			cfg.SentryTracesSampleRate = parseSampleRateEnv("SENTRY_TRACES_SAMPLE_RATE", logger)
+		}
+
+		if err := helper.InitSentryWithSampling(
+			cfg.SentryDSN,
+			version.Version,
+			svrCtx.Config.Moniker,
+			logger,
+			helper.SentrySamplingConfig{
+				ErrorSampleRate: cfg.SentryErrorSampleRate,
+				TraceSampleRate: cfg.SentryTracesSampleRate,
+			},
+		); err != nil {
 			logger.Error("sentry initialization failed", "error", err)
 		}
 
@@ -146,8 +165,29 @@ func readHelperConfig(v *viper.Viper, logger log.Logger) helper.Config {
 	if v.IsSet("helper.sentry_dsn") {
 		cfg.SentryDSN = v.GetString("helper.sentry_dsn")
 	}
+	if v.IsSet("helper.sentry_error_sample_rate") {
+		rate := v.GetFloat64("helper.sentry_error_sample_rate")
+		cfg.SentryErrorSampleRate = &rate
+	}
+	if v.IsSet("helper.sentry_traces_sample_rate") {
+		rate := v.GetFloat64("helper.sentry_traces_sample_rate")
+		cfg.SentryTracesSampleRate = &rate
+	}
 
 	return cfg
+}
+
+func parseSampleRateEnv(name string, logger log.Logger) *float64 {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return nil
+	}
+	rate, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		logger.Error("invalid sentry sample rate env var; ignoring", "name", name, "value", raw, "error", err)
+		return nil
+	}
+	return &rate
 }
 
 // keeperTreeReader implements helper.TreeReader by reading directly from the

@@ -408,6 +408,9 @@ The helper server uses Sentry when `[helper].sentry_dsn` is set in `app.toml`
 or `SENTRY_DSN` is present in the environment. Sentry events include a `stage`
 tag that identifies the helper code path that emitted the error, such as
 `enqueue`, `process_share`, `leaf_read`, `helper_new`, or `tree_status`.
+Sampling can be tuned with `[helper].sentry_error_sample_rate`,
+`[helper].sentry_traces_sample_rate`, or runtime env vars
+`SENTRY_ERROR_SAMPLE_RATE` and `SENTRY_TRACES_SAMPLE_RATE`.
 
 When a voting round closes, the helper summarizes queued shares before purging
 expired witness data. If any shares for that round are still pending or failed,
