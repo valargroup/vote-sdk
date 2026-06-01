@@ -91,9 +91,8 @@ func retryAwareCaptureDecision(retriable bool, attempt, maxAttempts int) bool {
 	if attempt <= 0 || maxAttempts <= 0 {
 		return true
 	}
-	if !retriable {
-		return attempt >= maxAttempts
-	}
+	// Always capture first and final attempts so operators get immediate
+	// visibility while still suppressing noisy middle retries.
 	return attempt == 1 || attempt >= maxAttempts
 }
 

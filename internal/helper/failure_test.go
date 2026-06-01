@@ -16,8 +16,8 @@ func TestRetryAwareCaptureDecision(t *testing.T) {
 		assert.True(t, retryAwareCaptureDecision(true, 5, 5))
 	})
 
-	t.Run("non retriable captures final only", func(t *testing.T) {
-		assert.False(t, retryAwareCaptureDecision(false, 1, 5))
+	t.Run("non retriable captures first and final", func(t *testing.T) {
+		assert.True(t, retryAwareCaptureDecision(false, 1, 5))
 		assert.False(t, retryAwareCaptureDecision(false, 4, 5))
 		assert.True(t, retryAwareCaptureDecision(false, 5, 5))
 	})
