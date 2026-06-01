@@ -156,9 +156,7 @@ func verifyDelegation(ctx context.Context, msg *types.MsgDelegateVote, k *keeper
 	for i, n := range msg.GovNullifiers {
 		govNullifiersHex[i] = hex.EncodeToString(n)
 	}
-	// Keep full cryptographic inputs available only at debug level to avoid
-	// high-cardinality info logs while preserving deep-dive troubleshooting.
-	k.Logger().Debug("VerifyDelegation inputs",
+	k.Logger().Info("VerifyDelegation inputs",
 		"rk", hex.EncodeToString(msg.Rk),
 		"signed_note_nullifier", hex.EncodeToString(msg.SignedNoteNullifier),
 		"cmx_new", hex.EncodeToString(msg.CmxNew),
