@@ -276,6 +276,50 @@ func TestProcessor_ProcessBatch_ChainRejects(t *testing.T) {
 	assert.Equal(t, 1, status[roundID].Pending) // back to pending for retry
 }
 
+func TestProcessor_ProcessShare_StructuredChainRejectError(t *testing.T) {
+	store := newTestStore(t)
+	prover := &mockProver{}
+	tree := newMockTreeReader()
+
+	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"tx_hash":"","code":5,"log":"vote round is not active"}`))
+	}))
+	defer chainServer.Close()
+
+	submitter := NewChainSubmitter(chainServer.URL)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
+
+	roundID := hex.EncodeToString(make([]byte, 32))
+	share := QueuedShare{Payload: testPayload(roundID, 0)}
+	err := proc.processShare(context.Background(), share)
+	require.Error(t, err)
+
+	meta := failureMetadataFromError(err, failureStageProcessShare, true)
+	require.NotNil(t, meta.chainCode)
+	assert.Equal(t, failureStageSubmitChain, meta.stage)
+	assert.False(t, meta.retriable)
+	assert.Equal(t, uint32(5), *meta.chainCode)
+}
+
+func TestProcessor_ProcessShare_StructuredProofError(t *testing.T) {
+	store := newTestStore(t)
+	prover := &mockProver{err: assert.AnError}
+	tree := newMockTreeReader()
+	submitter := NewChainSubmitter("http://localhost:0")
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
+
+	roundID := hex.EncodeToString(make([]byte, 32))
+	share := QueuedShare{Payload: testPayload(roundID, 0)}
+	err := proc.processShare(context.Background(), share)
+	require.Error(t, err)
+
+	meta := failureMetadataFromError(err, failureStageProcessShare, true)
+	assert.Equal(t, failureStageProofGenerate, meta.stage)
+	assert.False(t, meta.retriable)
+	assert.Nil(t, meta.chainCode)
+}
+
 func TestProcessor_ProcessBatch_DuplicateNullifierTreatedAsSuccess(t *testing.T) {
 	store := newTestStore(t)
 	prover := &mockProver{}

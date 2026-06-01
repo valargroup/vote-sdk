@@ -610,10 +610,18 @@ func (s *ShareStore) MarkSubmitted(roundID string, shareIndex, proposalID uint32
 	}
 }
 
+const maxShareProcessingAttempts = 5
+
+type markFailedResult struct {
+	Attempt     int
+	MaxAttempts int
+	Retriable   bool
+}
+
 // MarkFailed marks a share processing attempt as failed, with retry or
 // permanent failure after max attempts.
-func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, treePosition uint64) {
-	const maxAttempts = 5
+func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, treePosition uint64) markFailedResult {
+	result := markFailedResult{MaxAttempts: maxShareProcessingAttempts}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -625,13 +633,15 @@ func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, t
 		roundID, shareIndex, proposalID, treePosition,
 	).Scan(&attempts, &voteEndTime); err != nil {
 		s.logError("MarkFailed: db query failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
-		return
+		return result
 	}
 
 	newAttempts := attempts + 1
+	result.Attempt = newAttempts
+	result.Retriable = newAttempts < maxShareProcessingAttempts
 	key := schedKey(roundID, shareIndex, proposalID, treePosition)
 
-	if newAttempts >= maxAttempts {
+	if newAttempts >= maxShareProcessingAttempts {
 		if voteEndTime == 0 {
 			// Legacy or imported rows without a purge time cannot safely retain
 			// witness data because no end-of-round cleanup can be scheduled.
@@ -673,6 +683,7 @@ func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, t
 		s.schedule[key] = time.Now().Add(backoff)
 		s.notifyScheduleChangedLocked()
 	}
+	return result
 }
 
 func (s *ShareStore) logError(msg string, keyvals ...any) {

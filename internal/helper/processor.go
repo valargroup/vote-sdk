@@ -203,19 +203,18 @@ func (p *Processor) processBatch(ctx context.Context) {
 			}()
 			defer func() {
 				if r := recover(); r != nil {
-					err := fmt.Errorf("panic in processShare: %v", r)
+					err := wrapShareProcessingError(failureStagePanic, true, fmt.Errorf("panic in processShare: %v", r))
 					spanErr = err
-					CaptureErr(err, map[string]string{
-						"round_id":    share.Payload.VoteRoundID,
-						"share_index": strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
-						"stage":       "panic",
-					})
+					meta := failureMetadataFromError(err, failureStagePanic, true)
+					failure := p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+					if retryAwareCaptureDecision(meta.retriable, failure.Attempt, failure.MaxAttempts) {
+						CaptureErr(err, buildFailureTags(share, meta, failure.Attempt, failure.MaxAttempts))
+					}
 					p.logger.Error("panic in share processing",
 						"round_id", share.Payload.VoteRoundID,
 						"share_index", share.Payload.EncShare.ShareIndex,
 						"panic", r,
 					)
-					p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
 				}
 			}()
 
@@ -231,18 +230,18 @@ func (p *Processor) processBatch(ctx context.Context) {
 				active, err := p.isRoundActive(share.Payload.VoteRoundID)
 				statusSpan.Finish(err)
 				if err != nil {
+					err = wrapShareProcessingError(failureStageRoundStatusCheck, true, err)
 					spanErr = err
 					p.logger.Warn("round status check failed, skipping share",
 						"round_id", share.Payload.VoteRoundID,
 						"share_index", share.Payload.EncShare.ShareIndex,
 						"error", err,
 					)
-					CaptureErr(err, map[string]string{
-						"round_id":    share.Payload.VoteRoundID,
-						"share_index": strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
-						"stage":       "round_status_check",
-					})
-					p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+					meta := failureMetadataFromError(err, failureStageRoundStatusCheck, true)
+					failure := p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+					if retryAwareCaptureDecision(meta.retriable, failure.Attempt, failure.MaxAttempts) {
+						CaptureErr(err, buildFailureTags(share, meta, failure.Attempt, failure.MaxAttempts))
+					}
 					return nil
 				}
 				if !active {
@@ -258,17 +257,16 @@ func (p *Processor) processBatch(ctx context.Context) {
 
 			if err := p.processShare(shareCtx, share); err != nil {
 				spanErr = err
+				meta := failureMetadataFromError(err, failureStageProcessShare, true)
+				failure := p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
 				p.logger.Warn("share processing failed",
 					"round_id", share.Payload.VoteRoundID,
 					"share_index", share.Payload.EncShare.ShareIndex,
 					"error", err,
 				)
-				CaptureErr(err, map[string]string{
-					"round_id":    share.Payload.VoteRoundID,
-					"share_index": strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
-					"stage":       "process_share",
-				})
-				p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+				if retryAwareCaptureDecision(meta.retriable, failure.Attempt, failure.MaxAttempts) {
+					CaptureErr(err, buildFailureTags(share, meta, failure.Attempt, failure.MaxAttempts))
+				}
 				return nil
 			}
 
@@ -294,11 +292,11 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	// Scope the tree reader to this share's voting round.
 	roundBytes, err := hex.DecodeString(share.Payload.VoteRoundID)
 	if err != nil {
-		return fmt.Errorf("decode vote_round_id: %w", err)
+		return wrapShareProcessingError(failureStageDecodeRoundID, false, fmt.Errorf("decode vote_round_id: %w", err))
 	}
 	var roundID [32]byte
 	if len(roundBytes) != 32 {
-		return fmt.Errorf("vote_round_id must be 32 bytes, got %d", len(roundBytes))
+		return wrapShareProcessingError(failureStageDecodeRoundID, false, fmt.Errorf("vote_round_id must be 32 bytes, got %d", len(roundBytes)))
 	}
 	copy(roundID[:], roundBytes)
 
@@ -324,14 +322,18 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	// Read tree status (leaf count + anchor height) without loading leaf data.
 	status, err := tree.GetTreeStatus()
 	if err != nil {
-		return fmt.Errorf("read tree status: %w", err)
+		return wrapShareProcessingError(failureStageTreeStatus, true, fmt.Errorf("read tree status: %w", err))
 	}
 	if status.LeafCount == 0 {
-		return fmt.Errorf("commitment tree is empty")
+		return wrapShareProcessingError(failureStageTreeStatus, false, fmt.Errorf("commitment tree is empty"))
 	}
 	if share.Payload.TreePosition >= status.LeafCount {
-		return fmt.Errorf("tree_position %d out of range (tree has %d leaves)",
-			share.Payload.TreePosition, status.LeafCount)
+		return wrapShareProcessingError(
+			failureStageTreeStatus,
+			false,
+			fmt.Errorf("tree_position %d out of range (tree has %d leaves)",
+				share.Payload.TreePosition, status.LeafCount),
+		)
 	}
 	anchorHeight := status.AnchorHeight
 
@@ -339,21 +341,21 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	// O(depth) shard reads — no leaf replay.
 	merklePath, err := tree.MerklePath(share.Payload.TreePosition, uint32(anchorHeight))
 	if err != nil {
-		return fmt.Errorf("compute merkle path: %w", err)
+		return wrapShareProcessingError(failureStageMerklePath, true, fmt.Errorf("compute merkle path: %w", err))
 	}
 
 	// Decode share_comms.
 	var shareComms [16][32]byte
 	if len(share.Payload.ShareComms) != 16 {
-		return fmt.Errorf("expected 16 share_comms, got %d", len(share.Payload.ShareComms))
+		return wrapShareProcessingError(failureStageDecodePayload, false, fmt.Errorf("expected 16 share_comms, got %d", len(share.Payload.ShareComms)))
 	}
 	for i, c := range share.Payload.ShareComms {
 		cBytes, err := base64.StdEncoding.DecodeString(c)
 		if err != nil {
-			return fmt.Errorf("decode share_comms[%d]: %w", i, err)
+			return wrapShareProcessingError(failureStageDecodePayload, false, fmt.Errorf("decode share_comms[%d]: %w", i, err))
 		}
 		if len(cBytes) != 32 {
-			return fmt.Errorf("share_comms[%d] must be 32 bytes, got %d", i, len(cBytes))
+			return wrapShareProcessingError(failureStageDecodePayload, false, fmt.Errorf("share_comms[%d] must be 32 bytes, got %d", i, len(cBytes)))
 		}
 		copy(shareComms[i][:], cBytes)
 	}
@@ -362,27 +364,27 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	var primaryBlind [32]byte
 	pbBytes, err := base64.StdEncoding.DecodeString(share.Payload.PrimaryBlind)
 	if err != nil {
-		return fmt.Errorf("decode primary_blind: %w", err)
+		return wrapShareProcessingError(failureStageDecodePayload, false, fmt.Errorf("decode primary_blind: %w", err))
 	}
 	if len(pbBytes) != 32 {
-		return fmt.Errorf("primary_blind must be 32 bytes, got %d", len(pbBytes))
+		return wrapShareProcessingError(failureStageDecodePayload, false, fmt.Errorf("primary_blind must be 32 bytes, got %d", len(pbBytes)))
 	}
 	copy(primaryBlind[:], pbBytes)
 
 	// Decode the revealed share's C1/C2 once, reused for both the prover and the message.
 	c1Bytes, err := base64.StdEncoding.DecodeString(share.Payload.EncShare.C1)
 	if err != nil {
-		return fmt.Errorf("decode enc_share.c1: %w", err)
+		return wrapShareProcessingError(failureStageDecodePayload, false, fmt.Errorf("decode enc_share.c1: %w", err))
 	}
 	if len(c1Bytes) != 32 {
-		return fmt.Errorf("enc_share.c1 must be 32 bytes, got %d", len(c1Bytes))
+		return wrapShareProcessingError(failureStageDecodePayload, false, fmt.Errorf("enc_share.c1 must be 32 bytes, got %d", len(c1Bytes)))
 	}
 	c2Bytes, err := base64.StdEncoding.DecodeString(share.Payload.EncShare.C2)
 	if err != nil {
-		return fmt.Errorf("decode enc_share.c2: %w", err)
+		return wrapShareProcessingError(failureStageDecodePayload, false, fmt.Errorf("decode enc_share.c2: %w", err))
 	}
 	if len(c2Bytes) != 32 {
-		return fmt.Errorf("enc_share.c2 must be 32 bytes, got %d", len(c2Bytes))
+		return wrapShareProcessingError(failureStageDecodePayload, false, fmt.Errorf("enc_share.c2 must be 32 bytes, got %d", len(c2Bytes)))
 	}
 	var encC1, encC2 [32]byte
 	copy(encC1[:], c1Bytes)
@@ -414,7 +416,7 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	span.SetData("proof_bytes", len(proof))
 	span.Finish(err)
 	if err != nil {
-		return fmt.Errorf("generate proof: %w", err)
+		return wrapShareProcessingError(failureStageProofGenerate, false, fmt.Errorf("generate proof: %w", err))
 	}
 	p.logger.Info("proof generated",
 		"round_id", share.Payload.VoteRoundID,
@@ -440,7 +442,7 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	// Submit to chain.
 	result, err := p.submitter.SubmitRevealShareContext(ctx, msg)
 	if err != nil {
-		return fmt.Errorf("submit: %w", err)
+		return wrapShareProcessingError(failureStageSubmitHTTP, true, fmt.Errorf("submit: %w", err))
 	}
 	if result.Code != 0 {
 		if IsDuplicateNullifier(result.Code) {
@@ -450,7 +452,7 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 			)
 			return nil
 		}
-		return fmt.Errorf("chain rejected tx (code %d): %s", result.Code, result.Log)
+		return newChainRejectError(result.Code, result.Log)
 	}
 
 	p.logger.Debug("MsgRevealShare broadcast ok", "tx_hash", result.TxHash)
