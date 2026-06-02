@@ -31,6 +31,16 @@ type BroadcastResult struct {
 	Log    string `json:"log"`
 }
 
+type submitHTTPStatusError struct {
+	statusCode int
+	body       string
+}
+
+// Error returns the local REST status failure in the historical submitter format.
+func (e *submitHTTPStatusError) Error() string {
+	return fmt.Sprintf("chain returned %d: %s", e.statusCode, e.body)
+}
+
 // ChainSubmitter submits MsgRevealShare transactions to the chain's REST API.
 type ChainSubmitter struct {
 	baseURL    string
@@ -125,7 +135,7 @@ func (c *ChainSubmitter) SubmitRevealShareContext(ctx context.Context, msg *MsgR
 	// body still contains a structured BroadcastResult. Parse both so the caller
 	// can inspect result.Code.
 	if resp.StatusCode != 200 && resp.StatusCode != 422 {
-		err := fmt.Errorf("chain returned %d: %s", resp.StatusCode, string(respBody))
+		err := &submitHTTPStatusError{statusCode: resp.StatusCode, body: string(respBody)}
 		span.Finish(err)
 		return nil, err
 	}

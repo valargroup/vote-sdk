@@ -77,10 +77,13 @@ duplicate payloads return `"duplicate"`, and conflicting payloads for the same
 
 ## Known Limitations
 
-- Retry budget: `MarkFailed` allows 5 attempts with exponential backoff (2 s,
-  4 s, 8 s, 16 s, 32 s). If the chain is unreachable for longer, shares become
-  permanently failed. Attempt counts survive recovery, and failed-row witness
-  material is retained until expired-round purge.
+- Retry budget: share-specific failures use `MarkFailed`, which allows 5
+  attempts with exponential backoff before the terminal attempt (2 s, 4 s,
+  8 s, 16 s). Local submit transport errors, non-400 REST errors that do not
+  carry a structured chain rejection, round-status check errors, and
+  tree/Merkle readiness errors return to pending without spending attempts.
+  Attempt counts survive recovery, and failed-row witness material is retained
+  until expired-round purge.
 - Almost-submitted race: if the chain accepted a share but the server crashed
   before `MarkSubmitted`, recovery will retry it. The chain-side share nullifier
   makes the duplicate reveal idempotent.
