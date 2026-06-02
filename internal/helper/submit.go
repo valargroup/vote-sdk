@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"syscall"
 	"time"
 
 	votetypes "github.com/valargroup/vote-sdk/x/vote/types"
@@ -31,11 +34,33 @@ type BroadcastResult struct {
 	Log    string `json:"log"`
 }
 
+type submitTransportError struct {
+	err error
+}
+
+// Error preserves the submitter's existing HTTP error text while allowing
+// callers to distinguish transport failures from chain responses.
+func (e submitTransportError) Error() string {
+	return fmt.Sprintf("HTTP error: %v", e.err)
+}
+
+// Unwrap returns the transport error reported by the HTTP client.
+func (e submitTransportError) Unwrap() error {
+	return e.err
+}
+
 // ChainSubmitter submits MsgRevealShare transactions to the chain's REST API.
 type ChainSubmitter struct {
 	baseURL    string
 	httpClient *http.Client
 }
+
+const (
+	submitRevealShareAttempts = 3
+	submitRevealShareBackoff  = 100 * time.Millisecond
+)
+
+var errSubmitRetryCanceled = errors.New("submit retry canceled")
 
 // NewChainSubmitter creates a submitter targeting the given base URL.
 func NewChainSubmitter(baseURL string) *ChainSubmitter {
@@ -99,7 +124,35 @@ func (c *ChainSubmitter) SubmitRevealShareContext(ctx context.Context, msg *MsgR
 		return nil, fmt.Errorf("marshal msg: %w", err)
 	}
 
-	ctx, span := StartTrace(ctx, "http.client", "POST /shielded-vote/v1/reveal-share", nil, nil)
+	var lastErr error
+	for attempt := 1; attempt <= submitRevealShareAttempts; attempt++ {
+		result, err := c.submitRevealShareAttempt(ctx, url, body, attempt)
+		if err == nil {
+			return result, nil
+		}
+		lastErr = err
+		if !isRetryableSubmitTransportError(err) {
+			return nil, err
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("%w: %w", errSubmitRetryCanceled, err)
+		}
+		if !shouldRetrySubmitTransportError(err, attempt) {
+			return nil, err
+		}
+		if err := sleepBeforeSubmitRetry(ctx, attempt); err != nil {
+			return nil, fmt.Errorf("%w: %w", errSubmitRetryCanceled, err)
+		}
+	}
+	return nil, lastErr
+}
+
+// submitRevealShareAttempt sends one MsgRevealShare request and parses the
+// chain response when the server returns one.
+func (c *ChainSubmitter) submitRevealShareAttempt(ctx context.Context, url string, body []byte, attempt int) (*BroadcastResult, error) {
+	ctx, span := StartTrace(ctx, "http.client", "POST /shielded-vote/v1/reveal-share", nil, map[string]interface{}{
+		"attempt": attempt,
+	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		span.Finish(err)
@@ -110,7 +163,7 @@ func (c *ChainSubmitter) SubmitRevealShareContext(ctx context.Context, msg *MsgR
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		span.Finish(err)
-		return nil, fmt.Errorf("HTTP error: %w", err)
+		return nil, submitTransportError{err: err}
 	}
 	defer resp.Body.Close()
 	span.SetData("http.response.status_code", resp.StatusCode)
@@ -141,6 +194,74 @@ func (c *ChainSubmitter) SubmitRevealShareContext(ctx context.Context, msg *MsgR
 	}
 	span.Finish(nil)
 	return &result, nil
+}
+
+// shouldRetrySubmitTransportError reports whether the failed submit should be
+// retried before the processor marks the queued share failed.
+func shouldRetrySubmitTransportError(err error, attempt int) bool {
+	return attempt < submitRevealShareAttempts && isRetryableSubmitTransportError(err)
+}
+
+// isRetryableSubmitTransportError reports whether err came from the HTTP
+// transport and matches the bounded retry policy.
+func isRetryableSubmitTransportError(err error) bool {
+	var transportErr submitTransportError
+	if !errors.As(err, &transportErr) {
+		return false
+	}
+	return isTransientSubmitTransportError(transportErr.err)
+}
+
+// isTransientSubmitTransportError reports whether the transport error is
+// likely to be a short-lived connection failure rather than bad configuration.
+func isTransientSubmitTransportError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	for _, target := range []error{syscall.ECONNRESET, syscall.ECONNABORTED, syscall.EPIPE} {
+		if errors.Is(err, target) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// isCanceledSubmitError reports whether a submit failed because the caller's
+// context was canceled while waiting on a retry or an in-flight request.
+func isCanceledSubmitError(err error) bool {
+	if errors.Is(err, errSubmitRetryCanceled) {
+		return true
+	}
+	var transportErr submitTransportError
+	return errors.As(err, &transportErr) && errors.Is(transportErr.err, context.Canceled)
+}
+
+// sleepBeforeSubmitRetry waits a short, bounded time between local submit
+// attempts while still honoring processor cancellation.
+func sleepBeforeSubmitRetry(ctx context.Context, attempt int) error {
+	timer := time.NewTimer(time.Duration(attempt) * submitRevealShareBackoff)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // IsDuplicateNullifier returns true if the chain rejection code matches

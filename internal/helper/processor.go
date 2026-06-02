@@ -258,6 +258,14 @@ func (p *Processor) processBatch(ctx context.Context) {
 
 			if err := p.processShare(shareCtx, share); err != nil {
 				spanErr = err
+				if isCanceledSubmitError(err) {
+					p.logger.Warn("share processing canceled",
+						"round_id", share.Payload.VoteRoundID,
+						"share_index", share.Payload.EncShare.ShareIndex,
+						"error", err,
+					)
+					return nil
+				}
 				p.logger.Warn("share processing failed",
 					"round_id", share.Payload.VoteRoundID,
 					"share_index", share.Payload.EncShare.ShareIndex,

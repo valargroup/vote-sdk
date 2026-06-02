@@ -223,6 +223,197 @@ func TestProcessor_ProcessBatch_Success(t *testing.T) {
 	assert.Equal(t, 1, status[roundID].Submitted)
 }
 
+func TestProcessor_ProcessBatch_RetriesTransientSubmitWithoutQueueFailure(t *testing.T) {
+	store := newTestStore(t)
+	prover := &mockProver{}
+	tree := newMockTreeReader()
+
+	submitAttempts := 0
+	submitter := NewChainSubmitter("http://chain.test")
+	submitter.httpClient = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			submitAttempts++
+			if submitAttempts == 1 {
+				return nil, testConnectionResetErr()
+			}
+			return jsonResponse(req, http.StatusOK, `{"tx_hash":"AABB","code":0,"log":""}`), nil
+		}),
+	}
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
+
+	roundID := hex.EncodeToString(make([]byte, 32))
+	p := testPayload(roundID, 0)
+	p.TreePosition = 0
+	enqueueAndRequireInserted(t, store, p)
+
+	proc.processBatch(context.Background())
+
+	status := store.Status()
+	assert.Equal(t, 1, status[roundID].Submitted)
+	assert.Equal(t, 0, status[roundID].Pending)
+	assert.Equal(t, int32(1), prover.callCount.Load())
+	assert.Equal(t, 2, submitAttempts)
+
+	share, ok := store.loadShare(roundID, 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, ShareStateSubmitted, share.State)
+	assert.Equal(t, 0, share.Attempts)
+}
+
+func TestProcessor_ProcessBatch_ExhaustedSubmitRetriesFailQueueOnce(t *testing.T) {
+	store := newTestStore(t)
+	prover := &mockProver{}
+	tree := newMockTreeReader()
+
+	submitAttempts := 0
+	submitter := NewChainSubmitter("http://chain.test")
+	submitter.httpClient = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			submitAttempts++
+			return nil, testConnectionResetErr()
+		}),
+	}
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
+
+	roundID := hex.EncodeToString(make([]byte, 32))
+	p := testPayload(roundID, 0)
+	p.TreePosition = 0
+	enqueueAndRequireInserted(t, store, p)
+
+	proc.processBatch(context.Background())
+
+	status := store.Status()
+	assert.Equal(t, 0, status[roundID].Submitted)
+	assert.Equal(t, 1, status[roundID].Pending)
+	assert.Equal(t, int32(1), prover.callCount.Load())
+	assert.Equal(t, submitRevealShareAttempts, submitAttempts)
+
+	share, ok := store.loadShare(roundID, 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, ShareStateReceived, share.State)
+	assert.Equal(t, 1, share.Attempts)
+}
+
+func TestProcessor_ProcessBatch_ContextCancelDuringSubmitRetryDoesNotFailQueue(t *testing.T) {
+	store := newTestStore(t)
+	prover := &mockProver{}
+	tree := newMockTreeReader()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	submitAttempts := 0
+	submitter := NewChainSubmitter("http://chain.test")
+	submitter.httpClient = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			submitAttempts++
+			if submitAttempts > 1 {
+				t.Fatal("should stop retrying when parent context is canceled")
+			}
+			go func() {
+				time.Sleep(10 * time.Millisecond)
+				cancel()
+			}()
+			return nil, testConnectionResetErr()
+		}),
+	}
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
+
+	roundID := hex.EncodeToString(make([]byte, 32))
+	p := testPayload(roundID, 0)
+	p.TreePosition = 0
+	enqueueAndRequireInserted(t, store, p)
+
+	proc.processBatch(ctx)
+
+	status := store.Status()
+	assert.Equal(t, 0, status[roundID].Submitted)
+	assert.Equal(t, 1, status[roundID].Pending)
+	assert.Equal(t, int32(1), prover.callCount.Load())
+	assert.Equal(t, 1, submitAttempts)
+
+	share, ok := store.loadShare(roundID, 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, ShareStateWitnessed, share.State)
+	assert.Equal(t, 0, share.Attempts)
+}
+
+func TestProcessor_ProcessBatch_ContextCancelAfterTransientSubmitDoesNotFailQueue(t *testing.T) {
+	store := newTestStore(t)
+	prover := &mockProver{}
+	tree := newMockTreeReader()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	submitAttempts := 0
+	submitter := NewChainSubmitter("http://chain.test")
+	submitter.httpClient = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			submitAttempts++
+			cancel()
+			return nil, testConnectionResetErr()
+		}),
+	}
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
+
+	roundID := hex.EncodeToString(make([]byte, 32))
+	p := testPayload(roundID, 0)
+	p.TreePosition = 0
+	enqueueAndRequireInserted(t, store, p)
+
+	proc.processBatch(ctx)
+
+	status := store.Status()
+	assert.Equal(t, 0, status[roundID].Submitted)
+	assert.Equal(t, 1, status[roundID].Pending)
+	assert.Equal(t, int32(1), prover.callCount.Load())
+	assert.Equal(t, 1, submitAttempts)
+
+	share, ok := store.loadShare(roundID, 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, ShareStateWitnessed, share.State)
+	assert.Equal(t, 0, share.Attempts)
+}
+
+func TestProcessor_ProcessBatch_ContextCancelDoesNotHideChainRejection(t *testing.T) {
+	store := newTestStore(t)
+	prover := &mockProver{}
+	tree := newMockTreeReader()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	submitAttempts := 0
+	submitter := NewChainSubmitter("http://chain.test")
+	submitter.httpClient = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			submitAttempts++
+			cancel()
+			return jsonResponse(req, http.StatusUnprocessableEntity, `{"tx_hash":"","code":5,"log":"vote round is not active"}`), nil
+		}),
+	}
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
+
+	roundID := hex.EncodeToString(make([]byte, 32))
+	p := testPayload(roundID, 0)
+	p.TreePosition = 0
+	enqueueAndRequireInserted(t, store, p)
+
+	proc.processBatch(ctx)
+
+	status := store.Status()
+	assert.Equal(t, 0, status[roundID].Submitted)
+	assert.Equal(t, 1, status[roundID].Pending)
+	assert.Equal(t, int32(1), prover.callCount.Load())
+	assert.Equal(t, 1, submitAttempts)
+
+	share, ok := store.loadShare(roundID, 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, ShareStateReceived, share.State)
+	assert.Equal(t, 1, share.Attempts)
+}
+
 func TestProcessor_ProcessBatch_ProofFailure(t *testing.T) {
 	store := newTestStore(t)
 	prover := &mockProver{err: assert.AnError}

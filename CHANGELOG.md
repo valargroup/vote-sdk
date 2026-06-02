@@ -6,6 +6,10 @@ Historical changes before commit `704b202e2088b91caeaf2290cef85e4a9a759542` are 
 
 ## Unreleased
 
+### Fixed
+
+- Retry transient helper reveal share transport failures before failing queued shares.
+
 ## v0.9.7 - 2026-05-28
 
 ### Changed
