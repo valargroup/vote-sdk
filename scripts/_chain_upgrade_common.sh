@@ -10,9 +10,9 @@ readonly SVOTE_COSMOVISOR_GITHUB_REPO='cosmos/cosmos-sdk'
 readonly SVOTE_DAEMON_NAME='svoted'
 
 # svote_upgrade_log ...
-# Print a progress line to stdout with a fixed "==>" prefix.
+# Print a progress line to stderr so command substitutions can capture paths only.
 svote_upgrade_log() {
-  printf '==> %s\n' "$*"
+  printf '==> %s\n' "$*" >&2
 }
 
 # svote_upgrade_die message
@@ -240,7 +240,7 @@ svote_upgrade_download_with_fallback() {
   local label="$4"
 
   if curl -fsSL --retry 3 --retry-delay 2 -o "$output" "$spaces_url"; then
-    echo "Downloaded ${label} from Spaces."
+    svote_upgrade_log "Downloaded ${label} from Spaces."
     return 0
   fi
   if curl -fsSL --retry 3 --retry-delay 2 -o "$output" "$github_url"; then
