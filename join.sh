@@ -193,13 +193,10 @@ if [ -z "${SVOTE_UPGRADE_MODE}" ]; then
 fi
 
 case "$SVOTE_UPGRADE_MODE" in
-  legacy)
-    SVOTE_UPGRADE_MODE="direct"
-    ;;
   direct|cosmovisor) ;;
   *)
     echo "ERROR: Unsupported SVOTE_UPGRADE_MODE/--upgrade-mode: ${SVOTE_UPGRADE_MODE}"
-    echo "  Expected one of: direct, cosmovisor (legacy is accepted as an alias for direct)."
+    echo "  Expected one of: direct, cosmovisor."
     exit 1
     ;;
 esac
