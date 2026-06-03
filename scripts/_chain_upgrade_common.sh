@@ -452,10 +452,58 @@ svote_upgrade_require_single_signer_ack() {
   fi
 }
 
+# svote_upgrade_is_upgrade_invocation_pid pid
+# Return 0 when pid belongs to this script's shell ancestry (avoid migrate self-match).
+svote_upgrade_is_upgrade_invocation_pid() {
+  local check_pid="$1"
+  local ancestor="$$"
+  while [ -n "$ancestor" ] && [ "$ancestor" -gt 0 ] 2>/dev/null; do
+    if [ "$ancestor" -eq "$check_pid" ]; then
+      return 0
+    fi
+    ancestor=$(ps -o ppid= -p "$ancestor" 2>/dev/null | tr -d '[:space:]' || true)
+  done
+  return 1
+}
+
+# svote_upgrade_is_signer_runtime_cmd cmd home
+# Return 0 when cmd is a live svoted/cosmovisor runtime for home (not upgrade tooling).
+svote_upgrade_is_signer_runtime_cmd() {
+  local cmd="$1"
+  local home="$2"
+
+  case "$cmd" in
+    *update_chain.sh*|*_chain_upgrade_common.sh*) return 1 ;;
+  esac
+
+  if ! printf '%s\n' "$cmd" | grep -Eq '(^|[ /])(svoted|cosmovisor)( |$|--|$)'; then
+    return 1
+  fi
+
+  if printf '%s\n' "$cmd" | grep -Fq -- " --home ${home}"; then
+    return 0
+  fi
+  if printf '%s\n' "$cmd" | grep -Fq -- "--home=${home}"; then
+    return 0
+  fi
+  return 1
+}
+
 # svote_upgrade_find_signer_processes
 # Print pgrep lines for svoted/cosmovisor processes scoped to DAEMON_HOME, or nothing.
 svote_upgrade_find_signer_processes() {
-  pgrep -af "${SVOTE_DAEMON_NAME}|cosmovisor" 2>/dev/null | grep -F -- "${DAEMON_HOME}" || true
+  local line pid cmd
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    pid="${line%% *}"
+    cmd="${line#"$pid "}"
+    if svote_upgrade_is_upgrade_invocation_pid "$pid"; then
+      continue
+    fi
+    if svote_upgrade_is_signer_runtime_cmd "$cmd" "$DAEMON_HOME"; then
+      printf '%s\n' "$line"
+    fi
+  done < <(pgrep -af "${SVOTE_DAEMON_NAME}|cosmovisor" 2>/dev/null || true)
 }
 
 # svote_upgrade_assert_no_signer_processes
@@ -666,6 +714,18 @@ svote_upgrade_verify_prestage() {
       svote_upgrade_checklist_line FAIL "systemd unit missing DAEMON_HOME=${DAEMON_HOME}"
       service_failures=$((service_failures + 1))
     fi
+    if [ -f "$SERVICE_PATH" ] && grep -q "SVOTE_HOME=${DAEMON_HOME}" "$SERVICE_PATH"; then
+      svote_upgrade_checklist_line PASS "systemd unit sets SVOTE_HOME=${DAEMON_HOME}"
+    else
+      svote_upgrade_checklist_line FAIL "systemd unit missing SVOTE_HOME=${DAEMON_HOME}"
+      service_failures=$((service_failures + 1))
+    fi
+    if [ -f "$SERVICE_PATH" ] && grep -q 'MONIKER=' "$SERVICE_PATH"; then
+      svote_upgrade_checklist_line PASS "systemd unit sets MONIKER for wrapper startup"
+    else
+      svote_upgrade_checklist_line FAIL "systemd unit missing MONIKER (required by svoted-wrapper.sh)"
+      service_failures=$((service_failures + 1))
+    fi
   else
     svote_upgrade_log "Skipping service checks (--skip-cosmovisor-service)."
   fi
@@ -676,11 +736,69 @@ svote_upgrade_verify_prestage() {
   svote_upgrade_log "Pre-stage verification passed."
 }
 
+# svote_upgrade_derive_moniker_from_home home
+# Print validator moniker from config.toml when present; empty string otherwise.
+svote_upgrade_derive_moniker_from_home() {
+  local home="$1"
+  local config_toml="${home}/config/config.toml"
+  [ -f "$config_toml" ] || return 0
+  sed -n 's/^moniker[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$config_toml" | head -n 1
+}
+
+# svote_upgrade_derive_chain_id_from_home home
+# Print chain ID from genesis.json when present; empty string otherwise.
+svote_upgrade_derive_chain_id_from_home() {
+  local home="$1"
+  local genesis="${home}/config/genesis.json"
+  [ -f "$genesis" ] || return 0
+  jq -r '.chain_id // empty' "$genesis" 2>/dev/null || true
+}
+
+# svote_upgrade_extract_direct_svoted_start_args exec_start_cmd home
+# Print extra svoted start args from a direct ExecStart line after --home; empty when none.
+svote_upgrade_extract_direct_svoted_start_args() {
+  local exec_start_cmd="$1"
+  local home="$2"
+  local remainder
+
+  case "$exec_start_cmd" in
+    *svoted-wrapper*|*cosmovisor*) return 0 ;;
+  esac
+  case "$exec_start_cmd" in
+    *svoted*) ;;
+    *) return 0 ;;
+  esac
+
+  if [[ "$exec_start_cmd" == *"--home ${home}"* ]]; then
+    remainder="${exec_start_cmd#*--home ${home}}"
+  elif [[ "$exec_start_cmd" == *"--home=${home}"* ]]; then
+    remainder="${exec_start_cmd#*--home=${home}}"
+  else
+    return 0
+  fi
+
+  remainder="${remainder#"${remainder%%[![:space:]]*}"}"
+  printf '%s\n' "$remainder"
+}
+
+# svote_upgrade_ensure_systemd_environment_key tmp_unit key value
+# Append Environment=key=value under [Service] when key is not already present.
+svote_upgrade_ensure_systemd_environment_key() {
+  local tmp_unit="$1"
+  local key="$2"
+  local value="$3"
+
+  if grep -q "${key}=" "$tmp_unit"; then
+    return 0
+  fi
+  sed -i '/^\[Service\]/a Environment="'"${key}=${value}"'"' "$tmp_unit"
+}
+
 # svote_upgrade_patch_systemd_unit_for_cosmovisor
 # Patch svoted.service for cosmovisor mode; write unit and print backup path; die if unit missing.
 svote_upgrade_patch_systemd_unit_for_cosmovisor() {
   local backup_path="${SERVICE_PATH}.bak.$(date +%Y%m%d%H%M%S)"
-  local tmp_unit
+  local tmp_unit old_exec inferred_args derived_moniker derived_chain_id
   tmp_unit=$(mktemp)
 
   if [ ! -f "$SERVICE_PATH" ]; then
@@ -689,6 +807,29 @@ svote_upgrade_patch_systemd_unit_for_cosmovisor() {
 
   cp -p "$SERVICE_PATH" "$backup_path"
   cp "$SERVICE_PATH" "$tmp_unit"
+
+  old_exec=$(grep -E '^ExecStart=' "$tmp_unit" 2>/dev/null | head -n 1 | cut -d= -f2- || true)
+  if [ -z "${SVOTE_WRAPPER_SVOTED_START_ARGS:-}" ] && [ -n "$old_exec" ]; then
+    inferred_args=$(svote_upgrade_extract_direct_svoted_start_args "$old_exec" "$DAEMON_HOME" || true)
+    if [ -n "$inferred_args" ]; then
+      SVOTE_WRAPPER_SVOTED_START_ARGS="$inferred_args"
+      export SVOTE_WRAPPER_SVOTED_START_ARGS
+      svote_upgrade_log "Inferred wrapper start args from direct ExecStart: ${SVOTE_WRAPPER_SVOTED_START_ARGS}"
+    fi
+  fi
+
+  derived_moniker=$(svote_upgrade_derive_moniker_from_home "$DAEMON_HOME" || true)
+  derived_chain_id=$(svote_upgrade_derive_chain_id_from_home "$DAEMON_HOME" || true)
+
+  svote_upgrade_ensure_systemd_environment_key "$tmp_unit" "SVOTE_HOME" "$DAEMON_HOME"
+  if [ -n "$derived_moniker" ]; then
+    svote_upgrade_ensure_systemd_environment_key "$tmp_unit" "MONIKER" "$derived_moniker"
+  fi
+  if [ -n "$derived_chain_id" ]; then
+    svote_upgrade_ensure_systemd_environment_key "$tmp_unit" "SVOTE_CHAIN_ID" "$derived_chain_id"
+  fi
+  svote_upgrade_ensure_systemd_environment_key "$tmp_unit" "SVOTE_INSTALL_DIR" "$INSTALL_DIR"
+  svote_upgrade_ensure_systemd_environment_key "$tmp_unit" "SVOTED_BIN" "${INSTALL_DIR}/${SVOTE_DAEMON_NAME}"
 
   grep -q 'SVOTE_UPGRADE_MODE=cosmovisor' "$tmp_unit" || \
     sed -i '/^\[Service\]/a Environment="SVOTE_UPGRADE_MODE=cosmovisor"' "$tmp_unit"

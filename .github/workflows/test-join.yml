@@ -27,8 +27,12 @@ on:
     paths:
       - join.sh
       - scripts/svoted-wrapper.sh
+      - scripts/_chain_upgrade_common.sh
+      - scripts/update_chain.sh
+      - scripts/update_chain.sh.template
       - scripts/reset-validator-snapshot.sh
       - scripts/test_svoted_wrapper.sh
+      - scripts/test_chain_upgrade_signer_detect.sh
       - scripts/test_reset_validator_snapshot.sh
       - Dockerfile.join-test
       - scripts/test-join-docker.sh
@@ -38,8 +42,12 @@ on:
     paths:
       - join.sh
       - scripts/svoted-wrapper.sh
+      - scripts/_chain_upgrade_common.sh
+      - scripts/update_chain.sh
+      - scripts/update_chain.sh.template
       - scripts/reset-validator-snapshot.sh
       - scripts/test_svoted_wrapper.sh
+      - scripts/test_chain_upgrade_signer_detect.sh
       - scripts/test_reset_validator_snapshot.sh
       - Dockerfile.join-test
       - scripts/test-join-docker.sh
@@ -114,6 +122,9 @@ jobs:
 
       - name: Run svoted-wrapper unit smoke test
         run: bash scripts/test_svoted_wrapper.sh
+
+      - name: Run chain upgrade signer detection unit test
+        run: bash scripts/test_chain_upgrade_signer_detect.sh
 
       - name: Run reset-validator-snapshot unit smoke test
         run: bash scripts/test_reset_validator_snapshot.sh
