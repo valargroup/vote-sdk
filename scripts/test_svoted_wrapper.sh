@@ -144,4 +144,56 @@ COUNT="$(wc -l < "${STATE2}/create-val-tx.args" | tr -d '[:space:]')"
 [ "${COUNT}" = "1" ] || fail "create-val-tx called ${COUNT} times"
 grep -q -- '--chain-id zvote-1' "${STATE2}/create-val-tx.args" || fail "create-val-tx missing derived chain ID"
 
+echo "=== svoted-wrapper: empty extra args start under set -u ==="
+STATE3="${TMPDIR}/state3"
+HOME3="${TMPDIR}/home3"
+mkdir -p "${STATE3}" "${HOME3}/config"
+printf '{"chain_id":"zvote-1"}\n' > "${HOME3}/config/genesis.json"
+touch "${STATE3}/bonded"
+PID3="$(start_wrapper "${STATE3}" "${HOME3}" "${TMPDIR}/case3.log")"
+wait_for_file "${STATE3}/svoted-started" 5 || {
+  cat "${TMPDIR}/case3.log" >&2
+  fail "svoted did not start with empty extra args"
+}
+stop_wrapper "${PID3}"
+
+echo "=== svoted-wrapper: cosmovisor mode passes extra args ==="
+STATE4="${TMPDIR}/state4"
+HOME4="${TMPDIR}/home4"
+COS4="${TMPDIR}/cos4"
+mkdir -p "${STATE4}" "${HOME4}/config" "${HOME4}/cosmovisor/genesis/bin" "${COS4}"
+printf '{"chain_id":"zvote-1"}\n' > "${HOME4}/config/genesis.json"
+cp "${TMPDIR}/bin/svoted" "${HOME4}/cosmovisor/genesis/bin/svoted"
+cat > "${COS4}/cosmovisor" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" > "${STATE_DIR}/cosmovisor.args"
+trap 'exit 0' TERM INT HUP
+touch "${STATE_DIR}/svoted-started"
+while true; do sleep 1; done
+EOF
+chmod +x "${COS4}/cosmovisor"
+touch "${STATE4}/bonded"
+STATE_DIR="${STATE4}" \
+PATH="${COS4}:${TMPDIR}/bin:${PATH}" \
+SVOTE_HOME="${HOME4}" \
+VALIDATOR_ADDR="sv1wrapper" \
+VALIDATOR_VALOPER="svvaloper1wrapper" \
+MONIKER="wrapper-test" \
+SVOTE_INSTALL_DIR="${COS4}" \
+SVOTE_UPGRADE_MODE="cosmovisor" \
+SVOTE_WRAPPER_SVOTED_START_ARGS="--serve-ui --ui-dist /opt/ui/dist" \
+SVOTE_WRAPPER_SYNC_POLL_SECONDS=1 \
+  bash "${WRAPPER}" > "${TMPDIR}/case4.log" 2>&1 &
+PID4="$!"
+wait_for_file "${STATE4}/svoted-started" 5 || {
+  cat "${TMPDIR}/case4.log" >&2
+  fail "cosmovisor mode did not start"
+}
+grep -q -- '--serve-ui --ui-dist /opt/ui/dist' "${STATE4}/cosmovisor.args" || {
+  cat "${STATE4}/cosmovisor.args" >&2
+  fail "cosmovisor missing forwarded extra args"
+}
+stop_wrapper "${PID4}"
+
 echo "=== PASS: svoted-wrapper tests ==="

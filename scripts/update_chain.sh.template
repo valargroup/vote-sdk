@@ -5,7 +5,9 @@
 #
 # Modes:
 #   prepare        Stage Cosmovisor binaries only; never stop the running validator.
-#   migrate        One-time migration from direct wrapper service to Cosmovisor.
+#   migrate        One-time migration from direct svoted (or wrapper) service to Cosmovisor.
+#                  Injects missing wrapper env (SVOTE_HOME, MONIKER, install dir) and can
+#                  infer --serve-ui style args from a direct ExecStart when not supplied.
 #   verify-prestage Read-only PASS/FAIL checklist for operator runbooks.
 #
 # Example:
@@ -70,6 +72,11 @@ Options:
 Environment:
   SVOTE_ACK_SINGLE_SIGNER=1   Required in non-interactive mode for migrate/prepare service checks.
   SVOTE_WRAPPER_SVOTED_START_ARGS  Extra svoted start args consumed by svoted-wrapper.sh.
+
+Migrate notes:
+  Switches systemd to cosmovisor-managed wrapper startup. Missing SVOTE_HOME/MONIKER env is
+  auto-filled from validator home. Direct-mode ExecStart flags (e.g. --serve-ui) are copied
+  into SVOTE_WRAPPER_SVOTED_START_ARGS unless --wrapper-svoted-start-args is provided.
 EOF
 }
 

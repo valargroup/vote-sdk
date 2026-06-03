@@ -192,11 +192,19 @@ start_svoted_process() {
     export DAEMON_NAME="svoted"
     export DAEMON_ALLOW_DOWNLOAD_BINARIES="${DAEMON_ALLOW_DOWNLOAD_BINARIES:-false}"
     log "starting svoted via cosmovisor (home=${SVOTE_HOME}, extra_args=${SVOTE_WRAPPER_SVOTED_START_ARGS:-<none>})"
-    "${COSMOVISOR_BIN}" run start --home "${SVOTE_HOME}" "${SVOTED_EXTRA_ARGS[@]}" &
+    if [ "${#SVOTED_EXTRA_ARGS[@]}" -gt 0 ]; then
+      "${COSMOVISOR_BIN}" run start --home "${SVOTE_HOME}" "${SVOTED_EXTRA_ARGS[@]}" &
+    else
+      "${COSMOVISOR_BIN}" run start --home "${SVOTE_HOME}" &
+    fi
     return
   fi
   log "starting svoted directly (home=${SVOTE_HOME}, extra_args=${SVOTE_WRAPPER_SVOTED_START_ARGS:-<none>})"
-  "${SVOTED_BIN}" start --home "${SVOTE_HOME}" "${SVOTED_EXTRA_ARGS[@]}" &
+  if [ "${#SVOTED_EXTRA_ARGS[@]}" -gt 0 ]; then
+    "${SVOTED_BIN}" start --home "${SVOTE_HOME}" "${SVOTED_EXTRA_ARGS[@]}" &
+  else
+    "${SVOTED_BIN}" start --home "${SVOTE_HOME}" &
+  fi
 }
 
 log "starting svoted via wrapper (home=${SVOTE_HOME}, moniker=${MONIKER}, upgrade_mode=${SVOTE_UPGRADE_MODE})"
