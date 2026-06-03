@@ -11,6 +11,7 @@
 
 pub mod ffi;
 pub mod nc_root;
+mod proof;
 pub mod redpallas;
 pub mod toy;
 pub mod votetree;

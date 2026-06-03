@@ -9,6 +9,13 @@ Historical changes before commit `704b202e2088b91caeaf2290cef85e4a9a759542` are 
 ### Changed
 
 - Confirm helper share submissions against committed chain state before marking them submitted, retrying timed-out confirmations through the normal helper backoff path.
+- Reject Halo2 proofs with trailing unread transcript bytes at the Rust FFI
+  verifier boundary, and update the Rust voting dependencies to the published
+  `voting-circuits` 0.7.0 / `zcash_voting` 0.10.2 releases.
+- Preserve DKG coefficient files through speculative ceremony ack proposals so
+  validators can retry `MsgAckExecutiveAuthorityKey` if CometBFT advances to a
+  later round before their proposal commits. Coefficients are now cleaned up only
+  after committed state moves the round past the ceremony ack window.
 
 ## v0.9.7 - 2026-05-28
 
