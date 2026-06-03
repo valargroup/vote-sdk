@@ -1105,6 +1105,7 @@ function CoordinatorActionsPage({ wallet }: { wallet: UseWallet }) {
   const [latestBlock, setLatestBlock] = useState<chainApi.LatestBlockInfo | null>(null);
   const [voteManagers, setVoteManagers] = useState<string[]>([]);
   const [voteManagerThreshold, setVoteManagerThreshold] = useState(1);
+  const [minCeremonyValidators, setMinCeremonyValidators] = useState(1);
   const [pendingCoordinatorActions, setPendingCoordinatorActions] = useState<chainApi.CoordinatorAction[]>([]);
   const [approvingActionID, setApprovingActionID] = useState<number | null>(null);
   const [approvalTxHash, setApprovalTxHash] = useState("");
@@ -1113,6 +1114,7 @@ function CoordinatorActionsPage({ wallet }: { wallet: UseWallet }) {
   const [devKeyVisible, setDevKeyVisible] = useState(false);
   const [vmNewAddrs, setVmNewAddrs] = useState("");
   const [vmNewThreshold, setVmNewThreshold] = useState("1");
+  const [vmNewMinCeremonyValidators, setVmNewMinCeremonyValidators] = useState("1");
   const [vmDraftInitialized, setVmDraftInitialized] = useState(false);
   const [vmTxStatus, setVmTxStatus] = useState<"idle" | "sending" | "ok" | "error">("idle");
   const [vmTxError, setVmTxError] = useState("");
@@ -1130,6 +1132,7 @@ function CoordinatorActionsPage({ wallet }: { wallet: UseWallet }) {
       setLatestBlock(block);
       setVoteManagers(vmResp.vote_manager_addresses ?? []);
       setVoteManagerThreshold(vmResp.threshold ?? 1);
+      setMinCeremonyValidators(vmResp.min_ceremony_validators ?? 1);
       setPendingCoordinatorActions(pendingResp.actions ?? []);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : String(err));
@@ -1146,8 +1149,9 @@ function CoordinatorActionsPage({ wallet }: { wallet: UseWallet }) {
     if (vmDraftInitialized || voteManagers.length === 0) return;
     setVmNewAddrs(voteManagers.join("\n"));
     setVmNewThreshold(String(voteManagerThreshold || 1));
+    setVmNewMinCeremonyValidators(String(minCeremonyValidators || 1));
     setVmDraftInitialized(true);
-  }, [vmDraftInitialized, voteManagers, voteManagerThreshold]);
+  }, [vmDraftInitialized, voteManagers, voteManagerThreshold, minCeremonyValidators]);
 
   const handleConnectDev = async () => {
     await wallet.connectDev(devKey);
@@ -1194,6 +1198,7 @@ function CoordinatorActionsPage({ wallet }: { wallet: UseWallet }) {
       .map((addr) => addr.trim())
       .filter(Boolean);
     const newThreshold = parseInt(vmNewThreshold, 10);
+    const newMinCeremonyValidators = parseInt(vmNewMinCeremonyValidators, 10);
     const uniqueManagers = new Set(newManagers.map(normalizeCoordinatorAddress));
     if (newManagers.length === 0) {
       setVmTxStatus("error");
@@ -1210,6 +1215,11 @@ function CoordinatorActionsPage({ wallet }: { wallet: UseWallet }) {
       setVmTxError("Threshold must be at least 1 and no greater than the number of vote managers.");
       return;
     }
+    if (!Number.isFinite(newMinCeremonyValidators) || newMinCeremonyValidators < 1) {
+      setVmTxStatus("error");
+      setVmTxError("Min ceremony validators must be at least 1.");
+      return;
+    }
 
     setVmTxStatus("sending");
     setVmTxError("");
@@ -1220,6 +1230,7 @@ function CoordinatorActionsPage({ wallet }: { wallet: UseWallet }) {
         wallet.signer,
         newManagers,
         newThreshold,
+        newMinCeremonyValidators,
       );
       if (result.code !== 0) {
         setVmTxStatus("error");
@@ -1473,6 +1484,24 @@ function CoordinatorActionsPage({ wallet }: { wallet: UseWallet }) {
                     className="w-28 px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary focus:outline-none focus:border-accent/50"
                   />
                 </div>
+                <div>
+                  <label className="block text-[11px] text-text-secondary mb-1">
+                    New min ceremony validators
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={vmNewMinCeremonyValidators}
+                    onChange={(e) => {
+                      setVmDraftInitialized(true);
+                      setVmNewMinCeremonyValidators(e.target.value);
+                    }}
+                    className="w-28 px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary focus:outline-none focus:border-accent/50"
+                  />
+                  <p className="text-[10px] text-text-muted mt-1">
+                    Minimum bonded validators with registered Pallas keys required to create a voting session.
+                  </p>
+                </div>
                 <button
                   type="button"
                   onClick={handleUpdateVoteManagers}
@@ -1508,6 +1537,7 @@ function CoordinatorActionsPage({ wallet }: { wallet: UseWallet }) {
             <section className="bg-surface-1 border border-border-subtle rounded-xl p-5 space-y-3">
               <h2 className="text-xs font-semibold text-text-primary">Current policy</h2>
               <SettingsStubRow label="Threshold" value={`${voteManagerThreshold} of ${voteManagers.length}`} />
+              <SettingsStubRow label="Min ceremony validators" value={String(minCeremonyValidators)} />
               {latestBlock && (
                 <>
                   <SettingsStubRow label="Chain ID" value={latestBlock.chainId} />

@@ -1011,6 +1011,43 @@ func (s *MsgServerTestSuite) TestUpdateVoteManagers_EmitsEvent() {
 	s.Require().True(found, "expected %s event", types.EventTypeUpdateVoteManagers)
 }
 
+func (s *MsgServerTestSuite) TestUpdateVoteManagers_SetsMinCeremonyValidators() {
+	s.SetupTest()
+	vmA := testAccAddr(62)
+	s.seedVoteManagers(vmA)
+
+	_, err := s.proposeCoordinatorAction(s.ctx, vmA, &types.MsgUpdateVoteManagers{
+		Creator:                  vmA,
+		NewVoteManagers:          []string{vmA},
+		NewMinCeremonyValidators: 3,
+	})
+	s.Require().NoError(err)
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	minVal, err := s.keeper.GetMinCeremonyValidators(kv)
+	s.Require().NoError(err)
+	s.Require().Equal(uint32(3), minVal)
+}
+
+func (s *MsgServerTestSuite) TestUpdateVoteManagers_ZeroMinCeremonyValidatorsDefaultsToOne() {
+	s.SetupTest()
+	vmA := testAccAddr(63)
+	s.seedVoteManagers(vmA)
+	kv := s.keeper.OpenKVStore(s.ctx)
+	s.Require().NoError(s.keeper.SetMinCeremonyValidators(kv, 4))
+
+	_, err := s.proposeCoordinatorAction(s.ctx, vmA, &types.MsgUpdateVoteManagers{
+		Creator:                  vmA,
+		NewVoteManagers:          []string{vmA},
+		NewMinCeremonyValidators: 0,
+	})
+	s.Require().NoError(err)
+
+	minVal, err := s.keeper.GetMinCeremonyValidators(kv)
+	s.Require().NoError(err)
+	s.Require().Equal(uint32(1), minVal)
+}
+
 // ---------------------------------------------------------------------------
 // Software upgrade scheduling (coordinator-action gated x/upgrade access)
 // ---------------------------------------------------------------------------

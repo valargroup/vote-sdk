@@ -137,6 +137,7 @@ function decodeUpdateVoteManagers(bytes: Uint8Array): CoordinatorActionDetail[] 
   let creator = "";
   const managers: string[] = [];
   let threshold = 1;
+  let minCeremonyValidators = 1;
   while (!reader.eof()) {
     const field = reader.readField();
     if (!field) break;
@@ -153,6 +154,10 @@ function decodeUpdateVoteManagers(bytes: Uint8Array): CoordinatorActionDetail[] 
         expectWire(field, 0, "new_threshold");
         threshold = reader.readVarint();
         break;
+      case 4:
+        expectWire(field, 0, "new_min_ceremony_validators");
+        minCeremonyValidators = reader.readVarint();
+        break;
       default:
         reader.skip(field.wireType);
     }
@@ -160,6 +165,7 @@ function decodeUpdateVoteManagers(bytes: Uint8Array): CoordinatorActionDetail[] 
   return [
     detail("Creator", creator, true),
     detail("New threshold", threshold),
+    detail("New min ceremony validators", minCeremonyValidators || 1),
     detail("New managers", managers.join("\n"), true),
   ];
 }

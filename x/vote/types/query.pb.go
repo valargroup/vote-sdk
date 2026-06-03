@@ -951,11 +951,12 @@ func (*QueryVoteManagersRequest) Descriptor() ([]byte, []int) {
 }
 
 type QueryVoteManagersResponse struct {
-	state                protoimpl.MessageState `protogen:"open.v1"`
-	VoteManagerAddresses []string               `protobuf:"bytes,1,rep,name=vote_manager_addresses,json=voteManagerAddresses,proto3" json:"vote_manager_addresses,omitempty"`
-	Threshold            uint32                 `protobuf:"varint,2,opt,name=threshold,proto3" json:"threshold,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	state                 protoimpl.MessageState `protogen:"open.v1"`
+	VoteManagerAddresses  []string               `protobuf:"bytes,1,rep,name=vote_manager_addresses,json=voteManagerAddresses,proto3" json:"vote_manager_addresses,omitempty"`
+	Threshold             uint32                 `protobuf:"varint,2,opt,name=threshold,proto3" json:"threshold,omitempty"`
+	MinCeremonyValidators uint32                 `protobuf:"varint,3,opt,name=min_ceremony_validators,json=minCeremonyValidators,proto3" json:"min_ceremony_validators,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *QueryVoteManagersResponse) Reset() {
@@ -998,6 +999,13 @@ func (x *QueryVoteManagersResponse) GetVoteManagerAddresses() []string {
 func (x *QueryVoteManagersResponse) GetThreshold() uint32 {
 	if x != nil {
 		return x.Threshold
+	}
+	return 0
+}
+
+func (x *QueryVoteManagersResponse) GetMinCeremonyValidators() uint32 {
+	if x != nil {
+		return x.MinCeremonyValidators
 	}
 	return 0
 }
@@ -1676,10 +1684,11 @@ const file_svote_v1_query_proto_rawDesc = "" +
 	"\x19QueryCeremonyStateRequest\"Q\n" +
 	"\x1aQueryCeremonyStateResponse\x123\n" +
 	"\bceremony\x18\x01 \x01(\v2\x17.svote.v1.CeremonyStateR\bceremony\"\x1a\n" +
-	"\x18QueryVoteManagersRequest\"o\n" +
+	"\x18QueryVoteManagersRequest\"\xa7\x01\n" +
 	"\x19QueryVoteManagersResponse\x124\n" +
 	"\x16vote_manager_addresses\x18\x01 \x03(\tR\x14voteManagerAddresses\x12\x1c\n" +
-	"\tthreshold\x18\x02 \x01(\rR\tthreshold\"=\n" +
+	"\tthreshold\x18\x02 \x01(\rR\tthreshold\x126\n" +
+	"\x17min_ceremony_validators\x18\x03 \x01(\rR\x15minCeremonyValidators\"=\n" +
 	"\x17QueryVoteSummaryRequest\x12\"\n" +
 	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\"\xee\x01\n" +
 	"\x18QueryVoteSummaryResponse\x12\"\n" +

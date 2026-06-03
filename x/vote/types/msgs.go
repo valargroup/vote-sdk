@@ -268,6 +268,9 @@ func (msg *MsgUpdateVoteManagers) ValidateBasic() error {
 	if _, _, err := ValidateAndNormalizeVoteManagerPolicy(msg.NewVoteManagers, msg.NewThreshold); err != nil {
 		return err
 	}
+	if NormalizeMinCeremonyValidators(msg.NewMinCeremonyValidators) < 1 {
+		return fmt.Errorf("%w: new_min_ceremony_validators must be at least 1", ErrInvalidField)
+	}
 	return nil
 }
 

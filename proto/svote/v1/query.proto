@@ -149,6 +149,7 @@ message QueryVoteManagersRequest {}
 message QueryVoteManagersResponse {
   repeated string vote_manager_addresses = 1;
   uint32 threshold = 2;
+  uint32 min_ceremony_validators = 3;
 }
 
 message QueryVoteSummaryRequest {

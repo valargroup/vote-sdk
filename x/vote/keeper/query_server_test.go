@@ -519,3 +519,29 @@ func (s *QueryServerTestSuite) TestPendingCoordinatorActions_ExcludesExpiredPend
 	s.Require().Len(resp.Actions, 1)
 	s.Require().Equal(uint64(2), resp.Actions[0].ActionId)
 }
+
+// ---------------------------------------------------------------------------
+// VoteManagers
+// ---------------------------------------------------------------------------
+
+func (s *QueryServerTestSuite) TestVoteManagers_ReturnsPolicyAndMinCeremonyValidators() {
+	manager := svtest.TestAccAddr(0x93)
+	kvStore := s.keeper.OpenKVStore(s.ctx)
+	s.Require().NoError(s.keeper.SetVoteManagers(kvStore, &types.VoteManagerSet{
+		Addresses: []string{manager},
+		Threshold: 1,
+	}))
+	s.Require().NoError(s.keeper.SetMinCeremonyValidators(kvStore, 5))
+
+	resp, err := s.queryServer.VoteManagers(s.ctx, &types.QueryVoteManagersRequest{})
+	s.Require().NoError(err)
+	s.Require().Equal([]string{manager}, resp.VoteManagerAddresses)
+	s.Require().Equal(uint32(1), resp.Threshold)
+	s.Require().Equal(uint32(5), resp.MinCeremonyValidators)
+}
+
+func (s *QueryServerTestSuite) TestVoteManagers_DefaultMinCeremonyValidatorsWhenUnset() {
+	resp, err := s.queryServer.VoteManagers(s.ctx, &types.QueryVoteManagersRequest{})
+	s.Require().NoError(err)
+	s.Require().Equal(uint32(1), resp.MinCeremonyValidators)
+}

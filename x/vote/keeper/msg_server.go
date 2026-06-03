@@ -215,9 +215,10 @@ func (ms msgServer) CastVote(goCtx context.Context, msg *types.MsgCastVote) (*ty
 	return &types.MsgCastVoteResponse{}, nil
 }
 
-// executeUpdateVoteManagers atomically replaces the vote-manager set. See proto
-// for semantics. Allows the caller to remove themselves from the new set — the
-// non-empty check is the only liveness guarantee.
+// executeUpdateVoteManagers atomically replaces the vote-manager set, threshold,
+// and min_ceremony_validators. See proto for semantics. Allows the caller to
+// remove themselves from the new set — the non-empty check is the only liveness
+// guarantee.
 func (ms msgServer) executeUpdateVoteManagers(goCtx context.Context, msg *types.MsgUpdateVoteManagers) (*types.MsgUpdateVoteManagersResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 
@@ -225,6 +226,7 @@ func (ms msgServer) executeUpdateVoteManagers(goCtx context.Context, msg *types.
 	if err != nil {
 		return nil, fmt.Errorf("new_vote_manager_policy: %w", err)
 	}
+	minCeremonyValidators := types.NormalizeMinCeremonyValidators(msg.NewMinCeremonyValidators)
 
 	for _, addr := range normalized {
 		accAddr, err := sdk.AccAddressFromBech32(addr)
@@ -240,11 +242,15 @@ func (ms msgServer) executeUpdateVoteManagers(goCtx context.Context, msg *types.
 	if err := ms.k.SetVoteManagers(kvStore, &types.VoteManagerSet{Addresses: normalized, Threshold: threshold}); err != nil {
 		return nil, err
 	}
+	if err := ms.k.SetMinCeremonyValidators(kvStore, minCeremonyValidators); err != nil {
+		return nil, err
+	}
 
 	ctx.EventManager().EmitEvent(sdk.NewEvent(
 		types.EventTypeUpdateVoteManagers,
 		sdk.NewAttribute(types.AttributeKeyVoteManagers, strings.Join(normalized, ",")),
 		sdk.NewAttribute(types.AttributeKeyThreshold, fmt.Sprintf("%d", threshold)),
+		sdk.NewAttribute(types.AttributeKeyMinCeremonyValidators, fmt.Sprintf("%d", minCeremonyValidators)),
 		sdk.NewAttribute(types.AttributeKeyCreator, msg.Creator),
 	))
 

@@ -4,7 +4,15 @@ All notable changes to this repository will be documented in this file.
 
 Historical changes before commit `704b202e2088b91caeaf2290cef85e4a9a759542` are untracked.
 
-## Unreleased
+## v0.11.0
+
+### Added
+
+- Let coordinator policy updates set `min_ceremony_validators` through
+  `MsgUpdateVoteManagers`, expose the current value on the vote-managers query,
+  and add propose/current-policy controls on the admin Approvals page.
+
+## v0.10.0
 
 ### Changed
 
