@@ -16,6 +16,7 @@ use halo2_proofs::pasta::Fp;
 use pasta_curves::group::ff::PrimeField;
 
 use crate::delegation;
+use crate::proof::{verify_halo2_proof_bytes, ProofVerifyError};
 use crate::redpallas;
 use crate::share_reveal;
 use crate::toy;
@@ -42,6 +43,26 @@ fn set_ffi_error(msg: impl AsRef<str>) {
     let cstr = CString::new(s)
         .unwrap_or_else(|_| CString::new("<error message contained NUL byte>").unwrap());
     LAST_ERROR.with(|cell| *cell.borrow_mut() = cstr);
+}
+
+fn verify_ffi_halo2_proof(
+    label: &str,
+    params: &halo2_proofs::poly::commitment::Params<halo2_proofs::pasta::EqAffine>,
+    vk: &halo2_proofs::plonk::VerifyingKey<halo2_proofs::pasta::EqAffine>,
+    proof: &[u8],
+    public_inputs: &[Fp],
+) -> i32 {
+    match verify_halo2_proof_bytes(params, vk, proof, public_inputs) {
+        Ok(()) => 0,
+        Err(ProofVerifyError::Halo2(e)) => {
+            set_ffi_error(format!("{label}: verify_proof failed: {:?}", e));
+            -2
+        }
+        Err(ProofVerifyError::TrailingBytes(len)) => {
+            set_ffi_error(format!("{label}: proof has {len} trailing unread bytes"));
+            -2
+        }
+    }
 }
 
 /// Return a pointer to the last error message for the current thread.
@@ -518,26 +539,7 @@ pub unsafe extern "C" fn sv_verify_delegation_proof(
                 return -6;
             }
         };
-        let strategy = halo2_proofs::plonk::SingleVerifier::new(params);
-        let mut transcript = halo2_proofs::transcript::Blake2bRead::<
-            _,
-            halo2_proofs::pasta::EqAffine,
-            halo2_proofs::transcript::Challenge255<_>,
-        >::init(proof);
-
-        match halo2_proofs::plonk::verify_proof(
-            params,
-            vk,
-            strategy,
-            &[&[&public_inputs]],
-            &mut transcript,
-        ) {
-            Ok(()) => 0,
-            Err(e) => {
-                set_ffi_error(format!("delegation: verify_proof failed: {:?}", e));
-                -2
-            }
-        }
+        verify_ffi_halo2_proof("delegation", params, vk, proof, &public_inputs)
     }));
     match result {
         Ok(code) => code,
@@ -743,26 +745,7 @@ pub unsafe extern "C" fn sv_verify_vote_proof(
                 return -6;
             }
         };
-        let strategy = halo2_proofs::plonk::SingleVerifier::new(params);
-        let mut transcript = halo2_proofs::transcript::Blake2bRead::<
-            _,
-            halo2_proofs::pasta::EqAffine,
-            halo2_proofs::transcript::Challenge255<_>,
-        >::init(proof);
-
-        match halo2_proofs::plonk::verify_proof(
-            params,
-            vk,
-            strategy,
-            &[&[&public_inputs]],
-            &mut transcript,
-        ) {
-            Ok(()) => 0,
-            Err(e) => {
-                set_ffi_error(format!("vote: verify_proof failed: {:?}", e));
-                -2
-            }
-        }
+        verify_ffi_halo2_proof("vote", params, vk, proof, &public_inputs)
     }));
     match result {
         Ok(code) => code,
@@ -939,26 +922,7 @@ pub unsafe extern "C" fn sv_verify_share_reveal_proof(
                 return -6;
             }
         };
-        let strategy = halo2_proofs::plonk::SingleVerifier::new(params);
-        let mut transcript = halo2_proofs::transcript::Blake2bRead::<
-            _,
-            halo2_proofs::pasta::EqAffine,
-            halo2_proofs::transcript::Challenge255<_>,
-        >::init(proof);
-
-        match halo2_proofs::plonk::verify_proof(
-            params,
-            vk,
-            strategy,
-            &[&[&public_inputs]],
-            &mut transcript,
-        ) {
-            Ok(()) => 0,
-            Err(e) => {
-                set_ffi_error(format!("share_reveal: verify_proof failed: {:?}", e));
-                -2
-            }
-        }
+        verify_ffi_halo2_proof("share_reveal", params, vk, proof, &public_inputs)
     }));
     match result {
         Ok(code) => code,
@@ -1251,7 +1215,7 @@ pub fn build_share_reveal_test_data() -> (
 
     // Deterministic test EA secret key and public key.
     let ea_sk = pallas::Scalar::from(777u64);
-    let g = pallas::Point::from(voting_circuits::vote_proof::spend_auth_g_affine());
+    let g = pallas::Point::from(voting_circuits::spend_auth_g_affine());
     let ea_pk = g * ea_sk;
 
     // Synthetic blind factors.
@@ -1290,7 +1254,7 @@ pub fn build_share_reveal_test_data() -> (
 
     // Compute share commitments using full (x, y) coordinates and shares_hash.
     let share_comms: [pallas::Base; 16] = core::array::from_fn(|i| {
-        voting_circuits::vote_proof::share_commitment(
+        voting_circuits::share_commitment(
             share_blinds[i],
             all_c1_x[i],
             all_c2_x[i],
@@ -2102,6 +2066,30 @@ mod tests {
         };
 
         assert_eq!(verify_rc, 0, "verification failed with code {}", verify_rc);
+
+        let mut proof_with_trailing_bytes = proof.to_vec();
+        proof_with_trailing_bytes.extend_from_slice(b"junk");
+
+        let trailing_verify_rc = unsafe {
+            sv_verify_share_reveal_proof(
+                proof_with_trailing_bytes.as_ptr(),
+                proof_with_trailing_bytes.len(),
+                public_inputs.as_ptr(),
+                public_inputs.len(),
+            )
+        };
+        let last_error = unsafe { std::ffi::CStr::from_ptr(sv_last_error()) }
+            .to_string_lossy()
+            .into_owned();
+
+        assert_eq!(
+            trailing_verify_rc, -2,
+            "trailing proof bytes should fail with code -2"
+        );
+        assert!(
+            last_error.contains("4 trailing unread bytes"),
+            "unexpected error: {last_error}"
+        );
     }
 
     #[test]

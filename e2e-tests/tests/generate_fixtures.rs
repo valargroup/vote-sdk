@@ -23,7 +23,7 @@ use e2e_tests::payloads;
 use e2e_tests::setup::build_multi_delegation_bundles;
 
 use vote_commitment_tree::MemoryTreeServer;
-use voting_circuits::vote_proof::VOTE_COMM_TREE_DEPTH;
+use voting_circuits::VOTE_COMM_TREE_DEPTH;
 
 // ---------------------------------------------------------------------------
 // Serializable fixture types

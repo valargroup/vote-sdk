@@ -53,7 +53,7 @@ use group::GroupEncoding;
 use pasta_curves::pallas;
 use rand::rngs::OsRng;
 use serde::Deserialize;
-use voting_circuits::vote_proof::{build_vote_proof_from_delegation, VOTE_COMM_TREE_DEPTH};
+use voting_circuits::{vote_proof::build_vote_proof_from_delegation, VOTE_COMM_TREE_DEPTH};
 
 // ---------------------------------------------------------------------------
 // Fixture deserialization types (must match generate_fixtures.rs)
