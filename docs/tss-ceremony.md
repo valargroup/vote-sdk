@@ -14,13 +14,14 @@ For a ceremony with `n` validators:
 
 ```
 t(n) = 1                       (n = 1: trivial single-share, no threshold security)
-t(n) = max(2, ceil(n/2))       (n >= 2)
+t(n) = max(2, ceil(2n/3))      (n >= 2)
 ```
 
 The TSS reconstruction threshold `t` is deliberately separate from the
 ceremony activation quorum. Timeout activation requires roughly 80% of the
-ceremony set so the survivor set has margin above `t` if a validator later
-withholds partial decryptions:
+ceremony set. With a two-thirds TSS threshold, that usually leaves a small
+margin above `t`, but for some validator counts (for example `n = 5`) the
+activation quorum equals the tally threshold:
 
 ```
 required(n) = ceil(4n/5)
@@ -31,10 +32,10 @@ required(n) = ceil(4n/5)
 | 1 | 1 | 1 | Single share = full key; for local testing only |
 | 2 | 2 | 2 | Both validators required |
 | 3 | 2 | 3 | All validators required for activation |
-| 4 | 2 | 4 | All validators required for activation |
-| 5 | 3 | 4 | Canonical 4/5 quorum |
-| 6 | 3 | 5 | |
-| 9 | 5 | 8 | |
+| 4 | 3 | 4 | All validators required for activation |
+| 5 | 4 | 4 | 4/5 activation has no extra tally slack |
+| 6 | 4 | 5 | |
+| 9 | 6 | 8 | |
 
 **Warning:** with `n = 1, t = 1` the single validator holds the full `ea_sk` (the degree-0 polynomial makes `share = secret`). This provides no threshold security and should only be used for local development/testing.
 
@@ -63,7 +64,7 @@ retried.
 
 When a block proposer detects a PENDING round in REGISTERING status, is a ceremony validator, and has not yet contributed:
 
-1. Generate a random secret `s_i` and compute `t = max(2, ceil(n/2))` for `n >= 2` (`t = 1` for the single-validator dev path).
+1. Generate a random secret `s_i` and compute `t = max(2, ceil(2n/3))` for `n >= 2` (`t = 1` for the single-validator dev path).
 2. Build a degree-`(t-1)` polynomial `f_i(x)` over Pallas Fq with `f_i(0) = s_i`:
    ```
    f_i(x) = s_i + a_1*x + a_2*x^2 + ... + a_{t-1}*x^{t-1}
@@ -248,8 +249,8 @@ Implementation:
 |---|---|
 | Who knows `ea_sk` | **Nobody** — `ea_sk = sum(s_i)` is never assembled |
 | Single party can decrypt votes | No — requires `t` partial decryptions |
-| Malicious contributor sends bad shares | Detected at ack time (Feldman verification per contributor); timeout activation requires `ceil(4n/5)` acks so threshold-sized survivor sets do not activate |
-| Malicious validator sabotages tally | Invalid partial decryptions are rejected by DLEQ; withholding is tolerated while enough honest survivors remain above `t` |
+| Malicious contributor sends bad shares | Detected at ack time (Feldman verification per contributor); timeout activation requires `ceil(4n/5)` acks, which can equal the threshold for small validator sets |
+| Malicious validator sabotages tally | Invalid partial decryptions are rejected by DLEQ; withholding is tolerated only while enough honest survivors remain at or above `t` |
 | Offline validator | REGISTERING phase times out after `DefaultContributionTimeout` (10 min), non-contributors are jailed through `x/slashing`, the pending round is marked `SESSION_STATUS_CEREMONY_FAILED`, and a later create transaction can retry the same vote metadata with a fresh height-derived `vote_round_id` |
 | Compromised Pallas key | Validator rotates via `MsgRotatePallasKey` (blocked during in-flight ceremonies). Future rounds use the new key. Past ECIES ciphertexts in completed `DkgContributions` remain encrypted to the old key. |
 | Liveness (all honest, n validators) | ~2n blocks (n contributions + n acks) |
@@ -276,10 +277,10 @@ Two liveness gaps were identified during DKG review.
 required(n) = ceil(4n/5)
 ```
 
-For `n = 5`, this gives `t = 3`, `required = 4`: if one surviving validator
-withholds during tally, the remaining three can still finalize. This does not
-prove encrypted-share correctness; it only prevents activation with no liveness
-slack.
+For `n = 5`, this gives `t = 4`, `required = 4`: the timeout path can activate
+with exactly the tally threshold, so one surviving validator withholding during
+tally can prevent normal finalization. This does not prove encrypted-share
+correctness; it only keeps activation tied to the 4/5 ceremony quorum.
 
 **Why naive skipping doesn't work.** If `ackDKGRound` simply skipped a bad contributor and summed the remaining shares, validators would need to agree on who was skipped. A sophisticated attacker can send bad shares to *some* validators and valid shares to others. Validators who received good shares include the attacker in their sum; those who received bad shares exclude them. The two groups end up with shares of different combined polynomials — threshold decryption would fail later.
 
@@ -289,13 +290,15 @@ Analysis for a single malicious validator `j` who sends bad shares to `k` out
 of `n-1` honest validators under a future skip-set protocol must use the same
 `required(n) = ceil(4n/5)` quorum, not a bare majority:
 
-- `n-k >= required(n)`: the no-skip view has enough validators to confirm with `j` included, while still preserving tally slack.
-- `k >= required(n)`: the skip-`j` view has enough validators to recompute without `j`, while still preserving tally slack.
+- `n-k >= required(n)`: the no-skip view has enough validators to confirm with `j` included, preserving any tally slack available for that validator count.
+- `k >= required(n)`: the skip-`j` view has enough validators to recompute without `j`, preserving any tally slack available for that validator count.
 - Neither side reaches `required(n)`: the ceremony fails rather than activating a threshold-sized or view-split survivor set.
 - `k = n-1` (bad to everyone): unanimous `{skip j}`. Confirms only if the
   remaining set still meets the required quorum; otherwise the ceremony fails.
 
-A single attacker cannot force activation with no liveness margin. The attack
+A single attacker cannot lower the activation requirement below `required(n)`.
+For validator counts where `required(n) == t(n)`, a successful timeout
+activation still has no extra tally liveness margin. Otherwise, the attack
 degrades to either a bounded failed ceremony or to requiring enough coordinated
 selective targeting that no view reaches `required(n)`.
 

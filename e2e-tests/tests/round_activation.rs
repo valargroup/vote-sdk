@@ -6,7 +6,7 @@
 //!   3. Waits for all 3 validators to auto-deal and auto-ack via
 //!      PrepareProposal, transitioning the round to ACTIVE.
 //!   4. Asserts threshold=2, 3 ceremony validators, and 2 Feldman
-//!      commitments (Joint-Feldman DKG with t=ceil(3/2)=2).
+//!      commitments (Joint-Feldman DKG with t=ceil(2n/3)=2).
 //!
 //! Requires a 3-validator chain running via `make init-multi && make start-multi`.
 //!
@@ -15,9 +15,8 @@
 
 use e2e_tests::{
     api::{
-        broadcast_cosmos_msg, default_cosmos_tx_config, get_round,
-        wait_for_create_round_id, wait_for_round_status, FIRST_VOTE_MANAGER_KEY_NAME,
-        SESSION_STATUS_ACTIVE,
+        broadcast_cosmos_msg, default_cosmos_tx_config, get_round, wait_for_create_round_id,
+        wait_for_round_status, FIRST_VOTE_MANAGER_KEY_NAME, SESSION_STATUS_ACTIVE,
     },
     payloads::{coordinator_action_proposal_payload, create_voting_session_payload},
 };
@@ -50,7 +49,11 @@ fn round_activation() {
     };
     let (status, json) =
         broadcast_cosmos_msg(&body, &vm_config).expect("broadcast create-voting-session");
-    assert_eq!(status, 200, "create session: HTTP {}, body={:?}", status, json);
+    assert_eq!(
+        status, 200,
+        "create session: HTTP {}, body={:?}",
+        status, json
+    );
     assert_eq!(
         json.get("code").and_then(|c| c.as_i64()).unwrap_or(-1),
         0,
@@ -62,7 +65,10 @@ fn round_activation() {
     // Wait for auto-deal + auto-ack across all 3 validators → round becomes ACTIVE.
     // With 3 validators each needing a proposer turn for deal and ack, this can
     // take 20+ blocks depending on weighted round-robin scheduling.
-    eprintln!("[E2E] Waiting for round {} to become ACTIVE (3-validator DKG)...", &round_id_hex);
+    eprintln!(
+        "[E2E] Waiting for round {} to become ACTIVE (3-validator DKG)...",
+        &round_id_hex
+    );
     wait_for_round_status(&round_id_hex, SESSION_STATUS_ACTIVE, 180_000, 2_000)
         .expect("round should become ACTIVE via per-round ceremony");
     eprintln!("[E2E] Round {} is ACTIVE", round_id_hex);
@@ -98,7 +104,8 @@ fn round_activation() {
     // Log individual validator addresses for diagnostics.
     if let Some(vals) = ceremony_validators {
         for (i, v) in vals.iter().enumerate() {
-            let addr = v.get("validatorAddress")
+            let addr = v
+                .get("validatorAddress")
                 .or_else(|| v.get("validator_address"))
                 .and_then(|a| a.as_str())
                 .unwrap_or("unknown");
@@ -106,10 +113,19 @@ fn round_activation() {
         }
     }
 
-    assert_eq!(n_validators, 3,
-        "expected 3 ceremony validators, got {}", n_validators);
-    assert_eq!(threshold, 2,
-        "expected threshold=2 for 3 validators (ceil(3/2)), got {}", threshold);
-    assert_eq!(feldman_count, 2,
-        "expected 2 Feldman commitments (== threshold), got {}", feldman_count);
+    assert_eq!(
+        n_validators, 3,
+        "expected 3 ceremony validators, got {}",
+        n_validators
+    );
+    assert_eq!(
+        threshold, 2,
+        "expected threshold=2 for 3 validators (ceil(2n/3)), got {}",
+        threshold
+    );
+    assert_eq!(
+        feldman_count, 2,
+        "expected 2 Feldman commitments (== threshold), got {}",
+        feldman_count
+    );
 }

@@ -590,10 +590,8 @@ func runLargeValidatorBench(t *testing.T, numValidators, numVotes int) {
 	app, eaPk, eaSkBytes := testutil.SetupTestAppWithEAKey(t)
 	proposerAddr := app.ValidatorOperAddr()
 
-	threshold := (numValidators + 1) / 2
-	if threshold < 2 {
-		threshold = 2
-	}
+	threshold, err := votekeeper.ThresholdForN(numValidators)
+	require.NoError(t, err)
 
 	eaSk, err := elgamal.UnmarshalSecretKey(eaSkBytes)
 	require.NoError(t, err)

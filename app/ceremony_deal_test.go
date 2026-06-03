@@ -22,6 +22,7 @@ import (
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/crypto/shamir"
 	"github.com/valargroup/vote-sdk/testutil"
+	votekeeper "github.com/valargroup/vote-sdk/x/vote/keeper"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
@@ -601,7 +602,8 @@ func buildDKGDealtRoundState(
 
 	G := elgamal.PallasGenerator()
 	n := len(validatorAddrs)
-	tVal := (n + 1) / 2 // ceil(n/2)
+	tVal, err := votekeeper.ThresholdForN(n)
+	require.NoError(t, err)
 
 	allShares = make([][]shamir.Share, n)
 	allCoeffs = make([][]curvey.Scalar, n)
@@ -647,7 +649,7 @@ func buildDKGDealtRoundState(
 		}
 	}
 
-	combinedPts, err := shamir.CombineCommitments(allCommitmentPts)
+	combinedPts, err = shamir.CombineCommitments(allCommitmentPts)
 	require.NoError(t, err)
 
 	combinedSerialized = make([][]byte, len(combinedPts))
@@ -673,7 +675,8 @@ func seedDKGDealtRound(
 	t.Helper()
 
 	n := len(validatorAddrs)
-	tVal := (n + 1) / 2
+	tVal, err := votekeeper.ThresholdForN(n)
+	require.NoError(t, err)
 
 	validators := make([]*types.ValidatorPallasKey, n)
 	for i := range validatorAddrs {
@@ -702,7 +705,7 @@ func seedDKGDealtRound(
 		Threshold:            uint32(tVal),
 		FeldmanCommitments:   combinedSerialized,
 	}
-	err := ta.VoteKeeper().SetVoteRound(kvStore, round)
+	err = ta.VoteKeeper().SetVoteRound(kvStore, round)
 	require.NoError(t, err)
 	ta.NextBlock()
 

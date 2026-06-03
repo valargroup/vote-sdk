@@ -45,8 +45,8 @@ func (k *Keeper) SetCeremonyState(kvStore store.KVStore, state *types.CeremonySt
 
 // ThresholdForN computes the tally reconstruction threshold for n validators.
 // Ceremony activation uses RequiredCeremonyQuorumForN instead; keeping the two
-// values separate leaves liveness slack for later partial-decryption
-// withholding after non-ackers/non-contributors have been stripped.
+// values separate lets the activation policy evolve independently from the
+// reconstruction policy.
 //
 // For n = 1 returns t = 1 (trivial single-share scheme with no threshold
 // security — used for local testing). Returns an error if n < 1.
@@ -57,7 +57,7 @@ func ThresholdForN(n int) (int, error) {
 	if n == 1 {
 		return 1, nil
 	}
-	t := (n + 1) / 2
+	t := (2*n + 2) / 3
 	if t < 2 {
 		t = 2
 	}
@@ -69,8 +69,8 @@ func ThresholdForN(n int) (int, error) {
 //
 //	required(n) = ceil(4n/5)
 //
-// It is stricter than the tally threshold t: activating with ceil(4n/5)
-// ackers leaves required(n)-t extra active validators above the tally threshold.
+// It is stricter than the tally threshold t for most validator counts, but the
+// margin depends on the threshold policy.
 func RequiredCeremonyQuorumForN(n int) (int, error) {
 	if n < 1 {
 		return 0, fmt.Errorf("RequiredCeremonyQuorumForN: n must be >= 1, got %d", n)

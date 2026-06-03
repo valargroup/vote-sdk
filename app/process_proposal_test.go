@@ -681,10 +681,10 @@ func TestPrepareProposalDKGContributionAcceptedByProcessProposal(t *testing.T) {
 		n                 int
 		expectedThreshold uint32
 	}{
-		{"n=2 → t=2", 2, 2},
-		{"n=3 → t=2", 3, 2},
-		{"n=5 → t=3", 5, 3},
-		{"n=7 → t=4", 7, 4},
+		{"n=2 -> t=2", 2, 2},
+		{"n=3 -> t=2", 3, 2},
+		{"n=5 -> t=4", 5, 4},
+		{"n=7 -> t=5", 7, 5},
 	}
 
 	for _, tc := range tests {

@@ -471,11 +471,8 @@ func (ta *TestApp) SeedDealtCeremony(pallasPkBytes, eaPkBytes []byte, validators
 	h.Write(eaPkBytes)
 	roundID := h.Sum(nil)
 
-	n := len(validators)
-	t := (n + 1) / 2
-	if t < 2 {
-		t = 2
-	}
+	t, err := votekeeper.ThresholdForN(len(validators))
+	require.NoError(ta.t, err)
 	commitments := make([][]byte, t)
 	for i := range commitments {
 		commitments[i] = bytes.Repeat([]byte{byte(i + 1)}, 32)
@@ -492,7 +489,7 @@ func (ta *TestApp) SeedDealtCeremony(pallasPkBytes, eaPkBytes []byte, validators
 		Threshold:            uint32(t),
 		FeldmanCommitments:   commitments,
 	}
-	err := ta.VoteKeeper().SetVoteRound(kvStore, round)
+	err = ta.VoteKeeper().SetVoteRound(kvStore, round)
 	require.NoError(ta.t, err)
 
 	ta.NextBlock()
