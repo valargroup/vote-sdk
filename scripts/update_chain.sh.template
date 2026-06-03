@@ -44,6 +44,7 @@ REQUIRE_COSMOVISOR_SERVICE=1
 HOME_CLI_SET=0
 INSTALL_CLI_SET=0
 TIMEOUT_SECS=120
+WRAPPER_SVOTED_START_ARGS="${SVOTE_WRAPPER_SVOTED_START_ARGS:-}"
 
 # usage
 # Print CLI help for update_chain.sh modes and options, then return (caller exits 0 on --help).
@@ -61,12 +62,14 @@ Options:
   --allow-no-plan         Allow staging before a plan is scheduled on-chain
   --skip-cosmovisor-service  verify-prestage: skip systemd Cosmovisor service checks
   --timeout-secs N        RPC readiness timeout after migrate restart (default: 120)
+  --wrapper-svoted-start-args ARGS  Extra svoted start args for wrapper/cosmovisor (e.g. "--serve-ui --ui-dist /opt/shielded-vote/current/ui/dist")
   --repo OWNER/REPO       GitHub repo for release fallback (default: ${UPDATE_DEFAULT_GITHUB_REPO})
   --do-base URL           DigitalOcean Spaces base URL (default: ${UPDATE_DEFAULT_DO_BASE})
   --help                  Show this help text.
 
 Environment:
   SVOTE_ACK_SINGLE_SIGNER=1   Required in non-interactive mode for migrate/prepare service checks.
+  SVOTE_WRAPPER_SVOTED_START_ARGS  Extra svoted start args consumed by svoted-wrapper.sh.
 EOF
 }
 
@@ -147,6 +150,15 @@ while [ "$#" -gt 0 ]; do
       TIMEOUT_SECS="${1#--timeout-secs=}"
       shift
       ;;
+    --wrapper-svoted-start-args)
+      [ "$#" -ge 2 ] || svote_upgrade_die "--wrapper-svoted-start-args requires a value."
+      WRAPPER_SVOTED_START_ARGS="$2"
+      shift 2
+      ;;
+    --wrapper-svoted-start-args=*)
+      WRAPPER_SVOTED_START_ARGS="${1#--wrapper-svoted-start-args=}"
+      shift
+      ;;
     --repo)
       [ "$#" -ge 2 ] || svote_upgrade_die "--repo requires OWNER/REPO."
       SVOTE_GITHUB_REPO="$2"
@@ -192,6 +204,8 @@ if [ "$UPDATE_DEFAULT_DO_BASE" != '__DO_BASE__' ]; then
   SVOTE_DO_SPACES_BASE="${SVOTE_DO_SPACES_BASE:-$UPDATE_DEFAULT_DO_BASE}"
 fi
 SVOTE_GITHUB_REPO="${SVOTE_GITHUB_REPO:-$UPDATE_DEFAULT_GITHUB_REPO}"
+SVOTE_WRAPPER_SVOTED_START_ARGS="$WRAPPER_SVOTED_START_ARGS"
+export SVOTE_WRAPPER_SVOTED_START_ARGS
 
 svote_upgrade_require_linux_systemd_root
 svote_upgrade_require_curl
@@ -271,9 +285,7 @@ run_verify_prestage() {
 run_migrate() {
   local backup_unit
 
-  if [ ! -x "$WRAPPER_BIN" ]; then
-    svote_upgrade_die "Wrapper script missing: ${WRAPPER_BIN}. Re-run join.sh or publish svoted-wrapper.sh."
-  fi
+  svote_upgrade_ensure_wrapper_script
 
   svote_upgrade_require_single_signer_ack
   svote_upgrade_stop_validator_service
