@@ -8,6 +8,7 @@ Historical changes before commit `704b202e2088b91caeaf2290cef85e4a9a759542` are 
 
 ### Changed
 
+- Raise TSS threshold to two thirds
 - Reject Halo2 proofs with trailing unread transcript bytes at the Rust FFI
   verifier boundary, and update the Rust voting dependencies to the published
   `voting-circuits` 0.7.0 / `zcash_voting` 0.10.2 releases.
