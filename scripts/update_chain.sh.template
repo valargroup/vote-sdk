@@ -77,6 +77,7 @@ Migrate notes:
   Switches systemd to cosmovisor-managed wrapper startup. Missing SVOTE_HOME/MONIKER env is
   auto-filled from validator home. Direct-mode ExecStart flags (e.g. --serve-ui) are copied
   into SVOTE_WRAPPER_SVOTED_START_ARGS unless --wrapper-svoted-start-args is provided.
+  Migrate now validates effective runtime mode and fails unless a cosmovisor process is active.
 EOF
 }
 
@@ -300,6 +301,7 @@ run_migrate() {
   backup_unit=$(svote_upgrade_patch_systemd_unit_for_cosmovisor)
   svote_upgrade_restart_service "$backup_unit"
   svote_upgrade_wait_for_rpc "$TIMEOUT_SECS"
+  svote_upgrade_assert_cosmovisor_runtime
   svote_upgrade_log "Migration to Cosmovisor service completed."
 }
 
