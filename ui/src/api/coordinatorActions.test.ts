@@ -70,11 +70,13 @@ describe("describeCoordinatorActionPayload", () => {
       stringField(2, "svote1manager1"),
       stringField(2, "svote1manager2"),
       varintField(3, 2),
+      varintField(4, 3),
     ])));
 
     expect(description.canApprove).toBe(true);
     expect(valueFor(description, "Creator")).toBe("svote1creator");
     expect(valueFor(description, "New threshold")).toBe("2");
+    expect(valueFor(description, "New min ceremony validators")).toBe("3");
     expect(valueFor(description, "New managers")).toContain("svote1manager2");
   });
 

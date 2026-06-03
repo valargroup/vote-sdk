@@ -287,8 +287,14 @@ func (qs queryServer) VoteManagers(goCtx context.Context, req *types.QueryVoteMa
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to get vote-manager set: %v", err)
 	}
+	minCeremonyValidators, err := qs.k.GetMinCeremonyValidators(kvStore)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get min ceremony validators: %v", err)
+	}
 
-	resp := &types.QueryVoteManagersResponse{}
+	resp := &types.QueryVoteManagersResponse{
+		MinCeremonyValidators: minCeremonyValidators,
+	}
 	if set != nil {
 		resp.VoteManagerAddresses = set.Addresses
 		resp.Threshold = set.Threshold

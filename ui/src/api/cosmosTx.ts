@@ -114,7 +114,7 @@ class ProtoWriter {
 // auth accounts are initialized by the chain handler.
 const MsgUpdateVoteManagersProto = {
   encode(
-    message: { creator: string; newVoteManagers: string[]; newThreshold: number },
+    message: { creator: string; newVoteManagers: string[]; newThreshold: number; newMinCeremonyValidators: number },
     writer: ProtoWriter = ProtoWriter.create(),
   ): ProtoWriter {
     if (message.creator !== "") writer.uint32(10).string(message.creator);
@@ -122,18 +122,20 @@ const MsgUpdateVoteManagersProto = {
       writer.uint32(18).string(vm);
     }
     if (message.newThreshold !== 0) writer.uint32(24).uint32(message.newThreshold);
+    if (message.newMinCeremonyValidators !== 0) writer.uint32(32).uint32(message.newMinCeremonyValidators);
     return writer;
   },
-  decode(): { creator: string; newVoteManagers: string[]; newThreshold: number } {
+  decode(): { creator: string; newVoteManagers: string[]; newThreshold: number; newMinCeremonyValidators: number } {
     throw new Error("decode not implemented");
   },
   fromPartial(
-    object: Partial<{ creator: string; newVoteManagers: string[]; newThreshold: number }>,
-  ): { creator: string; newVoteManagers: string[]; newThreshold: number } {
+    object: Partial<{ creator: string; newVoteManagers: string[]; newThreshold: number; newMinCeremonyValidators: number }>,
+  ): { creator: string; newVoteManagers: string[]; newThreshold: number; newMinCeremonyValidators: number } {
     return {
       creator: object.creator ?? "",
       newVoteManagers: object.newVoteManagers ?? [],
       newThreshold: object.newThreshold ?? 0,
+      newMinCeremonyValidators: object.newMinCeremonyValidators ?? 0,
     };
   },
 };
@@ -803,6 +805,7 @@ export async function updateVoteManagers(
   signer: OfflineDirectSigner,
   newVoteManagers: string[],
   newThreshold = 1,
+  newMinCeremonyValidators = 1,
 ): Promise<BroadcastResult> {
   const [account] = await signer.getAccounts();
   return proposeCoordinatorPayload(
@@ -813,6 +816,7 @@ export async function updateVoteManagers(
       creator: account.address,
       newVoteManagers,
       newThreshold,
+      newMinCeremonyValidators,
     }),
   );
 }

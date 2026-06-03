@@ -28,6 +28,15 @@ func NormalizeVoteManagerThreshold(threshold uint32) uint32 {
 	return threshold
 }
 
+// NormalizeMinCeremonyValidators applies the default minimum ceremony validator
+// count. Zero means "use default 1".
+func NormalizeMinCeremonyValidators(minValidators uint32) uint32 {
+	if minValidators == 0 {
+		return 1
+	}
+	return minValidators
+}
+
 // ValidateAndNormalizeVoteManagerPolicy parses each manager address through
 // bech32, rejects duplicates, applies the default threshold, and enforces
 // 1 <= threshold <= len(addrs). The input list is not mutated.

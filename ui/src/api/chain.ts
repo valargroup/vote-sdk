@@ -515,13 +515,17 @@ export async function getCurrentUpgradePlan(): Promise<{ plan: UpgradePlan | nul
   };
 }
 
-export async function getVoteManagers(): Promise<{ vote_manager_addresses: string[]; threshold: number }> {
-  const resp = await fetchJson<{ vote_manager_addresses?: string[]; threshold?: number | string }>(
+export async function getVoteManagers(): Promise<{ vote_manager_addresses: string[]; threshold: number; min_ceremony_validators: number }> {
+  const resp = await fetchJson<{ vote_manager_addresses?: string[]; threshold?: number | string; min_ceremony_validators?: number | string }>(
     "/shielded-vote/v1/vote-managers"
   );
   return {
     vote_manager_addresses: resp.vote_manager_addresses ?? [],
     threshold: typeof resp.threshold === "number" ? resp.threshold : parseInt(resp.threshold ?? "1", 10) || 1,
+    min_ceremony_validators:
+      typeof resp.min_ceremony_validators === "number"
+        ? resp.min_ceremony_validators
+        : parseInt(resp.min_ceremony_validators ?? "1", 10) || 1,
   };
 }
 

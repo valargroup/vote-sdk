@@ -190,16 +190,17 @@ message PartialDecryptionEntry {
 
 message MsgSubmitPartialDecryptionResponse {}
 
-// MsgUpdateVoteManagers atomically replaces the coordinator set and threshold.
-// It is executed through coordinator action approval. It does not fund the
-// coordinators. The handler creates auth accounts for new managers when needed
-// so they can sign future transactions. Validation:
+// MsgUpdateVoteManagers atomically replaces the coordinator set, threshold, and
+// min_ceremony_validators. It is executed through coordinator action approval.
+// It does not fund the coordinators. The handler creates auth accounts for new
+// managers when needed so they can sign future transactions. Validation:
 // new_vote_managers must be non-empty, each entry a valid bech32 address, and no
 // duplicates (addresses normalized before compare).
 message MsgUpdateVoteManagers {
   string          creator    = 1; // Sender address (must be in the current coordinator set)
   repeated string new_vote_managers = 2; // Full replacement set
   uint32          new_threshold = 3; // Defaults to 1 when omitted; must be <= len(new_vote_managers)
+  uint32          new_min_ceremony_validators = 4; // Defaults to 1 when omitted; minimum eligible validators required to create a voting session
 }
 
 message MsgUpdateVoteManagersResponse {}

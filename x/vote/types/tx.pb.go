@@ -1447,19 +1447,20 @@ func (*MsgSubmitPartialDecryptionResponse) Descriptor() ([]byte, []int) {
 	return file_svote_v1_tx_proto_rawDescGZIP(), []int{23}
 }
 
-// MsgUpdateVoteManagers atomically replaces the coordinator set and threshold.
-// It is executed through coordinator action approval. It does not fund the
-// coordinators. The handler creates auth accounts for new managers when needed
-// so they can sign future transactions. Validation:
+// MsgUpdateVoteManagers atomically replaces the coordinator set, threshold, and
+// min_ceremony_validators. It is executed through coordinator action approval.
+// It does not fund the coordinators. The handler creates auth accounts for new
+// managers when needed so they can sign future transactions. Validation:
 // new_vote_managers must be non-empty, each entry a valid bech32 address, and no
 // duplicates (addresses normalized before compare).
 type MsgUpdateVoteManagers struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	Creator         string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`                                          // Sender address (must be in the current coordinator set)
-	NewVoteManagers []string               `protobuf:"bytes,2,rep,name=new_vote_managers,json=newVoteManagers,proto3" json:"new_vote_managers,omitempty"` // Full replacement set
-	NewThreshold    uint32                 `protobuf:"varint,3,opt,name=new_threshold,json=newThreshold,proto3" json:"new_threshold,omitempty"`           // Defaults to 1 when omitted; must be <= len(new_vote_managers)
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state                    protoimpl.MessageState `protogen:"open.v1"`
+	Creator                  string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`                                                                        // Sender address (must be in the current coordinator set)
+	NewVoteManagers          []string               `protobuf:"bytes,2,rep,name=new_vote_managers,json=newVoteManagers,proto3" json:"new_vote_managers,omitempty"`                               // Full replacement set
+	NewThreshold             uint32                 `protobuf:"varint,3,opt,name=new_threshold,json=newThreshold,proto3" json:"new_threshold,omitempty"`                                         // Defaults to 1 when omitted; must be <= len(new_vote_managers)
+	NewMinCeremonyValidators uint32                 `protobuf:"varint,4,opt,name=new_min_ceremony_validators,json=newMinCeremonyValidators,proto3" json:"new_min_ceremony_validators,omitempty"` // Defaults to 1 when omitted; minimum eligible validators required to create a voting session
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
 }
 
 func (x *MsgUpdateVoteManagers) Reset() {
@@ -1509,6 +1510,13 @@ func (x *MsgUpdateVoteManagers) GetNewVoteManagers() []string {
 func (x *MsgUpdateVoteManagers) GetNewThreshold() uint32 {
 	if x != nil {
 		return x.NewThreshold
+	}
+	return 0
+}
+
+func (x *MsgUpdateVoteManagers) GetNewMinCeremonyValidators() uint32 {
+	if x != nil {
+		return x.NewMinCeremonyValidators
 	}
 	return 0
 }
@@ -2466,11 +2474,12 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"\x0fpartial_decrypt\x18\x03 \x01(\fR\x0epartialDecrypt\x12\x1d\n" +
 	"\n" +
 	"dleq_proof\x18\x04 \x01(\fR\tdleqProof\"$\n" +
-	"\"MsgSubmitPartialDecryptionResponse\"\x82\x01\n" +
+	"\"MsgSubmitPartialDecryptionResponse\"\xc1\x01\n" +
 	"\x15MsgUpdateVoteManagers\x12\x18\n" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12*\n" +
 	"\x11new_vote_managers\x18\x02 \x03(\tR\x0fnewVoteManagers\x12#\n" +
-	"\rnew_threshold\x18\x03 \x01(\rR\fnewThreshold\"\x1f\n" +
+	"\rnew_threshold\x18\x03 \x01(\rR\fnewThreshold\x12=\n" +
+	"\x1bnew_min_ceremony_validators\x18\x04 \x01(\rR\x18newMinCeremonyValidators\"\x1f\n" +
 	"\x1dMsgUpdateVoteManagersResponse\"d\n" +
 	"\x11MsgAuthorizedSend\x12\x18\n" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12\x1d\n" +

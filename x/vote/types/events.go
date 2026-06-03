@@ -65,4 +65,5 @@ const (
 	AttributeKeyActionType       = "action_type"
 	AttributeKeyApprovalCount    = "approval_count"
 	AttributeKeyThreshold        = "threshold"
+	AttributeKeyMinCeremonyValidators = "min_ceremony_validators"
 )
