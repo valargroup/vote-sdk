@@ -58,6 +58,30 @@ if grep -q 'SVOTE_UPGRADE_MODE=direct' "$TMP_UNIT"; then
   fail "stale direct-mode env line still present"
 fi
 
+echo "=== systemd autodetect: infers --home from ExecStart ==="
+TMP_AUTODETECT_UNIT="$(mktemp)"
+trap 'rm -f "$TMP_UNIT" "$TMP_AUTODETECT_UNIT"; rm -rf "$TMP_MIGRATE"' EXIT
+cat > "$TMP_AUTODETECT_UNIT" <<'EOF'
+[Unit]
+Description=svoted
+
+[Service]
+User=root
+ExecStart=/usr/local/bin/svoted start --home /tmp/primary-home --serve-ui --ui-dist /opt/ui/dist
+EOF
+SERVICE_PATH="$TMP_AUTODETECT_UNIT"
+SERVICE_NAME="svoted"
+SVOTE_HOME="/tmp/default-home"
+DAEMON_HOME="/tmp/default-home"
+INSTALL_DIR="/tmp/default-install"
+WRAPPER_BIN="/tmp/default-install/svoted-wrapper.sh"
+COSMOVISOR_BIN="/tmp/default-install/cosmovisor"
+svote_upgrade_autodetect_from_systemd_unit 0 0 >/dev/null
+[ "$DAEMON_HOME" = "/tmp/primary-home" ] || fail "autodetect failed to infer home from ExecStart: ${DAEMON_HOME}"
+[ "$SVOTE_HOME" = "/tmp/primary-home" ] || fail "autodetect failed to set SVOTE_HOME from ExecStart: ${SVOTE_HOME}"
+[ "$INSTALL_DIR" = "/usr/local/bin" ] || fail "autodetect failed to infer install dir from ExecStart wrapper: ${INSTALL_DIR}"
+[ "$WRAPPER_BIN" = "/tmp/default-install/svoted-wrapper.sh" ] || fail "autodetect must not replace WRAPPER_BIN from direct ExecStart: ${WRAPPER_BIN}"
+
 echo "=== migrate patch: deterministic drop-in overrides primary direct config ==="
 SERVICE_NAME="svoted"
 SERVICE_PATH="${TMP_MIGRATE}/svoted.service"
@@ -86,6 +110,17 @@ ExecStart=
 ExecStart=/usr/local/bin/svoted start --home ${DAEMON_HOME} --serve-ui --ui-dist /opt/ui/dist
 EOF
 
+cat > "${TMP_MIGRATE}/svoted.service.d/zz-rogue.conf" <<EOF
+[Service]
+ExecStart=/usr/local/bin/svoted
+EOF
+
+cat > "${TMP_MIGRATE}/svoted.service.d/99-cosmovisor-migrate.conf" <<EOF
+[Service]
+Environment="SVOTE_UPGRADE_MODE=cosmovisor"
+Environment="DAEMON_HOME=${DAEMON_HOME}"
+EOF
+
 svote_upgrade_patch_systemd_unit_for_cosmovisor >/dev/null
 
 MIGRATE_DROPIN="${TMP_MIGRATE}/svoted.service.d/z-cosmovisor.conf"
@@ -102,15 +137,32 @@ grep -q 'Environment="DAEMON_ALLOW_DOWNLOAD_BINARIES=false"' "$MIGRATE_DROPIN" |
 grep -q 'Environment="SVOTE_WRAPPER_SVOTED_START_ARGS=--serve-ui --ui-dist /opt/ui/dist"' "$MIGRATE_DROPIN" || fail "drop-in missing wrapper args env"
 
 if grep -q '^ExecStart=' "${TMP_MIGRATE}/svoted.service.d/primary.conf"; then
-  fail "primary.conf still contains ExecStart override"
+  if ! grep -q "^ExecStart=${WRAPPER_BIN}$" "${TMP_MIGRATE}/svoted.service.d/primary.conf"; then
+    fail "primary.conf was not rewritten to wrapper ExecStart"
+  fi
+else
+  fail "primary.conf missing ExecStart lines after rewrite"
 fi
 if grep -q 'SVOTE_UPGRADE_MODE=direct' "${TMP_MIGRATE}/svoted.service.d/primary.conf"; then
   fail "primary.conf still contains direct mode env"
 fi
+if grep -q '^ExecStart=' "${TMP_MIGRATE}/svoted.service.d/zz-rogue.conf"; then
+  fail "zz-rogue.conf still contains ExecStart override"
+fi
+if grep -q 'SVOTE_UPGRADE_MODE=' "${TMP_MIGRATE}/svoted.service.d/99-cosmovisor-migrate.conf"; then
+  fail "legacy migrate drop-in still contains SVOTE_UPGRADE_MODE env"
+fi
+if grep -q 'DAEMON_HOME=' "${TMP_MIGRATE}/svoted.service.d/99-cosmovisor-migrate.conf"; then
+  fail "legacy migrate drop-in still contains DAEMON_HOME env"
+fi
 
 first_dropin="$(cat "$MIGRATE_DROPIN")"
+first_primary="$(cat "${TMP_MIGRATE}/svoted.service.d/primary.conf")"
 svote_upgrade_patch_systemd_unit_for_cosmovisor >/dev/null
 second_dropin="$(cat "$MIGRATE_DROPIN")"
+second_primary="$(cat "${TMP_MIGRATE}/svoted.service.d/primary.conf")"
 [ "$first_dropin" = "$second_dropin" ] || fail "migrate drop-in changed across repeated runs"
+[ "$first_dropin" = "$first_primary" ] || fail "primary.conf rewrite does not match canonical migrate drop-in"
+[ "$first_primary" = "$second_primary" ] || fail "primary.conf changed across repeated runs"
 
 echo "=== PASS: chain upgrade runtime-mode tests ==="
