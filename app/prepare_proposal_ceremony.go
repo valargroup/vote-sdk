@@ -120,8 +120,8 @@ func loadCoeffs(path string, expectedT int) ([]curvey.Scalar, error) {
 }
 
 // zeroAndDeleteCoeffsFile overwrites the DKG coefficients file with zeros and
-// removes it. Called after the ack handler has computed the combined share and
-// no longer needs the polynomial.
+// removes it. Call only from committed-state cleanup, after the ceremony has
+// moved past the speculative ack window.
 func zeroAndDeleteCoeffsFile(dir string, roundID []byte, logger log.Logger) {
 	if dir == "" {
 		return
@@ -447,8 +447,9 @@ func CeremonyAckPrepareProposalHandler(
 //     that contributor's individual Feldman commitments
 //
 // The partial shares are summed into combined_share, which is verified against
-// the round's combined Feldman commitments. On success the coefficients file is
-// securely deleted and the combined share bytes are returned.
+// the round's combined Feldman commitments. The coefficients file is left on
+// disk so a later proposer turn can retry if this speculative proposal does not
+// commit; committed-state cleanup removes it once the ceremony is past acking.
 func ackDKGRound(
 	pallasSk *elgamal.SecretKey,
 	round *types.VoteRound,
@@ -557,8 +558,6 @@ func ackDKGRound(
 	if !ok {
 		return nil, nil, fmt.Errorf("combined share failed Feldman verification")
 	}
-
-	zeroAndDeleteCoeffsFile(ceremonyDir, round.VoteRoundId, logger)
 
 	// Return the combined share as a byte slice and the combined secret key.
 	secretBytes := combinedShare.Bytes()
