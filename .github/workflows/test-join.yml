@@ -33,6 +33,7 @@ on:
       - scripts/reset-validator-snapshot.sh
       - scripts/test_svoted_wrapper.sh
       - scripts/test_chain_upgrade_signer_detect.sh
+      - scripts/test_chain_upgrade_runtime_mode.sh
       - scripts/test_reset_validator_snapshot.sh
       - Dockerfile.join-test
       - scripts/test-join-docker.sh
@@ -48,6 +49,7 @@ on:
       - scripts/reset-validator-snapshot.sh
       - scripts/test_svoted_wrapper.sh
       - scripts/test_chain_upgrade_signer_detect.sh
+      - scripts/test_chain_upgrade_runtime_mode.sh
       - scripts/test_reset_validator_snapshot.sh
       - Dockerfile.join-test
       - scripts/test-join-docker.sh
@@ -125,6 +127,9 @@ jobs:
 
       - name: Run chain upgrade signer detection unit test
         run: bash scripts/test_chain_upgrade_signer_detect.sh
+
+      - name: Run chain upgrade runtime-mode unit test
+        run: bash scripts/test_chain_upgrade_runtime_mode.sh
 
       - name: Run reset-validator-snapshot unit smoke test
         run: bash scripts/test_reset_validator_snapshot.sh

@@ -176,7 +176,9 @@ svote_upgrade_autodetect_from_systemd_unit() {
     fi
   fi
 
-  detected_wrapper=$(grep -E '^ExecStart=' "$SERVICE_PATH" 2>/dev/null | head -n 1 | cut -d= -f2- | tr -d '[:space:]' || true)
+  local detected_exec
+  detected_exec=$(grep -E '^ExecStart=' "$SERVICE_PATH" 2>/dev/null | head -n 1 | cut -d= -f2- || true)
+  detected_wrapper="${detected_exec%% *}"
   if [ -n "$detected_wrapper" ] && [ -x "$detected_wrapper" ]; then
     WRAPPER_BIN="$detected_wrapper"
   fi
@@ -701,29 +703,44 @@ svote_upgrade_verify_prestage() {
   fi
 
   if [ "$require_cosmovisor_service" = "1" ]; then
+    local effective_mode effective_daemon_home effective_svote_home effective_moniker
     echo "=== Service checks ==="
-    if [ -f "$SERVICE_PATH" ] && grep -q 'SVOTE_UPGRADE_MODE=cosmovisor' "$SERVICE_PATH"; then
-      svote_upgrade_checklist_line PASS "systemd unit sets SVOTE_UPGRADE_MODE=cosmovisor"
+    effective_mode=$(svote_upgrade_systemd_effective_env_value "SVOTE_UPGRADE_MODE" || true)
+    if [ "$effective_mode" = "cosmovisor" ]; then
+      svote_upgrade_checklist_line PASS "systemd effective SVOTE_UPGRADE_MODE=cosmovisor"
     else
-      svote_upgrade_checklist_line FAIL "systemd unit missing SVOTE_UPGRADE_MODE=cosmovisor (${SERVICE_PATH})"
+      svote_upgrade_checklist_line FAIL "systemd effective SVOTE_UPGRADE_MODE is ${effective_mode:-<unset>} (expected cosmovisor)"
       service_failures=$((service_failures + 1))
     fi
-    if [ -f "$SERVICE_PATH" ] && grep -q "DAEMON_HOME=${DAEMON_HOME}" "$SERVICE_PATH"; then
-      svote_upgrade_checklist_line PASS "systemd unit sets DAEMON_HOME=${DAEMON_HOME}"
+
+    effective_daemon_home=$(svote_upgrade_systemd_effective_env_value "DAEMON_HOME" || true)
+    if [ "$effective_daemon_home" = "$DAEMON_HOME" ]; then
+      svote_upgrade_checklist_line PASS "systemd effective DAEMON_HOME=${DAEMON_HOME}"
     else
-      svote_upgrade_checklist_line FAIL "systemd unit missing DAEMON_HOME=${DAEMON_HOME}"
+      svote_upgrade_checklist_line FAIL "systemd effective DAEMON_HOME is ${effective_daemon_home:-<unset>} (expected ${DAEMON_HOME})"
       service_failures=$((service_failures + 1))
     fi
-    if [ -f "$SERVICE_PATH" ] && grep -q "SVOTE_HOME=${DAEMON_HOME}" "$SERVICE_PATH"; then
-      svote_upgrade_checklist_line PASS "systemd unit sets SVOTE_HOME=${DAEMON_HOME}"
+
+    effective_svote_home=$(svote_upgrade_systemd_effective_env_value "SVOTE_HOME" || true)
+    if [ "$effective_svote_home" = "$DAEMON_HOME" ]; then
+      svote_upgrade_checklist_line PASS "systemd effective SVOTE_HOME=${DAEMON_HOME}"
     else
-      svote_upgrade_checklist_line FAIL "systemd unit missing SVOTE_HOME=${DAEMON_HOME}"
+      svote_upgrade_checklist_line FAIL "systemd effective SVOTE_HOME is ${effective_svote_home:-<unset>} (expected ${DAEMON_HOME})"
       service_failures=$((service_failures + 1))
     fi
-    if [ -f "$SERVICE_PATH" ] && grep -q 'MONIKER=' "$SERVICE_PATH"; then
-      svote_upgrade_checklist_line PASS "systemd unit sets MONIKER for wrapper startup"
+
+    effective_moniker=$(svote_upgrade_systemd_effective_env_value "MONIKER" || true)
+    if [ -n "$effective_moniker" ]; then
+      svote_upgrade_checklist_line PASS "systemd effective MONIKER is set (${effective_moniker})"
     else
-      svote_upgrade_checklist_line FAIL "systemd unit missing MONIKER (required by svoted-wrapper.sh)"
+      svote_upgrade_checklist_line FAIL "systemd effective MONIKER is unset (required by svoted-wrapper.sh)"
+      service_failures=$((service_failures + 1))
+    fi
+
+    if svote_upgrade_has_cosmovisor_runtime_for_home; then
+      svote_upgrade_checklist_line PASS "cosmovisor runtime process is active for ${DAEMON_HOME}"
+    else
+      svote_upgrade_checklist_line FAIL "cosmovisor runtime process missing for ${DAEMON_HOME}"
       service_failures=$((service_failures + 1))
     fi
   else
@@ -781,17 +798,97 @@ svote_upgrade_extract_direct_svoted_start_args() {
   printf '%s\n' "$remainder"
 }
 
-# svote_upgrade_ensure_systemd_environment_key tmp_unit key value
-# Append Environment=key=value under [Service] when key is not already present.
-svote_upgrade_ensure_systemd_environment_key() {
+# svote_upgrade_set_systemd_environment_key tmp_unit key value
+# Replace all Environment=key assignments and append a single canonical value under [Service].
+svote_upgrade_set_systemd_environment_key() {
   local tmp_unit="$1"
   local key="$2"
   local value="$3"
+  local tmp_filtered tmp_updated value_for_awk
 
-  if grep -q "${key}=" "$tmp_unit"; then
-    return 0
+  tmp_filtered=$(mktemp)
+  tmp_updated=$(mktemp)
+
+  awk -v key="$key" '
+    /^[[:space:]]*Environment=/ {
+      if ($0 ~ ("(^|[\"[:space:]])" key "=")) {
+        next
+      }
+    }
+    { print }
+  ' "$tmp_unit" > "$tmp_filtered"
+
+  value_for_awk=${value//\\/\\\\}
+  value_for_awk=${value_for_awk//\"/\\\"}
+
+  awk -v key="$key" -v value="$value_for_awk" '
+    {
+      print
+      if ($0 ~ /^\[Service\]$/) {
+        print "Environment=\"" key "=" value "\""
+      }
+    }
+  ' "$tmp_filtered" > "$tmp_updated"
+
+  mv "$tmp_updated" "$tmp_unit"
+  rm -f "$tmp_filtered"
+}
+
+# svote_upgrade_extract_effective_env_value env_blob key
+# Extract the last KEY=value token from a systemd Environment blob.
+svote_upgrade_extract_effective_env_value() {
+  local env_blob="$1"
+  local key="$2"
+  local token value=""
+
+  for token in $env_blob; do
+    token="${token#\"}"
+    token="${token%\"}"
+    case "$token" in
+      "${key}="*)
+        value="${token#${key}=}"
+        ;;
+    esac
+  done
+  [ -n "$value" ] || return 1
+  printf '%s\n' "$value"
+}
+
+# svote_upgrade_systemd_effective_env_value key
+# Extract the runtime-effective key from `systemctl show SERVICE_NAME -p Environment`.
+svote_upgrade_systemd_effective_env_value() {
+  local key="$1"
+  local env_blob
+
+  env_blob=$(systemctl show "$SERVICE_NAME" -p Environment --value 2>/dev/null || true)
+  [ -n "$env_blob" ] || return 1
+  svote_upgrade_extract_effective_env_value "$env_blob" "$key"
+}
+
+# svote_upgrade_has_cosmovisor_runtime_for_home
+# Return 0 when a running cosmovisor process includes DAEMON_HOME in argv.
+svote_upgrade_has_cosmovisor_runtime_for_home() {
+  pgrep -af "cosmovisor" 2>/dev/null | grep -F -- "$DAEMON_HOME" >/dev/null 2>&1
+}
+
+# svote_upgrade_assert_cosmovisor_runtime
+# Die unless effective systemd mode is cosmovisor and a cosmovisor process is running for DAEMON_HOME.
+svote_upgrade_assert_cosmovisor_runtime() {
+  local mode main_pid main_cmd
+
+  mode=$(svote_upgrade_systemd_effective_env_value "SVOTE_UPGRADE_MODE" || true)
+  if [ "$mode" != "cosmovisor" ]; then
+    svote_upgrade_die "Effective SVOTE_UPGRADE_MODE is ${mode:-<unset>} (expected cosmovisor)."
   fi
-  sed -i '/^\[Service\]/a Environment="'"${key}=${value}"'"' "$tmp_unit"
+
+  if ! svote_upgrade_has_cosmovisor_runtime_for_home; then
+    main_pid=$(systemctl show "$SERVICE_NAME" -p MainPID --value 2>/dev/null || true)
+    main_cmd=""
+    if [ -n "$main_pid" ] && [ "$main_pid" != "0" ]; then
+      main_cmd=$(ps -o command= -p "$main_pid" 2>/dev/null || true)
+    fi
+    svote_upgrade_die "No cosmovisor runtime process found for ${DAEMON_HOME} (service main_pid=${main_pid:-<unknown>} cmd=${main_cmd:-<unknown>})."
+  fi
 }
 
 # svote_upgrade_patch_systemd_unit_for_cosmovisor
@@ -821,35 +918,23 @@ svote_upgrade_patch_systemd_unit_for_cosmovisor() {
   derived_moniker=$(svote_upgrade_derive_moniker_from_home "$DAEMON_HOME" || true)
   derived_chain_id=$(svote_upgrade_derive_chain_id_from_home "$DAEMON_HOME" || true)
 
-  svote_upgrade_ensure_systemd_environment_key "$tmp_unit" "SVOTE_HOME" "$DAEMON_HOME"
+  svote_upgrade_set_systemd_environment_key "$tmp_unit" "SVOTE_HOME" "$DAEMON_HOME"
   if [ -n "$derived_moniker" ]; then
-    svote_upgrade_ensure_systemd_environment_key "$tmp_unit" "MONIKER" "$derived_moniker"
+    svote_upgrade_set_systemd_environment_key "$tmp_unit" "MONIKER" "$derived_moniker"
   fi
   if [ -n "$derived_chain_id" ]; then
-    svote_upgrade_ensure_systemd_environment_key "$tmp_unit" "SVOTE_CHAIN_ID" "$derived_chain_id"
+    svote_upgrade_set_systemd_environment_key "$tmp_unit" "SVOTE_CHAIN_ID" "$derived_chain_id"
   fi
-  svote_upgrade_ensure_systemd_environment_key "$tmp_unit" "SVOTE_INSTALL_DIR" "$INSTALL_DIR"
-  svote_upgrade_ensure_systemd_environment_key "$tmp_unit" "SVOTED_BIN" "${INSTALL_DIR}/${SVOTE_DAEMON_NAME}"
-
-  grep -q 'SVOTE_UPGRADE_MODE=cosmovisor' "$tmp_unit" || \
-    sed -i '/^\[Service\]/a Environment="SVOTE_UPGRADE_MODE=cosmovisor"' "$tmp_unit"
-  grep -q "DAEMON_HOME=${DAEMON_HOME}" "$tmp_unit" || \
-    sed -i '/^\[Service\]/a Environment="DAEMON_HOME='"${DAEMON_HOME}"'"' "$tmp_unit"
-  grep -q 'DAEMON_NAME=svoted' "$tmp_unit" || \
-    sed -i '/^\[Service\]/a Environment="DAEMON_NAME=svoted"' "$tmp_unit"
-  grep -q 'DAEMON_ALLOW_DOWNLOAD_BINARIES=false' "$tmp_unit" || \
-    sed -i '/^\[Service\]/a Environment="DAEMON_ALLOW_DOWNLOAD_BINARIES=false"' "$tmp_unit"
-  grep -q "COSMOVISOR_BIN=${COSMOVISOR_BIN}" "$tmp_unit" || \
-    sed -i '/^\[Service\]/a Environment="COSMOVISOR_BIN='"${COSMOVISOR_BIN}"'"' "$tmp_unit"
+  svote_upgrade_set_systemd_environment_key "$tmp_unit" "SVOTE_INSTALL_DIR" "$INSTALL_DIR"
+  svote_upgrade_set_systemd_environment_key "$tmp_unit" "SVOTED_BIN" "${INSTALL_DIR}/${SVOTE_DAEMON_NAME}"
+  svote_upgrade_set_systemd_environment_key "$tmp_unit" "SVOTE_UPGRADE_MODE" "cosmovisor"
+  svote_upgrade_set_systemd_environment_key "$tmp_unit" "DAEMON_HOME" "$DAEMON_HOME"
+  svote_upgrade_set_systemd_environment_key "$tmp_unit" "DAEMON_NAME" "svoted"
+  svote_upgrade_set_systemd_environment_key "$tmp_unit" "DAEMON_ALLOW_DOWNLOAD_BINARIES" "false"
+  svote_upgrade_set_systemd_environment_key "$tmp_unit" "COSMOVISOR_BIN" "$COSMOVISOR_BIN"
 
   if [ -n "${SVOTE_WRAPPER_SVOTED_START_ARGS:-}" ]; then
-    local escaped_wrapper_args
-    escaped_wrapper_args=$(printf '%s' "${SVOTE_WRAPPER_SVOTED_START_ARGS}" | sed 's/[\\&|]/\\&/g')
-    if grep -q "SVOTE_WRAPPER_SVOTED_START_ARGS=" "$tmp_unit"; then
-      sed -i "s|^Environment=.*SVOTE_WRAPPER_SVOTED_START_ARGS=.*|Environment=\"SVOTE_WRAPPER_SVOTED_START_ARGS=${escaped_wrapper_args}\"|" "$tmp_unit"
-    else
-      sed -i '/^\[Service\]/a Environment="SVOTE_WRAPPER_SVOTED_START_ARGS='"${escaped_wrapper_args}"'"' "$tmp_unit"
-    fi
+    svote_upgrade_set_systemd_environment_key "$tmp_unit" "SVOTE_WRAPPER_SVOTED_START_ARGS" "${SVOTE_WRAPPER_SVOTED_START_ARGS}"
   fi
 
   if ! grep -q "^ExecStart=${WRAPPER_BIN}$" "$tmp_unit" && ! grep -q "^ExecStart=${WRAPPER_BIN} " "$tmp_unit"; then
