@@ -14,8 +14,17 @@ Historical changes before commit `704b202e2088b91caeaf2290cef85e4a9a759542` are 
 
 ## v0.10.0
 
+## v0.9.8 - 2026-06-03
+
+### Added
+
+- Validator coordinated upgrade tooling: `update_chain.sh`, `_chain_upgrade_common.sh`, and `prepare-upgrade-artifacts.sh` for Cosmovisor pre-staging with stage-first safety guardrails.
+- `join.sh` defaults to `--upgrade-mode cosmovisor` on Linux (`direct` on macOS); use `--upgrade-mode direct` to run svoted without Cosmovisor.
+- Gated upgrade validation checklist and verification scripts for release and isolated-network testing.
+
 ### Changed
 
+- Harden validator upgrade scripts: Cosmovisor from official GitHub releases with checksum verification, systemd path autodetection when run as root, cosmovisor tree ownership fixup, fail-closed wrapper in cosmovisor mode, defensive upgrade-plan JSON parsing, and split staging vs service checks in `verify-prestage`.
 - Update Orchard to v0.14
 - Raise TSS threshold to two thirds
 - Reject Halo2 proofs with trailing unread transcript bytes at the Rust FFI

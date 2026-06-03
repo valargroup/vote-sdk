@@ -260,7 +260,45 @@ Optional overrides:
 
 ## Upgrading
 
-`join.sh` is idempotent and is the supported upgrade path. Re-run it:
+There are three distinct upgrade paths:
+
+| Scenario | Tool | Notes |
+|----------|------|-------|
+| Fresh join / full reinstall | `join.sh` | Wipes `~/.svoted`; not for bonded validators |
+| State-breaking coordinated upgrade | `update_chain.sh` | Pre-stage Cosmovisor binaries; see [software-upgrades.md](software-upgrades.md) |
+| Infra fleet binary swap | `install-release.sh` / deploy workflow | Production hosts under `/opt/shielded-vote` |
+
+### Coordinated state-breaking upgrades (validators)
+
+Use `update_chain.sh` to pre-stage binaries for an `x/upgrade` halt height without
+stopping the running validator until staging succeeds:
+
+```bash
+curl -fsSL https://shielded-vote.nyc3.digitaloceanspaces.com/update_chain.sh | sudo bash -s -- \
+  --mode prepare --plan-name <plan-name> --tag <release-tag>
+```
+
+Verify readiness:
+
+```bash
+sudo bash update_chain.sh --mode verify-prestage --plan-name <plan-name> --tag <release-tag>
+```
+
+Full operator checklist: [software-upgrades.md](software-upgrades.md).
+
+### Fresh install with Cosmovisor (Linux default)
+
+Linux `join.sh` installs bootstrap Cosmovisor by default. To run svoted directly instead:
+
+```bash
+curl -fsSL https://setup.valargroup.org/ | bash -s -- --env prod --upgrade-mode direct
+```
+
+Or set `SVOTE_UPGRADE_MODE=direct`. On macOS the default is `direct` because Cosmovisor is Linux-only.
+
+### Full reinstall (destructive)
+
+`join.sh` is idempotent and is the supported reinstall path. Re-run it:
 
 ```bash
 curl -fsSL https://shielded-vote.nyc3.digitaloceanspaces.com/join.sh | bash
@@ -268,9 +306,9 @@ curl -fsSL https://shielded-vote.nyc3.digitaloceanspaces.com/join.sh | bash
 
 The script downloads the latest `svoted` + `create-val-tx` tarball (per `${DO_BASE}/version.txt`) and verifies its checksum. Before replacing binaries it stops the service to avoid `Text file busy` (`systemctl stop svoted` on Linux, `launchctl bootout` on macOS). It then reinstalls the service files, re-registers with the admin join queue, and restarts.
 
-If a prior install is present, `join.sh` wipes `~/.svoted`. It is not a safe in-place chain-data upgrade.
+If a prior install is present, `join.sh` wipes `~/.svoted`. It is not a safe in-place chain-data upgrade for bonded validators.
 
-For a chain-data-preserving binary swap, follow the [production-setup.md](../production-setup.md) flow:
+For a chain-data-preserving binary swap on production infra hosts, follow the [production-setup.md](../production-setup.md) flow:
 
 ```bash
 systemctl stop svoted
@@ -296,6 +334,9 @@ The bucket also holds a few one-liner helpers:
 
 - `version.txt`: a single line with the latest release version.
 - `join.sh`: the latest installer.
+- `update_chain.sh`: coordinated upgrade pre-staging/migration helper for validators.
+- `prepare-upgrade-artifacts.sh`: alias for `update_chain.sh --mode prepare`.
+- `scripts/_chain_upgrade_common.sh`: shared upgrade helper library.
 - `reset-validator-snapshot.sh`: safe chain-data reset for existing validators.
 - `svoted-wrapper.sh`: the latest service wrapper, copied onto the host so the service unit can point at it.
 - `genesis.json`: canonical genesis, uploaded by `sdk-chain-reset.yml` after every chain reset.

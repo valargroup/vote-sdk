@@ -12,6 +12,11 @@ fi
 
 SVOTED_BIN="${SVOTED_BIN:-svoted}"
 CREATE_VAL_TX_BIN="${CREATE_VAL_TX_BIN:-create-val-tx}"
+COSMOVISOR_BIN="${COSMOVISOR_BIN:-${SVOTE_INSTALL_DIR:-}/cosmovisor}"
+SVOTE_UPGRADE_MODE="${SVOTE_UPGRADE_MODE:-direct}"
+case "${SVOTE_UPGRADE_MODE}" in
+  legacy) SVOTE_UPGRADE_MODE="direct" ;;
+esac
 SVOTE_RPC_URL="${SVOTE_RPC_URL:-tcp://localhost:26657}"
 JOIN_COMPLETE_FILE="${SVOTE_JOIN_COMPLETE_FILE:-${SVOTE_HOME}/join-complete}"
 JOIN_STAKE_USVOTE="${SVOTE_JOIN_STAKE_USVOTE:-10000000}"
@@ -24,10 +29,14 @@ POST_TX_SLEEP_SECONDS="${SVOTE_WRAPPER_POST_TX_SLEEP_SECONDS:-6}"
 
 SVOTED_PID=""
 
+# log ...
+# Print a UTC timestamped line to stdout.
 log() {
   echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") $*"
 }
 
+# child_running
+# Return 0 when SVOTED_PID refers to a live, non-zombie process.
 child_running() {
   local state
   [ -n "${SVOTED_PID}" ] && kill -0 "${SVOTED_PID}" >/dev/null 2>&1 || return 1
@@ -38,6 +47,8 @@ child_running() {
   return 0
 }
 
+# exit_with_child_status
+# wait on SVOTED_PID and exit with its status (0 when pid unset).
 exit_with_child_status() {
   local status=0
   if [ -n "${SVOTED_PID}" ]; then
@@ -48,6 +59,8 @@ exit_with_child_status() {
   exit "${status}"
 }
 
+# stop_child
+# Signal handler: forward TERM/INT/HUP to svoted child, then exit_with_child_status.
 stop_child() {
   trap - TERM INT HUP
   if child_running; then
@@ -57,6 +70,8 @@ stop_child() {
   exit_with_child_status
 }
 
+# sleep_checked seconds
+# Sleep in 1s steps; exit_with_child_status if the svoted child dies early.
 sleep_checked() {
   local seconds="$1"
   local elapsed=0
@@ -69,6 +84,8 @@ sleep_checked() {
   done
 }
 
+# derive_valoper
+# Print validator operator address from env or keyring; empty output on failure.
 derive_valoper() {
   if [ -n "${VALIDATOR_VALOPER:-}" ]; then
     echo "${VALIDATOR_VALOPER}"
@@ -80,6 +97,8 @@ derive_valoper() {
     --home "${SVOTE_HOME}" 2>/dev/null
 }
 
+# derive_chain_id
+# Print chain ID from SVOTE_CHAIN_ID or genesis.json; empty output when unavailable.
 derive_chain_id() {
   if [ -n "${SVOTE_CHAIN_ID:-}" ]; then
     echo "${SVOTE_CHAIN_ID}"
@@ -89,6 +108,8 @@ derive_chain_id() {
   jq -r '.chain_id // empty' "${SVOTE_HOME}/config/genesis.json" 2>/dev/null
 }
 
+# is_synced
+# Return 0 when local RPC reports catching_up=false and height > 0.
 is_synced() {
   local status catching_up height
   status=$("${SVOTED_BIN}" status --home "${SVOTE_HOME}" --node "${SVOTE_RPC_URL}" 2>/dev/null || echo "")
@@ -107,6 +128,8 @@ is_synced() {
   return 1
 }
 
+# is_bonded valoper
+# Return 0 when staking query reports BOND_STATUS_BONDED for valoper.
 is_bonded() {
   local valoper="$1"
   local out status
@@ -121,6 +144,8 @@ is_bonded() {
   [ "${status}" = "BOND_STATUS_BONDED" ]
 }
 
+# balance_usvote
+# Print validator usvote balance from bank query; print 0 when query fails or denom absent.
 balance_usvote() {
   local balances
   balances=$("${SVOTED_BIN}" query bank balances "${VALIDATOR_ADDR}" \
@@ -134,6 +159,8 @@ balance_usvote() {
   echo "${balances}" | jq -r '.balances[]? | select(.denom == "usvote") | .amount' 2>/dev/null | head -1
 }
 
+# mark_join_complete
+# Create/truncate JOIN_COMPLETE_FILE marker after successful bonding path.
 mark_join_complete() {
   mkdir -p "$(dirname "${JOIN_COMPLETE_FILE}")"
   : > "${JOIN_COMPLETE_FILE}"
@@ -142,8 +169,32 @@ mark_join_complete() {
 
 trap stop_child TERM INT HUP
 
-log "starting svoted via wrapper (home=${SVOTE_HOME}, moniker=${MONIKER})"
-"${SVOTED_BIN}" start --home "${SVOTE_HOME}" &
+# start_svoted_process
+# Background svoted via cosmovisor or direct start; exit 1 in cosmovisor mode when binaries missing.
+start_svoted_process() {
+  local genesis_bin="${SVOTE_HOME}/cosmovisor/genesis/bin/svoted"
+  if [ "${SVOTE_UPGRADE_MODE}" = "cosmovisor" ]; then
+    if [ ! -x "${COSMOVISOR_BIN}" ]; then
+      log "ERROR: cosmovisor binary missing at ${COSMOVISOR_BIN} (SVOTE_UPGRADE_MODE=cosmovisor)"
+      exit 1
+    fi
+    if [ ! -x "${genesis_bin}" ]; then
+      log "ERROR: cosmovisor genesis binary missing at ${genesis_bin}"
+      exit 1
+    fi
+    export DAEMON_HOME="${SVOTE_HOME}"
+    export DAEMON_NAME="svoted"
+    export DAEMON_ALLOW_DOWNLOAD_BINARIES="${DAEMON_ALLOW_DOWNLOAD_BINARIES:-false}"
+    log "starting svoted via cosmovisor (home=${SVOTE_HOME})"
+    "${COSMOVISOR_BIN}" run start --home "${SVOTE_HOME}" &
+    return
+  fi
+  log "starting svoted directly (home=${SVOTE_HOME})"
+  "${SVOTED_BIN}" start --home "${SVOTE_HOME}" &
+}
+
+log "starting svoted via wrapper (home=${SVOTE_HOME}, moniker=${MONIKER}, upgrade_mode=${SVOTE_UPGRADE_MODE})"
+start_svoted_process
 SVOTED_PID=$!
 log "svoted started with pid ${SVOTED_PID}"
 
