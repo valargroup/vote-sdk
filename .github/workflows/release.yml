@@ -312,6 +312,16 @@ jobs:
           s3cmd -c /tmp/do-spaces.s3cfg put scripts/remove-validator.sh "s3://${DO_SPACES_BUCKET}/remove-validator.sh" --acl-public --force
           s3cmd -c /tmp/do-spaces.s3cfg put scripts/remove-pir.sh "s3://${DO_SPACES_BUCKET}/remove-pir.sh" --acl-public --force
           s3cmd -c /tmp/do-spaces.s3cfg put scripts/svoted-wrapper.sh "s3://${DO_SPACES_BUCKET}/svoted-wrapper.sh" --acl-public --force
+          UPDATE_CHAIN="$(mktemp)"
+          sed \
+            -e "s|__RELEASE_TAG__|${VERSION}|g" \
+            -e "s|__GITHUB_REPO__|valargroup/vote-sdk|g" \
+            -e "s|__DO_BASE__|${DO_SPACES_BASE:-https://${DO_SPACES_BUCKET}.${DO_SPACES_REGION}.digitaloceanspaces.com}|g" \
+            scripts/update_chain.sh.template > "${UPDATE_CHAIN}"
+          s3cmd -c /tmp/do-spaces.s3cfg put "${UPDATE_CHAIN}" "s3://${DO_SPACES_BUCKET}/update_chain.sh" --acl-public --force
+          rm -f "${UPDATE_CHAIN}"
+          s3cmd -c /tmp/do-spaces.s3cfg put scripts/_chain_upgrade_common.sh "s3://${DO_SPACES_BUCKET}/scripts/_chain_upgrade_common.sh" --acl-public --force
+          s3cmd -c /tmp/do-spaces.s3cfg put scripts/prepare-upgrade-artifacts.sh "s3://${DO_SPACES_BUCKET}/prepare-upgrade-artifacts.sh" --acl-public --force
           s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force join.sh \
             "s3://${DO_SPACES_BUCKET}/scripts/join/${VERSION}/join.sh"
           VERSIONED_JOIN_FULL="$(mktemp)"
@@ -358,6 +368,9 @@ jobs:
             "remove-validator.sh" \
             "remove-pir.sh" \
             "svoted-wrapper.sh" \
+            "update_chain.sh" \
+            "scripts/_chain_upgrade_common.sh" \
+            "prepare-upgrade-artifacts.sh" \
             "scripts/join-full/${VERSION}/join-full.sh" \
             "scripts/join-common/${VERSION}/_join_common.sh" \
             "scripts/join/${VERSION}/join.sh" \

@@ -7,11 +7,42 @@ or cancel plans through `x/vote` coordinator actions.
 
 Routine binary swaps that preserve state still use `sdk-chain-deploy.yml`.
 
+Validator hosts installed through `join.sh` should use **Cosmovisor pre-staging**
+via `update_chain.sh` so the binary switches deterministically at the scheduled
+halt height without manual restart coordination.
+
 ## First rollout with x/upgrade
 
 The first release that adds `x/upgrade` must use **Reset SDK Chain**, not a
 state-preserving deploy. Adding the `upgrade` KV store is itself a store/state
 change, and existing live state does not contain that store.
+
+## Validator upgrade model
+
+```text
+Coordinator schedules plan (name + height)
+        ↓
+Validators run update_chain.sh --mode prepare (stage-only; no service stop)
+        ↓
+Validators run update_chain.sh --mode verify-prestage (PASS/FAIL checklist)
+        ↓
+At halt height Cosmovisor switches using upgrade-info.json
+        ↓
+Post-upgrade health checks
+```
+
+Fresh Linux installs bootstrap Cosmovisor by default through `join.sh`:
+
+```bash
+curl -fsSL https://setup.valargroup.org/ | bash -s -- --env prod
+```
+
+Existing direct-mode installs migrate once:
+
+```bash
+curl -fsSL https://shielded-vote.nyc3.digitaloceanspaces.com/update_chain.sh | sudo bash -s -- \
+  --mode migrate --plan-name <plan-name> --tag <tag>
+```
 
 ## Scheduling a state-breaking upgrade
 
@@ -45,7 +76,7 @@ preblock has already run.
 Inspect the scheduled plan through the query path:
 
 ```bash
-svoted query upgrade plan
+svoted query upgrade plan --home ~/.svoted
 ```
 
 Cancel the current plan through the same coordinator action flow:
@@ -66,11 +97,154 @@ For each future state-breaking release:
    before `app.Load` and install an `UpgradeStoreLoader` for that plan.
 4. Release the new binary.
 5. Schedule the plan from the old binary.
-6. At the halt height, install and start the new binary. Nodes without the
+6. Validators pre-stage the new binary under
+   `~/.svoted/cosmovisor/upgrades/<plan-name>/bin/svoted`.
+7. At the halt height, Cosmovisor switches automatically. Nodes without the
    matching handler halt with the `UPGRADE "<name>" NEEDED` message.
 
 The completed handler records the applied plan in `x/upgrade`, so later queries
-can confirm the upgrade height.
+can confirm the upgrade height:
+
+```bash
+svoted query upgrade applied <plan-name> --home ~/.svoted
+```
+
+## Validator operator checklist
+
+### T-24h to T-1h (pre-stage)
+
+1. Confirm scheduled plan name and height:
+
+   ```bash
+   svoted query upgrade plan --home ~/.svoted
+   ```
+
+2. Stage binaries without stopping the running validator:
+
+   ```bash
+   curl -fsSL https://shielded-vote.nyc3.digitaloceanspaces.com/update_chain.sh | sudo bash -s -- \
+     --mode prepare \
+     --plan-name <plan-name> \
+     --tag <release-tag>
+   ```
+
+   Or from a repo checkout:
+
+   ```bash
+   sudo scripts/update_chain.sh --mode prepare --plan-name <plan-name> --tag <release-tag>
+   ```
+
+3. Verify pre-stage readiness (staging + service checks):
+
+   ```bash
+   sudo scripts/update_chain.sh --mode verify-prestage \
+     --plan-name <plan-name> --tag <release-tag>
+   ```
+
+   For direct-mode hosts that staged but have not migrated yet, use
+   `--skip-cosmovisor-service` to validate binaries only.
+
+4. Confirm Cosmovisor layout:
+
+   ```bash
+   ls -l ~/.svoted/cosmovisor/genesis/bin/svoted
+   ls -l ~/.svoted/cosmovisor/upgrades/<plan-name>/bin/svoted
+   ```
+
+### One-time migration from direct join.sh service
+
+Run only once per host to move from direct `svoted` wrapper service to
+Cosmovisor-managed startup:
+
+```bash
+export SVOTE_ACK_SINGLE_SIGNER=1   # required for non-interactive runs
+curl -fsSL https://shielded-vote.nyc3.digitaloceanspaces.com/update_chain.sh | sudo bash -s -- \
+  --mode migrate \
+  --plan-name <plan-name> \
+  --tag <release-tag>
+```
+
+Migration performs staging first, then stops the service only after staging
+validation succeeds.
+
+### At/after halt height
+
+1. Watch logs:
+
+   ```bash
+   journalctl -u svoted -f
+   ```
+
+2. Confirm node resumes and applied upgrade:
+
+   ```bash
+   svoted status --home ~/.svoted
+   svoted query upgrade applied <plan-name> --home ~/.svoted
+   ```
+
+3. Confirm validator remains bonded:
+
+   ```bash
+   svoted query staking validators --home ~/.svoted --output json | jq '.validators[] | select(.status=="BOND_STATUS_BONDED") | .description.moniker'
+   ```
+
+### Post-upgrade
+
+- Share `verify-prestage` PASS output with coordinators if requested.
+- Keep staged upgrade directory until the plan is applied.
+- Do not restore old `priv_validator_state.json` backups.
+
+## Script guardrails
+
+`update_chain.sh` auto-detects `SVOTE_HOME`, `SVOTE_INSTALL_DIR`, and service
+`User=` from `/etc/systemd/system/svoted.service` when run with `sudo`. Explicit
+`--home` / `--install-dir` override detection.
+
+Cosmovisor is downloaded only from the official
+[cosmos-sdk Cosmovisor GitHub releases](https://github.com/cosmos/cosmos-sdk/releases?q=cosmovisor&expanded=true)
+with SHA256SUMS verification. Validators need outbound HTTPS to `github.com` at
+join and upgrade time.
+
+`update_chain.sh` enforces:
+
+- **Stage-first no-touch policy**: download/checksum/layout validation completes
+  before any `systemctl stop`.
+- **Fail-closed**: staging or config failure aborts with a clear error and leaves
+  the running validator untouched.
+- **Signer-stop gate** (migrate mode only): stop service, verify inactive, verify
+  no residual `svoted`/`cosmovisor` process for the same home.
+- **Double-sign controls**: require `priv_validator_state.json`, print consensus
+  pubkey fingerprint, and require explicit single-signer acknowledgment
+  (`SVOTE_ACK_SINGLE_SIGNER=1` or interactive `YES`).
+- **Plan-name strictness**: staged directory must match scheduled plan name unless
+  `--allow-no-plan` is explicitly set for early staging.
+
+Modes:
+
+| Mode | Purpose |
+|------|---------|
+| `prepare` | Stage genesis + upgrade binaries only |
+| `migrate` | Stage, then migrate systemd service to Cosmovisor |
+| `verify-prestage` | Read-only PASS/FAIL checklist (staging + service sections) |
+
+Use `--skip-cosmovisor-service` with `verify-prestage` to validate staged
+binaries on hosts that have not run `--mode migrate` yet.
+
+## Troubleshooting
+
+| Symptom | Likely cause | Action |
+|---------|--------------|--------|
+| `UPGRADE "<name>" NEEDED at height ...` persists | Missing/incorrect staged binary | Re-run `--mode prepare` with exact plan name |
+| `Scheduled plan name mismatch` | Wrong `--plan-name` | Match `svoted query upgrade plan` exactly |
+| `priv_validator_state.json is missing` | Data dir incomplete | Restore from backup or snapshot reset script; do not proceed |
+| Service restart loop after migrate | Bad unit env or cosmovisor path | Check `journalctl -u svoted`; restore unit backup under `/etc/systemd/system/svoted.service.bak.*` |
+| Checksum mismatch | Corrupted download | Retry; verify tag exists in Spaces/GitHub release |
+
+## Rollback policy
+
+- Do **not** attempt automatic chain-state rollback from the updater script.
+- Service/unit rollback is local-process safe only (restore `.bak` unit file).
+- State-breaking failures require coordinated cancel/new plan from vote managers.
 
 ## Current Testnet Funding Migration
 

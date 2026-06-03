@@ -25,7 +25,8 @@
 # Optional: SVOTE_DO_SPACES_BASE=https://<bucket>.<region>.digitaloceanspaces.com or
 # SVOTE_DO_SPACES_BUCKET=<bucket> to use a non-default release/genesis bucket.
 # Optional: --env prod|stage or SVOTE_ENV=prod|stage selects the public network.
-# Defaults to prod when omitted.
+# Optional: --upgrade-mode direct|cosmovisor selects how svoted is started under systemd.
+# Defaults to cosmovisor on Linux and direct on macOS when omitted.
 #
 # Requirements: curl. jq and lz4 are installed automatically when missing (apt/dnf/yum/apk/Homebrew).
 # Dependency (binary path): release.yml must have run to upload binaries to DO Spaces.
@@ -87,6 +88,7 @@ DEFAULT_ADMIN_API_BASE="${DEFAULT_ADMIN_API_BASE:-}"
 # installs can pass --tls-mode/SVOTE_TLS_MODE or the legacy SVOTE_SKIP_CADDY=1.
 SVOTE_DOMAIN="${SVOTE_DOMAIN:-}"
 SVOTE_TLS_MODE="${SVOTE_TLS_MODE:-}"
+SVOTE_UPGRADE_MODE="${SVOTE_UPGRADE_MODE:-}"
 DOMAIN_MODE=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -138,6 +140,22 @@ while [ $# -gt 0 ]; do
       fi
       shift
       ;;
+    --upgrade-mode)
+      if [ $# -lt 2 ]; then
+        echo "ERROR: --upgrade-mode requires one of: direct, cosmovisor."
+        exit 1
+      fi
+      SVOTE_UPGRADE_MODE="$2"
+      shift 2
+      ;;
+    --upgrade-mode=*)
+      SVOTE_UPGRADE_MODE="${1#--upgrade-mode=}"
+      if [ -z "${SVOTE_UPGRADE_MODE}" ]; then
+        echo "ERROR: --upgrade-mode requires one of: direct, cosmovisor."
+        exit 1
+      fi
+      shift
+      ;;
     *) shift ;;
   esac
 done
@@ -166,6 +184,30 @@ case "$SVOTE_ENV" in
     exit 1
     ;;
 esac
+
+if [ -z "${SVOTE_UPGRADE_MODE}" ]; then
+  case "$(uname -s)" in
+    Linux) SVOTE_UPGRADE_MODE="cosmovisor" ;;
+    *)     SVOTE_UPGRADE_MODE="direct" ;;
+  esac
+fi
+
+case "$SVOTE_UPGRADE_MODE" in
+  legacy)
+    SVOTE_UPGRADE_MODE="direct"
+    ;;
+  direct|cosmovisor) ;;
+  *)
+    echo "ERROR: Unsupported SVOTE_UPGRADE_MODE/--upgrade-mode: ${SVOTE_UPGRADE_MODE}"
+    echo "  Expected one of: direct, cosmovisor (legacy is accepted as an alias for direct)."
+    exit 1
+    ;;
+esac
+
+if [ "$SVOTE_UPGRADE_MODE" = "cosmovisor" ] && [ "$(uname -s)" != "Linux" ]; then
+  echo "ERROR: --upgrade-mode cosmovisor is supported on Linux systemd hosts only."
+  exit 1
+fi
 
 if [ "$VOTING_CONFIG_URL_WAS_SET" != "1" ]; then
   VOTING_CONFIG_URL="$(default_voting_config_url_for_env "$SVOTE_ENV")"
@@ -1564,6 +1606,41 @@ else
 fi
 chmod +x "${WRAPPER_BIN}"
 
+# setup_cosmovisor_for_join
+# When SVOTE_UPGRADE_MODE=cosmovisor, install cosmovisor and stage genesis svoted via shared upgrade helpers.
+setup_cosmovisor_for_join() {
+  if [ "${SVOTE_UPGRADE_MODE}" != "cosmovisor" ]; then
+    return 0
+  fi
+
+  echo "=== Configuring Cosmovisor layout ==="
+  local common_lib=""
+  if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" != "bash" ] && \
+     [ -f "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/_chain_upgrade_common.sh" ]; then
+    common_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/_chain_upgrade_common.sh"
+  elif curl -fsSL "${DO_BASE}/scripts/_chain_upgrade_common.sh" -o /tmp/_chain_upgrade_common.sh 2>/dev/null; then
+    common_lib="/tmp/_chain_upgrade_common.sh"
+  fi
+  if [ -z "${common_lib}" ] || [ ! -f "${common_lib}" ]; then
+    echo "ERROR: _chain_upgrade_common.sh not found locally or at ${DO_BASE}/scripts/_chain_upgrade_common.sh" >&2
+    exit 1
+  fi
+  # shellcheck source=scripts/_chain_upgrade_common.sh
+  source "${common_lib}"
+
+  export SVOTE_HOME="${HOME_DIR}"
+  export SVOTE_INSTALL_DIR="${INSTALL_DIR}"
+  svote_upgrade_resolve_paths
+  local tmp_dir
+  tmp_dir=$(mktemp -d)
+  svote_upgrade_install_cosmovisor "${tmp_dir}"
+  rm -rf "${tmp_dir}"
+  svote_upgrade_stage_binary "${SVOTED_BIN}" "${GENESIS_BIN}"
+  echo "Cosmovisor genesis binary staged at ${GENESIS_BIN}"
+}
+
+setup_cosmovisor_for_join
+
 echo ""
 OS_NAME=$(uname -s)
 
@@ -1703,6 +1780,16 @@ else
   SYSTEMD_CHAIN_ID=$(systemd_env_quote "SVOTE_CHAIN_ID=${CHAIN_ID}")
   SYSTEMD_INSTALL=$(systemd_env_quote "SVOTE_INSTALL_DIR=${INSTALL_DIR}")
   SYSTEMD_SVOTED=$(systemd_env_quote "SVOTED_BIN=${SVOTED_BIN}")
+  SYSTEMD_UPGRADE_MODE=$(systemd_env_quote "SVOTE_UPGRADE_MODE=${SVOTE_UPGRADE_MODE}")
+  SYSTEMD_DAEMON_HOME=$(systemd_env_quote "DAEMON_HOME=${HOME_DIR}")
+  SYSTEMD_DAEMON_NAME=$(systemd_env_quote "DAEMON_NAME=svoted")
+  SYSTEMD_COSMOVISOR=$(systemd_env_quote "COSMOVISOR_BIN=${INSTALL_DIR}/cosmovisor")
+  SYSTEMD_ALLOW_DOWNLOAD=$(systemd_env_quote "DAEMON_ALLOW_DOWNLOAD_BINARIES=false")
+
+  SYSTEMD_ENV="${SYSTEMD_PATH} ${SYSTEMD_HOME} ${SYSTEMD_ADDR} ${SYSTEMD_VALOPER} ${SYSTEMD_MONIKER} ${SYSTEMD_CHAIN_ID} ${SYSTEMD_INSTALL} ${SYSTEMD_SVOTED} ${SYSTEMD_UPGRADE_MODE}"
+  if [ "${SVOTE_UPGRADE_MODE}" = "cosmovisor" ]; then
+    SYSTEMD_ENV="${SYSTEMD_ENV} ${SYSTEMD_DAEMON_HOME} ${SYSTEMD_DAEMON_NAME} ${SYSTEMD_COSMOVISOR} ${SYSTEMD_ALLOW_DOWNLOAD}"
+  fi
 
   sudo tee /etc/systemd/system/${SERVICE_NAME}.service > /dev/null <<SVCEOF
 [Unit]
@@ -1712,7 +1799,7 @@ After=network.target
 [Service]
 Type=simple
 User=$(whoami)
-Environment=${SYSTEMD_PATH} ${SYSTEMD_HOME} ${SYSTEMD_ADDR} ${SYSTEMD_VALOPER} ${SYSTEMD_MONIKER} ${SYSTEMD_CHAIN_ID} ${SYSTEMD_INSTALL} ${SYSTEMD_SVOTED}
+Environment=${SYSTEMD_ENV}
 ExecStart=${WRAPPER_BIN}
 Restart=on-failure
 RestartSec=5

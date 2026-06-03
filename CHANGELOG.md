@@ -6,6 +6,11 @@ Historical changes before commit `704b202e2088b91caeaf2290cef85e4a9a759542` are 
 
 ## Unreleased
 
+### Added
+
+- Validator coordinated upgrade tooling: `update_chain.sh`, `_chain_upgrade_common.sh`, and `prepare-upgrade-artifacts.sh` for Cosmovisor pre-staging with stage-first safety guardrails.
+- `join.sh` defaults to `--upgrade-mode cosmovisor` on Linux (`direct` on macOS); use `--upgrade-mode direct` to run svoted without Cosmovisor.
+
 ### Changed
 
 - Update Orchard to v0.14
