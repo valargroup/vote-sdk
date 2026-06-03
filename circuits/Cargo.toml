@@ -15,8 +15,7 @@ rand_core = { version = "0.6", features = ["getrandom"] }
 reddsa = { version = "0.5", default-features = false }
 vote-commitment-tree = "0.3.0"
 orchard = { version = "=0.13.1", features = ["unstable-voting-circuits"] }
-# TODO: replace with crates.io release once tagged.
-voting-circuits = { git = "https://github.com/valargroup/voting-circuits.git", rev = "ac9c6251045f4b55494ae0fe32928b0f0e8914f2" }
+voting-circuits = "0.7.0"
 imt-tree = { git = "https://github.com/valargroup/vote-nullifier-pir.git" }
 incrementalmerkletree = "0.8"
 hex = "0.4"

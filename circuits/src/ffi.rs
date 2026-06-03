@@ -1215,7 +1215,7 @@ pub fn build_share_reveal_test_data() -> (
 
     // Deterministic test EA secret key and public key.
     let ea_sk = pallas::Scalar::from(777u64);
-    let g = pallas::Point::from(voting_circuits::vote_proof::spend_auth_g_affine());
+    let g = pallas::Point::from(voting_circuits::spend_auth_g_affine());
     let ea_pk = g * ea_sk;
 
     // Synthetic blind factors.
@@ -1254,7 +1254,7 @@ pub fn build_share_reveal_test_data() -> (
 
     // Compute share commitments using full (x, y) coordinates and shares_hash.
     let share_comms: [pallas::Base; 16] = core::array::from_fn(|i| {
-        voting_circuits::vote_proof::share_commitment(
+        voting_circuits::share_commitment(
             share_blinds[i],
             all_c1_x[i],
             all_c2_x[i],
