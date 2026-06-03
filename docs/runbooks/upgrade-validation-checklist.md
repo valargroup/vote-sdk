@@ -16,7 +16,7 @@ Related runbooks: [software-upgrades.md](software-upgrades.md),
 ```bash
 # From vote-sdk repo root on the upgrade PR branch
 bash -n scripts/_chain_upgrade_common.sh scripts/update_chain.sh scripts/svoted-wrapper.sh join.sh
-sed -e "s/__RELEASE_TAG__/v0.9.8/g" \
+sed -e "s/__RELEASE_TAG__/v0.11.0/g" \
     -e "s|__GITHUB_REPO__|valargroup/vote-sdk|g" \
     -e "s|__DO_BASE__|https://shielded-vote.nyc3.digitaloceanspaces.com|g" \
     scripts/update_chain.sh.template | bash -n
@@ -84,7 +84,7 @@ grep -A2 'SVOTE_UPGRADE_MODE' join.sh | head -20
 ### Post-release artifact verification
 
 ```bash
-TAG=v0.9.8   # replace with actual tag
+TAG=v0.11.0   # replace with actual tag
 DO_BASE="${SVOTE_DO_SPACES_BASE:-https://shielded-vote.nyc3.digitaloceanspaces.com}"
 scripts/verify_upgrade_release_artifacts.sh "$TAG" "$DO_BASE"
 ```

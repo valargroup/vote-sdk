@@ -2,8 +2,8 @@
 # verify_upgrade_release_artifacts.sh — post-release smoke check for upgrade tooling on DO Spaces.
 #
 # Usage:
-#   scripts/verify_upgrade_release_artifacts.sh v0.9.8
-#   scripts/verify_upgrade_release_artifacts.sh v0.9.8 https://shielded-vote.nyc3.digitaloceanspaces.com
+#   scripts/verify_upgrade_release_artifacts.sh v0.11.0
+#   scripts/verify_upgrade_release_artifacts.sh v0.11.0 https://shielded-vote.nyc3.digitaloceanspaces.com
 set -euo pipefail
 
 TAG="${1:?usage: verify_upgrade_release_artifacts.sh <tag> [do_base]}"
