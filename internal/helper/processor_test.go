@@ -79,12 +79,39 @@ func (p *trackingProver) GenerateShareRevealProof(
 	return proof, nullifier, treeRoot, nil
 }
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func preloadFailedAttempts(t *testing.T, store *ShareStore, roundID string, attempts int) {
+	t.Helper()
+
+	key := schedKey(roundID, 0, 1, 0)
+	for i := range attempts {
+		ready := store.TakeReady()
+		require.Len(t, ready, 1, "failed attempt %d", i)
+		store.MarkFailed(roundID, 0, 1, 0)
+
+		store.mu.Lock()
+		store.schedule[key] = time.Now().Add(-time.Second)
+		store.mu.Unlock()
+	}
+
+	share, ok := store.loadShare(roundID, 0, 1, 0)
+	require.True(t, ok)
+	require.Equal(t, ShareStateReceived, share.State)
+	require.Equal(t, attempts, share.Attempts)
+}
+
 // mockTreeReader implements TreeReader for tests.
 type mockTreeReader struct {
 	leafCount    uint64
 	anchorHeight uint64
 	leaves       map[uint64][]byte
 	err          error
+	pathErr      error
 }
 
 func (m *mockTreeReader) ForRound(_ []byte) TreeReader { return m }
@@ -100,6 +127,9 @@ func (m *mockTreeReader) GetTreeStatus() (TreeStatus, error) {
 }
 
 func (m *mockTreeReader) MerklePath(_ uint64, _ uint32) ([]byte, error) {
+	if m.pathErr != nil {
+		return nil, m.pathErr
+	}
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -223,20 +253,76 @@ func TestProcessor_ProcessBatch_Success(t *testing.T) {
 	assert.Equal(t, 1, status[roundID].Submitted)
 }
 
-func TestProcessor_ProcessBatch_ProofFailure(t *testing.T) {
+func TestProcessor_ProcessBatch_ProofFailureSpendsFailedAttempt(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{
+			name: "generic failure",
+			err:  assert.AnError,
+		},
+		{
+			name: "invalid inputs",
+			err:  fmt.Errorf("share reveal: invalid inputs"),
+		},
+		{
+			name: "deserialization error",
+			err:  fmt.Errorf("share reveal: deserialization error (non-canonical Fp or invalid curve point)"),
+		},
+		{
+			name: "proof generation failed",
+			err:  fmt.Errorf("share reveal: proof generation failed"),
+		},
+		{
+			name: "unknown error code",
+			err:  fmt.Errorf("share reveal: unknown error code -6"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newTestStore(t)
+			prover := &mockProver{err: tt.err}
+			tree := newMockTreeReader()
+
+			chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				t.Fatal("should not submit when proof fails")
+			}))
+			defer chainServer.Close()
+
+			submitter := NewChainSubmitter(chainServer.URL)
+			proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
+
+			roundID := hex.EncodeToString(make([]byte, 32))
+			p := testPayload(roundID, 0)
+			p.TreePosition = 0
+			enqueueAndRequireInserted(t, store, p)
+
+			proc.processBatch(context.Background())
+
+			status := store.Status()
+			assert.Equal(t, 1, status[roundID].Pending)
+			share, ok := store.loadShare(roundID, 0, 1, 0)
+			require.True(t, ok)
+			assert.Equal(t, 1, share.Attempts)
+		})
+	}
+}
+
+func TestProcessor_ProcessBatch_SubmitCancellationReturnsShareToPending(t *testing.T) {
 	store := newTestStore(t)
-	prover := &mockProver{err: assert.AnError}
+	prover := &mockProver{}
 	tree := newMockTreeReader()
 
-	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("should not submit when proof fails")
-	}))
-	defer chainServer.Close()
-
-	submitter := NewChainSubmitter(chainServer.URL)
+	submitter := NewChainSubmitter("http://example.test")
+	submitter.httpClient = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return nil, context.Canceled
+		}),
+	}
 	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
 
-	// Enqueue (zero delay, immediately ready).
 	roundID := hex.EncodeToString(make([]byte, 32))
 	p := testPayload(roundID, 0)
 	p.TreePosition = 0
@@ -244,9 +330,12 @@ func TestProcessor_ProcessBatch_ProofFailure(t *testing.T) {
 
 	proc.processBatch(context.Background())
 
-	// Should have been retried (attempts=1), back to pending.
 	status := store.Status()
 	assert.Equal(t, 1, status[roundID].Pending)
+	share, ok := store.loadShare(roundID, 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, ShareStateReceived, share.State)
+	assert.Equal(t, 0, share.Attempts)
 }
 
 func TestProcessor_ProcessBatch_ChainRejects(t *testing.T) {
@@ -271,9 +360,313 @@ func TestProcessor_ProcessBatch_ChainRejects(t *testing.T) {
 
 	proc.processBatch(context.Background())
 
-	// Share should be marked as failed (retried).
 	status := store.Status()
 	assert.Equal(t, 1, status[roundID].Pending) // back to pending for retry
+	share, ok := store.loadShare(roundID, 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, 1, share.Attempts)
+}
+
+func TestProcessor_ProcessBatch_SystemSubmitErrorDoesNotSpendFailedAttempt(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{
+			name:   "internal server error",
+			status: http.StatusInternalServerError,
+			body:   `{"error":"encode failed"}`,
+		},
+		{
+			name:   "bad gateway",
+			status: http.StatusBadGateway,
+			body:   `{"error":"broadcast failed"}`,
+		},
+		{
+			name:   "service unavailable",
+			status: http.StatusServiceUnavailable,
+			body:   `{"status":"warming"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newTestStore(t)
+			prover := &mockProver{}
+			tree := newMockTreeReader()
+
+			chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.status)
+				w.Write([]byte(tt.body))
+			}))
+			defer chainServer.Close()
+
+			submitter := NewChainSubmitter(chainServer.URL)
+			proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
+
+			roundID := hex.EncodeToString(make([]byte, 32))
+			p := testPayload(roundID, 0)
+			p.TreePosition = 0
+			enqueueAndRequireInserted(t, store, p)
+
+			proc.processBatch(context.Background())
+
+			status := store.Status()
+			assert.Equal(t, 1, status[roundID].Pending)
+			assert.Equal(t, 0, status[roundID].Failed)
+			share, ok := store.loadShare(roundID, 0, 1, 0)
+			require.True(t, ok)
+			assert.Equal(t, ShareStateReceived, share.State)
+			assert.Equal(t, 0, share.Attempts)
+		})
+	}
+}
+
+func TestProcessor_ProcessBatch_RepeatedSystemSubmitErrorDoesNotSpendFailedAttempts(t *testing.T) {
+	store := newTestStore(t)
+	prover := &mockProver{}
+	tree := newMockTreeReader()
+
+	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte(`{"status":"warming"}`))
+	}))
+	defer chainServer.Close()
+
+	submitter := NewChainSubmitter(chainServer.URL)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
+
+	roundID := hex.EncodeToString(make([]byte, 32))
+	p := testPayload(roundID, 0)
+	p.TreePosition = 0
+	enqueueAndRequireInserted(t, store, p)
+
+	for i := range 6 {
+		proc.processBatch(context.Background())
+		share, ok := store.loadShare(roundID, 0, 1, 0)
+		require.True(t, ok, "retry %d", i)
+		assert.Equal(t, ShareStateReceived, share.State)
+		assert.Equal(t, 0, share.Attempts)
+
+		store.mu.Lock()
+		store.schedule[schedKey(roundID, 0, 1, 0)] = time.Now().Add(-time.Second)
+		store.mu.Unlock()
+	}
+
+	status := store.Status()
+	assert.Equal(t, 1, status[roundID].Pending)
+	assert.Equal(t, 0, status[roundID].Failed)
+}
+
+func TestProcessor_ProcessBatch_SystemSubmitErrorPreservesFailedAttempts(t *testing.T) {
+	store := newTestStore(t)
+	prover := &mockProver{}
+	tree := newMockTreeReader()
+	responseStatus := atomic.Int32{}
+	responseStatus.Store(http.StatusServiceUnavailable)
+
+	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		status := int(responseStatus.Load())
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		if status == http.StatusBadRequest {
+			w.Write([]byte(`{"error":"validation failed"}`))
+			return
+		}
+		w.Write([]byte(`{"status":"warming"}`))
+	}))
+	defer chainServer.Close()
+
+	submitter := NewChainSubmitter(chainServer.URL)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
+
+	roundID := hex.EncodeToString(make([]byte, 32))
+	p := testPayload(roundID, 0)
+	p.TreePosition = 0
+	enqueueAndRequireInserted(t, store, p)
+	key := schedKey(roundID, 0, 1, 0)
+
+	preloadFailedAttempts(t, store, roundID, 4)
+
+	for i := range 2 {
+		proc.processBatch(context.Background())
+
+		share, ok := store.loadShare(roundID, 0, 1, 0)
+		require.True(t, ok, "system retry %d", i)
+		assert.Equal(t, ShareStateReceived, share.State)
+		assert.Equal(t, 4, share.Attempts)
+
+		store.mu.Lock()
+		next, ok := store.schedule[key]
+		store.mu.Unlock()
+		require.True(t, ok)
+		assert.True(t, time.Until(next) > 0)
+
+		store.mu.Lock()
+		store.schedule[key] = time.Now().Add(-time.Second)
+		store.mu.Unlock()
+	}
+
+	responseStatus.Store(http.StatusBadRequest)
+	proc.processBatch(context.Background())
+
+	status := store.Status()
+	assert.Equal(t, 0, status[roundID].Pending)
+	assert.Equal(t, 1, status[roundID].Failed)
+	share, ok := store.loadShare(roundID, 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, ShareStateFailed, share.State)
+	assert.Equal(t, 5, share.Attempts)
+}
+
+func TestProcessor_ProcessBatch_SystemErrorsPreserveExistingFailedAttempts(t *testing.T) {
+	tests := []struct {
+		name      string
+		tree      TreeReader
+		submitter *ChainSubmitter
+		active    RoundStatusChecker
+	}{
+		{
+			name: "transport error",
+			tree: newMockTreeReader(),
+			submitter: func() *ChainSubmitter {
+				submitter := NewChainSubmitter("http://example.test")
+				submitter.httpClient = &http.Client{
+					Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+						return nil, assert.AnError
+					}),
+				}
+				return submitter
+			}(),
+		},
+		{
+			name:      "round status check error",
+			tree:      newMockTreeReader(),
+			submitter: NewChainSubmitter("http://example.test"),
+			active: func(roundID string) (bool, error) {
+				return false, assert.AnError
+			},
+		},
+		{
+			name:      "tree readiness error",
+			tree:      &mockTreeReader{err: assert.AnError},
+			submitter: NewChainSubmitter("http://example.test"),
+		},
+		{
+			name: "merkle path error",
+			tree: &mockTreeReader{
+				leafCount:    1,
+				anchorHeight: 1,
+				pathErr:      assert.AnError,
+			},
+			submitter: NewChainSubmitter("http://example.test"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newTestStore(t)
+			prover := &mockProver{}
+			proc := NewProcessor(store, tt.tree, prover, tt.submitter, log.NewNopLogger(), 2, tt.active)
+
+			roundID := hex.EncodeToString(make([]byte, 32))
+			p := testPayload(roundID, 0)
+			p.TreePosition = 0
+			enqueueAndRequireInserted(t, store, p)
+			key := schedKey(roundID, 0, 1, 0)
+			preloadFailedAttempts(t, store, roundID, 4)
+
+			proc.processBatch(context.Background())
+
+			status := store.Status()
+			assert.Equal(t, 1, status[roundID].Pending)
+			assert.Equal(t, 0, status[roundID].Failed)
+			share, ok := store.loadShare(roundID, 0, 1, 0)
+			require.True(t, ok)
+			assert.Equal(t, ShareStateReceived, share.State)
+			assert.Equal(t, 4, share.Attempts)
+
+			store.mu.Lock()
+			_, ok = store.schedule[key]
+			store.mu.Unlock()
+			assert.True(t, ok)
+		})
+	}
+}
+
+func TestProcessor_ProcessBatch_SystemSubmitErrorNearVoteEndRetriesUrgently(t *testing.T) {
+	now := time.Now()
+	voteEndTime := uint64(now.Add(5 * time.Second).Unix())
+	fetcher := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: uint64(now.Add(-time.Hour).Unix()), VoteEndTime: voteEndTime}, nil
+	}
+	store, err := NewShareStore(":memory:", fetcher)
+	require.NoError(t, err)
+	defer store.Close()
+
+	prover := &mockProver{}
+	tree := newMockTreeReader()
+
+	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte(`{"status":"warming"}`))
+	}))
+	defer chainServer.Close()
+
+	submitter := NewChainSubmitter(chainServer.URL)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
+
+	roundID := hex.EncodeToString(make([]byte, 32))
+	p := testPayload(roundID, 0)
+	p.TreePosition = 0
+	enqueueAndRequireInserted(t, store, p)
+
+	proc.processBatch(context.Background())
+
+	status := store.Status()
+	assert.Equal(t, 1, status[roundID].Pending)
+	share, ok := store.loadShare(roundID, 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, 0, share.Attempts)
+
+	store.mu.Lock()
+	next, ok := store.schedule[schedKey(roundID, 0, 1, 0)]
+	store.mu.Unlock()
+	require.True(t, ok)
+	assert.WithinDuration(t, time.Now().Add(shareSystemRetryUrgentBackoff), next, 300*time.Millisecond)
+}
+
+func TestProcessor_ProcessBatch_BadRequestSpendsFailedAttempt(t *testing.T) {
+	store := newTestStore(t)
+	prover := &mockProver{}
+	tree := newMockTreeReader()
+
+	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":"validation failed"}`))
+	}))
+	defer chainServer.Close()
+
+	submitter := NewChainSubmitter(chainServer.URL)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
+
+	roundID := hex.EncodeToString(make([]byte, 32))
+	p := testPayload(roundID, 0)
+	p.TreePosition = 0
+	enqueueAndRequireInserted(t, store, p)
+
+	proc.processBatch(context.Background())
+
+	status := store.Status()
+	assert.Equal(t, 1, status[roundID].Pending)
+	share, ok := store.loadShare(roundID, 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, 1, share.Attempts)
 }
 
 func TestProcessor_ProcessBatch_DuplicateNullifierTreatedAsSuccess(t *testing.T) {
