@@ -16,6 +16,7 @@ Historical changes before commit `704b202e2088b91caeaf2290cef85e4a9a759542` are 
   validators can retry `MsgAckExecutiveAuthorityKey` if CometBFT advances to a
   later round before their proposal commits. Coefficients are now cleaned up only
   after committed state moves the round past the ceremony ack window.
+- Keep helper reveal shares pending when local submit, round status, tree readiness, or Merkle path failures look like system readiness or transport problems instead of spending failed-share attempts.
 
 ## v0.9.7 - 2026-05-28
 

@@ -255,6 +255,159 @@ func TestMarkFailed_RetryAndPermanent(t *testing.T) {
 	assert.Equal(t, payload.PrimaryBlind, share.Payload.PrimaryBlind)
 }
 
+func TestMarkRetry_DoesNotSpendFailedAttempts(t *testing.T) {
+	s := newTestStore(t)
+
+	enqueueAndRequireInserted(t, s, testPayload("round1", 0))
+
+	for i := range 6 {
+		ready := s.TakeReady()
+		require.Len(t, ready, 1, "retry %d", i)
+		s.MarkRetry("round1", 0, 1, 0)
+
+		s.mu.Lock()
+		s.schedule[schedKey("round1", 0, 1, 0)] = time.Now().Add(-time.Second)
+		s.mu.Unlock()
+	}
+
+	share, ok := s.loadShare("round1", 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, ShareStateReceived, share.State)
+	assert.Equal(t, 0, share.Attempts)
+
+	status := s.Status()
+	assert.Equal(t, 1, status["round1"].Pending)
+	assert.Equal(t, 0, status["round1"].Failed)
+}
+
+func TestMarkRetry_PreservesFailedAttempts(t *testing.T) {
+	s := newTestStore(t)
+
+	enqueueAndRequireInserted(t, s, testPayload("round1", 0))
+	key := schedKey("round1", 0, 1, 0)
+
+	for i := range 4 {
+		ready := s.TakeReady()
+		require.Len(t, ready, 1, "failed attempt %d", i)
+		s.MarkFailed("round1", 0, 1, 0)
+
+		s.mu.Lock()
+		s.schedule[key] = time.Now().Add(-time.Second)
+		s.mu.Unlock()
+	}
+
+	share, ok := s.loadShare("round1", 0, 1, 0)
+	require.True(t, ok)
+	require.Equal(t, ShareStateReceived, share.State)
+	require.Equal(t, 4, share.Attempts)
+
+	for i := range 2 {
+		ready := s.TakeReady()
+		require.Len(t, ready, 1, "system retry %d", i)
+		s.MarkRetry("round1", 0, 1, 0)
+
+		share, ok := s.loadShare("round1", 0, 1, 0)
+		require.True(t, ok)
+		assert.Equal(t, ShareStateReceived, share.State)
+		assert.Equal(t, 4, share.Attempts)
+
+		s.mu.Lock()
+		next, ok := s.schedule[key]
+		s.mu.Unlock()
+		require.True(t, ok)
+		assert.True(t, time.Until(next) > 0)
+
+		s.mu.Lock()
+		s.schedule[key] = time.Now().Add(-time.Second)
+		s.mu.Unlock()
+	}
+
+	ready := s.TakeReady()
+	require.Len(t, ready, 1)
+	s.MarkFailed("round1", 0, 1, 0)
+
+	share, ok = s.loadShare("round1", 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, ShareStateFailed, share.State)
+	assert.Equal(t, 5, share.Attempts)
+}
+
+func TestMarkRetry_SchedulesUrgentlyNearVoteEnd(t *testing.T) {
+	now := time.Now()
+	voteEndTime := uint64(now.Add(5 * time.Second).Unix())
+	fetcher := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: uint64(now.Add(-time.Hour).Unix()), VoteEndTime: voteEndTime}, nil
+	}
+	s, err := NewShareStore(":memory:", fetcher)
+	require.NoError(t, err)
+	defer s.Close()
+
+	enqueueAndRequireInserted(t, s, testPayload("round1", 0))
+	ready := s.TakeReady()
+	require.Len(t, ready, 1)
+	s.MarkRetry("round1", 0, 1, 0)
+
+	s.mu.Lock()
+	next, ok := s.schedule[schedKey("round1", 0, 1, 0)]
+	s.mu.Unlock()
+	require.True(t, ok)
+	assert.WithinDuration(t, time.Now().Add(shareSystemRetryUrgentBackoff), next, 300*time.Millisecond)
+}
+
+func TestMarkRetry_SchedulesUrgentlyWhenBackoffWouldLeaveLittleTime(t *testing.T) {
+	now := time.Now()
+	voteEndTime := uint64(now.Add(shareSystemRetryBackoff + shareSystemRetryDeadlineBuffer/2).Unix())
+	fetcher := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: uint64(now.Add(-time.Hour).Unix()), VoteEndTime: voteEndTime}, nil
+	}
+	s, err := NewShareStore(":memory:", fetcher)
+	require.NoError(t, err)
+	defer s.Close()
+
+	enqueueAndRequireInserted(t, s, testPayload("round1", 0))
+	ready := s.TakeReady()
+	require.Len(t, ready, 1)
+	s.MarkRetry("round1", 0, 1, 0)
+
+	s.mu.Lock()
+	next, ok := s.schedule[schedKey("round1", 0, 1, 0)]
+	s.mu.Unlock()
+	require.True(t, ok)
+	assert.WithinDuration(t, time.Now().Add(shareSystemRetryUrgentBackoff), next, 300*time.Millisecond)
+}
+
+func TestMarkRetry_UsesBackoffBeforeVoteEnd(t *testing.T) {
+	s := newTestStore(t)
+
+	enqueueAndRequireInserted(t, s, testPayload("round1", 0))
+	ready := s.TakeReady()
+	require.Len(t, ready, 1)
+
+	before := time.Now()
+	s.MarkRetry("round1", 0, 1, 0)
+
+	s.mu.Lock()
+	next, ok := s.schedule[schedKey("round1", 0, 1, 0)]
+	s.mu.Unlock()
+	require.True(t, ok)
+	assert.True(t, next.After(before.Add(shareSystemRetryBackoff-200*time.Millisecond)))
+	assert.True(t, next.Before(before.Add(shareSystemRetryBackoff+200*time.Millisecond)))
+}
+
+func TestNextShareSystemRetryTime_StaysBeforeDeadline(t *testing.T) {
+	now := time.Unix(1000, 0)
+	next := nextShareSystemRetryTime(now, uint64(now.Add(time.Second).Unix()))
+
+	assert.Equal(t, now.Add(500*time.Millisecond), next)
+}
+
+func TestNextShareSystemRetryTime_HalvesRemainingNearDeadline(t *testing.T) {
+	now := time.Unix(1000, 0)
+	next := nextShareSystemRetryTime(now, uint64(now.Add(3*time.Second).Unix()))
+
+	assert.Equal(t, now.Add(1500*time.Millisecond), next)
+}
+
 func TestMarkFailed_PermanentUnknownVoteEndTimeScrubsWitnessMaterial(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "helper.db")
 	now := uint64(time.Now().Unix())

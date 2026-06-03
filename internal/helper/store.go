@@ -772,6 +772,70 @@ func (s *ShareStore) MarkSubmitted(roundID string, shareIndex, proposalID uint32
 	}
 }
 
+const (
+	shareSystemRetryBackoff        = 10 * time.Second
+	shareSystemRetryUrgentBackoff  = 2 * time.Second
+	shareSystemRetryDeadlineBuffer = 30 * time.Second
+)
+
+// MarkRetry returns an in-flight share to the pending queue without spending a
+// failed-share attempt.
+func (s *ShareStore) MarkRetry(roundID string, shareIndex, proposalID uint32, treePosition uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var voteEndTime uint64
+	if err := s.db.QueryRow(
+		"SELECT vote_end_time FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = 1",
+		roundID, shareIndex, proposalID, treePosition,
+	).Scan(&voteEndTime); err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			s.logError("MarkRetry: db query failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
+		}
+		return
+	}
+
+	res, err := s.db.Exec(
+		"UPDATE shares SET state = 0 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = 1",
+		roundID, shareIndex, proposalID, treePosition,
+	)
+	if err != nil {
+		s.logError("MarkRetry: db update failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
+		return
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		return
+	}
+
+	key := schedKey(roundID, shareIndex, proposalID, treePosition)
+	now := time.Now()
+	s.schedule[key] = nextShareSystemRetryTime(now, voteEndTime)
+	s.notifyScheduleChangedLocked()
+}
+
+// nextShareSystemRetryTime returns the next retry time without intentionally
+// leaving too little processing time before the round's vote end time.
+func nextShareSystemRetryTime(now time.Time, voteEndTime uint64) time.Time {
+	scheduled := now.Add(shareSystemRetryBackoff)
+	if voteEndTime == 0 {
+		return scheduled
+	}
+	deadline := time.Unix(int64(voteEndTime), 0)
+	if scheduled.After(deadline.Add(-shareSystemRetryDeadlineBuffer)) {
+		remaining := deadline.Sub(now)
+		if remaining <= 0 {
+			return now
+		}
+		urgentBackoff := shareSystemRetryUrgentBackoff
+		if halfRemaining := remaining / 2; halfRemaining < urgentBackoff {
+			urgentBackoff = halfRemaining
+		}
+		return now.Add(urgentBackoff)
+	}
+	return scheduled
+}
+
 // MarkFailed marks a share processing attempt as failed, with retry or
 // permanent failure after max attempts.
 func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, treePosition uint64) {
