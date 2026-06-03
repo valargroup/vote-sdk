@@ -29,10 +29,10 @@ type Config struct {
 	// ChainAPIPort is the port of the chain's REST API (localhost).
 	// Used for submitting MsgRevealShare via POST. Defaults to 1317 — the
 	// standard Cosmos SDK [api] address port that svoted serves. Setting
-	// this to a port where no server listens causes every share to fail
-	// broadcast silently (`connection refused` warnings in the log while
-	// the helper keeps accepting and proving new shares), which surfaces
-	// to voters as zero-value tallies with no user-visible error.
+	// this to a port where no server listens leaves shares pending with
+	// repeated connection refused warnings while the helper keeps accepting
+	// new shares. If it is not fixed before the voting window closes, reveals
+	// can miss the chain and surface to voters as zero-value tallies.
 	ChainAPIPort int `mapstructure:"chain_api_port"`
 
 	// MaxConcurrentProofs limits concurrent proof generation goroutines.
@@ -180,7 +180,7 @@ const QueueExportVersion = 1
 
 // QueueExport is the local rescue artifact for one round's helper queue.
 // It is intentionally not exposed over HTTP. Treat files of this shape as
-// sensitive because processable rows contain witness material.
+// sensitive because processable and failed rows can contain witness material.
 type QueueExport struct {
 	Version    int              `json:"version"`
 	RoundID    string           `json:"round_id"`
@@ -197,6 +197,8 @@ type QueueExportRound struct {
 
 // QueueExportRow is one persisted share queue row. Terminal rows are exported
 // for debugging, but import skips them so they cannot be processed again.
+// Submitted rows should have witness material cleared. Failed rows can retain
+// it until the helper purges the round after vote_end_time.
 type QueueExportRow struct {
 	ShareIndex       uint32             `json:"share_index"`
 	SharesHash       string             `json:"shares_hash,omitempty"`

@@ -96,6 +96,7 @@ func PartialDecryptPrepareProposalInjector(
 		}
 		shareCacheMu.Unlock()
 
+		cleanObsoleteCoeffFiles(ceremonyDir, voteKeeper, kvStore, logger)
 		cleanOrphanedShareFiles(ceremonyDir, voteKeeper, kvStore, logger)
 
 		// Find the first TALLYING round.
@@ -277,6 +278,40 @@ func cleanOrphanedShareFiles(
 			r.Status == types.SessionStatus_SESSION_STATUS_FINALIZED ||
 			r.Status == types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED {
 			zeroAndDeleteShareFile(ceremonyDir, roundID, logger)
+		}
+	}
+}
+
+// cleanObsoleteCoeffFiles scans ceremonyDir for coeffs.<hex> files and removes
+// only those whose round is no longer in the speculative ceremony-ack window.
+// PrepareProposal may build blocks that never commit, so DKG coefficients must
+// survive while a round is still PENDING and awaiting ceremony acks.
+func cleanObsoleteCoeffFiles(
+	ceremonyDir string,
+	voteKeeper *votekeeper.Keeper,
+	kvStore store.KVStore,
+	logger log.Logger,
+) {
+	if ceremonyDir == "" {
+		return
+	}
+	entries, err := os.ReadDir(ceremonyDir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasPrefix(name, "coeffs.") || entry.IsDir() {
+			continue
+		}
+		roundHex := strings.TrimPrefix(name, "coeffs.")
+		roundID, err := hex.DecodeString(roundHex)
+		if err != nil {
+			continue
+		}
+		r, err := voteKeeper.GetVoteRound(kvStore, roundID)
+		if err != nil || r.Status != types.SessionStatus_SESSION_STATUS_PENDING {
+			zeroAndDeleteCoeffsFile(ceremonyDir, roundID, logger)
 		}
 	}
 }

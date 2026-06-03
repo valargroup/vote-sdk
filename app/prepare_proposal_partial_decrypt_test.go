@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/hex"
+	"os"
+	"path/filepath"
 	"testing"
 
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
@@ -157,6 +159,28 @@ func TestPartialDecryptInjector_SkipsDuplicate(t *testing.T) {
 
 	require.Empty(t, ta.CallPrepareProposal().Txs,
 		"second PrepareProposal must not re-inject after on-chain submission")
+}
+
+func TestPartialDecryptInjector_CleansCoeffFileAfterCeremony(t *testing.T) {
+	ta, _, pallasPk, _, eaPk := testutil.SetupTestAppWithPallasKey(t)
+
+	proposerAddr := ta.ValidatorOperAddr()
+	share, _ := elgamal.KeyGen(rand.Reader)
+	G := elgamal.PallasGenerator()
+	vk := G.Mul(share.Scalar).ToAffineCompressed()
+
+	validators := []*types.ValidatorPallasKey{
+		{ValidatorAddress: proposerAddr, PallasPk: pallasPk.Point.ToAffineCompressed()},
+	}
+	seedTallyingRoundWithAccumulators(t, ta, pdRound, 1, validators, [][]byte{vk}, eaPk)
+
+	coeffsPath := filepath.Join(ta.EaSkDir, "coeffs."+hex.EncodeToString(pdRound))
+	require.NoError(t, os.WriteFile(coeffsPath, bytes.Repeat([]byte{0xAB}, 32), 0600))
+
+	ta.CallPrepareProposal()
+
+	_, err := os.Stat(coeffsPath)
+	require.True(t, os.IsNotExist(err), "coefficients should be cleaned once the round is past ceremony")
 }
 
 // ---------------------------------------------------------------------------

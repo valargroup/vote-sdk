@@ -1,7 +1,10 @@
 package helper
 
 import (
+	"bytes"
 	"database/sql"
+	"encoding/base64"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -53,6 +56,49 @@ func testPayload(roundID string, shareIndex uint32) SharePayload {
 		PrimaryBlind: zeroB64,
 		SubmitAt:     0, // immediate
 	}
+}
+
+// testFieldB64 returns a valid 32-byte base64 field with a recognizable byte pattern.
+func testFieldB64(fill byte) string {
+	return base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{fill}, 32))
+}
+
+// distinctSensitivePayload returns a payload whose sensitive fields have
+// different sentinel values so tests can catch field swaps.
+func distinctSensitivePayload(roundID string, shareIndex uint32) SharePayload {
+	p := testPayload(roundID, shareIndex)
+	p.SharesHash = testFieldB64(1)
+	p.EncShare.C1 = testFieldB64(2)
+	p.EncShare.C2 = testFieldB64(3)
+	p.PrimaryBlind = testFieldB64(4)
+	p.ShareComms = make([]string, 16)
+	for i := range p.ShareComms {
+		p.ShareComms[i] = testFieldB64(byte(10 + i))
+	}
+	return p
+}
+
+// sensitiveFieldStrings returns the payload fields expected to be retained only
+// until terminal cleanup for failed shares.
+func sensitiveFieldStrings(payload SharePayload) []string {
+	fields := []string{
+		payload.EncShare.C1,
+		payload.EncShare.C2,
+		payload.PrimaryBlind,
+	}
+	fields = append(fields, payload.ShareComms...)
+	return fields
+}
+
+// containsSensitiveField reports whether any sensitive payload sentinel appears
+// in raw database bytes.
+func containsSensitiveField(data []byte, payload SharePayload) bool {
+	for _, field := range sensitiveFieldStrings(payload) {
+		if bytes.Contains(data, []byte(field)) {
+			return true
+		}
+	}
+	return false
 }
 
 func enqueueAndRequireInserted(t *testing.T, s *ShareStore, payload SharePayload) {
@@ -117,7 +163,8 @@ func TestMarkSubmitted(t *testing.T) {
 func TestMarkFailed_RetryAndPermanent(t *testing.T) {
 	s := newTestStore(t)
 
-	enqueueAndRequireInserted(t, s, testPayload("round1", 0))
+	payload := distinctSensitivePayload("round1", 0)
+	enqueueAndRequireInserted(t, s, payload)
 
 	// Take and fail it repeatedly, fast-forwarding the backoff schedule.
 	for i := range 4 {
@@ -140,17 +187,233 @@ func TestMarkFailed_RetryAndPermanent(t *testing.T) {
 	assert.Equal(t, 1, status["round1"].Failed)
 	assert.Equal(t, 0, status["round1"].Pending)
 
-	// Witness data must be scrubbed after permanent failure.
-	var c1, c2, comms, blind string
-	err := s.db.QueryRow(
-		"SELECT enc_share_c1, enc_share_c2, share_comms, primary_blind FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
-		"round1", 0, 1, 0,
-	).Scan(&c1, &c2, &comms, &blind)
+	share, ok := s.loadShare("round1", 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, ShareStateFailed, share.State)
+	assert.Equal(t, payload.EncShare.C1, share.Payload.EncShare.C1)
+	assert.Equal(t, payload.EncShare.C2, share.Payload.EncShare.C2)
+	assert.Equal(t, payload.ShareComms, share.Payload.ShareComms)
+	assert.Equal(t, payload.PrimaryBlind, share.Payload.PrimaryBlind)
+}
+
+func TestMarkRetry_DoesNotSpendFailedAttempts(t *testing.T) {
+	s := newTestStore(t)
+
+	enqueueAndRequireInserted(t, s, testPayload("round1", 0))
+
+	for i := range 6 {
+		ready := s.TakeReady()
+		require.Len(t, ready, 1, "retry %d", i)
+		s.MarkRetry("round1", 0, 1, 0)
+
+		s.mu.Lock()
+		s.schedule[schedKey("round1", 0, 1, 0)] = time.Now().Add(-time.Second)
+		s.mu.Unlock()
+	}
+
+	share, ok := s.loadShare("round1", 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, ShareStateReceived, share.State)
+	assert.Equal(t, 0, share.Attempts)
+
+	status := s.Status()
+	assert.Equal(t, 1, status["round1"].Pending)
+	assert.Equal(t, 0, status["round1"].Failed)
+}
+
+func TestMarkRetry_PreservesFailedAttempts(t *testing.T) {
+	s := newTestStore(t)
+
+	enqueueAndRequireInserted(t, s, testPayload("round1", 0))
+	key := schedKey("round1", 0, 1, 0)
+
+	for i := range 4 {
+		ready := s.TakeReady()
+		require.Len(t, ready, 1, "failed attempt %d", i)
+		s.MarkFailed("round1", 0, 1, 0)
+
+		s.mu.Lock()
+		s.schedule[key] = time.Now().Add(-time.Second)
+		s.mu.Unlock()
+	}
+
+	share, ok := s.loadShare("round1", 0, 1, 0)
+	require.True(t, ok)
+	require.Equal(t, ShareStateReceived, share.State)
+	require.Equal(t, 4, share.Attempts)
+
+	for i := range 2 {
+		ready := s.TakeReady()
+		require.Len(t, ready, 1, "system retry %d", i)
+		s.MarkRetry("round1", 0, 1, 0)
+
+		share, ok := s.loadShare("round1", 0, 1, 0)
+		require.True(t, ok)
+		assert.Equal(t, ShareStateReceived, share.State)
+		assert.Equal(t, 4, share.Attempts)
+
+		s.mu.Lock()
+		next, ok := s.schedule[key]
+		s.mu.Unlock()
+		require.True(t, ok)
+		assert.True(t, time.Until(next) > 0)
+
+		s.mu.Lock()
+		s.schedule[key] = time.Now().Add(-time.Second)
+		s.mu.Unlock()
+	}
+
+	ready := s.TakeReady()
+	require.Len(t, ready, 1)
+	s.MarkFailed("round1", 0, 1, 0)
+
+	share, ok = s.loadShare("round1", 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, ShareStateFailed, share.State)
+	assert.Equal(t, 5, share.Attempts)
+}
+
+func TestMarkRetry_SchedulesUrgentlyNearVoteEnd(t *testing.T) {
+	now := time.Now()
+	voteEndTime := uint64(now.Add(5 * time.Second).Unix())
+	fetcher := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: uint64(now.Add(-time.Hour).Unix()), VoteEndTime: voteEndTime}, nil
+	}
+	s, err := NewShareStore(":memory:", fetcher)
 	require.NoError(t, err)
-	assert.Empty(t, c1, "enc_share_c1 should be cleared after permanent failure")
-	assert.Empty(t, c2, "enc_share_c2 should be cleared after permanent failure")
-	assert.Equal(t, "[]", comms, "share_comms should be reset after permanent failure")
-	assert.Empty(t, blind, "primary_blind should be cleared after permanent failure")
+	defer s.Close()
+
+	enqueueAndRequireInserted(t, s, testPayload("round1", 0))
+	ready := s.TakeReady()
+	require.Len(t, ready, 1)
+	s.MarkRetry("round1", 0, 1, 0)
+
+	s.mu.Lock()
+	next, ok := s.schedule[schedKey("round1", 0, 1, 0)]
+	s.mu.Unlock()
+	require.True(t, ok)
+	assert.WithinDuration(t, time.Now().Add(shareSystemRetryUrgentBackoff), next, 300*time.Millisecond)
+}
+
+func TestMarkRetry_SchedulesUrgentlyWhenBackoffWouldLeaveLittleTime(t *testing.T) {
+	now := time.Now()
+	voteEndTime := uint64(now.Add(shareSystemRetryBackoff + shareSystemRetryDeadlineBuffer/2).Unix())
+	fetcher := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: uint64(now.Add(-time.Hour).Unix()), VoteEndTime: voteEndTime}, nil
+	}
+	s, err := NewShareStore(":memory:", fetcher)
+	require.NoError(t, err)
+	defer s.Close()
+
+	enqueueAndRequireInserted(t, s, testPayload("round1", 0))
+	ready := s.TakeReady()
+	require.Len(t, ready, 1)
+	s.MarkRetry("round1", 0, 1, 0)
+
+	s.mu.Lock()
+	next, ok := s.schedule[schedKey("round1", 0, 1, 0)]
+	s.mu.Unlock()
+	require.True(t, ok)
+	assert.WithinDuration(t, time.Now().Add(shareSystemRetryUrgentBackoff), next, 300*time.Millisecond)
+}
+
+func TestMarkRetry_UsesBackoffBeforeVoteEnd(t *testing.T) {
+	s := newTestStore(t)
+
+	enqueueAndRequireInserted(t, s, testPayload("round1", 0))
+	ready := s.TakeReady()
+	require.Len(t, ready, 1)
+
+	before := time.Now()
+	s.MarkRetry("round1", 0, 1, 0)
+
+	s.mu.Lock()
+	next, ok := s.schedule[schedKey("round1", 0, 1, 0)]
+	s.mu.Unlock()
+	require.True(t, ok)
+	assert.True(t, next.After(before.Add(shareSystemRetryBackoff-200*time.Millisecond)))
+	assert.True(t, next.Before(before.Add(shareSystemRetryBackoff+200*time.Millisecond)))
+}
+
+func TestNextShareSystemRetryTime_StaysBeforeDeadline(t *testing.T) {
+	now := time.Unix(1000, 0)
+	next := nextShareSystemRetryTime(now, uint64(now.Add(time.Second).Unix()))
+
+	assert.Equal(t, now.Add(500*time.Millisecond), next)
+}
+
+func TestNextShareSystemRetryTime_HalvesRemainingNearDeadline(t *testing.T) {
+	now := time.Unix(1000, 0)
+	next := nextShareSystemRetryTime(now, uint64(now.Add(3*time.Second).Unix()))
+
+	assert.Equal(t, now.Add(1500*time.Millisecond), next)
+}
+
+func TestMarkFailed_PermanentUnknownVoteEndTimeScrubsWitnessMaterial(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "helper.db")
+	now := uint64(time.Now().Unix())
+	fetcher := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: now, VoteEndTime: now + testVoteEndOffset}, nil
+	}
+
+	s, err := NewShareStore(dbPath, fetcher)
+	require.NoError(t, err)
+	defer s.Close()
+
+	payload := distinctSensitivePayload("round1", 0)
+	enqueueAndRequireInserted(t, s, payload)
+	_, err = s.db.Exec(
+		"UPDATE shares SET vote_end_time = 0 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
+		payload.VoteRoundID,
+		payload.EncShare.ShareIndex,
+		payload.ProposalID,
+		payload.TreePosition,
+	)
+	require.NoError(t, err)
+
+	walPath := dbPath + "-wal"
+	walBefore, err := os.ReadFile(walPath)
+	require.NoError(t, err)
+	require.True(t, containsSensitiveField(walBefore, payload), "expected WAL to contain unknown-time witness material before permanent scrub")
+
+	failSharePermanently(t, s, payload)
+
+	share, ok := s.loadShare(payload.VoteRoundID, payload.EncShare.ShareIndex, payload.ProposalID, payload.TreePosition)
+	require.True(t, ok)
+	assert.Equal(t, ShareStateFailed, share.State)
+	assert.Empty(t, share.Payload.EncShare.C1)
+	assert.Empty(t, share.Payload.EncShare.C2)
+	assert.Empty(t, share.Payload.ShareComms)
+	assert.Empty(t, share.Payload.PrimaryBlind)
+
+	walAfter, err := os.ReadFile(walPath)
+	if os.IsNotExist(err) {
+		return
+	}
+	require.NoError(t, err)
+	assert.False(t, containsSensitiveField(walAfter, payload), "unknown-time witness material should not remain in WAL after permanent scrub")
+}
+
+// failSharePermanently advances a queued test share through all retry attempts.
+func failSharePermanently(t *testing.T, s *ShareStore, payload SharePayload) {
+	t.Helper()
+
+	key := schedKey(payload.VoteRoundID, payload.EncShare.ShareIndex, payload.ProposalID, payload.TreePosition)
+	for attempt := 0; attempt < 5; attempt++ {
+		ready := s.TakeReady()
+		require.Len(t, ready, 1, "attempt %d", attempt)
+		assert.Equal(t, payload.VoteRoundID, ready[0].Payload.VoteRoundID)
+		assert.Equal(t, payload.EncShare.ShareIndex, ready[0].Payload.EncShare.ShareIndex)
+		assert.Equal(t, payload.ProposalID, ready[0].Payload.ProposalID)
+		assert.Equal(t, payload.TreePosition, ready[0].Payload.TreePosition)
+
+		s.MarkFailed(payload.VoteRoundID, payload.EncShare.ShareIndex, payload.ProposalID, payload.TreePosition)
+		if attempt < 4 {
+			s.mu.Lock()
+			s.schedule[key] = time.Now().Add(-time.Second)
+			s.mu.Unlock()
+		}
+	}
 }
 
 func TestStatus(t *testing.T) {
@@ -539,6 +802,56 @@ func TestPurgeExpiredRounds(t *testing.T) {
 	assert.Equal(t, 1, status["active_round"].Total)
 }
 
+func TestPurgeExpiredRoundsTruncatesWALWithFailedWitnessMaterial(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "helper.db")
+	end := uint64(time.Now().Add(-time.Hour).Unix())
+	fetcher := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: end - oneHourSecs, VoteEndTime: end}, nil
+	}
+
+	s, err := NewShareStore(dbPath, fetcher)
+	require.NoError(t, err)
+	defer s.Close()
+
+	failed := distinctSensitivePayload("expired_round", 0)
+	enqueueAndRequireInserted(t, s, failed)
+	failSharePermanently(t, s, failed)
+
+	walPath := dbPath + "-wal"
+	walBefore, err := os.ReadFile(walPath)
+	require.NoError(t, err)
+	require.True(t, containsSensitiveField(walBefore, failed), "expected WAL to contain failed-row witness material before purge")
+
+	blockerDB, err := sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+	defer blockerDB.Close()
+	blockerTx, err := blockerDB.Begin()
+	require.NoError(t, err)
+	var rowCount int
+	require.NoError(t, blockerTx.QueryRow("SELECT COUNT(*) FROM shares").Scan(&rowCount))
+	require.Equal(t, 1, rowCount)
+
+	deleted := s.PurgeExpiredRounds()
+	assert.Equal(t, int64(1), deleted)
+	_, ok := s.loadShare(failed.VoteRoundID, failed.EncShare.ShareIndex, failed.ProposalID, failed.TreePosition)
+	assert.False(t, ok)
+
+	walAfterBlockedCheckpoint, err := os.ReadFile(walPath)
+	require.NoError(t, err)
+	assert.True(t, containsSensitiveField(walAfterBlockedCheckpoint, failed), "blocked checkpoint should leave cleanup for a later purge pass")
+	require.NoError(t, blockerTx.Rollback())
+
+	deleted = s.PurgeExpiredRounds()
+	assert.Equal(t, int64(0), deleted)
+
+	walAfter, err := os.ReadFile(walPath)
+	if os.IsNotExist(err) {
+		return
+	}
+	require.NoError(t, err)
+	assert.False(t, containsSensitiveField(walAfter, failed), "failed-row witness material should not remain in WAL after purge")
+}
+
 func TestExpiredRoundSummaries(t *testing.T) {
 	fetcher := func(roundID string) (RoundInfo, error) {
 		end := uint64(time.Now().Add(-time.Hour).Unix())
@@ -845,6 +1158,33 @@ func TestExportQueueIncludesTerminalRows(t *testing.T) {
 	}
 	assert.True(t, sawPending)
 	assert.True(t, sawSubmitted)
+}
+
+func TestExportQueueIncludesFailedRowsWithWitnessMaterial(t *testing.T) {
+	s := newTestStore(t)
+
+	failed := distinctSensitivePayload("round1", 0)
+	enqueueAndRequireInserted(t, s, failed)
+	failSharePermanently(t, s, failed)
+
+	export, err := s.ExportQueue("round1", time.Now())
+	require.NoError(t, err)
+	require.Len(t, export.Rows, 1)
+
+	row := export.Rows[0]
+	assert.False(t, row.Processable)
+	assert.Equal(t, ShareStateFailed, row.State)
+	assert.Equal(t, failed.EncShare.C1, row.EncShare.C1)
+	assert.Equal(t, failed.EncShare.C2, row.EncShare.C2)
+	assert.Equal(t, failed.ShareComms, row.ShareComms)
+	assert.Equal(t, failed.PrimaryBlind, row.PrimaryBlind)
+
+	dest := newTestStore(t)
+	result, err := dest.ImportQueue(export, QueueImportOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 0, result.Inserted)
+	assert.Equal(t, 1, result.SkippedTerminal)
+	assert.Empty(t, dest.Status())
 }
 
 func TestImportQueueSkipsTerminalAndRoundTripsProcessableRows(t *testing.T) {

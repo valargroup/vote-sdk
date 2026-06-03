@@ -610,6 +610,70 @@ func (s *ShareStore) MarkSubmitted(roundID string, shareIndex, proposalID uint32
 	}
 }
 
+const (
+	shareSystemRetryBackoff        = 10 * time.Second
+	shareSystemRetryUrgentBackoff  = 2 * time.Second
+	shareSystemRetryDeadlineBuffer = 30 * time.Second
+)
+
+// MarkRetry returns an in-flight share to the pending queue without spending a
+// failed-share attempt.
+func (s *ShareStore) MarkRetry(roundID string, shareIndex, proposalID uint32, treePosition uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var voteEndTime uint64
+	if err := s.db.QueryRow(
+		"SELECT vote_end_time FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = 1",
+		roundID, shareIndex, proposalID, treePosition,
+	).Scan(&voteEndTime); err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			s.logError("MarkRetry: db query failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
+		}
+		return
+	}
+
+	res, err := s.db.Exec(
+		"UPDATE shares SET state = 0 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = 1",
+		roundID, shareIndex, proposalID, treePosition,
+	)
+	if err != nil {
+		s.logError("MarkRetry: db update failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
+		return
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		return
+	}
+
+	key := schedKey(roundID, shareIndex, proposalID, treePosition)
+	now := time.Now()
+	s.schedule[key] = nextShareSystemRetryTime(now, voteEndTime)
+	s.notifyScheduleChangedLocked()
+}
+
+// nextShareSystemRetryTime returns the next retry time without intentionally
+// leaving too little processing time before the round's vote end time.
+func nextShareSystemRetryTime(now time.Time, voteEndTime uint64) time.Time {
+	scheduled := now.Add(shareSystemRetryBackoff)
+	if voteEndTime == 0 {
+		return scheduled
+	}
+	deadline := time.Unix(int64(voteEndTime), 0)
+	if scheduled.After(deadline.Add(-shareSystemRetryDeadlineBuffer)) {
+		remaining := deadline.Sub(now)
+		if remaining <= 0 {
+			return now
+		}
+		urgentBackoff := shareSystemRetryUrgentBackoff
+		if halfRemaining := remaining / 2; halfRemaining < urgentBackoff {
+			urgentBackoff = halfRemaining
+		}
+		return now.Add(urgentBackoff)
+	}
+	return scheduled
+}
+
 // MarkFailed marks a share processing attempt as failed, with retry or
 // permanent failure after max attempts.
 func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, treePosition uint64) {
@@ -619,10 +683,11 @@ func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, t
 	defer s.mu.Unlock()
 
 	var attempts int
+	var voteEndTime uint64
 	if err := s.db.QueryRow(
-		"SELECT attempts FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
+		"SELECT attempts, vote_end_time FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
 		roundID, shareIndex, proposalID, treePosition,
-	).Scan(&attempts); err != nil {
+	).Scan(&attempts, &voteEndTime); err != nil {
 		s.logError("MarkFailed: db query failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
 		return
 	}
@@ -631,15 +696,30 @@ func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, t
 	key := schedKey(roundID, shareIndex, proposalID, treePosition)
 
 	if newAttempts >= maxAttempts {
-		// Permanently failed — clear witness data.
-		if _, err := s.db.Exec(
-			`UPDATE shares SET state = 3, attempts = ?,
-			        enc_share_c1 = '', enc_share_c2 = '',
-			        share_comms = '[]', primary_blind = ''
-			 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
-			newAttempts, roundID, shareIndex, proposalID, treePosition,
-		); err != nil {
-			s.logError("MarkFailed: db update (permanent) failed", "error", err)
+		if voteEndTime == 0 {
+			// Legacy or imported rows without a purge time cannot safely retain
+			// witness data because no end-of-round cleanup can be scheduled.
+			if _, err := s.db.Exec(
+				`UPDATE shares SET state = 3, attempts = ?,
+				        enc_share_c1 = '', enc_share_c2 = '',
+				        share_comms = '[]', primary_blind = ''
+				 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
+				newAttempts, roundID, shareIndex, proposalID, treePosition,
+			); err != nil {
+				s.logError("MarkFailed: db update (permanent scrub) failed", "error", err)
+			} else {
+				s.truncateWALAfterWitnessCleanup("MarkFailed: permanent scrub")
+			}
+		} else {
+			// Permanently failed. Keep witness data until round purge so operators
+			// can inspect or export failed rows before the voting window closes.
+			if _, err := s.db.Exec(
+				`UPDATE shares SET state = 3, attempts = ?
+				 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
+				newAttempts, roundID, shareIndex, proposalID, treePosition,
+			); err != nil {
+				s.logError("MarkFailed: db update (permanent) failed", "error", err)
+			}
 		}
 		if _, ok := s.schedule[key]; ok {
 			delete(s.schedule, key)
@@ -743,8 +823,8 @@ func isProcessableShareState(state ShareState) bool {
 }
 
 // ExportQueue returns every persisted row for a round. Terminal rows are
-// included for local debugging, but their witness material should already be
-// cleared by MarkSubmitted or permanent MarkFailed.
+// included for local debugging. Submitted rows should already have witness
+// material cleared, while failed rows retain it until round purge.
 func (s *ShareStore) ExportQueue(roundID string, now time.Time) (QueueExport, error) {
 	export := QueueExport{
 		Version:    QueueExportVersion,
@@ -1284,8 +1364,9 @@ func (s *ShareStore) Close() error {
 }
 
 // PurgeExpiredRounds deletes all share data for rounds whose vote_end_time
-// has passed, and removes the corresponding entries from the in-memory
-// schedule and round cache. Returns the number of rows deleted.
+// has passed, checkpoints the WAL after deleting expired share rows, and
+// removes the corresponding entries from the in-memory schedule and round
+// cache. Returns the number of rows deleted.
 func (s *ShareStore) PurgeExpiredRounds() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1307,6 +1388,7 @@ func (s *ShareStore) PurgeExpiredRounds() int64 {
 	); err != nil {
 		s.logError("PurgeExpiredRounds: delete rounds failed", "error", err)
 	}
+	s.truncateWALAfterWitnessCleanup("PurgeExpiredRounds")
 
 	// Prune in-memory caches for expired rounds.
 	for roundID, info := range s.roundCache {
@@ -1336,6 +1418,25 @@ func (s *ShareStore) PurgeExpiredRounds() int64 {
 		}
 	}
 	return deleted
+}
+
+// truncateWALAfterWitnessCleanup checkpoints and truncates the SQLite WAL after
+// witness cleanup attempts so removed material from this or an earlier cleanup
+// does not remain in WAL frames until a later checkpoint.
+func (s *ShareStore) truncateWALAfterWitnessCleanup(stage string) {
+	var busy, logFrames, checkpointedFrames int
+	if err := s.db.QueryRow("PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &logFrames, &checkpointedFrames); err != nil {
+		s.logError(stage+": WAL checkpoint failed", "error", err)
+		return
+	}
+	if busy != 0 {
+		s.logError(
+			stage+": WAL checkpoint busy",
+			"busy", busy,
+			"log_frames", logFrames,
+			"checkpointed_frames", checkpointedFrames,
+		)
+	}
 }
 
 // recover resets in-flight shares and restores their submit_at schedule.

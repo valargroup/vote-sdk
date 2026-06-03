@@ -47,7 +47,7 @@ cat > "${CHAIN_CONFIG}" <<EOF
   ],
   "chain_id": "${CHAIN_ID}",
   "pretty_name": "Zcash Vote",
-  "features": ["blocks", "tx", "staking", "governance", "supply", "parameters", "consensus"]
+  "features": ["blocks", "tx", "staking", "supply", "parameters", "consensus", "uptime"]
 }
 EOF
 
