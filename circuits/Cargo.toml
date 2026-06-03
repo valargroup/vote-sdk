@@ -13,13 +13,13 @@ pasta_curves = "0.5"
 group = "0.13"
 rand_core = { version = "0.6", features = ["getrandom"] }
 reddsa = { version = "0.5", default-features = false }
-vote-commitment-tree = "0.3.0"
-orchard = { version = "=0.13.1", features = ["unstable-voting-circuits"] }
-voting-circuits = "0.7.0"
-imt-tree = { git = "https://github.com/valargroup/vote-nullifier-pir.git" }
+vote-commitment-tree = "0.3.2"
+orchard = { version = "=0.14.0", features = ["unstable-voting-circuits"] }
+voting-circuits = "0.8.0"
+imt-tree = "0.2.0"
 incrementalmerkletree = "0.8"
 hex = "0.4"
-halo2_gadgets = "0.4"
+halo2_gadgets = "=0.5.0"
 
 [dependencies.ff]
 version = "0.13"

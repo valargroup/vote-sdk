@@ -8,11 +8,11 @@ description = "Rust E2E API tests for Shielded-Vote voting flow (replaces TypeSc
 # Same-repo path dep (circuits/ is a sibling directory)
 shielded-vote-circuits = { path = "../circuits" }
 
-orchard = { version = "=0.13.1", features = ["unstable-voting-circuits"] }
-voting-circuits = "0.7.0"
-vote-commitment-tree = "0.3.0"
-vote-commitment-tree-client = { version = "0.5.0", features = ["http"] }
-zcash_voting = { git = "https://github.com/valargroup/zcash_voting", tag = "zcash_voting-v0.10.2" }
+orchard = { version = "=0.14.0", features = ["unstable-voting-circuits"] }
+voting-circuits = "0.8.0"
+vote-commitment-tree = "0.3.2"
+vote-commitment-tree-client = { version = "0.5.2", features = ["http"] }
+zcash_voting = "0.11.0"
 
 # HTTP and JSON
 reqwest = { version = "0.12", features = ["blocking", "json"] }
@@ -24,7 +24,7 @@ base64 = "0.22"
 hex = "0.4"
 
 # Round ID derivation (Poseidon hash)
-halo2_gadgets = "0.4"
+halo2_gadgets = "=0.5.0"
 
 # Blake2b (still used for sighash in e2e setup)
 blake2b_simd = "1"
