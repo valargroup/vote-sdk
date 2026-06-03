@@ -1003,7 +1003,8 @@ svote_upgrade_patch_systemd_unit_for_cosmovisor() {
   local dropin_dir migrate_dropin old_exec inferred_args derived_moniker derived_chain_id
   local daemon_home_escaped moniker_escaped cosmovisor_bin_escaped wrapper_args_escaped
   dropin_dir="$(dirname "$SERVICE_PATH")/${SERVICE_NAME}.service.d"
-  migrate_dropin="${dropin_dir}/99-cosmovisor-migrate.conf"
+  # Use a lexicographically-late name so this drop-in wins over earlier files like primary.conf.
+  migrate_dropin="${dropin_dir}/z-cosmovisor.conf"
 
   if [ ! -f "$SERVICE_PATH" ]; then
     svote_upgrade_die "systemd unit not found: ${SERVICE_PATH}. Run join.sh first."

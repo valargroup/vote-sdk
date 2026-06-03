@@ -88,7 +88,7 @@ EOF
 
 svote_upgrade_patch_systemd_unit_for_cosmovisor >/dev/null
 
-MIGRATE_DROPIN="${TMP_MIGRATE}/svoted.service.d/99-cosmovisor-migrate.conf"
+MIGRATE_DROPIN="${TMP_MIGRATE}/svoted.service.d/z-cosmovisor.conf"
 [ -f "$MIGRATE_DROPIN" ] || fail "migrate drop-in was not created"
 grep -q "^ExecStart=$" "$MIGRATE_DROPIN" || fail "drop-in missing ExecStart reset"
 grep -q "^ExecStart=${WRAPPER_BIN}$" "$MIGRATE_DROPIN" || fail "drop-in missing wrapper ExecStart"
