@@ -595,6 +595,10 @@ svote_upgrade_validate_scheduled_plan() {
   plan_name=$(svote_upgrade_parse_plan_name "$plan_json")
   plan_height=$(svote_upgrade_parse_plan_height "$plan_json")
   if [ -z "$plan_name" ] || [ "$plan_name" = "null" ]; then
+    if [ "$allow_no_plan" = "1" ]; then
+      svote_upgrade_warn "No upgrade plan name present in chain response (--allow-no-plan set)."
+      return 0
+    fi
     svote_upgrade_die "Could not parse scheduled upgrade plan name."
   fi
   if [ "$plan_name" != "$expected_name" ]; then
@@ -707,7 +711,7 @@ svote_upgrade_verify_prestage() {
   fi
 
   if [ "$require_cosmovisor_service" = "1" ]; then
-    local effective_mode effective_daemon_home effective_svote_home effective_moniker effective_exec
+    local effective_mode effective_daemon_home effective_svote_home effective_exec
     echo "=== Service checks ==="
     effective_mode=$(svote_upgrade_systemd_effective_env_value "SVOTE_UPGRADE_MODE" || true)
     if [ "$effective_mode" = "cosmovisor" ]; then
@@ -733,19 +737,12 @@ svote_upgrade_verify_prestage() {
       service_failures=$((service_failures + 1))
     fi
 
-    effective_moniker=$(svote_upgrade_systemd_effective_env_value "MONIKER" || true)
-    if [ -n "$effective_moniker" ]; then
-      svote_upgrade_checklist_line PASS "systemd effective MONIKER is set (${effective_moniker})"
-    else
-      svote_upgrade_checklist_line FAIL "systemd effective MONIKER is unset (required by svoted-wrapper.sh)"
-      service_failures=$((service_failures + 1))
-    fi
-
     effective_exec=$(svote_upgrade_systemd_effective_execstart || true)
-    if [ "$effective_exec" = "$WRAPPER_BIN" ]; then
-      svote_upgrade_checklist_line PASS "systemd effective ExecStart=${WRAPPER_BIN}"
+    if [ -n "$effective_exec" ] && [ "${effective_exec##*/}" = "cosmovisor" ] \
+      && svote_upgrade_systemd_effective_execstart_is_cosmovisor_run_start; then
+      svote_upgrade_checklist_line PASS "systemd effective ExecStart is cosmovisor run start"
     else
-      svote_upgrade_checklist_line FAIL "systemd effective ExecStart is ${effective_exec:-<unset>} (expected ${WRAPPER_BIN})"
+      svote_upgrade_checklist_line FAIL "systemd effective ExecStart is ${effective_exec:-<unset>} (expected cosmovisor run start)"
       service_failures=$((service_failures + 1))
     fi
 
@@ -907,13 +904,26 @@ svote_upgrade_systemd_effective_execstart() {
 }
 
 # svote_upgrade_has_cosmovisor_runtime_for_home
-# Return 0 when a running cosmovisor process includes DAEMON_HOME in argv.
+# Return 0 when a running cosmovisor process is executing run start for DAEMON_HOME.
 svote_upgrade_has_cosmovisor_runtime_for_home() {
-  pgrep -af "cosmovisor" 2>/dev/null | grep -F -- "$DAEMON_HOME" >/dev/null 2>&1
+  pgrep -af "cosmovisor" 2>/dev/null \
+    | grep -E '(^| )[^ ]*cosmovisor( |$)' \
+    | grep -F -- "run start" \
+    | grep -F -- "$DAEMON_HOME" >/dev/null 2>&1
+}
+
+# svote_upgrade_systemd_effective_execstart_is_cosmovisor_run_start
+# Return 0 when systemd effective ExecStart argv includes cosmovisor run start.
+svote_upgrade_systemd_effective_execstart_is_cosmovisor_run_start() {
+  local exec_blob
+  exec_blob=$(systemctl show "$SERVICE_NAME" -p ExecStart --value 2>/dev/null || true)
+  [ -n "$exec_blob" ] || return 1
+  [ "$exec_blob" != "[]" ] || return 1
+  printf '%s\n' "$exec_blob" | grep -Eq 'argv\[\]=[^;]*cosmovisor([^;]*) run start([ ;]|$)'
 }
 
 # svote_upgrade_assert_cosmovisor_runtime
-# Die unless effective systemd mode is cosmovisor and a cosmovisor process is running for DAEMON_HOME.
+# Die unless effective systemd mode is cosmovisor, ExecStart is cosmovisor run start, and runtime is live.
 svote_upgrade_assert_cosmovisor_runtime() {
   local mode effective_exec main_pid main_cmd
 
@@ -923,8 +933,11 @@ svote_upgrade_assert_cosmovisor_runtime() {
   fi
 
   effective_exec=$(svote_upgrade_systemd_effective_execstart || true)
-  if [ -n "$effective_exec" ] && [ "$effective_exec" != "$WRAPPER_BIN" ]; then
-    svote_upgrade_die "Effective ExecStart is ${effective_exec} (expected ${WRAPPER_BIN})."
+  if [ -n "$effective_exec" ] && [ "${effective_exec##*/}" != "cosmovisor" ]; then
+    svote_upgrade_die "Effective ExecStart is ${effective_exec} (expected cosmovisor binary)."
+  fi
+  if ! svote_upgrade_systemd_effective_execstart_is_cosmovisor_run_start; then
+    svote_upgrade_die "Effective ExecStart is not a cosmovisor run start command."
   fi
 
   if ! svote_upgrade_has_cosmovisor_runtime_for_home; then
@@ -966,58 +979,21 @@ svote_upgrade_detect_existing_execstart() {
   printf '%s\n' "$existing_exec"
 }
 
-# svote_upgrade_neutralize_conflicting_direct_dropins migrate_dropin
-# Remove non-migrate ExecStart overrides and direct-mode env from drop-ins (idempotent).
-svote_upgrade_neutralize_conflicting_direct_dropins() {
-  local migrate_dropin="$1"
-  local dropin_dir dropin tmp_sanitized
-
-  dropin_dir="$(dirname "$SERVICE_PATH")/${SERVICE_NAME}.service.d"
-  [ -d "$dropin_dir" ] || return 0
-
-  for dropin in "$dropin_dir"/*.conf; do
-    [ -f "$dropin" ] || continue
-    [ "$dropin" = "$migrate_dropin" ] && continue
-
-    if ! grep -Eq '^[[:space:]]*Environment=.*(SVOTE_UPGRADE_MODE|DAEMON_HOME|SVOTE_HOME|MONIKER|SVOTE_CHAIN_ID|COSMOVISOR_BIN|DAEMON_NAME|DAEMON_ALLOW_DOWNLOAD_BINARIES|SVOTE_INSTALL_DIR|SVOTED_BIN|SVOTE_WRAPPER_SVOTED_START_ARGS)=|^[[:space:]]*ExecStart=' "$dropin" 2>/dev/null; then
-      continue
-    fi
-
-    tmp_sanitized=$(mktemp)
-    awk '
-      /^[[:space:]]*Environment=/ && /(SVOTE_UPGRADE_MODE|DAEMON_HOME|SVOTE_HOME|MONIKER|SVOTE_CHAIN_ID|COSMOVISOR_BIN|DAEMON_NAME|DAEMON_ALLOW_DOWNLOAD_BINARIES|SVOTE_INSTALL_DIR|SVOTED_BIN|SVOTE_WRAPPER_SVOTED_START_ARGS)=/ { next }
-      # Keep migrate deterministic: only z-cosmovisor.conf may define ExecStart.
-      /^[[:space:]]*ExecStart=/ { next }
-      { print }
-    ' "$dropin" > "$tmp_sanitized"
-
-    if ! cmp -s "$dropin" "$tmp_sanitized" 2>/dev/null; then
-      cp -p "$dropin" "${dropin}.bak.pre-migrate.$(date +%Y%m%d%H%M%S)"
-      mv -f "$tmp_sanitized" "$dropin"
-      svote_upgrade_log "Neutralized conflicting direct-mode directives in ${dropin}"
-    else
-      rm -f "$tmp_sanitized"
-    fi
-  done
-}
-
 # svote_upgrade_patch_systemd_unit_for_cosmovisor
-# Write deterministic migrate drop-in for cosmovisor mode; print backup path; die if unit missing.
+# Rewrite main unit for direct cosmovisor startup and remove drop-ins; print backup path.
 svote_upgrade_patch_systemd_unit_for_cosmovisor() {
   local backup_path="${SERVICE_PATH}.bak.$(date +%Y%m%d%H%M%S)"
-  local dropin_dir migrate_dropin primary_dropin old_exec inferred_args derived_moniker derived_chain_id
-  local daemon_home_escaped moniker_escaped cosmovisor_bin_escaped wrapper_args_escaped
+  local dropin_dir old_exec inferred_args derived_chain_id service_desc service_user
+  local daemon_home_escaped cosmovisor_bin_escaped chain_id_escaped install_dir_escaped svoted_bin_escaped
+  local start_args_escaped
   dropin_dir="$(dirname "$SERVICE_PATH")/${SERVICE_NAME}.service.d"
-  # Use a lexicographically-late name so this drop-in wins over earlier files like primary.conf.
-  migrate_dropin="${dropin_dir}/z-cosmovisor.conf"
-  primary_dropin="${dropin_dir}/primary.conf"
+  local dropin backup_suffix
 
   if [ ! -f "$SERVICE_PATH" ]; then
     svote_upgrade_die "systemd unit not found: ${SERVICE_PATH}. Run join.sh first."
   fi
 
   cp -p "$SERVICE_PATH" "$backup_path"
-  install -d -m 0755 "$dropin_dir"
 
   old_exec=$(svote_upgrade_detect_existing_execstart || true)
   if [ -z "${SVOTE_WRAPPER_SVOTED_START_ARGS:-}" ] && [ -n "$old_exec" ]; then
@@ -1029,49 +1005,76 @@ svote_upgrade_patch_systemd_unit_for_cosmovisor() {
     fi
   fi
 
-  derived_moniker=$(svote_upgrade_derive_moniker_from_home "$DAEMON_HOME" || true)
   derived_chain_id=$(svote_upgrade_derive_chain_id_from_home "$DAEMON_HOME" || true)
+  if [ -n "$derived_chain_id" ]; then
+    SVOTE_CHAIN_ID="$derived_chain_id"
+  fi
+  service_desc=$(grep -E '^Description=' "$SERVICE_PATH" 2>/dev/null | head -n 1 | cut -d= -f2- || true)
+  service_user=$(grep -E '^User=' "$SERVICE_PATH" 2>/dev/null | head -n 1 | cut -d= -f2- | tr -d '[:space:]' || true)
 
-  svote_upgrade_neutralize_conflicting_direct_dropins "$migrate_dropin"
+  if [ ! -x "$COSMOVISOR_BIN" ]; then
+    svote_upgrade_die "Cosmovisor binary missing or not executable at ${COSMOVISOR_BIN}."
+  fi
+  if [ -z "$service_desc" ]; then
+    service_desc="Shielded-Vote validator (${SERVICE_NAME})"
+  fi
+  if [ -z "$service_user" ]; then
+    service_user="${SERVICE_USER:-root}"
+  fi
 
   daemon_home_escaped=$(svote_upgrade_escape_systemd_env_value "$DAEMON_HOME")
   cosmovisor_bin_escaped=$(svote_upgrade_escape_systemd_env_value "$COSMOVISOR_BIN")
+  chain_id_escaped=$(svote_upgrade_escape_systemd_env_value "${SVOTE_CHAIN_ID:-}")
+  install_dir_escaped=$(svote_upgrade_escape_systemd_env_value "$INSTALL_DIR")
+  svoted_bin_escaped=$(svote_upgrade_escape_systemd_env_value "${INSTALL_DIR}/${SVOTE_DAEMON_NAME}")
+  start_args_escaped=""
+  if [ -n "${SVOTE_WRAPPER_SVOTED_START_ARGS:-}" ]; then
+    start_args_escaped=" $(svote_upgrade_escape_systemd_env_value "${SVOTE_WRAPPER_SVOTED_START_ARGS}")"
+  fi
 
   {
+    printf '[Unit]\n'
+    printf 'Description=%s\n' "$service_desc"
+    printf 'After=network.target\n'
+    printf '\n'
     printf '[Service]\n'
-    printf 'ExecStart=\n'
-    printf 'ExecStart=%s\n' "$WRAPPER_BIN"
+    printf 'Type=simple\n'
+    printf 'User=%s\n' "$service_user"
+    printf 'ExecStart=%s run start --home %s%s\n' "$cosmovisor_bin_escaped" "$daemon_home_escaped" "$start_args_escaped"
     printf 'Environment="SVOTE_UPGRADE_MODE=cosmovisor"\n'
     printf 'Environment="DAEMON_HOME=%s"\n' "$daemon_home_escaped"
     printf 'Environment="SVOTE_HOME=%s"\n' "$daemon_home_escaped"
-    if [ -n "$derived_moniker" ]; then
-      moniker_escaped=$(svote_upgrade_escape_systemd_env_value "$derived_moniker")
-      printf 'Environment="MONIKER=%s"\n' "$moniker_escaped"
-    fi
-    if [ -n "$derived_chain_id" ]; then
-      printf 'Environment="SVOTE_CHAIN_ID=%s"\n' "$(svote_upgrade_escape_systemd_env_value "$derived_chain_id")"
-    fi
+    printf 'Environment="SVOTE_CHAIN_ID=%s"\n' "$chain_id_escaped"
     printf 'Environment="COSMOVISOR_BIN=%s"\n' "$cosmovisor_bin_escaped"
     printf 'Environment="DAEMON_NAME=%s"\n' "$SVOTE_DAEMON_NAME"
     printf 'Environment="DAEMON_ALLOW_DOWNLOAD_BINARIES=false"\n'
-    printf 'Environment="SVOTE_INSTALL_DIR=%s"\n' "$(svote_upgrade_escape_systemd_env_value "$INSTALL_DIR")"
-    printf 'Environment="SVOTED_BIN=%s"\n' "$(svote_upgrade_escape_systemd_env_value "${INSTALL_DIR}/${SVOTE_DAEMON_NAME}")"
+    printf 'Environment="SVOTE_INSTALL_DIR=%s"\n' "$install_dir_escaped"
+    printf 'Environment="SVOTED_BIN=%s"\n' "$svoted_bin_escaped"
     if [ -n "${SVOTE_WRAPPER_SVOTED_START_ARGS:-}" ]; then
-      wrapper_args_escaped=$(svote_upgrade_escape_systemd_env_value "$SVOTE_WRAPPER_SVOTED_START_ARGS")
-      printf 'Environment="SVOTE_WRAPPER_SVOTED_START_ARGS=%s"\n' "$wrapper_args_escaped"
+      printf 'Environment="SVOTE_WRAPPER_SVOTED_START_ARGS=%s"\n' "$(svote_upgrade_escape_systemd_env_value "$SVOTE_WRAPPER_SVOTED_START_ARGS")"
     fi
-  } > "${migrate_dropin}.tmp"
-  mv -f "${migrate_dropin}.tmp" "$migrate_dropin"
-  chmod 0644 "$migrate_dropin"
+    printf 'Restart=on-failure\n'
+    printf 'RestartSec=5\n'
+    printf 'StandardOutput=journal\n'
+    printf 'StandardError=journal\n'
+    printf '\n'
+    printf '[Install]\n'
+    printf 'WantedBy=multi-user.target\n'
+  } > "${SERVICE_PATH}.tmp"
+  mv -f "${SERVICE_PATH}.tmp" "$SERVICE_PATH"
+  chmod 0644 "$SERVICE_PATH"
 
-  if [ -f "$primary_dropin" ]; then
-    cp -p "$migrate_dropin" "${primary_dropin}.tmp"
-    mv -f "${primary_dropin}.tmp" "$primary_dropin"
-    chmod 0644 "$primary_dropin"
-    svote_upgrade_log "Replaced existing ${primary_dropin} with cosmovisor-wrapper override"
+  if [ -d "$dropin_dir" ]; then
+    backup_suffix="$(date +%Y%m%d%H%M%S)"
+    for dropin in "$dropin_dir"/*.conf; do
+      [ -f "$dropin" ] || continue
+      cp -p "$dropin" "${dropin}.bak.pre-migrate.${backup_suffix}"
+      rm -f "$dropin"
+      svote_upgrade_log "Removed drop-in override ${dropin}"
+    done
   fi
 
-  svote_upgrade_log "Wrote migrate drop-in ${migrate_dropin} (deterministic precedence)"
+  svote_upgrade_log "Rewrote ${SERVICE_PATH} for direct cosmovisor startup"
   printf '%s\n' "$backup_path"
 }
 
@@ -1108,8 +1111,11 @@ svote_upgrade_wait_for_rpc() {
     fi
 
     effective_exec=$(svote_upgrade_systemd_effective_execstart || true)
-    if [ -n "$effective_exec" ] && [ "$effective_exec" != "$WRAPPER_BIN" ]; then
-      svote_upgrade_die "Service migrated with unexpected ExecStart=${effective_exec} (expected ${WRAPPER_BIN})."
+    if [ -n "$effective_exec" ] && [ "${effective_exec##*/}" != "cosmovisor" ]; then
+      svote_upgrade_die "Service migrated with unexpected ExecStart=${effective_exec} (expected cosmovisor binary)."
+    fi
+    if ! svote_upgrade_systemd_effective_execstart_is_cosmovisor_run_start; then
+      svote_upgrade_die "Service migrated with unexpected ExecStart command (expected cosmovisor run start)."
     fi
 
     if systemctl is-failed --quiet "$SERVICE_NAME" 2>/dev/null; then

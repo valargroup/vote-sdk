@@ -5,9 +5,9 @@
 #
 # Modes:
 #   prepare        Stage Cosmovisor binaries only; never stop the running validator.
-#   migrate        One-time migration from direct svoted (or wrapper) service to Cosmovisor.
-#                  Injects missing wrapper env (SVOTE_HOME, MONIKER, install dir) and can
-#                  infer --serve-ui style args from a direct ExecStart when not supplied.
+#   migrate        One-time migration from direct svoted service to a plain Cosmovisor service.
+#                  Rewrites the main systemd unit and removes conflicting drop-ins (e.g. primary.conf).
+#                  Can infer --serve-ui style args from the current direct ExecStart when not supplied.
 #   verify-prestage Read-only PASS/FAIL checklist for operator runbooks.
 #
 # Example:
@@ -64,22 +64,20 @@ Options:
   --allow-no-plan         Allow staging before a plan is scheduled on-chain
   --skip-cosmovisor-service  verify-prestage: skip systemd Cosmovisor service checks
   --timeout-secs N        RPC readiness timeout after migrate restart (default: 120)
-  --wrapper-svoted-start-args ARGS  Extra svoted start args for wrapper/cosmovisor (e.g. "--serve-ui --ui-dist /opt/shielded-vote/current/ui/dist")
+  --wrapper-svoted-start-args ARGS  Extra svoted start args passed to cosmovisor run start (e.g. "--serve-ui --ui-dist /opt/shielded-vote/current/ui/dist")
   --repo OWNER/REPO       GitHub repo for release fallback (default: ${UPDATE_DEFAULT_GITHUB_REPO})
   --do-base URL           DigitalOcean Spaces base URL (default: ${UPDATE_DEFAULT_DO_BASE})
   --help                  Show this help text.
 
 Environment:
   SVOTE_ACK_SINGLE_SIGNER=1   Required in non-interactive mode for migrate/prepare service checks.
-  SVOTE_WRAPPER_SVOTED_START_ARGS  Extra svoted start args consumed by svoted-wrapper.sh.
+  SVOTE_WRAPPER_SVOTED_START_ARGS  Extra svoted start args passed to cosmovisor run start.
 
 Migrate notes:
-  Switches systemd to cosmovisor-managed wrapper startup. Missing SVOTE_HOME/MONIKER env is
-  auto-filled from validator home. Direct-mode ExecStart flags (e.g. --serve-ui) are copied
-  into SVOTE_WRAPPER_SVOTED_START_ARGS unless --wrapper-svoted-start-args is provided.
-  Migrate writes /etc/systemd/system/<service>.service.d/z-cosmovisor.conf. The z- prefix is
-  intentional so lexicographical systemd drop-in ordering applies this override last, then it
-  neutralizes conflicting direct-mode drop-in directives for deterministic wrapper startup.
+  Rewrites /etc/systemd/system/<service>.service to launch cosmovisor directly and removes
+  active drop-ins under /etc/systemd/system/<service>.service.d/*.conf (backing them up as
+  *.bak.pre-migrate.<timestamp>). Direct-mode ExecStart flags (e.g. --serve-ui) are copied
+  into the migrated cosmovisor run start command unless --wrapper-svoted-start-args is provided.
   Migrate validates effective runtime mode, effective ExecStart, and a live cosmovisor process.
 EOF
 }
@@ -295,8 +293,6 @@ run_verify_prestage() {
 # Stop validator, patch systemd for cosmovisor, restart, and wait for RPC; requires single-signer ack.
 run_migrate() {
   local backup_unit
-
-  svote_upgrade_ensure_wrapper_script
 
   svote_upgrade_require_single_signer_ack
   svote_upgrade_stop_validator_service

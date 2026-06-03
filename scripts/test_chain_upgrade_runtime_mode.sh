@@ -82,15 +82,17 @@ svote_upgrade_autodetect_from_systemd_unit 0 0 >/dev/null
 [ "$INSTALL_DIR" = "/usr/local/bin" ] || fail "autodetect failed to infer install dir from ExecStart wrapper: ${INSTALL_DIR}"
 [ "$WRAPPER_BIN" = "/tmp/default-install/svoted-wrapper.sh" ] || fail "autodetect must not replace WRAPPER_BIN from direct ExecStart: ${WRAPPER_BIN}"
 
-echo "=== migrate patch: deterministic drop-in overrides primary direct config ==="
+echo "=== migrate patch: rewrites main unit for cosmovisor and removes drop-ins ==="
 SERVICE_NAME="svoted"
 SERVICE_PATH="${TMP_MIGRATE}/svoted.service"
 DAEMON_HOME="${TMP_MIGRATE}/home"
 INSTALL_DIR="${TMP_MIGRATE}/bin"
 WRAPPER_BIN="${TMP_MIGRATE}/bin/svoted-wrapper.sh"
 COSMOVISOR_BIN="${TMP_MIGRATE}/bin/cosmovisor"
-SVOTE_WRAPPER_SVOTED_START_ARGS="--serve-ui --ui-dist /opt/ui/dist"
+SVOTE_WRAPPER_SVOTED_START_ARGS=""
 mkdir -p "${DAEMON_HOME}/config" "${TMP_MIGRATE}/svoted.service.d" "${INSTALL_DIR}"
+printf '#!/usr/bin/env bash\n' > "${COSMOVISOR_BIN}"
+chmod +x "${COSMOVISOR_BIN}"
 printf 'moniker = "primary-test"\n' > "${DAEMON_HOME}/config/config.toml"
 printf '{"chain_id":"upgrade-test-1"}\n' > "${DAEMON_HOME}/config/genesis.json"
 
@@ -99,13 +101,15 @@ cat > "${SERVICE_PATH}" <<EOF
 Description=svoted
 
 [Service]
-ExecStart=/usr/local/bin/svoted start --home ${DAEMON_HOME}
+User=root
+ExecStart=/usr/local/bin/svoted start --home ${DAEMON_HOME} --serve-ui --ui-dist /opt/ui/dist
 Environment="SVOTE_UPGRADE_MODE=direct"
+[Install]
+WantedBy=multi-user.target
 EOF
 
 cat > "${TMP_MIGRATE}/svoted.service.d/primary.conf" <<EOF
 [Service]
-Environment="SVOTE_UPGRADE_MODE=direct"
 ExecStart=
 ExecStart=/usr/local/bin/svoted start --home ${DAEMON_HOME} --serve-ui --ui-dist /opt/ui/dist
 EOF
@@ -123,46 +127,26 @@ EOF
 
 svote_upgrade_patch_systemd_unit_for_cosmovisor >/dev/null
 
-MIGRATE_DROPIN="${TMP_MIGRATE}/svoted.service.d/z-cosmovisor.conf"
-[ -f "$MIGRATE_DROPIN" ] || fail "migrate drop-in was not created"
-grep -q "^ExecStart=$" "$MIGRATE_DROPIN" || fail "drop-in missing ExecStart reset"
-grep -q "^ExecStart=${WRAPPER_BIN}$" "$MIGRATE_DROPIN" || fail "drop-in missing wrapper ExecStart"
-grep -q 'Environment="SVOTE_UPGRADE_MODE=cosmovisor"' "$MIGRATE_DROPIN" || fail "drop-in missing cosmovisor mode env"
-grep -q "Environment=\"DAEMON_HOME=${DAEMON_HOME}\"" "$MIGRATE_DROPIN" || fail "drop-in missing daemon home env"
-grep -q "Environment=\"SVOTE_HOME=${DAEMON_HOME}\"" "$MIGRATE_DROPIN" || fail "drop-in missing svote home env"
-grep -q "Environment=\"MONIKER=primary-test\"" "$MIGRATE_DROPIN" || fail "drop-in missing moniker env"
-grep -q "Environment=\"COSMOVISOR_BIN=${COSMOVISOR_BIN}\"" "$MIGRATE_DROPIN" || fail "drop-in missing cosmovisor bin env"
-grep -q 'Environment="DAEMON_NAME=svoted"' "$MIGRATE_DROPIN" || fail "drop-in missing daemon name env"
-grep -q 'Environment="DAEMON_ALLOW_DOWNLOAD_BINARIES=false"' "$MIGRATE_DROPIN" || fail "drop-in missing no-download env"
-grep -q 'Environment="SVOTE_WRAPPER_SVOTED_START_ARGS=--serve-ui --ui-dist /opt/ui/dist"' "$MIGRATE_DROPIN" || fail "drop-in missing wrapper args env"
+grep -q '^Description=svoted$' "${SERVICE_PATH}" || fail "service description not preserved"
+grep -q '^User=root$' "${SERVICE_PATH}" || fail "service user not preserved"
+grep -q "^ExecStart=${COSMOVISOR_BIN} run start --home ${DAEMON_HOME} --serve-ui --ui-dist /opt/ui/dist$" "${SERVICE_PATH}" || fail "service ExecStart is not cosmovisor run start"
+grep -q 'Environment="SVOTE_UPGRADE_MODE=cosmovisor"' "${SERVICE_PATH}" || fail "service missing cosmovisor mode env"
+grep -q "Environment=\"DAEMON_HOME=${DAEMON_HOME}\"" "${SERVICE_PATH}" || fail "service missing daemon home env"
+grep -q 'Environment="DAEMON_NAME=svoted"' "${SERVICE_PATH}" || fail "service missing daemon name env"
+grep -q "Environment=\"COSMOVISOR_BIN=${COSMOVISOR_BIN}\"" "${SERVICE_PATH}" || fail "service missing cosmovisor env"
+grep -q '^Restart=on-failure$' "${SERVICE_PATH}" || fail "service missing restart policy"
 
-if grep -q '^ExecStart=' "${TMP_MIGRATE}/svoted.service.d/primary.conf"; then
-  if ! grep -q "^ExecStart=${WRAPPER_BIN}$" "${TMP_MIGRATE}/svoted.service.d/primary.conf"; then
-    fail "primary.conf was not rewritten to wrapper ExecStart"
-  fi
-else
-  fail "primary.conf missing ExecStart lines after rewrite"
-fi
-if grep -q 'SVOTE_UPGRADE_MODE=direct' "${TMP_MIGRATE}/svoted.service.d/primary.conf"; then
-  fail "primary.conf still contains direct mode env"
-fi
-if grep -q '^ExecStart=' "${TMP_MIGRATE}/svoted.service.d/zz-rogue.conf"; then
-  fail "zz-rogue.conf still contains ExecStart override"
-fi
-if grep -q 'SVOTE_UPGRADE_MODE=' "${TMP_MIGRATE}/svoted.service.d/99-cosmovisor-migrate.conf"; then
-  fail "legacy migrate drop-in still contains SVOTE_UPGRADE_MODE env"
-fi
-if grep -q 'DAEMON_HOME=' "${TMP_MIGRATE}/svoted.service.d/99-cosmovisor-migrate.conf"; then
-  fail "legacy migrate drop-in still contains DAEMON_HOME env"
-fi
+[ ! -f "${TMP_MIGRATE}/svoted.service.d/primary.conf" ] || fail "primary.conf should be removed"
+[ ! -f "${TMP_MIGRATE}/svoted.service.d/zz-rogue.conf" ] || fail "zz-rogue.conf should be removed"
+[ ! -f "${TMP_MIGRATE}/svoted.service.d/99-cosmovisor-migrate.conf" ] || fail "legacy drop-in should be removed"
+ls "${TMP_MIGRATE}/svoted.service.d/primary.conf.bak.pre-migrate."* >/dev/null 2>&1 || fail "primary.conf backup missing"
+ls "${TMP_MIGRATE}/svoted.service.d/zz-rogue.conf.bak.pre-migrate."* >/dev/null 2>&1 || fail "zz-rogue.conf backup missing"
+ls "${TMP_MIGRATE}/svoted.service.d/99-cosmovisor-migrate.conf.bak.pre-migrate."* >/dev/null 2>&1 || fail "legacy drop-in backup missing"
 
-first_dropin="$(cat "$MIGRATE_DROPIN")"
-first_primary="$(cat "${TMP_MIGRATE}/svoted.service.d/primary.conf")"
+first_unit="$(cat "$SERVICE_PATH")"
 svote_upgrade_patch_systemd_unit_for_cosmovisor >/dev/null
-second_dropin="$(cat "$MIGRATE_DROPIN")"
-second_primary="$(cat "${TMP_MIGRATE}/svoted.service.d/primary.conf")"
-[ "$first_dropin" = "$second_dropin" ] || fail "migrate drop-in changed across repeated runs"
-[ "$first_dropin" = "$first_primary" ] || fail "primary.conf rewrite does not match canonical migrate drop-in"
-[ "$first_primary" = "$second_primary" ] || fail "primary.conf changed across repeated runs"
+second_unit="$(cat "$SERVICE_PATH")"
+[ "$first_unit" = "$second_unit" ] || fail "rewritten service changed across repeated runs"
+[ ! -f "${TMP_MIGRATE}/svoted.service.d/primary.conf" ] || fail "primary.conf reappeared after second migrate"
 
 echo "=== PASS: chain upgrade runtime-mode tests ==="
