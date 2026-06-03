@@ -26,6 +26,12 @@ esac
 SYNC_POLL_SECONDS="${SVOTE_WRAPPER_SYNC_POLL_SECONDS:-5}"
 BALANCE_POLL_SECONDS="${SVOTE_WRAPPER_BALANCE_POLL_SECONDS:-30}"
 POST_TX_SLEEP_SECONDS="${SVOTE_WRAPPER_POST_TX_SLEEP_SECONDS:-6}"
+SVOTE_WRAPPER_SVOTED_START_ARGS="${SVOTE_WRAPPER_SVOTED_START_ARGS:-${SVOTED_START_ARGS:-}}"
+SVOTED_EXTRA_ARGS=()
+if [ -n "${SVOTE_WRAPPER_SVOTED_START_ARGS}" ]; then
+  # shellcheck disable=SC2206
+  SVOTED_EXTRA_ARGS=( ${SVOTE_WRAPPER_SVOTED_START_ARGS} )
+fi
 
 SVOTED_PID=""
 
@@ -185,12 +191,12 @@ start_svoted_process() {
     export DAEMON_HOME="${SVOTE_HOME}"
     export DAEMON_NAME="svoted"
     export DAEMON_ALLOW_DOWNLOAD_BINARIES="${DAEMON_ALLOW_DOWNLOAD_BINARIES:-false}"
-    log "starting svoted via cosmovisor (home=${SVOTE_HOME})"
-    "${COSMOVISOR_BIN}" run start --home "${SVOTE_HOME}" &
+    log "starting svoted via cosmovisor (home=${SVOTE_HOME}, extra_args=${SVOTE_WRAPPER_SVOTED_START_ARGS:-<none>})"
+    "${COSMOVISOR_BIN}" run start --home "${SVOTE_HOME}" "${SVOTED_EXTRA_ARGS[@]}" &
     return
   fi
-  log "starting svoted directly (home=${SVOTE_HOME})"
-  "${SVOTED_BIN}" start --home "${SVOTE_HOME}" &
+  log "starting svoted directly (home=${SVOTE_HOME}, extra_args=${SVOTE_WRAPPER_SVOTED_START_ARGS:-<none>})"
+  "${SVOTED_BIN}" start --home "${SVOTE_HOME}" "${SVOTED_EXTRA_ARGS[@]}" &
 }
 
 log "starting svoted via wrapper (home=${SVOTE_HOME}, moniker=${MONIKER}, upgrade_mode=${SVOTE_UPGRADE_MODE})"

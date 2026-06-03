@@ -250,6 +250,30 @@ svote_upgrade_download_with_fallback() {
   svote_upgrade_die "Failed to download ${label} from Spaces and GitHub."
 }
 
+# svote_upgrade_ensure_wrapper_script
+# Ensure WRAPPER_BIN exists and is executable; fetch from DO_BASE when missing.
+svote_upgrade_ensure_wrapper_script() {
+  if [ -x "$WRAPPER_BIN" ]; then
+    return 0
+  fi
+
+  install -d -m 0755 "$(dirname "$WRAPPER_BIN")"
+
+  if [ -n "${SVOTE_WRAPPER_SCRIPT:-}" ] && [ -f "${SVOTE_WRAPPER_SCRIPT}" ]; then
+    cp "${SVOTE_WRAPPER_SCRIPT}" "$WRAPPER_BIN"
+  elif curl -fsSL "${DO_BASE}/svoted-wrapper.sh" -o "$WRAPPER_BIN" 2>/dev/null; then
+    :
+  else
+    svote_upgrade_die "Wrapper script missing: ${WRAPPER_BIN}. Set SVOTE_WRAPPER_SCRIPT or publish svoted-wrapper.sh to ${DO_BASE}/svoted-wrapper.sh."
+  fi
+
+  chmod 0755 "$WRAPPER_BIN"
+  if [ -n "${SERVICE_USER:-}" ] && id "$SERVICE_USER" >/dev/null 2>&1; then
+    chown "${SERVICE_USER}:${SERVICE_USER}" "$WRAPPER_BIN" 2>/dev/null || true
+  fi
+  svote_upgrade_log "Installed wrapper script at ${WRAPPER_BIN}"
+}
+
 # svote_upgrade_download_release_tarball tag tmp_dir
 # Download shielded-vote release tarball for tag/platform, verify .sha256, print local path; die on mismatch.
 svote_upgrade_download_release_tarball() {
@@ -676,6 +700,16 @@ svote_upgrade_patch_systemd_unit_for_cosmovisor() {
     sed -i '/^\[Service\]/a Environment="DAEMON_ALLOW_DOWNLOAD_BINARIES=false"' "$tmp_unit"
   grep -q "COSMOVISOR_BIN=${COSMOVISOR_BIN}" "$tmp_unit" || \
     sed -i '/^\[Service\]/a Environment="COSMOVISOR_BIN='"${COSMOVISOR_BIN}"'"' "$tmp_unit"
+
+  if [ -n "${SVOTE_WRAPPER_SVOTED_START_ARGS:-}" ]; then
+    local escaped_wrapper_args
+    escaped_wrapper_args=$(printf '%s' "${SVOTE_WRAPPER_SVOTED_START_ARGS}" | sed 's/[\\&|]/\\&/g')
+    if grep -q "SVOTE_WRAPPER_SVOTED_START_ARGS=" "$tmp_unit"; then
+      sed -i "s|^Environment=.*SVOTE_WRAPPER_SVOTED_START_ARGS=.*|Environment=\"SVOTE_WRAPPER_SVOTED_START_ARGS=${escaped_wrapper_args}\"|" "$tmp_unit"
+    else
+      sed -i '/^\[Service\]/a Environment="SVOTE_WRAPPER_SVOTED_START_ARGS='"${escaped_wrapper_args}"'"' "$tmp_unit"
+    fi
+  fi
 
   if ! grep -q "^ExecStart=${WRAPPER_BIN}$" "$tmp_unit" && ! grep -q "^ExecStart=${WRAPPER_BIN} " "$tmp_unit"; then
     if grep -q '^ExecStart=' "$tmp_unit"; then
