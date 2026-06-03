@@ -230,6 +230,12 @@ Modes:
 Use `--skip-cosmovisor-service` with `verify-prestage` to validate staged
 binaries on hosts that have not run `--mode migrate` yet.
 
+## Validation program
+
+Before rolling coordinated upgrades to production validators, follow the gated
+checklist in [upgrade-validation-checklist.md](upgrade-validation-checklist.md).
+Post-release artifact smoke checks: `scripts/verify_upgrade_release_artifacts.sh`.
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Action |
