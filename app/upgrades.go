@@ -8,4 +8,5 @@ func (app *SvoteApp) RegisterUpgradeHandlers() {
 	// Future mainnet upgrades should be registered here. Testnet repair
 	// handlers should live in their own files with clear chain ID guards.
 	app.registerStageVoteFundingMigrationUpgrade()
+	app.registerIsolatedRehearsalUpgrade()
 }

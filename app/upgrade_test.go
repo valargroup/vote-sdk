@@ -184,6 +184,38 @@ func TestScheduledUpgradeWithHandlerAppliesAtDueHeight(t *testing.T) {
 	require.Equal(t, dueHeight, doneHeight)
 }
 
+func TestIsolatedRehearsalUpgradeAppliesAtDueHeight(t *testing.T) {
+	ta := testutil.SetupTestAppWithChainID(t, "upgrade-test-1")
+	voteManager := ta.ValidatorAccAddr()
+	ta.SeedVoteManagers(voteManager)
+
+	dueHeight := ta.Height + 2
+	txBytes := ta.MustBuildSignedCoordinatorActionTx(voteManager, &votetypes.MsgScheduleUpgrade{
+		Creator: voteManager,
+		Name:    svoteapp.IsolatedRehearsalUpgradeName,
+		Height:  dueHeight,
+		Info:    `{"purpose":"isolated-rehearsal"}`,
+	})
+	result := ta.DeliverVoteTx(txBytes)
+	require.Equal(t, uint32(0), result.Code, result.Log)
+
+	ta.Height++
+	ta.Time = ta.Time.Add(5 * time.Second)
+	_, err := ta.FinalizeBlock(&abci.RequestFinalizeBlock{
+		Height:          ta.Height,
+		Time:            ta.Time,
+		ProposerAddress: ta.ProposerAddress,
+	})
+	require.NoError(t, err)
+	_, err = ta.Commit()
+	require.NoError(t, err)
+
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	doneHeight, err := ta.SvoteApp.UpgradeKeeper.GetDoneHeight(ctx, svoteapp.IsolatedRehearsalUpgradeName)
+	require.NoError(t, err)
+	require.Equal(t, dueHeight, doneHeight)
+}
+
 // moveVoteFundingModuleBalanceToManagers simulates the old genesis shape where
 // vote-manager addresses held the funding pool directly.
 func moveVoteFundingModuleBalanceToManagers(t *testing.T, ta *testutil.TestApp, balances map[string]int64) {
