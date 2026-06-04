@@ -156,6 +156,8 @@ svote_upgrade_autodetect_from_systemd_unit() {
   local home_cli_set="${1:-0}"
   local install_cli_set="${2:-0}"
   local unit_user detected_home detected_install detected_wrapper
+  local install_dir_autodetected=0
+  local wrapper_path_autodetected=0
 
   [ -f "$SERVICE_PATH" ] || return 0
 
@@ -174,6 +176,9 @@ svote_upgrade_autodetect_from_systemd_unit() {
   if [ "$install_cli_set" != "1" ]; then
     detected_install=$(svote_upgrade_systemd_unit_value "SVOTE_INSTALL_DIR" "$SERVICE_PATH" || true)
     if [ -n "$detected_install" ]; then
+      if [ "$detected_install" != "$INSTALL_DIR" ]; then
+        install_dir_autodetected=1
+      fi
       INSTALL_DIR="$detected_install"
     fi
   fi
@@ -191,9 +196,26 @@ svote_upgrade_autodetect_from_systemd_unit() {
   detected_wrapper="${detected_exec%% *}"
   if [ -n "$detected_wrapper" ] && [ -x "$detected_wrapper" ] && [ "${detected_wrapper##*/}" = "svoted-wrapper.sh" ]; then
     WRAPPER_BIN="$detected_wrapper"
+    wrapper_path_autodetected=1
   fi
   if [ "$install_cli_set" != "1" ] && [ -n "$detected_wrapper" ]; then
-    INSTALL_DIR="$(dirname "$detected_wrapper")"
+    # If ExecStart points at a wrapper, treat that wrapper directory as the canonical install dir.
+    # This captures real runtime layout even when unit env is stale/missing.
+    detected_install="$(dirname "$detected_wrapper")"
+    if [ "$detected_install" != "$INSTALL_DIR" ]; then
+      install_dir_autodetected=1
+    fi
+    INSTALL_DIR="$detected_install"
+  fi
+
+  if [ "$install_dir_autodetected" = "1" ] && [ -z "${SVOTE_COSMOVISOR_BIN:-}" ]; then
+    # Keep derived binaries aligned with autodetected INSTALL_DIR unless the operator explicitly
+    # pinned SVOTE_COSMOVISOR_BIN. Prevents mixed-path state (e.g. INSTALL_DIR in /home but
+    # COSMOVISOR_BIN still in /root) that leads to systemd 203/EXEC permission failures.
+    COSMOVISOR_BIN="${INSTALL_DIR}/cosmovisor"
+    if [ "$wrapper_path_autodetected" = "1" ]; then
+      WRAPPER_BIN="${INSTALL_DIR}/svoted-wrapper.sh"
+    fi
   fi
 
   COSMOVISOR_BIN="${SVOTE_COSMOVISOR_BIN:-${COSMOVISOR_BIN:-${INSTALL_DIR}/cosmovisor}}"
@@ -1174,14 +1196,17 @@ svote_upgrade_patch_systemd_unit_for_cosmovisor() {
   service_desc=$(grep -E '^Description=' "$SERVICE_PATH" 2>/dev/null | head -n 1 | cut -d= -f2- || true)
   service_user=$(grep -E '^User=' "$SERVICE_PATH" 2>/dev/null | head -n 1 | cut -d= -f2- | tr -d '[:space:]' || true)
 
-  if [ ! -x "$COSMOVISOR_BIN" ]; then
-    svote_upgrade_die "Cosmovisor binary missing or not executable at ${COSMOVISOR_BIN}."
-  fi
   if [ -z "$service_desc" ]; then
     service_desc="Shielded-Vote validator (${SERVICE_NAME})"
   fi
   if [ -z "$service_user" ]; then
     service_user="${SERVICE_USER:-root}"
+  fi
+  if [ "$service_user" != "root" ] && [ "${COSMOVISOR_BIN#/root/}" != "$COSMOVISOR_BIN" ]; then
+    svote_upgrade_die "Refusing to migrate ${SERVICE_NAME}: service user ${service_user} cannot execute cosmovisor from root-owned path ${COSMOVISOR_BIN}. Re-run with --install-dir /home/${service_user}/.local/bin or set SVOTE_COSMOVISOR_BIN=/home/${service_user}/.local/bin/cosmovisor."
+  fi
+  if [ ! -x "$COSMOVISOR_BIN" ]; then
+    svote_upgrade_die "Cosmovisor binary missing or not executable at ${COSMOVISOR_BIN}."
   fi
 
   daemon_home_escaped=$(svote_upgrade_escape_systemd_env_value "$DAEMON_HOME")
