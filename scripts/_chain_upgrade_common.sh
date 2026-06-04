@@ -1264,7 +1264,11 @@ svote_upgrade_wait_for_rpc() {
   local query_bin="${GENESIS_BIN}"
   local effective_mode effective_exec unit_active missing_runtime_checks=0
   if [ ! -x "$query_bin" ]; then
-    query_bin="$(command -v svoted 2>/dev/null || true)"
+    if command -v svote_upgrade_resolve_query_svoted >/dev/null 2>&1; then
+      query_bin="$(svote_upgrade_resolve_query_svoted 1 2>/dev/null || true)"
+    else
+      query_bin="$(command -v svoted 2>/dev/null || true)"
+    fi
   fi
   while [ "$SECONDS" -le "$deadline" ]; do
     effective_mode=$(svote_upgrade_systemd_effective_env_value "SVOTE_UPGRADE_MODE" || true)
