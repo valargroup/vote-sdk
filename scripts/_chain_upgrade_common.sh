@@ -157,6 +157,7 @@ svote_upgrade_autodetect_from_systemd_unit() {
   local install_cli_set="${2:-0}"
   local unit_user detected_home detected_install detected_wrapper
   local install_dir_autodetected=0
+  local wrapper_path_autodetected=0
 
   [ -f "$SERVICE_PATH" ] || return 0
 
@@ -195,6 +196,7 @@ svote_upgrade_autodetect_from_systemd_unit() {
   detected_wrapper="${detected_exec%% *}"
   if [ -n "$detected_wrapper" ] && [ -x "$detected_wrapper" ] && [ "${detected_wrapper##*/}" = "svoted-wrapper.sh" ]; then
     WRAPPER_BIN="$detected_wrapper"
+    wrapper_path_autodetected=1
   fi
   if [ "$install_cli_set" != "1" ] && [ -n "$detected_wrapper" ]; then
     # If ExecStart points at a wrapper, treat that wrapper directory as the canonical install dir.
@@ -211,7 +213,9 @@ svote_upgrade_autodetect_from_systemd_unit() {
     # pinned SVOTE_COSMOVISOR_BIN. Prevents mixed-path state (e.g. INSTALL_DIR in /home but
     # COSMOVISOR_BIN still in /root) that leads to systemd 203/EXEC permission failures.
     COSMOVISOR_BIN="${INSTALL_DIR}/cosmovisor"
-    WRAPPER_BIN="${INSTALL_DIR}/svoted-wrapper.sh"
+    if [ "$wrapper_path_autodetected" = "1" ]; then
+      WRAPPER_BIN="${INSTALL_DIR}/svoted-wrapper.sh"
+    fi
   fi
 
   COSMOVISOR_BIN="${SVOTE_COSMOVISOR_BIN:-${COSMOVISOR_BIN:-${INSTALL_DIR}/cosmovisor}}"
