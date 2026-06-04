@@ -139,7 +139,13 @@ svote_upgrade_systemd_unit_value() {
   [ -f "$unit_file" ] || return 1
   line=$(grep -E "^Environment=.*${key}=" "$unit_file" 2>/dev/null | head -n 1 || true)
   [ -n "$line" ] || return 1
-  value=$(printf '%s\n' "$line" | sed -n "s/.*[\"']\\?${key}=\\([^\"' ]*\\)[\"' ]*.*/\\1/p" | head -n 1)
+  # Parameter expansion instead of sed so the optional surrounding quotes are handled portably (BSD
+  # sed, unlike GNU sed, does not support \? in BRE). Take the text after KEY=, cut at the next
+  # whitespace, then strip a trailing double/single quote.
+  value=${line#*"${key}"=}
+  value=${value%%[[:space:]]*}
+  value=${value%\"}
+  value=${value%\'}
   [ -n "$value" ] || return 1
   printf '%s\n' "$value"
 }
@@ -382,6 +388,77 @@ svote_upgrade_assert_genesis_pre_upgrade() {
     fi
     svote_upgrade_die "Genesis binary ${GENESIS_BIN} is already at target tag ${target_tag}; this can cause BINARY UPDATED BEFORE TRIGGER behavior. Restore the pre-upgrade binary before migrating."
   fi
+}
+
+# svote_upgrade_runtime_svoted_candidate_ok candidate target_tag
+# Return 0 when candidate is an executable svoted binary that is not already target_tag.
+# An empty/unreadable version is treated as "not target" so a real running binary is not rejected.
+svote_upgrade_runtime_svoted_candidate_ok() {
+  local candidate="$1"
+  local target_tag="$2"
+  local version
+  [ -n "$candidate" ] || return 1
+  [ -x "$candidate" ] || return 1
+  if [ -n "$target_tag" ]; then
+    version=$("$candidate" version 2>/dev/null | tr -d '[:space:]' || true)
+    [ "$version" = "$target_tag" ] && return 1
+  fi
+  return 0
+}
+
+# svote_upgrade_resolve_runtime_svoted [target_tag]
+# Print the path to the current pre-upgrade svoted binary, derived from the validator service itself
+# (never from a guessed INSTALL_DIR). Tries in order: SVOTED_BIN declared in the unit (join.sh
+# secondaries), the ExecStart svoted binary (direct-mode primaries), the running signer process
+# binary (truth), then an already-staged genesis binary. Dies when none resolve. When target_tag is
+# given, candidates already at that tag are skipped so an upgraded binary is never chosen as genesis.
+svote_upgrade_resolve_runtime_svoted() {
+  local target_tag="${1:-}"
+  local candidate exec_cmd first_token line cmd pid exe
+
+  # 1. SVOTED_BIN declared in the systemd unit (join.sh records the absolute path here).
+  candidate=$(svote_upgrade_systemd_unit_value "SVOTED_BIN" "$SERVICE_PATH" 2>/dev/null || true)
+  if svote_upgrade_runtime_svoted_candidate_ok "$candidate" "$target_tag"; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+
+  # 2. ExecStart svoted binary; direct-mode primaries run svoted as the first token.
+  exec_cmd=$(svote_upgrade_detect_existing_execstart 2>/dev/null || true)
+  if [ -n "$exec_cmd" ]; then
+    first_token="${exec_cmd%% *}"
+    if [ "${first_token##*/}" = "$SVOTE_DAEMON_NAME" ] \
+      && svote_upgrade_runtime_svoted_candidate_ok "$first_token" "$target_tag"; then
+      printf '%s\n' "$first_token"
+      return 0
+    fi
+  fi
+
+  # 3. The actual running signer process binary, scoped to DAEMON_HOME (cosmovisor supervisor skipped).
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    pid="${line%% *}"
+    cmd="${line#* }"
+    case "${cmd%% *}" in
+      *cosmovisor*) continue ;;
+    esac
+    case "$pid" in
+      ''|*[!0-9]*) continue ;;
+    esac
+    exe=$(readlink -f "/proc/${pid}/exe" 2>/dev/null || true)
+    if svote_upgrade_runtime_svoted_candidate_ok "$exe" "$target_tag"; then
+      printf '%s\n' "$exe"
+      return 0
+    fi
+  done < <(svote_upgrade_find_signer_processes 2>/dev/null || true)
+
+  # 4. Reuse an already-staged pre-upgrade genesis binary.
+  if svote_upgrade_runtime_svoted_candidate_ok "$GENESIS_BIN" "$target_tag"; then
+    printf '%s\n' "$GENESIS_BIN"
+    return 0
+  fi
+
+  svote_upgrade_die "Could not resolve the current svoted binary from the validator service (checked SVOTED_BIN, ExecStart, the running process, and staged genesis at ${GENESIS_BIN}). Ensure the validator service is configured and running, or stage the genesis binary manually."
 }
 
 # svote_upgrade_install_cosmovisor tmp_dir

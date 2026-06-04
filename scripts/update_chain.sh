@@ -14,7 +14,7 @@
 #
 # Example:
 #   curl -fsSL https://shielded-vote.nyc3.digitaloceanspaces.com/update_chain.sh | sudo bash -s -- \
-#     --mode prepare --plan-name v1_4_0 --tag v1.4.0 --install-dir /usr/local/bin
+#     --mode prepare --plan-name v1_4_0 --tag v1.4.0
 set -euo pipefail
 
 readonly UPDATE_DEFAULT_RELEASE_TAG='latest'
@@ -79,8 +79,6 @@ Migrate notes:
   Requires a prior 'prepare' run for the same --plan-name/--tag; migrate no longer downloads or
   stages binaries. It fails fast if the staged layout is missing or the genesis binary already
   equals the target tag (which would let cosmovisor run the upgrade build before the trigger height).
-  For primary operators, pass --install-dir /usr/local/bin explicitly to avoid install-dir autodetect
-  drift when systemd units or wrappers differ across hosts.
   Rewrites /etc/systemd/system/<service>.service to launch cosmovisor directly and removes
   active drop-ins under /etc/systemd/system/<service>.service.d/*.conf (backing them up as
   *.bak.pre-migrate.<timestamp>). Direct-mode ExecStart flags (e.g. --serve-ui) are copied
@@ -254,8 +252,7 @@ trap cleanup EXIT
 # run_stage_first
 # Download release, stage genesis/upgrade binaries and cosmovisor; never stop the running validator.
 run_stage_first() {
-  local current_bin="${INSTALL_DIR}/svoted"
-  local staged_svoted upgrade_bin_dir upgrade_bin
+  local staged_svoted upgrade_bin resolved_dir
 
   svote_upgrade_verify_validator_identity_files
 
@@ -267,6 +264,26 @@ run_stage_first() {
     fi
   fi
 
+  # Resolve the pre-upgrade genesis source from the validator service itself (never from a guessed
+  # INSTALL_DIR). Done before installing cosmovisor so the install dir can be aligned to the real
+  # binary location on nodes where autodetect would otherwise drift (e.g. direct-mode primaries).
+  staged_svoted="$(svote_upgrade_resolve_runtime_svoted "$RELEASE_TAG")"
+  if [ "${INSTALL_CLI_SET:-0}" != "1" ] && [ "$staged_svoted" != "$GENESIS_BIN" ]; then
+    resolved_dir="$(dirname "$staged_svoted")"
+    case "$resolved_dir" in
+      "$COSMVISOR_ROOT"/*) ;;
+      *)
+        if [ -n "$resolved_dir" ] && [ "$resolved_dir" != "$INSTALL_DIR" ]; then
+          INSTALL_DIR="$resolved_dir"
+          COSMOVISOR_BIN="${SVOTE_COSMOVISOR_BIN:-${INSTALL_DIR}/cosmovisor}"
+          WRAPPER_BIN="${SVOTE_WRAPPER_SCRIPT:-${INSTALL_DIR}/svoted-wrapper.sh}"
+          export INSTALL_DIR COSMOVISOR_BIN WRAPPER_BIN
+          svote_upgrade_log "Aligned install dir to running binary location: ${INSTALL_DIR}"
+        fi
+        ;;
+    esac
+  fi
+
   TMP_DIR=$(mktemp -d)
   local tarball_path extracted_svoted
   tarball_path=$(svote_upgrade_download_release_tarball "$RELEASE_TAG" "$TMP_DIR")
@@ -275,23 +292,15 @@ run_stage_first() {
 
   svote_upgrade_install_cosmovisor "$TMP_DIR"
 
-  if [ -x "$current_bin" ]; then
-    staged_svoted="$current_bin"
-  elif [ -x "$GENESIS_BIN" ]; then
-    staged_svoted="$GENESIS_BIN"
-  else
-    svote_upgrade_die "Could not locate current svoted binary under ${INSTALL_DIR} or ${GENESIS_BIN}."
-  fi
-
-  svote_upgrade_log "Staging genesis binary at ${GENESIS_BIN}"
+  svote_upgrade_log "Staging genesis binary at ${GENESIS_BIN} (source: ${staged_svoted})"
   svote_upgrade_stage_binary "$staged_svoted" "$GENESIS_BIN"
 
-  upgrade_bin_dir=$(svote_upgrade_upgrade_bin_dir "$PLAN_NAME")
   upgrade_bin=$(svote_upgrade_upgrade_bin_path "$PLAN_NAME")
   svote_upgrade_log "Staging upgrade binary for plan ${PLAN_NAME} at ${upgrade_bin}"
   svote_upgrade_stage_binary "$extracted_svoted" "$upgrade_bin"
 
   svote_upgrade_assert_layout_ready "$PLAN_NAME"
+  svote_upgrade_assert_genesis_pre_upgrade "$RELEASE_TAG"
   svote_upgrade_fixup_cosmovisor_ownership
   svote_upgrade_log "Staging complete; running validator was not stopped."
 }
@@ -319,7 +328,6 @@ run_migrate() {
   svote_upgrade_stop_validator_service
 
   backup_unit=$(svote_upgrade_patch_systemd_unit_for_cosmovisor)
-  svote_upgrade_assert_genesis_pre_upgrade "$RELEASE_TAG"
   svote_upgrade_restart_service "$backup_unit"
   svote_upgrade_wait_for_rpc "$TIMEOUT_SECS"
   svote_upgrade_assert_cosmovisor_runtime
