@@ -1796,6 +1796,7 @@ After=network.target
 [Service]
 Type=simple
 User=$(whoami)
+EnvironmentFile=-/etc/default/svoted
 Environment=${SYSTEMD_ENV}
 ExecStart=${WRAPPER_BIN}
 Restart=on-failure

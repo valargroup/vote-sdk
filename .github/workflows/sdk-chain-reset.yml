@@ -244,6 +244,9 @@ jobs:
             if [ -n "${SVOTE_CONFIG_PR_GITHUB_TOKEN:-}" ]; then
               echo "SVOTE_CONFIG_PR_GITHUB_TOKEN=$SVOTE_CONFIG_PR_GITHUB_TOKEN" >> /etc/default/svoted
             fi
+            mkdir -p /etc/systemd/system/svoted.service.d
+            printf '[Service]\nEnvironmentFile=-/etc/default/svoted\n' \
+              > /etc/systemd/system/svoted.service.d/10-envfile.conf
             if [ "$SENTRY_ENVIRONMENT" = "production" ]; then
               cat > /etc/default/caddy-env <<EOF
             DOMAIN=${DOMAIN}
@@ -427,6 +430,9 @@ jobs:
             echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
             sed -i '/^SENTRY_ENVIRONMENT=/d' /etc/default/svoted
             echo "SENTRY_ENVIRONMENT=$SENTRY_ENVIRONMENT" >> /etc/default/svoted
+            mkdir -p /etc/systemd/system/svoted.service.d
+            printf '[Service]\nEnvironmentFile=-/etc/default/svoted\n' \
+              > /etc/systemd/system/svoted.service.d/10-envfile.conf
 
             # Run reset-snapshot: wipe state, download genesis, configure peering
             # with primary, start svoted as a pruned non-validator, and enable
@@ -542,6 +548,9 @@ jobs:
             echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
             sed -i '/^SENTRY_ENVIRONMENT=/d' /etc/default/svoted
             echo "SENTRY_ENVIRONMENT=$SENTRY_ENVIRONMENT" >> /etc/default/svoted
+            mkdir -p /etc/systemd/system/svoted.service.d
+            printf '[Service]\nEnvironmentFile=-/etc/default/svoted\n' \
+              > /etc/systemd/system/svoted.service.d/10-envfile.conf
 
             # Run reset-join with deterministic validator key
             export GENESIS_URL="${DO_SPACES_BASE}/${GENESIS_KEY}"
@@ -609,6 +618,9 @@ jobs:
             echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
             sed -i '/^SENTRY_ENVIRONMENT=/d' /etc/default/svoted
             echo "SENTRY_ENVIRONMENT=$SENTRY_ENVIRONMENT" >> /etc/default/svoted
+            mkdir -p /etc/systemd/system/svoted.service.d
+            printf '[Service]\nEnvironmentFile=-/etc/default/svoted\n' \
+              > /etc/systemd/system/svoted.service.d/10-envfile.conf
 
             if [ "$SENTRY_ENVIRONMENT" = "production" ]; then
               cat > /etc/default/caddy-env <<EOF

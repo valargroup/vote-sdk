@@ -115,6 +115,10 @@ jobs:
             if [ -n "${SVOTE_CONFIG_PR_GITHUB_TOKEN:-}" ]; then
               echo "SVOTE_CONFIG_PR_GITHUB_TOKEN=$SVOTE_CONFIG_PR_GITHUB_TOKEN" >> /etc/default/svoted
             fi
+            mkdir -p /etc/systemd/system/svoted.service.d
+            printf '[Service]\nEnvironmentFile=-/etc/default/svoted\n' \
+              > /etc/systemd/system/svoted.service.d/10-envfile.conf
+            systemctl daemon-reload
             if [ "$SENTRY_ENVIRONMENT" = "production" ]; then
               cat > /etc/default/caddy-env <<EOF
             DOMAIN=${DOMAIN}
@@ -181,6 +185,10 @@ jobs:
             echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
             sed -i '/^SENTRY_ENVIRONMENT=/d' /etc/default/svoted
             echo "SENTRY_ENVIRONMENT=$SENTRY_ENVIRONMENT" >> /etc/default/svoted
+            mkdir -p /etc/systemd/system/svoted.service.d
+            printf '[Service]\nEnvironmentFile=-/etc/default/svoted\n' \
+              > /etc/systemd/system/svoted.service.d/10-envfile.conf
+            systemctl daemon-reload
             /opt/shielded-vote/install-release.sh --tag "${{ env.TAG }}" --base "${{ env.RELEASE_BASE_URL }}"
         env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
@@ -227,6 +235,10 @@ jobs:
             echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
             sed -i '/^SENTRY_ENVIRONMENT=/d' /etc/default/svoted
             echo "SENTRY_ENVIRONMENT=$SENTRY_ENVIRONMENT" >> /etc/default/svoted
+            mkdir -p /etc/systemd/system/svoted.service.d
+            printf '[Service]\nEnvironmentFile=-/etc/default/svoted\n' \
+              > /etc/systemd/system/svoted.service.d/10-envfile.conf
+            systemctl daemon-reload
 
             if [ "$SENTRY_ENVIRONMENT" = "production" ]; then
               cat > /etc/default/caddy-env <<EOF
@@ -310,6 +322,10 @@ jobs:
             echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
             sed -i '/^SENTRY_ENVIRONMENT=/d' /etc/default/svoted
             echo "SENTRY_ENVIRONMENT=$SENTRY_ENVIRONMENT" >> /etc/default/svoted
+            mkdir -p /etc/systemd/system/svoted.service.d
+            printf '[Service]\nEnvironmentFile=-/etc/default/svoted\n' \
+              > /etc/systemd/system/svoted.service.d/10-envfile.conf
+            systemctl daemon-reload
 
             # On first deploy (before sdk-chain-reset.yml runs reset-snapshot),
             # .svoted/config/genesis.json does not exist yet, so svoted cannot

@@ -134,6 +134,7 @@ grep -q 'Environment="SVOTE_UPGRADE_MODE=cosmovisor"' "${SERVICE_PATH}" || fail 
 grep -q "Environment=\"DAEMON_HOME=${DAEMON_HOME}\"" "${SERVICE_PATH}" || fail "service missing daemon home env"
 grep -q 'Environment="DAEMON_NAME=svoted"' "${SERVICE_PATH}" || fail "service missing daemon name env"
 grep -q "Environment=\"COSMOVISOR_BIN=${COSMOVISOR_BIN}\"" "${SERVICE_PATH}" || fail "service missing cosmovisor env"
+grep -q '^EnvironmentFile=-/etc/default/svoted$' "${SERVICE_PATH}" || fail "service missing default env file"
 grep -q '^Restart=on-failure$' "${SERVICE_PATH}" || fail "service missing restart policy"
 
 [ ! -f "${TMP_MIGRATE}/svoted.service.d/primary.conf" ] || fail "primary.conf should be removed"
