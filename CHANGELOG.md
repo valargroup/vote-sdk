@@ -6,6 +6,10 @@ Historical changes before commit `704b202e2088b91caeaf2290cef85e4a9a759542` are 
 
 ## Unreleased
 
+### Added
+
+- Add a `v1` x/upgrade handler in `app.RegisterUpgradeHandlers` so coordinated upgrades can use the same plan name across `svote-1`, `zvote-1`, and test chains.
+
 ## v0.11.0 - 2026-06-03
 
 ### Added
