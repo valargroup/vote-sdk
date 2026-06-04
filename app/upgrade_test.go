@@ -184,6 +184,43 @@ func TestScheduledUpgradeWithHandlerAppliesAtDueHeight(t *testing.T) {
 	require.Equal(t, dueHeight, doneHeight)
 }
 
+func TestV1UpgradeAppliesAcrossSupportedChains(t *testing.T) {
+	testChains := []string{"svote-1", "zvote-1", "upgrade-test-1"}
+	for _, chainID := range testChains {
+		t.Run(chainID, func(t *testing.T) {
+			ta := testutil.SetupTestAppWithChainID(t, chainID)
+			voteManager := ta.ValidatorAccAddr()
+			ta.SeedVoteManagers(voteManager)
+
+			dueHeight := ta.Height + 2
+			txBytes := ta.MustBuildSignedCoordinatorActionTx(voteManager, &votetypes.MsgScheduleUpgrade{
+				Creator: voteManager,
+				Name:    svoteapp.V1UpgradeName,
+				Height:  dueHeight,
+				Info:    `{"purpose":"v1-shared-handler"}`,
+			})
+			result := ta.DeliverVoteTx(txBytes)
+			require.Equal(t, uint32(0), result.Code, result.Log)
+
+			ta.Height++
+			ta.Time = ta.Time.Add(5 * time.Second)
+			_, err := ta.FinalizeBlock(&abci.RequestFinalizeBlock{
+				Height:          ta.Height,
+				Time:            ta.Time,
+				ProposerAddress: ta.ProposerAddress,
+			})
+			require.NoError(t, err)
+			_, err = ta.Commit()
+			require.NoError(t, err)
+
+			ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+			doneHeight, err := ta.SvoteApp.UpgradeKeeper.GetDoneHeight(ctx, svoteapp.V1UpgradeName)
+			require.NoError(t, err)
+			require.Equal(t, dueHeight, doneHeight)
+		})
+	}
+}
+
 func TestIsolatedRehearsalUpgradeAppliesAtDueHeight(t *testing.T) {
 	ta := testutil.SetupTestAppWithChainID(t, "upgrade-test-1")
 	voteManager := ta.ValidatorAccAddr()
