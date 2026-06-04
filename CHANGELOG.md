@@ -4,7 +4,14 @@ All notable changes to this repository will be documented in this file.
 
 Historical changes before commit `704b202e2088b91caeaf2290cef85e4a9a759542` are untracked.
 
-## Unreleased
+Instructions on coordinated upgrades can be found [here](https://setup.valargroup.org/#coordinated-upgrade).
+
+## v1.0.0
+
+This is the coordinated upgrade intended to be applied on mainnet.
+Previously, we had state-breaks across minor versions that we would
+apply to stage nodes directly. However, production is still running v0.9.x
+up until v1.0.0.
 
 ### Added
 
