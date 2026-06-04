@@ -10,6 +10,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 Operational migration script updates. Does not touch chain code.
 
+- Ensure managed systemd services load `/etc/default/svoted` after Cosmovisor migration so deploy-time environment variables remain available.
+
 ## v1.0.0
 
 This is the coordinated upgrade intended to be applied on mainnet.

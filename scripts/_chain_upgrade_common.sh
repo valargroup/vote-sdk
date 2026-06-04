@@ -1227,6 +1227,7 @@ svote_upgrade_patch_systemd_unit_for_cosmovisor() {
     printf '[Service]\n'
     printf 'Type=simple\n'
     printf 'User=%s\n' "$service_user"
+    printf 'EnvironmentFile=-/etc/default/svoted\n'
     printf 'ExecStart=%s run start --home %s%s\n' "$cosmovisor_bin_escaped" "$daemon_home_escaped" "$start_args_escaped"
     printf 'Environment="SVOTE_UPGRADE_MODE=cosmovisor"\n'
     printf 'Environment="DAEMON_HOME=%s"\n' "$daemon_home_escaped"
