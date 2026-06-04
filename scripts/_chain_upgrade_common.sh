@@ -558,25 +558,6 @@ svote_upgrade_verify_validator_identity_files() {
   export SVOTE_CONSENSUS_PUBKEY
 }
 
-# svote_upgrade_require_single_signer_ack
-# Require SVOTE_ACK_SINGLE_SIGNER=1 or interactive YES before stop/migrate; die otherwise.
-svote_upgrade_require_single_signer_ack() {
-  if [ "${SVOTE_ACK_SINGLE_SIGNER:-0}" = "1" ]; then
-    return 0
-  fi
-  if [ ! -t 0 ]; then
-    svote_upgrade_die "Refusing to continue without SVOTE_ACK_SINGLE_SIGNER=1 in non-interactive mode. Confirm no second live signer uses this consensus key."
-  fi
-  echo "Consensus pubkey: ${SVOTE_CONSENSUS_PUBKEY}"
-  echo "Confirm no other live validator process uses this consensus key."
-  printf 'Type YES to continue: ' > /dev/tty
-  local response
-  read -r response < /dev/tty
-  if [ "$response" != "YES" ]; then
-    svote_upgrade_die "Aborted by operator."
-  fi
-}
-
 # svote_upgrade_is_upgrade_invocation_pid pid
 # Return 0 when pid belongs to this script's shell ancestry (avoid migrate self-match).
 svote_upgrade_is_upgrade_invocation_pid() {

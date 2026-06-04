@@ -72,7 +72,6 @@ Options:
   --help                  Show this help text.
 
 Environment:
-  SVOTE_ACK_SINGLE_SIGNER=1   Required in non-interactive mode for migrate/prepare service checks.
   SVOTE_WRAPPER_SVOTED_START_ARGS  Extra svoted start args passed to cosmovisor run start.
 
 Migrate notes:
@@ -313,18 +312,16 @@ run_verify_prestage() {
 
 # run_migrate
 # Verify validator identity and the prepared layout/pre-upgrade genesis, then stop validator, patch
-# systemd for cosmovisor, restart, and wait for RPC; requires single-signer ack. Never stages binaries.
+# systemd for cosmovisor, restart, and wait for RPC. Never stages binaries.
 run_migrate() {
   local backup_unit
 
-  # verify_validator_identity_files asserts the priv-validator files (double-sign safety) and exports
-  # SVOTE_CONSENSUS_PUBKEY, which require_single_signer_ack relies on in interactive mode.
+  # verify_validator_identity_files asserts the priv-validator files (double-sign safety).
   svote_upgrade_verify_validator_identity_files
   svote_upgrade_assert_layout_ready "$PLAN_NAME"
   svote_upgrade_verify_binary_tag "$(svote_upgrade_upgrade_bin_path "$PLAN_NAME")" "$RELEASE_TAG"
   svote_upgrade_assert_genesis_pre_upgrade "$RELEASE_TAG"
 
-  svote_upgrade_require_single_signer_ack
   svote_upgrade_stop_validator_service
 
   backup_unit=$(svote_upgrade_patch_systemd_unit_for_cosmovisor)
