@@ -6,6 +6,10 @@ Historical changes before commit `704b202e2088b91caeaf2290cef85e4a9a759542` are 
 
 Instructions on coordinated upgrades can be found [here](https://setup.valargroup.org/#coordinated-upgrade).
 
+## v1.0.1
+
+Operational migration script updates. Does not touch chain code.
+
 ## v1.0.0
 
 This is the coordinated upgrade intended to be applied on mainnet.
