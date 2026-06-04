@@ -6,13 +6,15 @@
 # Modes:
 #   prepare        Stage Cosmovisor binaries only; never stop the running validator.
 #   migrate        One-time migration from direct svoted service to a plain Cosmovisor service.
+#                  Requires a prior `prepare` run; migrate never downloads or stages binaries and
+#                  refuses to run if the genesis binary already equals the target tag.
 #                  Rewrites the main systemd unit and removes conflicting drop-ins (e.g. primary.conf).
 #                  Can infer --serve-ui style args from the current direct ExecStart when not supplied.
 #   verify-prestage Read-only PASS/FAIL checklist for operator runbooks.
 #
 # Example:
 #   curl -fsSL https://shielded-vote.nyc3.digitaloceanspaces.com/update_chain.sh | sudo bash -s -- \
-#     --mode prepare --plan-name v1_4_0 --tag v1.4.0
+#     --mode prepare --plan-name v1_4_0 --tag v1.4.0 --install-dir /usr/local/bin
 set -euo pipefail
 
 readonly UPDATE_DEFAULT_RELEASE_TAG='latest'
@@ -74,11 +76,22 @@ Environment:
   SVOTE_WRAPPER_SVOTED_START_ARGS  Extra svoted start args passed to cosmovisor run start.
 
 Migrate notes:
+  Requires a prior 'prepare' run for the same --plan-name/--tag; migrate no longer downloads or
+  stages binaries. It fails fast if the staged layout is missing or the genesis binary already
+  equals the target tag (which would let cosmovisor run the upgrade build before the trigger height).
+  For primary operators, pass --install-dir /usr/local/bin explicitly to avoid install-dir autodetect
+  drift when systemd units or wrappers differ across hosts.
   Rewrites /etc/systemd/system/<service>.service to launch cosmovisor directly and removes
   active drop-ins under /etc/systemd/system/<service>.service.d/*.conf (backing them up as
   *.bak.pre-migrate.<timestamp>). Direct-mode ExecStart flags (e.g. --serve-ui) are copied
   into the migrated cosmovisor run start command unless --wrapper-svoted-start-args is provided.
   Migrate validates effective runtime mode, effective ExecStart, and a live cosmovisor process.
+
+Verify notes:
+  Primary pre-migrate in direct mode: verify-prestage without --skip-cosmovisor-service is expected
+  to fail service checks until migrate is complete.
+  Secondary pre-migrate in direct mode: run verify-prestage with --skip-cosmovisor-service.
+  Post-migrate on either node: verify-prestage without skip should pass both staging and service checks.
 EOF
 }
 
@@ -290,14 +303,23 @@ run_verify_prestage() {
 }
 
 # run_migrate
-# Stop validator, patch systemd for cosmovisor, restart, and wait for RPC; requires single-signer ack.
+# Verify validator identity and the prepared layout/pre-upgrade genesis, then stop validator, patch
+# systemd for cosmovisor, restart, and wait for RPC; requires single-signer ack. Never stages binaries.
 run_migrate() {
   local backup_unit
+
+  # verify_validator_identity_files asserts the priv-validator files (double-sign safety) and exports
+  # SVOTE_CONSENSUS_PUBKEY, which require_single_signer_ack relies on in interactive mode.
+  svote_upgrade_verify_validator_identity_files
+  svote_upgrade_assert_layout_ready "$PLAN_NAME"
+  svote_upgrade_verify_binary_tag "$(svote_upgrade_upgrade_bin_path "$PLAN_NAME")" "$RELEASE_TAG"
+  svote_upgrade_assert_genesis_pre_upgrade "$RELEASE_TAG"
 
   svote_upgrade_require_single_signer_ack
   svote_upgrade_stop_validator_service
 
   backup_unit=$(svote_upgrade_patch_systemd_unit_for_cosmovisor)
+  svote_upgrade_assert_genesis_pre_upgrade "$RELEASE_TAG"
   svote_upgrade_restart_service "$backup_unit"
   svote_upgrade_wait_for_rpc "$TIMEOUT_SECS"
   svote_upgrade_assert_cosmovisor_runtime
@@ -313,13 +335,10 @@ case "$MODE" in
     ;;
   migrate)
     if [ -z "$PLAN_NAME" ]; then
-      svote_upgrade_die "--plan-name is required for migrate (needed to stage upgrade binary)."
+      svote_upgrade_die "--plan-name is required for migrate (run prepare first; needed to locate the staged upgrade binary)."
     fi
-    run_stage_first
     run_migrate
-    if [ "$PLAN_NAME" != "" ]; then
-      svote_upgrade_verify_prestage "$PLAN_NAME" "$RELEASE_TAG" "$ALLOW_NO_PLAN" "$REQUIRE_COSMOVISOR_SERVICE"
-    fi
+    svote_upgrade_verify_prestage "$PLAN_NAME" "$RELEASE_TAG" "$ALLOW_NO_PLAN" "$REQUIRE_COSMOVISOR_SERVICE"
     ;;
 esac
 

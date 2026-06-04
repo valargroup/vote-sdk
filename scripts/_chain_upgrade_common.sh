@@ -342,6 +342,48 @@ svote_upgrade_verify_binary_tag() {
   fi
 }
 
+# svote_upgrade_genesis_binary_version
+# Print the version string of the staged genesis binary; return 1 if missing or unreadable.
+svote_upgrade_genesis_binary_version() {
+  [ -x "$GENESIS_BIN" ] || return 1
+  local version
+  version=$("$GENESIS_BIN" version 2>/dev/null | tr -d '[:space:]' || true)
+  [ -n "$version" ] || return 1
+  printf '%s\n' "$version"
+}
+
+# svote_upgrade_assert_genesis_pre_upgrade target_tag
+# Die if the staged genesis binary equals target_tag (genesis must remain the pre-upgrade build so
+# cosmovisor does not run the upgrade binary before the trigger height).
+svote_upgrade_assert_genesis_pre_upgrade() {
+  local target_tag="$1"
+  local genesis_version
+  local plan_json="" plan_name="" plan_height="" current_height=""
+  [ -x "$GENESIS_BIN" ] || svote_upgrade_die "Missing genesis binary: ${GENESIS_BIN}"
+  genesis_version=$(svote_upgrade_genesis_binary_version || true)
+  if [ -z "$genesis_version" ]; then
+    svote_upgrade_die "Could not read version from genesis binary ${GENESIS_BIN}."
+  fi
+  if [ "$genesis_version" = "$target_tag" ]; then
+    plan_json=$(svote_upgrade_query_upgrade_plan || true)
+    if [ -n "$plan_json" ] && [ "$plan_json" != "null" ]; then
+      plan_name=$(svote_upgrade_parse_plan_name "$plan_json")
+      plan_height=$(svote_upgrade_parse_plan_height "$plan_json")
+      current_height=$(svote_upgrade_query_block_height || true)
+      case "$plan_height" in
+        ''|*[!0-9]*) plan_height="" ;;
+      esac
+      case "$current_height" in
+        ''|*[!0-9]*) current_height="" ;;
+      esac
+      if [ -n "$plan_height" ] && [ -n "$current_height" ] && [ "$current_height" -lt "$plan_height" ]; then
+        svote_upgrade_die "BINARY UPDATED BEFORE TRIGGER: genesis binary ${GENESIS_BIN} is already ${target_tag} while chain is below upgrade height (current=${current_height}, planned=${plan_height}, plan=${plan_name:-<unknown>}). Restore a pre-upgrade genesis binary before migrating."
+      fi
+    fi
+    svote_upgrade_die "Genesis binary ${GENESIS_BIN} is already at target tag ${target_tag}; this can cause BINARY UPDATED BEFORE TRIGGER behavior. Restore the pre-upgrade binary before migrating."
+  fi
+}
+
 # svote_upgrade_install_cosmovisor tmp_dir
 # Install cosmovisor to COSMOVISOR_BIN from official GitHub release with SHA256SUMS check; no-op if already installed.
 svote_upgrade_install_cosmovisor() {
@@ -683,6 +725,17 @@ svote_upgrade_verify_prestage() {
 
   if [ -x "$GENESIS_BIN" ]; then
     svote_upgrade_checklist_line PASS "Genesis binary present (${GENESIS_BIN})"
+    local genesis_version
+    genesis_version=$(svote_upgrade_genesis_binary_version || true)
+    if [ -z "$genesis_version" ]; then
+      svote_upgrade_checklist_line FAIL "Genesis binary version unreadable (${GENESIS_BIN})"
+      staging_failures=$((staging_failures + 1))
+    elif [ "$genesis_version" = "$expected_tag" ]; then
+      svote_upgrade_checklist_line FAIL "Genesis binary must stay pre-upgrade but equals target ${expected_tag} (${GENESIS_BIN})"
+      staging_failures=$((staging_failures + 1))
+    else
+      svote_upgrade_checklist_line PASS "Genesis binary is pre-upgrade build (${genesis_version})"
+    fi
   else
     svote_upgrade_checklist_line FAIL "Genesis binary missing (${GENESIS_BIN})"
     staging_failures=$((staging_failures + 1))
