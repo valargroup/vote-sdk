@@ -649,15 +649,69 @@ svote_upgrade_parse_plan_height() {
   printf '%s\n' "$plan_json" | jq -r '.plan.height // .height // empty' 2>/dev/null || true
 }
 
+# svote_upgrade_resolve_query_svoted [allow_empty]
+# Resolve a usable svoted binary for status/plan queries. Tries runtime/service-derived locations
+# before fallback paths. When allow_empty=1, return 1 instead of exiting if none resolve.
+svote_upgrade_resolve_query_svoted() {
+  local allow_empty="${1:-0}"
+  local candidate resolved=""
+  local attempted=""
+
+  append_attempt() {
+    local value="$1"
+    [ -n "$value" ] || return 0
+    if [ -n "$attempted" ]; then
+      attempted="${attempted}, ${value}"
+    else
+      attempted="$value"
+    fi
+  }
+
+  maybe_select_candidate() {
+    local value="$1"
+    [ -n "$value" ] || return 1
+    append_attempt "$value"
+    [ -x "$value" ] || return 1
+    resolved="$value"
+    return 0
+  }
+
+  candidate=$(svote_upgrade_resolve_runtime_svoted 2>/dev/null || true)
+  maybe_select_candidate "$candidate" || true
+
+  if [ -z "$resolved" ]; then
+    maybe_select_candidate "${INSTALL_DIR}/${SVOTE_DAEMON_NAME}" || true
+  fi
+
+  if [ -z "$resolved" ]; then
+    candidate=$(svote_upgrade_systemd_unit_value "SVOTED_BIN" "$SERVICE_PATH" 2>/dev/null || true)
+    maybe_select_candidate "$candidate" || true
+  fi
+
+  if [ -z "$resolved" ]; then
+    maybe_select_candidate "${GENESIS_BIN}" || true
+  fi
+
+  if [ -z "$resolved" ]; then
+    candidate="$(command -v "$SVOTE_DAEMON_NAME" 2>/dev/null || true)"
+    maybe_select_candidate "$candidate" || true
+  fi
+
+  if [ -z "$resolved" ]; then
+    if [ "$allow_empty" = "1" ]; then
+      return 1
+    fi
+    svote_upgrade_die "No svoted binary available to query upgrade plan/status. Tried: ${attempted:-<none>}."
+  fi
+
+  printf '%s\n' "$resolved"
+}
+
 # svote_upgrade_query_upgrade_plan
 # Query on-chain upgrade plan as JSON; return empty on "no plan"; die on RPC/parse errors.
 svote_upgrade_query_upgrade_plan() {
-  local query_bin="${GENESIS_BIN}"
-  local plan_json query_err
-  if [ ! -x "$query_bin" ]; then
-    query_bin="$(command -v svoted 2>/dev/null || true)"
-  fi
-  [ -n "$query_bin" ] || svote_upgrade_die "No svoted binary available to query upgrade plan."
+  local query_bin plan_json query_err
+  query_bin=$(svote_upgrade_resolve_query_svoted)
   query_err=$(mktemp)
   if ! plan_json=$("$query_bin" query upgrade plan --home "$DAEMON_HOME" --output json 2>"$query_err"); then
     if grep -qi 'no upgrade plan\|not found\|no plan' "$query_err" 2>/dev/null; then
@@ -721,11 +775,8 @@ svote_upgrade_validate_scheduled_plan() {
 # svote_upgrade_query_block_height
 # Print latest block height from svoted status JSON, or return 1 when query fails.
 svote_upgrade_query_block_height() {
-  local query_bin="${GENESIS_BIN}"
-  if [ ! -x "$query_bin" ]; then
-    query_bin="$(command -v svoted 2>/dev/null || true)"
-  fi
-  [ -n "$query_bin" ] || return 1
+  local query_bin
+  query_bin=$(svote_upgrade_resolve_query_svoted 1) || return 1
   "$query_bin" status --home "$DAEMON_HOME" 2>/dev/null | jq -r '.sync_info.latest_block_height // empty'
 }
 
