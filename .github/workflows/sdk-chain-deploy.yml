@@ -156,6 +156,7 @@ jobs:
             chmod +x "$helper"
             SYNC_COSMOVISOR_RUNTIME="${SYNC_COSMOVISOR_RUNTIME}" \
               ENSURE_COSMOVISOR_MODE="true" \
+              MIGRATE_TO_COSMOVISOR_IF_DIRECT="false" \
               "$helper"
         env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
@@ -213,6 +214,7 @@ jobs:
             chmod +x "$helper"
             SYNC_COSMOVISOR_RUNTIME="${SYNC_COSMOVISOR_RUNTIME}" \
               ENSURE_COSMOVISOR_MODE="true" \
+              MIGRATE_TO_COSMOVISOR_IF_DIRECT="false" \
               "$helper"
         env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
@@ -293,6 +295,7 @@ jobs:
               chmod +x "$helper"
               SYNC_COSMOVISOR_RUNTIME="${SYNC_COSMOVISOR_RUNTIME}" \
                 ENSURE_COSMOVISOR_MODE="true" \
+                MIGRATE_TO_COSMOVISOR_IF_DIRECT="true" \
                 "$helper"
             else
               /opt/shielded-vote/install-release.sh --tag "${TAG}" --base "${RELEASE_BASE_URL}" --skip-restart
@@ -369,6 +372,7 @@ jobs:
               chmod +x "$helper"
               SYNC_COSMOVISOR_RUNTIME="${SYNC_COSMOVISOR_RUNTIME}" \
                 ENSURE_COSMOVISOR_MODE="true" \
+                MIGRATE_TO_COSMOVISOR_IF_DIRECT="true" \
                 "$helper"
             else
               /opt/shielded-vote/install-release.sh --tag "${TAG}" --base "${RELEASE_BASE_URL}" --skip-restart

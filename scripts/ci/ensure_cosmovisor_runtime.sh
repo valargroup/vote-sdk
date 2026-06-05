@@ -23,6 +23,31 @@ svote_ci_stage_binary_atomically() {
   mv -f "${target_bin}.new" "$target_bin"
 }
 
+svote_ci_find_running_svoted_pid() {
+  local daemon_home="$1"
+  local line
+  local pid
+  local cmd
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    pid="${line%% *}"
+    cmd="${line#"$pid "}"
+    case "$cmd" in
+      *"svoted start"* )
+        if printf '%s\n' "$cmd" | grep -Fq -- " --home ${daemon_home}"; then
+          printf '%s\n' "$pid"
+          return 0
+        fi
+        if printf '%s\n' "$cmd" | grep -Fq -- "--home=${daemon_home}"; then
+          printf '%s\n' "$pid"
+          return 0
+        fi
+        ;;
+    esac
+  done < <(pgrep -af svoted 2>/dev/null || true)
+  return 1
+}
+
 svote_ci_hash_file() {
   local path="$1"
   if command -v sha256sum >/dev/null 2>&1; then
@@ -73,12 +98,45 @@ svote_ci_is_cosmovisor_execstart() {
   return 1
 }
 
+svote_ci_migrate_direct_service_to_cosmovisor() {
+  local service_name="$1"
+  local daemon_home="$2"
+  local source_bin="$3"
+  local cosmovisor_bin="${COSMOVISOR_BIN:-/root/.local/bin/cosmovisor}"
+  local dropin_dir="/etc/systemd/system/${service_name}.service.d"
+  local dropin_path="${dropin_dir}/99-cosmovisor-runtime.conf"
+  local genesis_bin="${daemon_home%/}/cosmovisor/genesis/bin/svoted"
+
+  if [ ! -x "$cosmovisor_bin" ]; then
+    svote_ci_die "cosmovisor binary missing at ${cosmovisor_bin}; cannot auto-migrate direct service"
+  fi
+
+  svote_ci_log "migrating ${service_name} from direct mode to cosmovisor"
+  svote_ci_stage_binary_atomically "$source_bin" "$genesis_bin"
+  ln -sfn "${daemon_home%/}/cosmovisor/genesis" "${daemon_home%/}/cosmovisor/current"
+
+  mkdir -p "$dropin_dir"
+  cat > "$dropin_path" <<EOF
+[Service]
+ExecStart=
+ExecStart=${cosmovisor_bin} run start --home ${daemon_home}
+Environment="SVOTE_UPGRADE_MODE=cosmovisor"
+Environment="DAEMON_HOME=${daemon_home}"
+Environment="SVOTE_HOME=${daemon_home}"
+Environment="DAEMON_NAME=svoted"
+Environment="DAEMON_ALLOW_DOWNLOAD_BINARIES=false"
+Environment="COSMOVISOR_BIN=${cosmovisor_bin}"
+Environment="SVOTED_BIN=${source_bin}"
+EOF
+}
+
 main() {
   local service_name="${SERVICE_NAME:-svoted}"
   local daemon_home="${DAEMON_HOME:-/opt/shielded-vote/.svoted}"
   local source_bin="${SOURCE_BIN:-/opt/shielded-vote/current/bin/svoted}"
   local sync_runtime="${SYNC_COSMOVISOR_RUNTIME:-false}"
   local ensure_cosmovisor="${ENSURE_COSMOVISOR_MODE:-true}"
+  local migrate_if_direct="${MIGRATE_TO_COSMOVISOR_IF_DIRECT:-false}"
   local service_tmp
   local runtime_link
   local runtime_target
@@ -95,11 +153,20 @@ main() {
   systemctl cat "$service_name" --no-pager > "$service_tmp"
 
   if ! svote_ci_is_cosmovisor_execstart "$service_tmp"; then
-    if [ "$ensure_cosmovisor" = "true" ]; then
-      svote_ci_die "service ${service_name} is not configured for cosmovisor ExecStart"
+    if [ "$migrate_if_direct" = "true" ]; then
+      svote_ci_migrate_direct_service_to_cosmovisor "$service_name" "$daemon_home" "$source_bin"
+      systemctl daemon-reload
+      systemctl cat "$service_name" --no-pager > "$service_tmp"
     fi
-    svote_ci_log "service ${service_name} is not in cosmovisor mode; skipping runtime sync"
-    return 0
+    if [ "$ensure_cosmovisor" = "true" ]; then
+      if ! svote_ci_is_cosmovisor_execstart "$service_tmp"; then
+        svote_ci_die "service ${service_name} is not configured for cosmovisor ExecStart"
+      fi
+    fi
+    if ! svote_ci_is_cosmovisor_execstart "$service_tmp"; then
+      svote_ci_log "service ${service_name} is not in cosmovisor mode; skipping runtime sync"
+      return 0
+    fi
   fi
 
   runtime_link="${daemon_home%/}/cosmovisor/current/bin/svoted"
@@ -129,7 +196,7 @@ main() {
   systemctl restart "$service_name"
   systemctl is-active --quiet "$service_name" || svote_ci_die "service ${service_name} is not active after restart"
 
-  runtime_pid="$(pgrep -f "${daemon_home%/}.*svoted start --home ${daemon_home}" | head -n 1 || true)"
+  runtime_pid="$(svote_ci_find_running_svoted_pid "$daemon_home" || true)"
   [ -n "$runtime_pid" ] || svote_ci_die "unable to find running svoted pid for ${daemon_home}"
   runtime_exe="$(readlink -f "/proc/${runtime_pid}/exe" 2>/dev/null || true)"
   [ -n "$runtime_exe" ] || svote_ci_die "unable to resolve /proc/${runtime_pid}/exe"
