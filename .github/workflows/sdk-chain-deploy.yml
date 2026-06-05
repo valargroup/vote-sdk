@@ -155,7 +155,7 @@ jobs:
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/ci/ensure_cosmovisor_runtime.sh" -o "$helper"
             chmod +x "$helper"
             SYNC_COSMOVISOR_RUNTIME="${SYNC_COSMOVISOR_RUNTIME}" \
-              ENSURE_COSMOVISOR_MODE="${SYNC_COSMOVISOR_RUNTIME}" \
+              ENSURE_COSMOVISOR_MODE="true" \
               "$helper"
         env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
@@ -212,7 +212,7 @@ jobs:
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/ci/ensure_cosmovisor_runtime.sh" -o "$helper"
             chmod +x "$helper"
             SYNC_COSMOVISOR_RUNTIME="${SYNC_COSMOVISOR_RUNTIME}" \
-              ENSURE_COSMOVISOR_MODE="${SYNC_COSMOVISOR_RUNTIME}" \
+              ENSURE_COSMOVISOR_MODE="true" \
               "$helper"
         env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
@@ -292,7 +292,7 @@ jobs:
               curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/ci/ensure_cosmovisor_runtime.sh" -o "$helper"
               chmod +x "$helper"
               SYNC_COSMOVISOR_RUNTIME="${SYNC_COSMOVISOR_RUNTIME}" \
-                ENSURE_COSMOVISOR_MODE="${SYNC_COSMOVISOR_RUNTIME}" \
+                ENSURE_COSMOVISOR_MODE="true" \
                 "$helper"
             else
               /opt/shielded-vote/install-release.sh --tag "${TAG}" --base "${RELEASE_BASE_URL}" --skip-restart
@@ -368,7 +368,7 @@ jobs:
               curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/ci/ensure_cosmovisor_runtime.sh" -o "$helper"
               chmod +x "$helper"
               SYNC_COSMOVISOR_RUNTIME="${SYNC_COSMOVISOR_RUNTIME}" \
-                ENSURE_COSMOVISOR_MODE="${SYNC_COSMOVISOR_RUNTIME}" \
+                ENSURE_COSMOVISOR_MODE="true" \
                 "$helper"
             else
               /opt/shielded-vote/install-release.sh --tag "${TAG}" --base "${RELEASE_BASE_URL}" --skip-restart
