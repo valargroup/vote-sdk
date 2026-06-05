@@ -143,8 +143,7 @@ jobs:
             helper=/tmp/ensure-cosmovisor-runtime.sh
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/ci/ensure_cosmovisor_runtime.sh" -o "$helper"
             chmod +x "$helper"
-            SYNC_COSMOVISOR_RUNTIME="true" \
-              ENSURE_COSMOVISOR_MODE="true" \
+            ENSURE_COSMOVISOR_MODE="true" \
               MIGRATE_TO_COSMOVISOR_IF_DIRECT="false" \
               "$helper"
         env:
@@ -200,8 +199,7 @@ jobs:
             helper=/tmp/ensure-cosmovisor-runtime.sh
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/ci/ensure_cosmovisor_runtime.sh" -o "$helper"
             chmod +x "$helper"
-            SYNC_COSMOVISOR_RUNTIME="true" \
-              ENSURE_COSMOVISOR_MODE="true" \
+            ENSURE_COSMOVISOR_MODE="true" \
               MIGRATE_TO_COSMOVISOR_IF_DIRECT="false" \
               "$helper"
         env:
@@ -280,8 +278,7 @@ jobs:
               helper=/tmp/ensure-cosmovisor-runtime.sh
               curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/ci/ensure_cosmovisor_runtime.sh" -o "$helper"
               chmod +x "$helper"
-              SYNC_COSMOVISOR_RUNTIME="true" \
-                ENSURE_COSMOVISOR_MODE="true" \
+              ENSURE_COSMOVISOR_MODE="true" \
                 MIGRATE_TO_COSMOVISOR_IF_DIRECT="true" \
                 "$helper"
             else
@@ -356,8 +353,7 @@ jobs:
               helper=/tmp/ensure-cosmovisor-runtime.sh
               curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/ci/ensure_cosmovisor_runtime.sh" -o "$helper"
               chmod +x "$helper"
-              SYNC_COSMOVISOR_RUNTIME="true" \
-                ENSURE_COSMOVISOR_MODE="true" \
+              ENSURE_COSMOVISOR_MODE="true" \
                 MIGRATE_TO_COSMOVISOR_IF_DIRECT="true" \
                 "$helper"
             else

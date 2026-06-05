@@ -210,7 +210,6 @@ main() {
   local service_name="${SERVICE_NAME:-svoted}"
   local daemon_home="${DAEMON_HOME:-/opt/shielded-vote/.svoted}"
   local source_bin="${SOURCE_BIN:-/opt/shielded-vote/current/bin/svoted}"
-  local sync_runtime="${SYNC_COSMOVISOR_RUNTIME:-true}"
   local ensure_cosmovisor="${ENSURE_COSMOVISOR_MODE:-true}"
   local migrate_if_direct="${MIGRATE_TO_COSMOVISOR_IF_DIRECT:-false}"
   local service_tmp
@@ -253,19 +252,15 @@ main() {
   svote_ci_log "service ${service_name} is in cosmovisor mode"
   svote_ci_log "runtime target: ${runtime_target}"
 
-  if [ "$sync_runtime" = "true" ]; then
-    svote_ci_log "syncing deployed binary into cosmovisor runtime path"
-    svote_ci_stage_binary_atomically "$source_bin" "$runtime_target"
+  svote_ci_log "syncing deployed binary into cosmovisor runtime path"
+  svote_ci_stage_binary_atomically "$source_bin" "$runtime_target"
 
-    if applied_plan="$(svote_ci_parse_upgrade_plan_from_runtime_path "$runtime_target" "$daemon_home" 2>/dev/null || true)"; then
-      if [ -n "$applied_plan" ]; then
-        plan_bin="${daemon_home%/}/cosmovisor/upgrades/${applied_plan}/bin/svoted"
-        svote_ci_log "mirroring deployed binary into applied plan path: ${plan_bin}"
-        svote_ci_stage_binary_atomically "$source_bin" "$plan_bin"
-      fi
+  if applied_plan="$(svote_ci_parse_upgrade_plan_from_runtime_path "$runtime_target" "$daemon_home" 2>/dev/null || true)"; then
+    if [ -n "$applied_plan" ]; then
+      plan_bin="${daemon_home%/}/cosmovisor/upgrades/${applied_plan}/bin/svoted"
+      svote_ci_log "mirroring deployed binary into applied plan path: ${plan_bin}"
+      svote_ci_stage_binary_atomically "$source_bin" "$plan_bin"
     fi
-  else
-    svote_ci_log "SYNC_COSMOVISOR_RUNTIME=false; leaving runtime binary unchanged"
   fi
 
   svote_ci_log "restarting ${service_name}"
@@ -278,10 +273,8 @@ main() {
   printf '%s\n' "$runtime_cmd" | grep -Fq -- "run start --home ${daemon_home}" \
     || svote_ci_die "cosmovisor process command does not match expected home"
 
-  if [ "$sync_runtime" = "true" ]; then
-    if ! svote_ci_require_matching_hashes "$source_bin" "$runtime_target"; then
-      svote_ci_die "runtime hash mismatch after sync (deployed != runtime)"
-    fi
+  if ! svote_ci_require_matching_hashes "$source_bin" "$runtime_target"; then
+    svote_ci_die "runtime hash mismatch after sync (deployed != runtime)"
   fi
 
   svote_ci_log "cosmovisor runtime verification complete"
