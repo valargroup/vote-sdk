@@ -26,6 +26,7 @@ func RegisterRoutes(router *mux.Router, store *ShareStore, logger log.Logger) {
 		func() *ShareStore { return store },
 		func() string { return "" },
 		func() bool { return false },
+		func() bool { return true },
 		nil,
 		nil,
 		nil,
@@ -37,7 +38,7 @@ func RegisterRoutes(router *mux.Router, store *ShareStore, logger log.Logger) {
 // mux router, resolving the store at request time. This allows routes to be
 // mounted before the helper is fully initialized.
 func RegisterRoutesWithStoreGetter(router *mux.Router, getStore func() *ShareStore, logger log.Logger) {
-	RegisterRoutesWithGetters(router, getStore, func() string { return "" }, func() bool { return false }, nil, nil, nil, logger)
+	RegisterRoutesWithGetters(router, getStore, func() string { return "" }, func() bool { return false }, func() bool { return true }, nil, nil, nil, logger)
 }
 
 // ErrInvalidCommitment is returned when the share's recomputed vote commitment
@@ -51,6 +52,7 @@ func RegisterRoutesWithGetters(
 	getStore func() *ShareStore,
 	getAPIToken func() string,
 	getExposeQueueStatus func() bool,
+	getIngressAllowed func() bool,
 	getTree func() TreeReader,
 	getVCHash func() VCHashFunc,
 	getShareNullifier ShareNullifierCheckerGetter,
@@ -62,6 +64,7 @@ func RegisterRoutesWithGetters(
 		getAPIToken,
 		getExposeQueueStatus,
 		func() bool { return true },
+		getIngressAllowed,
 		getTree,
 		getVCHash,
 		getShareNullifier,
@@ -77,6 +80,7 @@ func RegisterRoutesWithQueueSummaryGetters(
 	getAPIToken func() string,
 	getExposeQueueStatus func() bool,
 	getExposeQueueSummary func() bool,
+	getIngressAllowed func() bool,
 	getTree func() TreeReader,
 	getVCHash func() VCHashFunc,
 	getShareNullifier ShareNullifierCheckerGetter,
@@ -87,6 +91,7 @@ func RegisterRoutesWithQueueSummaryGetters(
 		getAPIToken:           getAPIToken,
 		getExposeQueueStatus:  getExposeQueueStatus,
 		getExposeQueueSummary: getExposeQueueSummary,
+		getIngressAllowed:     getIngressAllowed,
 		getTree:               getTree,
 		getVCHash:             getVCHash,
 		getShareNullifier:     getShareNullifier,
@@ -108,6 +113,7 @@ type apiHandler struct {
 	getAPIToken           func() string
 	getExposeQueueStatus  func() bool
 	getExposeQueueSummary func() bool
+	getIngressAllowed     func() bool
 	getTree               func() TreeReader
 	getVCHash             func() VCHashFunc
 	getShareNullifier     ShareNullifierCheckerGetter
@@ -131,6 +137,9 @@ func jsonError(w http.ResponseWriter, msg string, code int) {
 }
 
 func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureIngressAllowed(w) {
+		return
+	}
 	store := h.getStore()
 	if store == nil {
 		jsonError(w, "helper unavailable", http.StatusServiceUnavailable)
@@ -213,6 +222,9 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *apiHandler) handleShareStatus(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureIngressAllowed(w) {
+		return
+	}
 	if h.getStore() == nil {
 		jsonError(w, "helper unavailable", http.StatusServiceUnavailable)
 		return
@@ -281,6 +293,9 @@ type statusResponse struct {
 }
 
 func (h *apiHandler) handleStatus(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureIngressAllowed(w) {
+		return
+	}
 	store := h.getStore()
 	if store == nil {
 		jsonError(w, "helper unavailable", http.StatusServiceUnavailable)
@@ -296,6 +311,9 @@ func (h *apiHandler) handleStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *apiHandler) handleQueueStatus(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureIngressAllowed(w) {
+		return
+	}
 	if h.getExposeQueueStatus == nil || !h.getExposeQueueStatus() {
 		jsonError(w, "not found", http.StatusNotFound)
 		return
@@ -368,6 +386,14 @@ func (h *apiHandler) authorizeSubmit(r *http.Request) bool {
 	}
 	provided := r.Header.Get("X-Helper-Token")
 	return subtle.ConstantTimeCompare([]byte(provided), []byte(token)) == 1
+}
+
+func (h *apiHandler) ensureIngressAllowed(w http.ResponseWriter) bool {
+	if h.getIngressAllowed == nil || h.getIngressAllowed() {
+		return true
+	}
+	jsonError(w, "helper ingress disabled: local node not producing recent blocks", http.StatusServiceUnavailable)
+	return false
 }
 
 // verifyCommitment recomputes the vote commitment Poseidon hash from the

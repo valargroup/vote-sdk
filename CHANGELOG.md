@@ -6,6 +6,12 @@ Historical changes before commit `704b202e2088b91caeaf2290cef85e4a9a759542` are 
 
 Instructions on coordinated upgrades can be found [here](https://setup.valargroup.org/#coordinated-upgrade).
 
+## Unreleased
+
+### Changed
+
+- Helper endpoints now return `503` when the local node has not produced a block for more than 3 minutes (based on local Comet `/status` `latest_block_time`), preventing share ingestion on stale nodes.
+
 ## v1.0.1
 
 Operational migration script updates. Does not touch chain code.
