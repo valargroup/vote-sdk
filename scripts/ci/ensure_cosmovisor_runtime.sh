@@ -23,6 +23,31 @@ svote_ci_stage_binary_atomically() {
   mv -f "${target_bin}.new" "$target_bin"
 }
 
+svote_ci_find_running_svoted_pid() {
+  local daemon_home="$1"
+  local line
+  local pid
+  local cmd
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    pid="${line%% *}"
+    cmd="${line#"$pid "}"
+    case "$cmd" in
+      *"svoted start"* )
+        if printf '%s\n' "$cmd" | grep -Fq -- " --home ${daemon_home}"; then
+          printf '%s\n' "$pid"
+          return 0
+        fi
+        if printf '%s\n' "$cmd" | grep -Fq -- "--home=${daemon_home}"; then
+          printf '%s\n' "$pid"
+          return 0
+        fi
+        ;;
+    esac
+  done < <(pgrep -af svoted 2>/dev/null || true)
+  return 1
+}
+
 svote_ci_hash_file() {
   local path="$1"
   if command -v sha256sum >/dev/null 2>&1; then
@@ -30,6 +55,84 @@ svote_ci_hash_file() {
   else
     shasum -a 256 "$path" | awk '{print $1}'
   fi
+}
+
+svote_ci_download_and_install_cosmovisor() {
+  local target_bin="$1"
+  local version="${COSMOVISOR_VERSION:-v1.6.0}"
+  local os="linux"
+  local arch
+  local platform
+  local asset
+  local release_base
+  local tmp_dir
+  local archive
+  local sums_file
+  local expected
+  local actual
+  local found
+
+  case "$(uname -m)" in
+    x86_64) arch="amd64" ;;
+    aarch64|arm64) arch="arm64" ;;
+    *) svote_ci_die "unsupported architecture for cosmovisor install: $(uname -m)" ;;
+  esac
+  platform="${os}-${arch}"
+  asset="cosmovisor-${version}-${platform}.tar.gz"
+  release_base="https://github.com/cosmos/cosmos-sdk/releases/download/cosmovisor%2F${version}"
+
+  tmp_dir="$(mktemp -d)"
+  archive="${tmp_dir}/cosmovisor.tar.gz"
+  sums_file="${tmp_dir}/SHA256SUMS.txt"
+  trap 'rm -rf "$tmp_dir"' RETURN
+
+  curl -fsSL "${release_base}/${asset}" -o "$archive"
+  curl -fsSL "${release_base}/SHA256SUMS-cosmovisor-${version}.txt" -o "$sums_file"
+
+  expected="$(awk -v name="$asset" '$2 == name {print $1}' "$sums_file" | tr -d '\r' | head -n 1)"
+  [ -n "$expected" ] || svote_ci_die "unable to resolve expected checksum for ${asset}"
+  actual="$(svote_ci_hash_file "$archive")"
+  [ "$expected" = "$actual" ] || svote_ci_die "cosmovisor checksum mismatch (expected=${expected}, actual=${actual})"
+
+  tar xzf "$archive" -C "$tmp_dir"
+  found="$(find "$tmp_dir" -type f -name cosmovisor | head -n 1 || true)"
+  [ -n "$found" ] || svote_ci_die "cosmovisor archive did not contain binary"
+  install -d -m 0755 "$(dirname "$target_bin")"
+  install -m 0755 "$found" "$target_bin"
+}
+
+svote_ci_resolve_cosmovisor_binary() {
+  local explicit="${COSMOVISOR_BIN:-}"
+  local daemon_home="$1"
+  local source_bin="$2"
+  local install_dir
+  local candidate
+
+  if [ -n "$explicit" ] && [ -x "$explicit" ]; then
+    printf '%s\n' "$explicit"
+    return 0
+  fi
+
+  for candidate in "/root/.local/bin/cosmovisor" "/opt/shielded-vote/cosmovisor"; do
+    if [ -x "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  install_dir="$(dirname "$source_bin")"
+  candidate="${install_dir}/cosmovisor"
+  if [ -x "$candidate" ]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+
+  # Last resort for hosts that were never migrated: install a pinned cosmovisor binary.
+  candidate="/opt/shielded-vote/cosmovisor"
+  svote_ci_log "cosmovisor not found; installing pinned binary at ${candidate}"
+  svote_ci_download_and_install_cosmovisor "$candidate"
+  [ -x "$candidate" ] || svote_ci_die "failed to install cosmovisor at ${candidate}"
+  printf '%s\n' "$candidate"
 }
 
 svote_ci_require_matching_hashes() {
@@ -73,17 +176,48 @@ svote_ci_is_cosmovisor_execstart() {
   return 1
 }
 
+svote_ci_migrate_direct_service_to_cosmovisor() {
+  local service_name="$1"
+  local daemon_home="$2"
+  local source_bin="$3"
+  local cosmovisor_bin
+  local dropin_dir="/etc/systemd/system/${service_name}.service.d"
+  local dropin_path="${dropin_dir}/99-cosmovisor-runtime.conf"
+  local genesis_bin="${daemon_home%/}/cosmovisor/genesis/bin/svoted"
+
+  cosmovisor_bin="$(svote_ci_resolve_cosmovisor_binary "$daemon_home" "$source_bin")"
+
+  svote_ci_log "migrating ${service_name} from direct mode to cosmovisor"
+  svote_ci_stage_binary_atomically "$source_bin" "$genesis_bin"
+  ln -sfn "${daemon_home%/}/cosmovisor/genesis" "${daemon_home%/}/cosmovisor/current"
+
+  mkdir -p "$dropin_dir"
+  cat > "$dropin_path" <<EOF
+[Service]
+ExecStart=
+ExecStart=${cosmovisor_bin} run start --home ${daemon_home}
+Environment="SVOTE_UPGRADE_MODE=cosmovisor"
+Environment="DAEMON_HOME=${daemon_home}"
+Environment="SVOTE_HOME=${daemon_home}"
+Environment="DAEMON_NAME=svoted"
+Environment="DAEMON_ALLOW_DOWNLOAD_BINARIES=false"
+Environment="COSMOVISOR_BIN=${cosmovisor_bin}"
+Environment="SVOTED_BIN=${source_bin}"
+EOF
+}
+
 main() {
   local service_name="${SERVICE_NAME:-svoted}"
   local daemon_home="${DAEMON_HOME:-/opt/shielded-vote/.svoted}"
   local source_bin="${SOURCE_BIN:-/opt/shielded-vote/current/bin/svoted}"
   local sync_runtime="${SYNC_COSMOVISOR_RUNTIME:-false}"
   local ensure_cosmovisor="${ENSURE_COSMOVISOR_MODE:-true}"
+  local migrate_if_direct="${MIGRATE_TO_COSMOVISOR_IF_DIRECT:-false}"
   local service_tmp
   local runtime_link
   local runtime_target
   local runtime_pid
-  local runtime_exe
+  local runtime_cmd
   local applied_plan
   local plan_bin
 
@@ -91,15 +225,24 @@ main() {
   command -v systemctl >/dev/null 2>&1 || svote_ci_die "systemctl is required"
 
   service_tmp="$(mktemp)"
-  trap 'rm -f "$service_tmp"' EXIT
+  trap 'rm -f "${service_tmp:-}"' EXIT
   systemctl cat "$service_name" --no-pager > "$service_tmp"
 
   if ! svote_ci_is_cosmovisor_execstart "$service_tmp"; then
-    if [ "$ensure_cosmovisor" = "true" ]; then
-      svote_ci_die "service ${service_name} is not configured for cosmovisor ExecStart"
+    if [ "$migrate_if_direct" = "true" ]; then
+      svote_ci_migrate_direct_service_to_cosmovisor "$service_name" "$daemon_home" "$source_bin"
+      systemctl daemon-reload
+      systemctl cat "$service_name" --no-pager > "$service_tmp"
     fi
-    svote_ci_log "service ${service_name} is not in cosmovisor mode; skipping runtime sync"
-    return 0
+    if [ "$ensure_cosmovisor" = "true" ]; then
+      if ! svote_ci_is_cosmovisor_execstart "$service_tmp"; then
+        svote_ci_die "service ${service_name} is not configured for cosmovisor ExecStart"
+      fi
+    fi
+    if ! svote_ci_is_cosmovisor_execstart "$service_tmp"; then
+      svote_ci_log "service ${service_name} is not in cosmovisor mode; skipping runtime sync"
+      return 0
+    fi
   fi
 
   runtime_link="${daemon_home%/}/cosmovisor/current/bin/svoted"
@@ -129,17 +272,14 @@ main() {
   systemctl restart "$service_name"
   systemctl is-active --quiet "$service_name" || svote_ci_die "service ${service_name} is not active after restart"
 
-  runtime_pid="$(pgrep -f "${daemon_home%/}.*svoted start --home ${daemon_home}" | head -n 1 || true)"
-  [ -n "$runtime_pid" ] || svote_ci_die "unable to find running svoted pid for ${daemon_home}"
-  runtime_exe="$(readlink -f "/proc/${runtime_pid}/exe" 2>/dev/null || true)"
-  [ -n "$runtime_exe" ] || svote_ci_die "unable to resolve /proc/${runtime_pid}/exe"
-  case "$runtime_exe" in
-    "${daemon_home%/}/cosmovisor/"*) ;;
-    *) svote_ci_die "runtime executable is not under cosmovisor tree: ${runtime_exe}" ;;
-  esac
+  runtime_pid="$(pgrep -f "cosmovisor.*run start --home ${daemon_home}" | head -n 1 || true)"
+  [ -n "$runtime_pid" ] || svote_ci_die "unable to find running cosmovisor process for ${daemon_home}"
+  runtime_cmd="$(ps -o args= -p "$runtime_pid" 2>/dev/null || true)"
+  printf '%s\n' "$runtime_cmd" | grep -Fq -- "run start --home ${daemon_home}" \
+    || svote_ci_die "cosmovisor process command does not match expected home"
 
   if [ "$sync_runtime" = "true" ]; then
-    if ! svote_ci_require_matching_hashes "$source_bin" "$runtime_exe"; then
+    if ! svote_ci_require_matching_hashes "$source_bin" "$runtime_target"; then
       svote_ci_die "runtime hash mismatch after sync (deployed != runtime)"
     fi
   fi
