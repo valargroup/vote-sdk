@@ -51,6 +51,10 @@ func TestShouldDropEvent_MessageSignature(t *testing.T) {
 			name:    "duplicate nullifier noise",
 			message: "chain rejected tx (code 2): nullifier already spent",
 		},
+		{
+			name:    "helper warming status noise",
+			message: `submit: chain returned 503: {"status":"warming","started_at":"2026-06-05T20:23:39.398477557Z","duration_ms":37672}`,
+		},
 	}
 
 	for _, tc := range tests {

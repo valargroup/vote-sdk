@@ -26,6 +26,7 @@ type TraceSpan struct {
 var knownNoisyErrorSignatures = []string{
 	"has no method 'updatefrom'",
 	"nullifier already spent",
+	`"status":"warming"`,
 }
 
 // InitSentry initializes the Sentry SDK with the given DSN. If dsn is empty,
