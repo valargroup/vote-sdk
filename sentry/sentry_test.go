@@ -39,11 +39,27 @@ func (t *captureTransport) Events() []*sentrylib.Event {
 }
 
 func TestShouldDropEvent_MessageSignature(t *testing.T) {
-	event := &sentrylib.Event{
-		Message: "TypeError: Object [object Object] has no method 'updateFrom'",
+	tests := []struct {
+		name    string
+		message string
+	}{
+		{
+			name:    "frontend updateFrom noise",
+			message: "TypeError: Object [object Object] has no method 'updateFrom'",
+		},
+		{
+			name:    "duplicate nullifier noise",
+			message: "chain rejected tx (code 2): nullifier already spent",
+		},
 	}
-	if !shouldDropEvent(event) {
-		t.Fatalf("expected event to be dropped by message signature")
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			event := &sentrylib.Event{Message: tc.message}
+			if !shouldDropEvent(event) {
+				t.Fatalf("expected event to be dropped by message signature")
+			}
+		})
 	}
 }
 

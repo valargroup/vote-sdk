@@ -25,6 +25,7 @@ type TraceSpan struct {
 // Sentry that do not originate from vote-sdk runtime code.
 var knownNoisyErrorSignatures = []string{
 	"has no method 'updatefrom'",
+	"nullifier already spent",
 }
 
 // InitSentry initializes the Sentry SDK with the given DSN. If dsn is empty,
