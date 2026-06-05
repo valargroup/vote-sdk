@@ -196,4 +196,57 @@ if svote_ci_require_matching_hashes "$MISMATCH_A" "$MISMATCH_B" >/dev/null 2>&1;
   fail "expected hash guardrail mismatch to fail"
 fi
 
+echo "=== deploy helper: reads safe applied plan from upgrade-info ==="
+TMP_UPGRADE_HOME="$(mktemp -d)"
+trap 'rm -f "$TMP_UNIT" "$TMP_AUTODETECT_UNIT" "$TMP_HELPER_UNIT"; rm -rf "$TMP_MIGRATE" "$TMP_SYNC_DIR" "$TMP_UPGRADE_HOME"' EXIT
+mkdir -p "${TMP_UPGRADE_HOME}/data"
+cat > "${TMP_UPGRADE_HOME}/data/upgrade-info.json" <<'EOF'
+{"name":"v1","height":123}
+EOF
+applied_plan="$(svote_ci_read_applied_plan_from_upgrade_info "$TMP_UPGRADE_HOME" || true)"
+[ "$applied_plan" = "v1" ] || fail "expected applied plan v1 from upgrade-info, got ${applied_plan}"
+cat > "${TMP_UPGRADE_HOME}/data/upgrade-info.json" <<'EOF'
+{"name":"../escape","height":123}
+EOF
+if svote_ci_read_applied_plan_from_upgrade_info "$TMP_UPGRADE_HOME" >/dev/null 2>&1; then
+  fail "unsafe applied plan should be ignored"
+fi
+
+echo "=== deploy helper: direct migration seeds applied plan runtime ==="
+TMP_MIGRATE_RUNTIME="$(mktemp -d)"
+trap 'rm -f "$TMP_UNIT" "$TMP_AUTODETECT_UNIT" "$TMP_HELPER_UNIT"; rm -rf "$TMP_MIGRATE" "$TMP_SYNC_DIR" "$TMP_UPGRADE_HOME" "$TMP_MIGRATE_RUNTIME"' EXIT
+MIGRATE_HOME="${TMP_MIGRATE_RUNTIME}/home"
+SOURCE_BIN="${TMP_MIGRATE_RUNTIME}/source/svoted"
+COSMOVISOR_BIN_TEST="${TMP_MIGRATE_RUNTIME}/bin/cosmovisor"
+SYSTEMD_UNIT_DIR="${TMP_MIGRATE_RUNTIME}/systemd"
+mkdir -p "${MIGRATE_HOME}/data" "$(dirname "$SOURCE_BIN")" "$(dirname "$COSMOVISOR_BIN_TEST")" "$SYSTEMD_UNIT_DIR"
+printf '#!/usr/bin/env bash\necho source\n' > "$SOURCE_BIN"
+chmod +x "$SOURCE_BIN"
+printf '#!/usr/bin/env bash\necho cosmovisor\n' > "$COSMOVISOR_BIN_TEST"
+chmod +x "$COSMOVISOR_BIN_TEST"
+cat > "${MIGRATE_HOME}/data/upgrade-info.json" <<'EOF'
+{"name":"v1","height":456}
+EOF
+svote_ci_resolve_cosmovisor_binary() {
+  printf '%s\n' "$COSMOVISOR_BIN_TEST"
+}
+svote_ci_migrate_direct_service_to_cosmovisor "svoted" "$MIGRATE_HOME" "$SOURCE_BIN"
+
+GENESIS_BIN="${MIGRATE_HOME}/cosmovisor/genesis/bin/svoted"
+PLAN_BIN="${MIGRATE_HOME}/cosmovisor/upgrades/v1/bin/svoted"
+CURRENT_LINK="${MIGRATE_HOME}/cosmovisor/current"
+DROPIN_PATH="${SYSTEMD_UNIT_DIR}/svoted.service.d/99-cosmovisor-runtime.conf"
+[ -x "$GENESIS_BIN" ] || fail "genesis binary was not seeded during migration"
+[ -x "$PLAN_BIN" ] || fail "applied plan binary was not seeded during migration"
+[ "$(readlink "$CURRENT_LINK")" = "${MIGRATE_HOME}/cosmovisor/upgrades/v1" ] || fail "current symlink did not point to applied plan path"
+grep -q "^ExecStart=${COSMOVISOR_BIN_TEST} run start --home ${MIGRATE_HOME}$" "$DROPIN_PATH" || fail "drop-in ExecStart did not use resolved cosmovisor binary"
+[ "$(svote_ci_hash_file "$SOURCE_BIN")" = "$(svote_ci_hash_file "$PLAN_BIN")" ] || fail "applied plan binary does not match source binary"
+
+echo "=== deploy helper: direct migration falls back to genesis current ==="
+cat > "${MIGRATE_HOME}/data/upgrade-info.json" <<'EOF'
+{"name":"../invalid","height":789}
+EOF
+svote_ci_migrate_direct_service_to_cosmovisor "svoted" "$MIGRATE_HOME" "$SOURCE_BIN"
+[ "$(readlink "$CURRENT_LINK")" = "${MIGRATE_HOME}/cosmovisor/genesis" ] || fail "current symlink did not fallback to genesis for invalid plan"
+
 echo "=== PASS: chain upgrade runtime-mode tests ==="
