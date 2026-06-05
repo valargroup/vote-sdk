@@ -194,6 +194,32 @@ validation succeeds.
 - Keep staged upgrade directory until the plan is applied.
 - Do not restore old `priv_validator_state.json` backups.
 
+## Deploy-only patch rollout (no reset)
+
+For patch-compatible releases that do not require a new `x/upgrade` plan, use
+`sdk-chain-deploy.yml` only. Do not run `sdk-chain-reset.yml` for this path.
+
+`Deploy SDK` supports a `sync_cosmovisor_runtime` flag:
+
+- `false` (baseline): deploy updates `/opt/shielded-vote/current` assets/config,
+  keeps Cosmovisor mode enforcement, and leaves the runtime binary unchanged.
+- `true` (runtime sync): after install, deploy atomically mirrors
+  `/opt/shielded-vote/current/bin/svoted` into
+  `~/.svoted/cosmovisor/current/bin/svoted`, then restarts and verifies runtime.
+
+Recommended production-safe sequence:
+
+1. Run staging deploy with `sync_cosmovisor_runtime=false` and verify health.
+2. Run staging deploy with `sync_cosmovisor_runtime=true` and verify:
+   - `systemctl cat svoted` still uses `cosmovisor run start`.
+   - running `/proc/<pid>/exe` is under `~/.svoted/cosmovisor/...`.
+   - runtime binary hash/version matches the deployed tag.
+3. Repeat one restart-only staging deploy to confirm persistence.
+4. Promote to production deploy-only after staging signoff.
+
+Rollback for this path is deploy-only as well: redeploy the prior tag with the
+same `sync_cosmovisor_runtime` setting and re-run runtime verification.
+
 ## Script guardrails
 
 `update_chain.sh` auto-detects `SVOTE_HOME`, `SVOTE_INSTALL_DIR`, and service
