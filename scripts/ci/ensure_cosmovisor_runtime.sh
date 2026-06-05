@@ -225,7 +225,7 @@ main() {
   command -v systemctl >/dev/null 2>&1 || svote_ci_die "systemctl is required"
 
   service_tmp="$(mktemp)"
-  trap 'rm -f "$service_tmp"' EXIT
+  trap 'rm -f "${service_tmp:-}"' EXIT
   systemctl cat "$service_name" --no-pager > "$service_tmp"
 
   if ! svote_ci_is_cosmovisor_execstart "$service_tmp"; then
