@@ -35,6 +35,7 @@ func newQueueStatusRouter(t *testing.T, token string) (*mux.Router, *ShareStore)
 		func() *ShareStore { return store },
 		func() string { return token },
 		func() bool { return true },
+		func() bool { return true },
 		nil,
 		nil,
 		nil,
@@ -52,6 +53,7 @@ func newQueueSummaryRouter(t *testing.T, store *ShareStore, token string, expose
 		func() string { return token },
 		func() bool { return false },
 		func() bool { return expose },
+		func() bool { return true },
 		nil,
 		nil,
 		nil,
@@ -115,6 +117,7 @@ func TestShareStatus_PendingThenConfirmed(t *testing.T) {
 		func() *ShareStore { return store },
 		func() string { return "" },
 		func() bool { return false },
+		func() bool { return true },
 		nil,
 		nil,
 		func() ShareNullifierChecker { return checker },
@@ -357,6 +360,36 @@ func TestRoutes_HelperUnavailable(t *testing.T) {
 	})
 }
 
+func TestRoutes_IngressDisabledReturnsServiceUnavailable(t *testing.T) {
+	store := newTestStore(t)
+	router := mux.NewRouter()
+	RegisterRoutesWithGetters(
+		router,
+		func() *ShareStore { return store },
+		func() string { return "" },
+		func() bool { return true },
+		func() bool { return false },
+		nil,
+		nil,
+		nil,
+		log.NewNopLogger(),
+	)
+
+	t.Run("shares returns 503", func(t *testing.T) {
+		req := httptest.NewRequest("POST", "/shielded-vote/v1/shares", strings.NewReader(validPayloadJSON()))
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	})
+
+	t.Run("status returns 503", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/shielded-vote/v1/status", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	})
+}
+
 func TestRoutes_BecomeReadyAfterStoreSet(t *testing.T) {
 	router := mux.NewRouter()
 	var store *ShareStore
@@ -420,6 +453,7 @@ func TestSubmitShare_APITokenAuth(t *testing.T) {
 		func() *ShareStore { return store },
 		func() string { return "secret-token" },
 		func() bool { return false },
+		func() bool { return true },
 		nil,
 		nil,
 		nil,
@@ -478,6 +512,7 @@ func vcTestRouter(t *testing.T) (*mux.Router, *ShareStore, *vcMockTree) {
 		func() *ShareStore { return store },
 		func() string { return "" },
 		func() bool { return false },
+		func() bool { return true },
 		func() TreeReader { return tree },
 		func() VCHashFunc { return vcHash },
 		nil,
@@ -587,6 +622,7 @@ func TestSubmitShare_VCCrossCheck_GracefulDegradation(t *testing.T) {
 		func() *ShareStore { return store },
 		func() string { return "" },
 		func() bool { return false },
+		func() bool { return true },
 		nil,
 		nil,
 		nil,

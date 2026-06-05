@@ -105,6 +105,7 @@ func (h *Helper) RegisterRoutes(router *mux.Router) {
 		func() string { return h.APIToken },
 		func() bool { return h.ExposeQueueStatus },
 		func() bool { return h.ExposeQueueSummary },
+		func() bool { return true },
 		func() TreeReader { return h.Processor.tree },
 		func() VCHashFunc { return h.VCHash },
 		func() ShareNullifierChecker { return h.ShareNullifierChecker },

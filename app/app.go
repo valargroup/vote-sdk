@@ -2,11 +2,14 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	dbm "github.com/cosmos/cosmos-db"
 
@@ -49,6 +52,11 @@ var DefaultNodeHome string
 var (
 	_ runtime.AppI            = (*SvoteApp)(nil)
 	_ servertypes.Application = (*SvoteApp)(nil)
+)
+
+const (
+	helperMaxBlockStaleness  = 3 * time.Minute
+	helperStatusQueryTimeout = 3 * time.Second
 )
 
 // SvoteApp extends an ABCI application for the Shielded-Vote chain.
@@ -369,6 +377,8 @@ func (app *SvoteApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIC
 			return false
 		}
 		return h.ExposeQueueSummary
+	}, func() bool {
+		return app.helperIngressAllowed()
 	}, func() helper.TreeReader {
 		h := app.GetHelper()
 		if h == nil {
@@ -424,6 +434,63 @@ func (app *SvoteApp) resolveAdminPIRServiceURL(_ context.Context) (string, error
 		return "", fmt.Errorf("voting-config has no pir_endpoints")
 	}
 	return cfg.PIRServers[0].URL, nil
+}
+
+func (app *SvoteApp) helperIngressAllowed() bool {
+	healthy, err := app.localNodeProducedRecently(helperMaxBlockStaleness)
+	if err != nil {
+		app.Logger().Warn("helper ingress disabled: local Comet status check failed", "error", err)
+		return false
+	}
+	return healthy
+}
+
+func (app *SvoteApp) localNodeProducedRecently(maxStaleness time.Duration) (bool, error) {
+	cometRPC := app.cometRPC
+	if cometRPC == "" {
+		cometRPC = "http://localhost:26657"
+	} else if strings.HasPrefix(cometRPC, "tcp://") {
+		cometRPC = "http://" + strings.TrimPrefix(cometRPC, "tcp://")
+	}
+
+	statusURL := strings.TrimRight(cometRPC, "/") + "/status"
+	ctx, cancel := context.WithTimeout(context.Background(), helperStatusQueryTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, statusURL, nil)
+	if err != nil {
+		return false, fmt.Errorf("create status request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("query status: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("status returned HTTP %d", resp.StatusCode)
+	}
+
+	var statusResp struct {
+		Result struct {
+			SyncInfo struct {
+				LatestBlockTime string `json:"latest_block_time"`
+			} `json:"sync_info"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&statusResp); err != nil {
+		return false, fmt.Errorf("decode status response: %w", err)
+	}
+	if statusResp.Result.SyncInfo.LatestBlockTime == "" {
+		return false, fmt.Errorf("status missing latest_block_time")
+	}
+
+	latestBlockTime, err := time.Parse(time.RFC3339Nano, statusResp.Result.SyncInfo.LatestBlockTime)
+	if err != nil {
+		return false, fmt.Errorf("parse latest_block_time: %w", err)
+	}
+
+	return time.Since(latestBlockTime) <= maxStaleness, nil
 }
 
 // SetHelper publishes the helper instance for concurrent readers.
