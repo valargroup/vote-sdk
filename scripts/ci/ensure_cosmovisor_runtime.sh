@@ -168,6 +168,24 @@ svote_ci_parse_upgrade_plan_from_runtime_path() {
   esac
 }
 
+svote_ci_read_applied_plan_from_upgrade_info() {
+  local daemon_home="$1"
+  local upgrade_info="${daemon_home%/}/data/upgrade-info.json"
+  local applied_plan
+
+  [ -f "$upgrade_info" ] || return 1
+  applied_plan="$(sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$upgrade_info" | head -n 1)"
+  [ -n "$applied_plan" ] || return 1
+
+  # Keep path operations safe; plan names are expected to be filesystem-safe identifiers.
+  if ! printf '%s\n' "$applied_plan" | grep -Eq '^[A-Za-z0-9._-]+$'; then
+    printf '==> ignoring unsafe applied plan name from %s: %s\n' "$upgrade_info" "$applied_plan" >&2
+    return 1
+  fi
+
+  printf '%s\n' "$applied_plan"
+}
+
 svote_ci_is_cosmovisor_execstart() {
   local service_file="$1"
   if grep -Eq '^ExecStart=.*cosmovisor.*run start' "$service_file"; then
@@ -181,15 +199,30 @@ svote_ci_migrate_direct_service_to_cosmovisor() {
   local daemon_home="$2"
   local source_bin="$3"
   local cosmovisor_bin
-  local dropin_dir="/etc/systemd/system/${service_name}.service.d"
+  local systemd_unit_dir="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
+  local dropin_dir="${systemd_unit_dir%/}/${service_name}.service.d"
   local dropin_path="${dropin_dir}/99-cosmovisor-runtime.conf"
   local genesis_bin="${daemon_home%/}/cosmovisor/genesis/bin/svoted"
+  local applied_plan=""
+  local applied_plan_bin=""
+  local current_target=""
 
   cosmovisor_bin="$(svote_ci_resolve_cosmovisor_binary "$daemon_home" "$source_bin")"
 
   svote_ci_log "migrating ${service_name} from direct mode to cosmovisor"
   svote_ci_stage_binary_atomically "$source_bin" "$genesis_bin"
-  ln -sfn "${daemon_home%/}/cosmovisor/genesis" "${daemon_home%/}/cosmovisor/current"
+  if applied_plan="$(svote_ci_read_applied_plan_from_upgrade_info "$daemon_home" 2>/dev/null || true)"; then
+    if [ -n "$applied_plan" ]; then
+      applied_plan_bin="${daemon_home%/}/cosmovisor/upgrades/${applied_plan}/bin/svoted"
+      svote_ci_log "seeding applied plan runtime binary: ${applied_plan_bin}"
+      svote_ci_stage_binary_atomically "$source_bin" "$applied_plan_bin"
+      current_target="${daemon_home%/}/cosmovisor/upgrades/${applied_plan}"
+    fi
+  fi
+  if [ -z "$current_target" ]; then
+    current_target="${daemon_home%/}/cosmovisor/genesis"
+  fi
+  ln -sfn "$current_target" "${daemon_home%/}/cosmovisor/current"
 
   mkdir -p "$dropin_dir"
   cat > "$dropin_path" <<EOF
