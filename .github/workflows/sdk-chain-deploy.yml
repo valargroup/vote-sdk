@@ -10,6 +10,11 @@ on:
         description: "Release tag to deploy (e.g. v1.2.3). Must already exist in DO Spaces."
         type: string
         required: true
+      sync_cosmovisor_runtime:
+        description: "If true, atomically sync /opt/shielded-vote/current/bin/svoted into Cosmovisor runtime before restart."
+        type: boolean
+        default: false
+        required: false
       target_environment:
         description: "GitHub Environment to read deploy secrets and variables from."
         type: choice
@@ -24,6 +29,11 @@ on:
         description: "Release tag to deploy (e.g. v1.2.3). Must already exist in DO Spaces."
         type: string
         required: true
+      sync_cosmovisor_runtime:
+        description: "If true, atomically sync /opt/shielded-vote/current/bin/svoted into Cosmovisor runtime before restart."
+        type: boolean
+        default: false
+        required: false
       target_environment:
         description: "GitHub Environment to read deploy secrets and variables from."
         type: string
@@ -96,6 +106,7 @@ jobs:
       DNS_PREFIX: ${{ needs.resolve-environment.outputs.dns_prefix }}
       SENTRY_ENVIRONMENT: ${{ inputs.target_environment }}
       SVOTE_CONFIG_URL: ${{ needs.resolve-environment.outputs.voting_config_url }}
+      SYNC_COSMOVISOR_RUNTIME: ${{ inputs.sync_cosmovisor_runtime && 'true' || 'false' }}
     steps:
       - name: Deploy to primary Droplet
         uses: appleboy/ssh-action@v1.0.3
@@ -103,7 +114,7 @@ jobs:
           host: ${{ secrets.PRIMARY_HOST || vars.PRIMARY_HOST || format('{0}vote-chain-primary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: SENTRY_DSN,SENTRY_ENVIRONMENT,SVOTE_CONFIG_PR_GITHUB_TOKEN,SVOTE_CONFIG_URL,DNS_PREFIX,DOMAIN
+          envs: SENTRY_DSN,SENTRY_ENVIRONMENT,SVOTE_CONFIG_PR_GITHUB_TOKEN,SVOTE_CONFIG_URL,DNS_PREFIX,DOMAIN,SYNC_COSMOVISOR_RUNTIME
           script: |
             sed -i '/^SENTRY_DSN=/d' /etc/default/svoted
             echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
@@ -140,6 +151,12 @@ jobs:
               rm -f /opt/shielded-vote/.svoted/config/app.toml.bak
             fi
             /opt/shielded-vote/install-release.sh --tag "${{ env.TAG }}" --base "${{ env.RELEASE_BASE_URL }}"
+            helper=/tmp/ensure-cosmovisor-runtime.sh
+            curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/ci/ensure_cosmovisor_runtime.sh" -o "$helper"
+            chmod +x "$helper"
+            SYNC_COSMOVISOR_RUNTIME="${SYNC_COSMOVISOR_RUNTIME}" \
+              ENSURE_COSMOVISOR_MODE="${SYNC_COSMOVISOR_RUNTIME}" \
+              "$helper"
         env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           SVOTE_CONFIG_PR_GITHUB_TOKEN: ${{ secrets.CONFIG_PR_GITHUB_TOKEN }}
@@ -172,6 +189,7 @@ jobs:
     env:
       RELEASE_BASE_URL: ${{ needs.resolve-environment.outputs.release_base_url }}
       SENTRY_ENVIRONMENT: ${{ inputs.target_environment }}
+      SYNC_COSMOVISOR_RUNTIME: ${{ inputs.sync_cosmovisor_runtime && 'true' || 'false' }}
     steps:
       - name: Deploy to secondary Droplet
         uses: appleboy/ssh-action@v1.0.3
@@ -179,7 +197,7 @@ jobs:
           host: ${{ secrets.SECONDARY_HOST || vars.SECONDARY_HOST || format('{0}vote-chain-secondary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: SENTRY_DSN,SENTRY_ENVIRONMENT
+          envs: SENTRY_DSN,SENTRY_ENVIRONMENT,SYNC_COSMOVISOR_RUNTIME
           script: |
             sed -i '/^SENTRY_DSN=/d' /etc/default/svoted
             echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
@@ -190,6 +208,12 @@ jobs:
               > /etc/systemd/system/svoted.service.d/10-envfile.conf
             systemctl daemon-reload
             /opt/shielded-vote/install-release.sh --tag "${{ env.TAG }}" --base "${{ env.RELEASE_BASE_URL }}"
+            helper=/tmp/ensure-cosmovisor-runtime.sh
+            curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/ci/ensure_cosmovisor_runtime.sh" -o "$helper"
+            chmod +x "$helper"
+            SYNC_COSMOVISOR_RUNTIME="${SYNC_COSMOVISOR_RUNTIME}" \
+              ENSURE_COSMOVISOR_MODE="${SYNC_COSMOVISOR_RUNTIME}" \
+              "$helper"
         env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
@@ -221,6 +245,7 @@ jobs:
       DNS_PREFIX: ${{ needs.resolve-environment.outputs.dns_prefix }}
       RELEASE_BASE_URL: ${{ needs.resolve-environment.outputs.release_base_url }}
       SENTRY_ENVIRONMENT: ${{ inputs.target_environment }}
+      SYNC_COSMOVISOR_RUNTIME: ${{ inputs.sync_cosmovisor_runtime && 'true' || 'false' }}
     steps:
       - name: Deploy to explorer Droplet
         uses: appleboy/ssh-action@v1.0.3
@@ -228,7 +253,7 @@ jobs:
           host: ${{ secrets.EXPLORER_HOST || vars.EXPLORER_HOST || format('{0}explorer.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: SENTRY_DSN,SENTRY_ENVIRONMENT,TAG,CHAIN_ID,DNS_PREFIX,DOMAIN,RELEASE_BASE_URL
+          envs: SENTRY_DSN,SENTRY_ENVIRONMENT,TAG,CHAIN_ID,DNS_PREFIX,DOMAIN,RELEASE_BASE_URL,SYNC_COSMOVISOR_RUNTIME
           script: |
             set -euo pipefail
             sed -i '/^SENTRY_DSN=/d' /etc/default/svoted
@@ -263,6 +288,12 @@ jobs:
             # to pick up the new binary.
             if [ -f /opt/shielded-vote/.svoted/config/genesis.json ]; then
               /opt/shielded-vote/install-release.sh --tag "${TAG}" --base "${RELEASE_BASE_URL}"
+              helper=/tmp/ensure-cosmovisor-runtime.sh
+              curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/ci/ensure_cosmovisor_runtime.sh" -o "$helper"
+              chmod +x "$helper"
+              SYNC_COSMOVISOR_RUNTIME="${SYNC_COSMOVISOR_RUNTIME}" \
+                ENSURE_COSMOVISOR_MODE="${SYNC_COSMOVISOR_RUNTIME}" \
+                "$helper"
             else
               /opt/shielded-vote/install-release.sh --tag "${TAG}" --base "${RELEASE_BASE_URL}" --skip-restart
               echo "NOTE: archive has no genesis yet. Run sdk-chain-reset.yml with this tag to initialize it."
@@ -308,6 +339,7 @@ jobs:
     env:
       RELEASE_BASE_URL: ${{ needs.resolve-environment.outputs.release_base_url }}
       SENTRY_ENVIRONMENT: ${{ inputs.target_environment }}
+      SYNC_COSMOVISOR_RUNTIME: ${{ inputs.sync_cosmovisor_runtime && 'true' || 'false' }}
     steps:
       - name: Deploy to snapshot Droplet
         uses: appleboy/ssh-action@v1.0.3
@@ -315,7 +347,7 @@ jobs:
           host: ${{ secrets.SNAPSHOT_HOST || vars.SNAPSHOT_HOST || format('{0}snapshots.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: SENTRY_DSN,SENTRY_ENVIRONMENT,TAG,RELEASE_BASE_URL
+          envs: SENTRY_DSN,SENTRY_ENVIRONMENT,TAG,RELEASE_BASE_URL,SYNC_COSMOVISOR_RUNTIME
           script: |
             set -euo pipefail
             sed -i '/^SENTRY_DSN=/d' /etc/default/svoted
@@ -332,6 +364,12 @@ jobs:
             # start. Subsequent deploys restart normally to pick up the binary.
             if [ -f /opt/shielded-vote/.svoted/config/genesis.json ]; then
               /opt/shielded-vote/install-release.sh --tag "${TAG}" --base "${RELEASE_BASE_URL}"
+              helper=/tmp/ensure-cosmovisor-runtime.sh
+              curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/ci/ensure_cosmovisor_runtime.sh" -o "$helper"
+              chmod +x "$helper"
+              SYNC_COSMOVISOR_RUNTIME="${SYNC_COSMOVISOR_RUNTIME}" \
+                ENSURE_COSMOVISOR_MODE="${SYNC_COSMOVISOR_RUNTIME}" \
+                "$helper"
             else
               /opt/shielded-vote/install-release.sh --tag "${TAG}" --base "${RELEASE_BASE_URL}" --skip-restart
               echo "NOTE: snapshot node has no genesis yet. Run sdk-chain-reset.yml with this tag to initialize it."

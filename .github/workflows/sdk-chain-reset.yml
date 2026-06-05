@@ -274,10 +274,9 @@ jobs:
             curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/_vote_manager_keys_lib.sh" -o /tmp/_vote_manager_keys_lib.sh
             bash /tmp/init.sh
 
-            # Ensure the primary systemd drop-in exists (serves admin UI)
-            mkdir -p /etc/systemd/system/svoted.service.d
-            printf '[Service]\nExecStart=\nExecStart=/opt/shielded-vote/current/bin/svoted start --home /opt/shielded-vote/.svoted --serve-ui --ui-dist /opt/shielded-vote/current/ui/dist\n' \
-              > /etc/systemd/system/svoted.service.d/primary.conf
+            # Remove stale direct ExecStart overrides so reset remains compatible
+            # with Cosmovisor-managed services.
+            rm -f /etc/systemd/system/svoted.service.d/primary.conf
 
             # Start svoted
             systemctl daemon-reload

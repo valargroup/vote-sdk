@@ -5,6 +5,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMMON="${REPO_ROOT}/scripts/_chain_upgrade_common.sh"
+RUNTIME_HELPER="${REPO_ROOT}/scripts/ci/ensure_cosmovisor_runtime.sh"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -13,6 +14,8 @@ fail() {
 
 # shellcheck source=scripts/_chain_upgrade_common.sh
 source "$COMMON"
+# shellcheck source=scripts/ci/ensure_cosmovisor_runtime.sh
+source "$RUNTIME_HELPER"
 
 echo "=== env parser: last duplicate value wins ==="
 ENV_BLOB='PATH=/usr/local/bin SVOTE_UPGRADE_MODE=cosmovisor SVOTE_UPGRADE_MODE=direct DAEMON_HOME=/tmp/a DAEMON_HOME=/tmp/b'
@@ -149,5 +152,48 @@ svote_upgrade_patch_systemd_unit_for_cosmovisor >/dev/null
 second_unit="$(cat "$SERVICE_PATH")"
 [ "$first_unit" = "$second_unit" ] || fail "rewritten service changed across repeated runs"
 [ ! -f "${TMP_MIGRATE}/svoted.service.d/primary.conf" ] || fail "primary.conf reappeared after second migrate"
+
+echo "=== deploy helper: detects cosmovisor execstart ==="
+TMP_HELPER_UNIT="$(mktemp)"
+trap 'rm -f "$TMP_UNIT" "$TMP_AUTODETECT_UNIT" "$TMP_HELPER_UNIT"; rm -rf "$TMP_MIGRATE"' EXIT
+cat > "$TMP_HELPER_UNIT" <<'EOF'
+[Service]
+ExecStart=/root/.local/bin/cosmovisor run start --home /opt/shielded-vote/.svoted
+EOF
+svote_ci_is_cosmovisor_execstart "$TMP_HELPER_UNIT" || fail "helper failed to detect cosmovisor ExecStart"
+cat > "$TMP_HELPER_UNIT" <<'EOF'
+[Service]
+ExecStart=/opt/shielded-vote/current/bin/svoted start --home /opt/shielded-vote/.svoted
+EOF
+if svote_ci_is_cosmovisor_execstart "$TMP_HELPER_UNIT"; then
+  fail "helper incorrectly detected direct ExecStart as cosmovisor"
+fi
+
+echo "=== deploy helper: sync disabled/enabled atomic stage behavior ==="
+TMP_SYNC_DIR="$(mktemp -d)"
+trap 'rm -f "$TMP_UNIT" "$TMP_AUTODETECT_UNIT" "$TMP_HELPER_UNIT"; rm -rf "$TMP_MIGRATE" "$TMP_SYNC_DIR"' EXIT
+SRC_BIN="${TMP_SYNC_DIR}/source.bin"
+DST_BIN="${TMP_SYNC_DIR}/target.bin"
+printf 'old-runtime' > "$DST_BIN"
+printf 'new-runtime' > "$SRC_BIN"
+before_hash=$(svote_ci_hash_file "$DST_BIN")
+[ "$before_hash" != "$(svote_ci_hash_file "$SRC_BIN")" ] || fail "test precondition failed: source and target should differ"
+sync_enabled="false"
+[ "$sync_enabled" = "false" ] || fail "sync disabled flag unexpectedly changed"
+if [ "$sync_enabled" = "true" ]; then
+  svote_ci_stage_binary_atomically "$SRC_BIN" "$DST_BIN"
+fi
+[ "$before_hash" = "$(svote_ci_hash_file "$DST_BIN")" ] || fail "target changed while sync was disabled"
+svote_ci_stage_binary_atomically "$SRC_BIN" "$DST_BIN"
+[ "$(svote_ci_hash_file "$SRC_BIN")" = "$(svote_ci_hash_file "$DST_BIN")" ] || fail "target was not updated by atomic stage"
+
+echo "=== deploy helper: guardrail failure on hash mismatch ==="
+MISMATCH_A="${TMP_SYNC_DIR}/mismatch-a.bin"
+MISMATCH_B="${TMP_SYNC_DIR}/mismatch-b.bin"
+printf 'hash-a' > "$MISMATCH_A"
+printf 'hash-b' > "$MISMATCH_B"
+if svote_ci_require_matching_hashes "$MISMATCH_A" "$MISMATCH_B" >/dev/null 2>&1; then
+  fail "expected hash guardrail mismatch to fail"
+fi
 
 echo "=== PASS: chain upgrade runtime-mode tests ==="
