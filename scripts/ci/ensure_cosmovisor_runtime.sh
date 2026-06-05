@@ -210,7 +210,7 @@ main() {
   local service_name="${SERVICE_NAME:-svoted}"
   local daemon_home="${DAEMON_HOME:-/opt/shielded-vote/.svoted}"
   local source_bin="${SOURCE_BIN:-/opt/shielded-vote/current/bin/svoted}"
-  local sync_runtime="${SYNC_COSMOVISOR_RUNTIME:-false}"
+  local sync_runtime="${SYNC_COSMOVISOR_RUNTIME:-true}"
   local ensure_cosmovisor="${ENSURE_COSMOVISOR_MODE:-true}"
   local migrate_if_direct="${MIGRATE_TO_COSMOVISOR_IF_DIRECT:-false}"
   local service_tmp
