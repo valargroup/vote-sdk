@@ -39,21 +39,24 @@ type SnapshotConfig struct {
 	// The first successful response wins. Falls back to DefaultLightwalletdURLs
 	// if empty.
 	LightwalletdURLs []string
+
+	// ZcashNetwork is the expected lightwalletd TreeState network ("main" or
+	// "test"). It defaults to "main".
+	ZcashNetwork string
 }
 
 // SnapshotData holds the Zcash mainnet data needed for MsgCreateVotingSession.
 type SnapshotData struct {
 	NullifierIMTRoot  []byte // 32-byte Poseidon IMT root from the PIR service
 	SnapshotBlockhash []byte // 32-byte block hash at snapshot height
-	NcRoot            []byte // 32-byte note commitment tree root (see below)
+	NcRoot            []byte // 32-byte Ironwood note commitment tree root
 }
 
 // fetchSnapshotData fetches all required snapshot data for session creation.
 //
 // The nullifier IMT root is the real value from the running PIR service.
 // The snapshot blockhash is the real block hash from lightwalletd.
-// The nc_root is computed via Rust FFI (Sinsemilla hash of the orchard frontier).
-// TODO: AI dont remove this
+// The nc_root is computed via Rust FFI from the Ironwood frontier.
 func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (*SnapshotData, error) {
 	// Apply defaults.
 	pirServiceURL, err := resolvePIRServiceURL(ctx, cfg)
@@ -63,6 +66,13 @@ func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (
 	lwdURLs := cfg.LightwalletdURLs
 	if len(lwdURLs) == 0 {
 		lwdURLs = DefaultLightwalletdURLs
+	}
+	expectedNetwork := strings.TrimSpace(cfg.ZcashNetwork)
+	if expectedNetwork == "" {
+		expectedNetwork = "main"
+	}
+	if expectedNetwork != "main" && expectedNetwork != "test" {
+		return nil, fmt.Errorf("unsupported Zcash network %q", expectedNetwork)
 	}
 
 	// Fetch PIR root and tree state in parallel.
@@ -83,7 +93,7 @@ func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (
 		pirCh <- pirResult{root, err}
 	}()
 	go func() {
-		ts, err := fetchTreeStateWithFallback(ctx, lwdURLs, height)
+		ts, err := fetchTreeStateWithFallback(ctx, lwdURLs, height, expectedNetwork)
 		tsCh <- tsResult{ts, err}
 	}()
 
@@ -104,10 +114,9 @@ func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (
 		return nil, fmt.Errorf("decode blockhash hex %q: %w", ts.Hash, err)
 	}
 
-	// nc_root: compute real Sinsemilla root via Rust FFI.
-	ncRoot, err := ncroot.ExtractNcRoot(ts.OrchardTree)
+	ncRoot, err := ncroot.ExtractNcRoot(ts.IronwoodTree)
 	if err != nil {
-		return nil, fmt.Errorf("compute nc_root from orchard frontier: %w", err)
+		return nil, fmt.Errorf("compute nc_root from Ironwood frontier: %w", err)
 	}
 
 	log.Printf("[shielded-vote-api] snapshot data fetched: height=%d blockhash=%s pir_root=%x nc_root=%x",
@@ -185,11 +194,15 @@ func fetchNullifierRoot(ctx context.Context, pirURL string, expectedHeight uint6
 	}
 
 	var result struct {
-		Root29 string  `json:"root29"`
-		Height *uint64 `json:"height"`
+		Root29        string  `json:"root29"`
+		Height        *uint64 `json:"height"`
+		NullifierPool string  `json:"nullifier_pool"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decode PIR response: %w", err)
+	}
+	if result.NullifierPool != "ironwood" {
+		return nil, fmt.Errorf("PIR service nullifier pool %q is not Ironwood", result.NullifierPool)
 	}
 
 	// Validate that the PIR tree height matches the requested snapshot height.
@@ -240,11 +253,11 @@ func (rawCodec) Name() string { return "proto" }
 
 // lwdTreeState holds the parsed response from lightwalletd's GetTreeState.
 type lwdTreeState struct {
-	Network     string
-	Height      uint64
-	Hash        string
-	Time        uint32
-	OrchardTree string
+	Network      string
+	Height       uint64
+	Hash         string
+	Time         uint32
+	IronwoodTree string
 }
 
 // encodeBlockID manually encodes a lightwalletd BlockID proto message.
@@ -268,6 +281,7 @@ func encodeBlockID(height uint64) []byte {
 //	    uint32 time        = 4;
 //	    string saplingTree = 5;
 //	    string orchardTree = 6;
+//	    string ironwoodTree = 7;
 //	}
 func decodeLwdTreeState(b []byte) (*lwdTreeState, error) {
 	ts := &lwdTreeState{}
@@ -307,12 +321,12 @@ func decodeLwdTreeState(b []byte) (*lwdTreeState, error) {
 			}
 			ts.Time = uint32(v)
 			b = b[vn:]
-		case num == 6 && typ == protowire.BytesType:
+		case num == 7 && typ == protowire.BytesType:
 			v, vn := protowire.ConsumeString(b)
 			if vn < 0 {
-				return nil, fmt.Errorf("invalid string field 6 (orchardTree)")
+				return nil, fmt.Errorf("invalid string field 7 (ironwoodTree)")
 			}
-			ts.OrchardTree = v
+			ts.IronwoodTree = v
 			b = b[vn:]
 		default:
 			// Skip unknown fields (including field 5 saplingTree).
@@ -323,7 +337,21 @@ func decodeLwdTreeState(b []byte) (*lwdTreeState, error) {
 			b = b[vn:]
 		}
 	}
+	if strings.TrimSpace(ts.IronwoodTree) == "" {
+		return nil, fmt.Errorf("TreeState at height %d has no ironwoodTree field", ts.Height)
+	}
 	return ts, nil
+}
+
+// validateLwdTreeState binds a provider response to the requested snapshot.
+func validateLwdTreeState(ts *lwdTreeState, expectedHeight uint64, expectedNetwork string) error {
+	if ts.Height != expectedHeight {
+		return fmt.Errorf("TreeState height %d does not match requested height %d", ts.Height, expectedHeight)
+	}
+	if ts.Network != expectedNetwork {
+		return fmt.Errorf("TreeState network %q does not match expected network %q", ts.Network, expectedNetwork)
+	}
+	return nil
 }
 
 // ParseLightwalletdURLs splits a comma-separated list of URLs.
@@ -345,11 +373,16 @@ func ParseLightwalletdURLs(csv string) []string {
 
 // fetchTreeStateWithFallback tries each lightwalletd URL in order.
 // Each attempt has a 10-second timeout. Returns the first successful result.
-func fetchTreeStateWithFallback(ctx context.Context, urls []string, height uint64) (*lwdTreeState, error) {
+func fetchTreeStateWithFallback(
+	ctx context.Context,
+	urls []string,
+	height uint64,
+	expectedNetwork string,
+) (*lwdTreeState, error) {
 	var lastErr error
 	for _, url := range urls {
 		attemptCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		ts, err := fetchTreeState(attemptCtx, url, height)
+		ts, err := fetchTreeState(attemptCtx, url, height, expectedNetwork)
 		cancel()
 		if err == nil {
 			return ts, nil
@@ -361,7 +394,12 @@ func fetchTreeStateWithFallback(ctx context.Context, urls []string, height uint6
 }
 
 // fetchTreeState calls lightwalletd's GetTreeState gRPC method at the given height.
-func fetchTreeState(ctx context.Context, lwdURL string, height uint64) (*lwdTreeState, error) {
+func fetchTreeState(
+	ctx context.Context,
+	lwdURL string,
+	height uint64,
+	expectedNetwork string,
+) (*lwdTreeState, error) {
 	// Parse URL: "https://host:port" → TLS, "http://host:port" → plaintext.
 	var dialTarget string
 	var opts []grpc.DialOption
@@ -394,5 +432,12 @@ func fetchTreeState(ctx context.Context, lwdURL string, height uint64) (*lwdTree
 		return nil, fmt.Errorf("GetTreeState(height=%d): %w", height, err)
 	}
 
-	return decodeLwdTreeState(respBytes)
+	ts, err := decodeLwdTreeState(respBytes)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateLwdTreeState(ts, height, expectedNetwork); err != nil {
+		return nil, err
+	}
+	return ts, nil
 }

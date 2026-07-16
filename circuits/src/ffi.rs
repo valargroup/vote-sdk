@@ -1640,18 +1640,17 @@ pub unsafe extern "C" fn sv_vote_tree_path_stateful(
 }
 
 // ---------------------------------------------------------------------------
-// nc_root extraction — Sinsemilla-based Orchard commitment tree root
+// Ironwood nc_root extraction
 // ---------------------------------------------------------------------------
 
-/// Compute the Orchard note commitment tree root from a hex-encoded frontier.
+/// Compute the Ironwood note commitment tree root from a hex-encoded frontier.
 ///
-/// Lightwalletd's TreeState contains an `orchardTree` field: a hex string
+/// Lightwalletd's TreeState contains an `ironwoodTree` field: a hex string
 /// encoding a serialized `CommitmentTree<MerkleHashOrchard, 32>`. Go can
-/// fetch this via gRPC but cannot compute the Sinsemilla-based root.
-/// This FFI function bridges that gap.
+/// fetch this via gRPC but cannot compute its Sinsemilla-based root.
 ///
 /// # Arguments
-/// * `hex_ptr` - Pointer to the hex-encoded orchard frontier string (ASCII).
+/// * `hex_ptr` - Pointer to the hex-encoded Ironwood frontier string (ASCII).
 /// * `hex_len` - Length of the hex string (in bytes/characters).
 /// * `root_out` - Pointer to a 32-byte output buffer for the root.
 ///
@@ -1862,7 +1861,7 @@ pub unsafe extern "C" fn sv_share_nullifier_hash(
 /// * `proposals_hash`       - 32-byte hash of the proposals.
 /// * `vote_end_time`        - Unix timestamp when voting ends.
 /// * `nullifier_imt_root`   - 32-byte canonical Fp (IMT root).
-/// * `nc_root`              - 32-byte canonical Fp (Orchard NC root).
+/// * `nc_root`              - 32-byte canonical Fp (Ironwood NC root).
 /// * `round_id_out`         - 32-byte output buffer for the round ID.
 ///
 /// # Returns

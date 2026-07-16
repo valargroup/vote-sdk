@@ -4,19 +4,19 @@
 //! The admin UI uses stub values (0xdd*32 for nc_root, 0xcc*32 for
 //! nullifier_imt_root) which causes ZKP #1 to fail because the Merkle roots
 //! don't match the real chain state. This test fetches the real values from
-//! lightwalletd (via grpcurl) and the IMT server, then creates a session
+//! lightwalletd (via grpcurl) and the Ironwood PIR server, then creates a session
 //! that Zashi can actually delegate to.
 //!
 //! Prerequisites:
 //!   - Local svoted chain running (port 1317)
 //!   - `grpcurl` installed (brew install grpcurl)
 //!   - Validator Pallas key registered (done during chain init)
-//!   - IMT server reachable (default: http://46.101.255.48:3000)
+//!   - Ironwood PIR server reachable (default: http://46.101.255.48:3000)
 //!
 //! Environment variables:
-//!   ZASHI_SNAPSHOT_HEIGHT  - Block height for the snapshot (default: latest - 10)
+//!   ZASHI_SNAPSHOT_HEIGHT  - Block height for the snapshot (default: latest - 100)
 //!   ZASHI_LIGHTWALLETD     - Lightwalletd host:port (default: us.zec.stardust.rest:443)
-//!   ZASHI_IMT_URL          - IMT server URL (default: http://46.101.255.48:3000)
+//!   ZASHI_PIR_URL          - PIR server URL (default: http://46.101.255.48:3000)
 //!   ZASHI_VOTE_WINDOW_SECS - Voting window in seconds (default: 604800 = 7 days)
 
 use e2e_tests::{
@@ -27,10 +27,8 @@ use e2e_tests::{
     },
     payloads::coordinator_action_proposal_payload,
 };
-use incrementalmerkletree::{Hashable, Level};
-use orchard::tree::MerkleHashOrchard;
 use serde_json::json;
-use std::io::{self, Read};
+use shielded_vote_circuits::nc_root::compute_nc_root;
 
 fn log(msg: &str) {
     eprintln!("[create-round] {}", msg);
@@ -40,8 +38,8 @@ fn lightwalletd_host() -> String {
     std::env::var("ZASHI_LIGHTWALLETD").unwrap_or_else(|_| "us.zec.stardust.rest:443".to_string())
 }
 
-fn imt_url() -> String {
-    std::env::var("ZASHI_IMT_URL").unwrap_or_else(|_| "http://46.101.255.48:3000".to_string())
+fn pir_url() -> String {
+    std::env::var("ZASHI_PIR_URL").unwrap_or_else(|_| "http://46.101.255.48:3000".to_string())
 }
 
 fn vote_window_secs() -> u64 {
@@ -51,10 +49,8 @@ fn vote_window_secs() -> u64 {
         .unwrap_or(604800) // 7 days
 }
 
-/// Fetch the Orchard note commitment tree root at a given height from lightwalletd
-/// via grpcurl. Parses the legacy CommitmentTree binary format inline (replacing
-/// the previous zcash_client_backend dependency).
-fn fetch_orchard_nc_root(height: u64) -> [u8; 32] {
+/// Fetch the Ironwood note commitment tree root at a given height.
+fn fetch_ironwood_nc_root(height: u64) -> [u8; 32] {
     let host = lightwalletd_host();
     log(&format!(
         "fetching tree state at height {} from {}...",
@@ -80,146 +76,56 @@ fn fetch_orchard_nc_root(height: u64) -> [u8; 32] {
     let json: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("grpcurl output is not valid JSON");
 
-    let orchard_tree_hex = json["orchardTree"].as_str().unwrap_or("");
+    let ironwood_tree_hex = json["ironwoodTree"]
+        .as_str()
+        .expect("lightwalletd response missing ironwoodTree");
+    assert!(
+        !ironwood_tree_hex.is_empty(),
+        "lightwalletd returned an empty ironwoodTree"
+    );
     log(&format!(
-        "tree state: height={}, orchard_tree_hex_len={}",
+        "tree state: height={}, ironwood_tree_hex_len={}",
         height,
-        orchard_tree_hex.len()
+        ironwood_tree_hex.len()
     ));
 
-    parse_orchard_tree_root(orchard_tree_hex)
-        .expect("failed to parse orchard tree root from lightwalletd hex")
+    compute_nc_root(ironwood_tree_hex)
+        .expect("failed to parse Ironwood tree root from lightwalletd hex")
 }
 
-// ---------------------------------------------------------------------------
-// Inline parser for the legacy CommitmentTree<MerkleHashOrchard, 32> format.
-//
-// Binary layout (from zcash_primitives::merkle_tree):
-//   optional(left)  ||  optional(right)  ||  vector(optional(parent))
-//
-// optional: u8 flag (0=None, 1=Some) + 32-byte node if Some
-// vector:   CompactSize length + elements
-// ---------------------------------------------------------------------------
-
-const DEPTH: u8 = orchard::NOTE_COMMITMENT_TREE_DEPTH as u8;
-
-fn parse_orchard_tree_root(hex_str: &str) -> io::Result<[u8; 32]> {
-    if hex_str.is_empty() {
-        return Ok(MerkleHashOrchard::empty_root(Level::from(DEPTH)).to_bytes());
-    }
-    let bytes = hex::decode(hex_str)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("hex decode: {e}")))?;
-    let mut r = &bytes[..];
-
-    let left = read_optional_node(&mut r)?;
-    let right = read_optional_node(&mut r)?;
-    let parents = read_vector(&mut r, read_optional_node)?;
-
-    Ok(commitment_tree_root(left, right, &parents))
-}
-
-fn read_node(r: &mut &[u8]) -> io::Result<MerkleHashOrchard> {
-    let mut repr = [0u8; 32];
-    r.read_exact(&mut repr)?;
-    <Option<MerkleHashOrchard>>::from(MerkleHashOrchard::from_bytes(&repr))
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "non-canonical Pallas field"))
-}
-
-fn read_optional_node(r: &mut &[u8]) -> io::Result<Option<MerkleHashOrchard>> {
-    let mut flag = [0u8; 1];
-    r.read_exact(&mut flag)?;
-    match flag[0] {
-        0 => Ok(None),
-        1 => read_node(r).map(Some),
-        _ => Err(io::Error::new(io::ErrorKind::InvalidData, "bad optional flag")),
-    }
-}
-
-fn read_compact_size(r: &mut &[u8]) -> io::Result<usize> {
-    let mut flag = [0u8; 1];
-    r.read_exact(&mut flag)?;
-    match flag[0] {
-        n @ 0..=252 => Ok(n as usize),
-        253 => {
-            let mut buf = [0u8; 2];
-            r.read_exact(&mut buf)?;
-            Ok(u16::from_le_bytes(buf) as usize)
-        }
-        254 => {
-            let mut buf = [0u8; 4];
-            r.read_exact(&mut buf)?;
-            Ok(u32::from_le_bytes(buf) as usize)
-        }
-        255 => {
-            let mut buf = [0u8; 8];
-            r.read_exact(&mut buf)?;
-            Ok(u64::from_le_bytes(buf) as usize)
-        }
-    }
-}
-
-fn read_vector<T>(
-    r: &mut &[u8],
-    read_elem: fn(&mut &[u8]) -> io::Result<T>,
-) -> io::Result<Vec<T>> {
-    let len = read_compact_size(r)?;
-    (0..len).map(|_| read_elem(r)).collect()
-}
-
-/// Compute the root of a legacy CommitmentTree (mirrors incrementalmerkletree's
-/// `CommitmentTree::root_at_depth` without requiring the `legacy-api` feature).
-fn commitment_tree_root(
-    left: Option<MerkleHashOrchard>,
-    right: Option<MerkleHashOrchard>,
-    parents: &[Option<MerkleHashOrchard>],
-) -> [u8; 32] {
-    let filler = |level: u8| MerkleHashOrchard::empty_root(Level::from(level));
-
-    let leaf_root = MerkleHashOrchard::combine(
-        Level::from(0),
-        &left.unwrap_or_else(|| filler(0)),
-        &right.unwrap_or_else(|| filler(0)),
-    );
-
-    let mut current = leaf_root;
-    for (i, parent) in parents.iter().enumerate() {
-        let level = (i + 1) as u8;
-        let sibling = parent.unwrap_or_else(|| filler(level));
-        current = MerkleHashOrchard::combine(Level::from(level), &current, &sibling);
-    }
-    for level in (parents.len() + 1)..DEPTH as usize {
-        current = MerkleHashOrchard::combine(
-            Level::from(level as u8),
-            &current,
-            &filler(level as u8),
-        );
-    }
-
-    current.to_bytes()
-}
-
-/// Fetch the nullifier IMT root from the IMT server.
-fn fetch_imt_root() -> [u8; 32] {
-    let url = format!("{}/root", imt_url());
-    log(&format!("fetching IMT root from {}...", url));
+/// Fetch the Ironwood nullifier root at the snapshot height.
+fn fetch_ironwood_nullifier_root(height: u64) -> [u8; 32] {
+    let url = format!("{}/root", pir_url());
+    log(&format!("fetching Ironwood PIR root from {}...", url));
 
     let resp = api::client()
         .get(&url)
         .send()
-        .expect("failed to reach IMT server");
-    let json: serde_json::Value = resp.json().expect("IMT /root response is not JSON");
-    let root_hex = json["root"]
+        .expect("failed to reach PIR server");
+    let json: serde_json::Value = resp.json().expect("PIR /root response is not JSON");
+    assert_eq!(
+        json["nullifier_pool"].as_str(),
+        Some("ironwood"),
+        "PIR server is not serving Ironwood nullifiers"
+    );
+    let served_height = json["height"]
+        .as_u64()
+        .or_else(|| json["height"].as_str().and_then(|value| value.parse().ok()))
+        .expect("PIR /root response missing height");
+    assert_eq!(served_height, height, "PIR snapshot height mismatch");
+
+    let root_hex = json["root29"]
         .as_str()
-        .expect("IMT /root response missing 'root' field");
+        .expect("PIR /root response missing root29");
 
     // Strip 0x prefix if present
     let hex_str = root_hex.strip_prefix("0x").unwrap_or(root_hex);
-    let bytes = hex::decode(hex_str).expect("IMT root is not valid hex");
-    assert_eq!(bytes.len(), 32, "IMT root must be 32 bytes");
+    let bytes = hex::decode(hex_str).expect("PIR root is not valid hex");
+    assert_eq!(bytes.len(), 32, "PIR root must be 32 bytes");
 
     let mut arr = [0u8; 32];
     arr.copy_from_slice(&bytes);
-    log(&format!("IMT root: {}", hex::encode(arr)));
+    log(&format!("PIR root: {}", hex::encode(arr)));
     arr
 }
 
@@ -304,7 +210,7 @@ fn to_base64(bytes: &[u8]) -> String {
 }
 
 #[test]
-#[ignore = "requires running chain + grpcurl + IMT server"]
+#[ignore = "requires running chain + grpcurl + Ironwood PIR server"]
 fn create_round_for_zashi() {
     // ---- Step 0: Ensure Pallas key registered ----
     e2e_tests::setup::ensure_pallas_key_registered();
@@ -320,11 +226,11 @@ fn create_round_for_zashi() {
     log(&format!("snapshot height: {}", snap_height));
 
     // ---- Step 3: Fetch real nc_root from lightwalletd ----
-    let nc_root = fetch_orchard_nc_root(snap_height);
+    let nc_root = fetch_ironwood_nc_root(snap_height);
     log(&format!("nc_root: {}", hex::encode(nc_root)));
 
-    // ---- Step 4: Fetch real nullifier_imt_root from IMT server ----
-    let nullifier_imt_root = fetch_imt_root();
+    // ---- Step 4: Fetch real Ironwood nullifier root ----
+    let nullifier_imt_root = fetch_ironwood_nullifier_root(snap_height);
 
     // ---- Step 5: Compute session fields ----
     let now = std::time::SystemTime::now()

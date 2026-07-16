@@ -344,6 +344,7 @@ func (app *SvoteApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIC
 		Snapshot: voteapi.SnapshotConfig{
 			PIRServiceURLResolver: app.resolveAdminPIRServiceURL,
 			LightwalletdURLs:      voteapi.ParseLightwalletdURLs(os.Getenv("SVOTE_LWD_URLS")),
+			ZcashNetwork:          os.Getenv("SVOTE_ZCASH_NETWORK"),
 		},
 		CryptoReadiness: app.CryptoWarmupStatus,
 	})

@@ -12,7 +12,7 @@ use group::GroupEncoding;
 use incrementalmerkletree::{Hashable, Level};
 use orchard::{
     keys::{FullViewingKey, Scope, SpendAuthorizingKey, SpendingKey},
-    note::{ExtractedNoteCommitment, Note, Rho},
+    note::{ExtractedNoteCommitment, Note, NoteVersion, Rho},
     tree::{MerkleHashOrchard, MerklePath},
     value::NoteValue,
     NOTE_COMMITMENT_TREE_DEPTH,
@@ -24,6 +24,7 @@ use voting_circuits::delegation::{
     build_delegation_bundle, create_delegation_proof, verify_delegation_proof, ImtProofData,
     ImtProvider, RealNoteInput, SpacedLeafImtProvider,
 };
+use zcash_voting::VotingHotkey;
 
 /// Far-future vote_end_time (Jan 1 2100 UTC). Since vote_end_time is hashed
 /// into round_id (which is a ZKP public input), fixtures bind to it permanently.
@@ -32,7 +33,7 @@ const FAR_FUTURE_VOTE_END_TIME: u64 = 4102444800;
 
 /// Data from delegation that the vote proof builder needs.
 pub struct VoteProofDelegationData {
-    /// The spending key used during delegation.
+    /// The spending key used for fixture generation.
     pub sk: SpendingKey,
     /// Blinding factor for the VAN (van_comm).
     pub van_comm_rand: pallas::Base,
@@ -205,11 +206,34 @@ pub fn prepare_delegation_bundle_for_test(
     vote_end_time_override: Option<u64>,
 ) -> Result<(PreparedDelegationBundle, SetupRoundFields), Box<dyn std::error::Error + Send + Sync>>
 {
+    prepare_delegation_bundle_with_recipient(sk_override, None, vote_end_time_override)
+}
+
+/// Prepare a delegation whose output belongs to the typed voting hotkey.
+pub fn prepare_delegation_bundle_for_hotkey(
+    voting_hotkey: &VotingHotkey,
+    vote_end_time_override: Option<u64>,
+) -> Result<(PreparedDelegationBundle, SetupRoundFields), Box<dyn std::error::Error + Send + Sync>>
+{
+    let output_recipient = Option::<orchard::Address>::from(
+        orchard::Address::from_raw_address_bytes(voting_hotkey.raw_orchard_address()),
+    )
+    .ok_or("invalid voting hotkey address")?;
+    prepare_delegation_bundle_with_recipient(None, Some(output_recipient), vote_end_time_override)
+}
+
+fn prepare_delegation_bundle_with_recipient(
+    sk_override: Option<SpendingKey>,
+    output_recipient_override: Option<orchard::Address>,
+    vote_end_time_override: Option<u64>,
+) -> Result<(PreparedDelegationBundle, SetupRoundFields), Box<dyn std::error::Error + Send + Sync>>
+{
     let mut rng = OsRng;
 
     let sk = sk_override.unwrap_or_else(|| SpendingKey::random(&mut rng));
     let fvk: FullViewingKey = (&sk).into();
-    let output_recipient = fvk.address_at(1u32, Scope::External);
+    let output_recipient =
+        output_recipient_override.unwrap_or_else(|| fvk.address_at(1u32, Scope::External));
     let alpha = pallas::Scalar::random(&mut rng);
     let van_comm_rand = pallas::Base::random(&mut rng);
 
@@ -221,18 +245,20 @@ pub fn prepare_delegation_bundle_for_test(
     let recipient_ext = fvk.address_at(0u32, Scope::External);
     let recipient_int = fvk.address_at(0u32, Scope::Internal);
 
-    let (_, _, dummy_parent) = Note::dummy(&mut rng, None);
+    let (_, _, dummy_parent) = Note::dummy(&mut rng, None, NoteVersion::V3);
     let note_ext = Note::new(
         recipient_ext,
         NoteValue::from_raw(note_value_ext),
         Rho::from_nf_old(dummy_parent.nullifier(&fvk)),
+        NoteVersion::V3,
         &mut rng,
     );
-    let (_, _, dummy_parent2) = Note::dummy(&mut rng, None);
+    let (_, _, dummy_parent2) = Note::dummy(&mut rng, None, NoteVersion::V3);
     let note_int = Note::new(
         recipient_int,
         NoteValue::from_raw(note_value_int),
         Rho::from_nf_old(dummy_parent2.nullifier(&fvk)),
+        NoteVersion::V3,
         &mut rng,
     );
 
@@ -495,18 +521,20 @@ pub fn prepare_multi_delegation_bundles(
         let recipient_ext = fvk.address_at(0u32, Scope::External);
         let recipient_int = fvk.address_at(0u32, Scope::Internal);
 
-        let (_, _, dp1) = Note::dummy(&mut rng, None);
+        let (_, _, dp1) = Note::dummy(&mut rng, None, NoteVersion::V3);
         let note_ext = Note::new(
             recipient_ext,
             NoteValue::from_raw(note_value_ext),
             Rho::from_nf_old(dp1.nullifier(&fvk)),
+            NoteVersion::V3,
             &mut rng,
         );
-        let (_, _, dp2) = Note::dummy(&mut rng, None);
+        let (_, _, dp2) = Note::dummy(&mut rng, None, NoteVersion::V3);
         let note_int = Note::new(
             recipient_int,
             NoteValue::from_raw(note_value_int),
             Rho::from_nf_old(dp2.nullifier(&fvk)),
+            NoteVersion::V3,
             &mut rng,
         );
 
@@ -802,5 +830,28 @@ pub fn ensure_pallas_key_registered() {
             "[E2E] Pallas key registration failed: {} (may be already registered)",
             e
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_delegation_uses_v3_notes() {
+        let (prepared, _) = prepare_delegation_bundle_for_test(None, None).unwrap();
+        assert!(prepared
+            .note_inputs
+            .iter()
+            .all(|input| input.note.version() == NoteVersion::V3));
+    }
+
+    #[test]
+    fn multi_delegation_uses_v3_notes() {
+        let (prepared, _) = prepare_multi_delegation_bundles(2).unwrap();
+        assert!(prepared.inputs.iter().all(|input| {
+            input.note_ext.version() == NoteVersion::V3
+                && input.note_int.version() == NoteVersion::V3
+        }));
     }
 }

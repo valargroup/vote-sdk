@@ -64,7 +64,7 @@ type HandlerConfig struct {
 	CometRPCEndpoint string
 
 	// Snapshot configures external service URLs for fetching Zcash snapshot
-	// data (nc_root from lightwalletd, nullifier IMT root from IMT service).
+	// data (Ironwood nc_root from lightwalletd, nullifier IMT root from PIR).
 	Snapshot SnapshotConfig
 
 	// CryptoReadiness returns the process-local Halo2 verifier warm-up status.

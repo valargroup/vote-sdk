@@ -1,13 +1,11 @@
-// Package ncroot provides Go bindings to the Rust FFI function that computes
-// the Orchard note commitment tree root from a hex-encoded frontier.
+// Package ncroot computes the Ironwood note commitment tree root from a
+// hex-encoded lightwalletd frontier.
 //
-// The orchardTree field from lightwalletd's TreeState is a hex string encoding
-// a serialized CommitmentTree. Computing the root requires Sinsemilla hashing
-// which is only available in Rust. This package bridges Go ↔ Rust via CGo.
+// Ironwood uses the Orchard protocol's serialized frontier and Sinsemilla hash.
 //
 // It requires the Rust static library to be built first:
 //
-//	cargo build --release --manifest-path sdk/circuits/Cargo.toml
+//	cargo build --release --manifest-path circuits/Cargo.toml
 package ncroot
 
 /*
@@ -22,18 +20,18 @@ import (
 	"unsafe"
 )
 
-// ExtractNcRoot computes the Orchard note commitment tree root from a
-// hex-encoded frontier string (the orchardTree field from lightwalletd).
+// ExtractNcRoot computes the Ironwood note commitment tree root from a
+// hex-encoded frontier string.
 //
 // Returns the 32-byte Sinsemilla-based root.
-func ExtractNcRoot(orchardTreeHex string) ([32]byte, error) {
+func ExtractNcRoot(frontierHex string) ([32]byte, error) {
 	var root [32]byte
 
-	if len(orchardTreeHex) == 0 {
-		return root, fmt.Errorf("ncroot: empty orchard tree hex string")
+	if len(frontierHex) == 0 {
+		return root, fmt.Errorf("ncroot: empty Ironwood frontier")
 	}
 
-	hexBytes := []byte(orchardTreeHex)
+	hexBytes := []byte(frontierHex)
 
 	rc := C.sv_extract_nc_root(
 		(*C.uint8_t)(unsafe.Pointer(&hexBytes[0])),

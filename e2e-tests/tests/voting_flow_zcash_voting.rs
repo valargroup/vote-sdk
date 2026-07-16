@@ -9,7 +9,6 @@
 //! generates ZKP #3 and submits reveal-share TXs to the chain.
 
 use base64::Engine;
-use blake2b_simd::Params as Blake2bParams;
 use e2e_tests::{
     api::{
         self, broadcast_cosmos_msg, commitment_tree_next_index, default_cosmos_tx_config, get_json,
@@ -22,19 +21,17 @@ use e2e_tests::{
         cast_vote_payload_real, coordinator_action_proposal_payload, create_voting_session_payload,
         delegate_vote_payload, helper_share_payload,
     },
-    setup::prepare_delegation_bundle_for_test,
+    setup::prepare_delegation_bundle_for_hotkey,
     tree_transport::ReqwestTreeTransport,
 };
 use ff::PrimeField;
 use group::{Curve, GroupEncoding};
-use orchard::keys::SpendAuthorizingKey;
 use pasta_curves::{arithmetic::CurveAffine, pallas};
-use rand::SeedableRng;
-use rand_chacha::ChaCha20Rng;
 use std::sync::Arc;
 use vote_commitment_tree::TreeClient;
 use vote_commitment_tree_client::http_sync_api::HttpTreeSyncApi;
-use zcash_voting::{NoopProgressReporter, VotingRoundParams, WireEncryptedShare};
+use zcash_voting::vote::{commit as commit_vote, DraftVote, VanWitness, VoteSigner};
+use zcash_voting::{Network, NoopProgressReporter, VotingHotkey, VotingRoundParams};
 
 const BLOCK_WAIT_MS: u64 = 6000;
 
@@ -51,14 +48,8 @@ fn block_wait() {
 #[test]
 #[ignore = "requires running chain + helper server"]
 fn voting_flow_zcash_voting_path() {
-    // ---- Setup: derive SpendingKey from seed (same ZIP-32 path as production) ----
-    log_step(
-        "Setup",
-        "deriving SpendingKey from hotkey seed via ZIP-32...",
-    );
-    let seed = [0x42u8; 64];
-    let sk =
-        zcash_voting::zkp2::derive_spending_key(&seed, 1).expect("derive_spending_key from seed");
+    let hotkey = VotingHotkey::from_stored_secret(&[0x42; 64], Network::Testnet)
+        .expect("reconstruct voting hotkey");
 
     // ---- Step 0: Ensure Pallas key registered + import vote manager key ----
     e2e_tests::setup::ensure_pallas_key_registered();
@@ -70,22 +61,16 @@ fn voting_flow_zcash_voting_path() {
         &format!("vote manager address: {}", vote_manager_address),
     );
 
-    let mut rng = ChaCha20Rng::seed_from_u64(43);
-
-    // Prepare delegation inputs using the seed-derived SpendingKey. The proof
-    // must be built after the create tx emits the height-derived round ID.
-    log_step(
-        "Setup",
-        "preparing delegation inputs with seed-derived key...",
-    );
+    // The proof must be built after the create tx emits the round ID.
+    log_step("Setup", "preparing typed-hotkey delegation inputs...");
     let vote_end = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs()
         + 300;
     let (prepared_delegation, session_fields) =
-        prepare_delegation_bundle_for_test(Some(sk), Some(vote_end))
-            .expect("prepare_delegation_bundle_for_test");
+        prepare_delegation_bundle_for_hotkey(&hotkey, Some(vote_end))
+            .expect("prepare_delegation_bundle_for_hotkey");
     log_step("Setup", "delegation inputs ready");
 
     // Save fields we need for DB before session_fields is consumed
@@ -266,6 +251,7 @@ fn voting_flow_zcash_voting_path() {
     let db = zcash_voting::storage::VotingDb::open(":memory:").expect("open VotingDb");
     db.set_wallet_id("test");
     db.init_round(
+        Network::Testnet,
         &VotingRoundParams {
             vote_round_id: round_id_hex.clone(),
             snapshot_height: fields_for_db.snapshot_height,
@@ -300,8 +286,8 @@ fn voting_flow_zcash_voting_path() {
             &[0u8; 32], // rseed_output
             &delegation_bundle.van_cmx,
             vote_proof_data.total_note_value,
-            1, // address_index (matches delegation output_recipient = fvk.address_at(1, External))
-            &[], // padded_note_secrets (not needed for ZKP #2 test)
+            hotkey.address_index(),
+            &[],        // padded_note_secrets (not needed for ZKP #2 test)
             &[0u8; 32], // pczt_sighash
         )
         .expect("store_delegation_data");
@@ -377,30 +363,38 @@ fn voting_flow_zcash_voting_path() {
         );
     }
 
-    // Convert witness auth_path to byte arrays for build_vote_commitment
-    let auth_path_bytes: Vec<[u8; 32]> = witness.auth_path().iter().map(|h| h.to_bytes()).collect();
+    let auth_path: Vec<Vec<u8>> = witness
+        .auth_path()
+        .iter()
+        .map(|hash| hash.to_bytes().to_vec())
+        .collect();
+    let van_witness = VanWitness::from_wire(
+        &auth_path,
+        u32::try_from(van_position).expect("van_position fits in u32"),
+        anchor_height,
+    )
+    .expect("construct VAN witness");
+    let vc_position = van_position + 2;
+    let draft = DraftVote {
+        proposal_id: 1,
+        choice: 1,
+        num_options: 2,
+        vc_tree_position: vc_position,
+        single_share: false,
+    };
 
-    // ---- Step 7: Build vote commitment via VotingDb (real ZKP #2) ----
-    log_step(
-        "Step 7",
-        "building vote commitment via VotingDb (K=14 proof, 30-60s)...",
-    );
-    let bundle = db
-        .build_vote_commitment(
-            &round_id_hex,
-            0, // bundle_index
-            &seed,
-            1, // network_id (testnet)
-            1, // proposal_id
-            1, // choice (oppose)
-            2, // num_options
-            &auth_path_bytes,
-            u32::try_from(van_position).expect("van_position fits in u32"),
-            anchor_height,
-            false, // single_share
-            &NoopProgressReporter,
-        )
-        .expect("VotingDb::build_vote_commitment");
+    // ---- Step 7: Build vote commitment through the public API ----
+    log_step("Step 7", "building vote commitment (K=14 proof, 30-60s)...");
+    let bundle = commit_vote(
+        &db,
+        &round_id_hex,
+        0,
+        &draft,
+        &van_witness,
+        VoteSigner::hotkey(&hotkey),
+        &NoopProgressReporter,
+    )
+    .expect("commit vote");
     log_step("Step 7", "vote commitment built successfully");
 
     // Verify the bundle looks reasonable
@@ -410,11 +404,12 @@ fn voting_flow_zcash_voting_path() {
     assert_eq!(bundle.proposal_id, 1);
     assert!(!bundle.proof.is_empty());
     assert_eq!(
-        bundle.enc_shares.len(),
+        bundle.encrypted_shares.len(),
         16,
         "should have 16 encrypted shares"
     );
-    assert_eq!(bundle.shares_hash.len(), 32);
+    assert_eq!(bundle.share_payloads.len(), 16);
+    assert_eq!(bundle.share_payloads[0].shares_hash.len(), 32);
 
     // ---- Step 7b: Local proof verification (same binary = same VK) ----
     {
@@ -423,9 +418,8 @@ fn voting_flow_zcash_voting_path() {
             bundle.van_nullifier.as_slice().try_into().unwrap(),
         ))
         .expect("van_nullifier");
-        let r_vpk_arr: [u8; 32] = bundle.r_vpk_bytes.as_slice().try_into().unwrap();
         let r_vpk_affine: pallas::Affine =
-            Option::from(pallas::Affine::from_bytes(&r_vpk_arr)).expect("decompress r_vpk");
+            Option::from(pallas::Affine::from_bytes(&bundle.r_vpk)).expect("decompress r_vpk");
         let r_vpk_coords = r_vpk_affine.coordinates().unwrap();
         let van_new: pallas::Base = Option::from(pallas::Base::from_repr(
             bundle
@@ -471,56 +465,7 @@ fn voting_flow_zcash_voting_path() {
     }
 
     // ---- Step 8: Submit cast-vote TX ----
-    log_step("Step 8", "computing sighash and signing cast-vote TX");
-
-    // 8a: Compute canonical sighash (must match Go's ComputeCastVoteSighash).
-    const CAST_VOTE_SIGHASH_DOMAIN: &[u8] = b"SVOTE_CAST_VOTE_SIGHASH_V0";
-    let mut canonical = Vec::new();
-    canonical.extend_from_slice(CAST_VOTE_SIGHASH_DOMAIN);
-    // vote_round_id: pad to 32 bytes
-    let mut buf32 = [0u8; 32];
-    let vr_len = round_id.len().min(32);
-    buf32[..vr_len].copy_from_slice(&round_id[..vr_len]);
-    canonical.extend_from_slice(&buf32);
-    // r_vpk: already 32 bytes
-    canonical.extend_from_slice(&bundle.r_vpk_bytes);
-    // van_nullifier: 32 bytes
-    buf32 = [0u8; 32];
-    let vn = &bundle.van_nullifier;
-    buf32[..vn.len().min(32)].copy_from_slice(&vn[..vn.len().min(32)]);
-    canonical.extend_from_slice(&buf32);
-    // vote_authority_note_new: 32 bytes
-    buf32 = [0u8; 32];
-    let vn_new = &bundle.vote_authority_note_new;
-    buf32[..vn_new.len().min(32)].copy_from_slice(&vn_new[..vn_new.len().min(32)]);
-    canonical.extend_from_slice(&buf32);
-    // vote_commitment: 32 bytes
-    buf32 = [0u8; 32];
-    let vc = &bundle.vote_commitment;
-    buf32[..vc.len().min(32)].copy_from_slice(&vc[..vc.len().min(32)]);
-    canonical.extend_from_slice(&buf32);
-    // proposal_id: 4 bytes LE, padded to 32 bytes
-    let mut pid_buf = [0u8; 32];
-    pid_buf[..4].copy_from_slice(&1u32.to_le_bytes());
-    canonical.extend_from_slice(&pid_buf);
-    // anchor_height: 8 bytes LE, padded to 32 bytes
-    let mut ah_buf = [0u8; 32];
-    ah_buf[..8].copy_from_slice(&(anchor_height as u64).to_le_bytes());
-    canonical.extend_from_slice(&ah_buf);
-
-    let sighash_full = Blake2bParams::new().hash_length(32).hash(&canonical);
-    let mut sighash = [0u8; 32];
-    sighash.copy_from_slice(sighash_full.as_bytes());
-
-    // 8c: Sign the sighash with the randomized voting key (rsk_v = ask_v.randomize(&alpha_v)).
-    let alpha_v_arr: [u8; 32] = bundle.alpha_v.as_slice().try_into().unwrap();
-    let alpha_v: pallas::Scalar =
-        Option::from(pallas::Scalar::from_repr(alpha_v_arr)).expect("deserialize alpha_v");
-    let ask_v = SpendAuthorizingKey::from(&vote_proof_data.sk);
-    let rsk_v = ask_v.randomize(&alpha_v);
-    let vote_auth_sig = rsk_v.sign(&mut rng, &sighash);
-    let vote_auth_sig_bytes: [u8; 64] = (&vote_auth_sig).into();
-
+    log_step("Step 8", "submitting signed cast-vote TX");
     let cast_body = cast_vote_payload_real(
         &round_id,
         anchor_height,
@@ -529,8 +474,8 @@ fn voting_flow_zcash_voting_path() {
         &bundle.vote_commitment,
         1, // proposal_id
         &bundle.proof,
-        &bundle.r_vpk_bytes,
-        &vote_auth_sig_bytes,
+        &bundle.r_vpk,
+        &bundle.vote_auth_sig,
     );
     let cast_target_next_index = van_position + 3; // delegation leaf + 2 cast leaves
 
@@ -597,29 +542,12 @@ fn voting_flow_zcash_voting_path() {
         "cast-vote leaves never appeared in commitment tree (waited 60s)"
     );
 
-    // ---- Step 9: Build share payloads via VotingDb ----
-    log_step("Step 9", "building share payloads via VotingDb");
-    // Relative to this test's VAN leaf, cast-vote appends:
-    // vote_authority_note_new at +1 and vote_commitment at +2.
-    let vc_position = van_position + 2;
-    let wire_shares: Vec<WireEncryptedShare> = bundle
-        .enc_shares
-        .iter()
-        .map(WireEncryptedShare::from)
-        .collect();
-    let payloads = db
-        .build_share_payloads(
-            &wire_shares,
-            &bundle,
-            1,           // vote_decision (oppose)
-            2,           // num_options
-            vc_position, // vc_tree_position
-            false,       // single_share
-        )
-        .expect("VotingDb::build_share_payloads");
+    // ---- Step 9: Validate share payloads built by the public API ----
+    let payloads = bundle.share_payloads.clone();
     assert_eq!(payloads.len(), 16, "should have 16 share payloads");
+    let shares_hash = payloads[0].shares_hash.clone();
     for (i, p) in payloads.iter().enumerate() {
-        assert_eq!(p.shares_hash, bundle.shares_hash);
+        assert_eq!(p.shares_hash, shares_hash);
         assert_eq!(p.proposal_id, 1);
         assert_eq!(p.vote_decision, 1);
         assert_eq!(p.tree_position, vc_position);
@@ -631,36 +559,37 @@ fn voting_flow_zcash_voting_path() {
     // In single-share mode, all voting weight goes into share 0 ([num_ballots, 0, ..., 0])
     // instead of splitting evenly across 16 shares. The ZKP #2 circuit accepts both.
     // We can't submit this to chain (same VAN nullifier as above), but we verify the
-    // proof is valid and build_share_payloads returns exactly 1 payload.
+    // proof is valid and the public API returns exactly 1 payload.
     log_step(
         "Step 9b",
         "building vote commitment with single_share=true (K=14 proof, 30-60s)...",
     );
-    let single_bundle = db
-        .build_vote_commitment(
-            &round_id_hex,
-            0, // bundle_index
-            &seed,
-            1, // network_id (testnet)
-            1, // proposal_id
-            1, // choice (oppose)
-            2, // num_options
-            &auth_path_bytes,
-            u32::try_from(van_position).expect("van_position fits in u32"),
-            anchor_height,
-            true, // single_share
-            &NoopProgressReporter,
-        )
-        .expect("VotingDb::build_vote_commitment(single_share=true)");
+    let single_draft = DraftVote {
+        proposal_id: 2,
+        choice: 1,
+        num_options: 2,
+        vc_tree_position: vc_position,
+        single_share: true,
+    };
+    let single_bundle = commit_vote(
+        &db,
+        &round_id_hex,
+        0,
+        &single_draft,
+        &van_witness,
+        VoteSigner::hotkey(&hotkey),
+        &NoopProgressReporter,
+    )
+    .expect("commit single-share vote");
     log_step("Step 9b", "single-share vote commitment built successfully");
 
     // Basic bundle sanity checks
     assert_eq!(
-        single_bundle.enc_shares.len(),
+        single_bundle.encrypted_shares.len(),
         16,
         "circuit always produces 16 encrypted shares"
     );
-    assert_eq!(single_bundle.shares_hash.len(), 32);
+    assert_eq!(single_bundle.share_payloads[0].shares_hash.len(), 32);
 
     // Verify the proof locally — the circuit must accept [num_ballots, 0, ..., 0] shares
     {
@@ -669,9 +598,9 @@ fn voting_flow_zcash_voting_path() {
             single_bundle.van_nullifier.as_slice().try_into().unwrap(),
         ))
         .expect("van_nullifier");
-        let r_vpk_arr: [u8; 32] = single_bundle.r_vpk_bytes.as_slice().try_into().unwrap();
         let r_vpk_affine: pallas::Affine =
-            Option::from(pallas::Affine::from_bytes(&r_vpk_arr)).expect("decompress r_vpk");
+            Option::from(pallas::Affine::from_bytes(&single_bundle.r_vpk))
+                .expect("decompress r_vpk");
         let r_vpk_coords = r_vpk_affine.coordinates().unwrap();
         let van_new: pallas::Base = Option::from(pallas::Base::from_repr(
             single_bundle
@@ -704,7 +633,7 @@ fn voting_flow_zcash_voting_path() {
             vc_field,
             local_root,
             pallas::Base::from(anchor_height as u64),
-            pallas::Base::from(1u64), // proposal_id
+            pallas::Base::from(2u64), // proposal_id
             vri,
             *ea_coords.x(),
             *ea_coords.y(),
@@ -714,22 +643,7 @@ fn voting_flow_zcash_voting_path() {
         log_step("Step 9b", "single-share local verification PASSED");
     }
 
-    // Build share payloads with single_share=true — should return exactly 1
-    let single_wire_shares: Vec<WireEncryptedShare> = single_bundle
-        .enc_shares
-        .iter()
-        .map(WireEncryptedShare::from)
-        .collect();
-    let single_payloads = db
-        .build_share_payloads(
-            &single_wire_shares,
-            &single_bundle,
-            1,           // vote_decision
-            2,           // num_options
-            vc_position, // vc_tree_position (reuse — we won't submit this)
-            true,        // single_share
-        )
-        .expect("VotingDb::build_share_payloads(single_share=true)");
+    let single_payloads = &single_bundle.share_payloads;
     assert_eq!(
         single_payloads.len(),
         1,
@@ -740,7 +654,7 @@ fn voting_flow_zcash_voting_path() {
         single_payloads[0].enc_share.share_index, 0,
         "single payload must be share 0"
     );
-    assert_eq!(single_payloads[0].proposal_id, 1);
+    assert_eq!(single_payloads[0].proposal_id, 2);
     assert_eq!(single_payloads[0].vote_decision, 1);
     // The all_enc_shares field should still contain all 16 shares (needed by the helper for ZKP #3)
     assert_eq!(

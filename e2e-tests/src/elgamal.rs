@@ -142,7 +142,7 @@ mod tests {
 
         assert_eq!(
             go_gen_bytes.as_slice(),
-            rust_gen_bytes.as_ref(),
+            &rust_gen_bytes[..],
             "Go standard Pallas generator != Rust pasta_curves generator"
         );
     }
