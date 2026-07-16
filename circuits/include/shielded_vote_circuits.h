@@ -471,18 +471,18 @@ int32_t sv_generate_share_reveal(
 int32_t sv_warm_verifier_caches(void);
 
 /* -----------------------------------------------------------------------
- * Orchard note commitment tree root extraction
+ * Ironwood note commitment tree root extraction
  * ----------------------------------------------------------------------- */
 
 /*
- * Compute the Orchard nc_root from a hex-encoded frontier string.
+ * Compute the Ironwood nc_root from a hex-encoded frontier string.
  *
- * The orchardTree field from lightwalletd's GetTreeState response is a
+ * The ironwoodTree field from lightwalletd's GetTreeState response is a
  * hex-encoded serialized CommitmentTree. This function hex-decodes it,
  * parses the frontier, and computes the Sinsemilla-based Merkle root.
  *
  * Parameters:
- *   hex_ptr  - Pointer to the hex-encoded orchard frontier string (ASCII).
+ *   hex_ptr  - Pointer to the hex-encoded Ironwood frontier string (ASCII).
  *   hex_len  - Length of the hex string (bytes/characters).
  *   root_out - Pointer to a 32-byte output buffer for the root.
  *

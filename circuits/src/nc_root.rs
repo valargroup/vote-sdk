@@ -1,9 +1,8 @@
-//! Compute the Orchard note commitment tree root from a hex-encoded frontier.
+//! Compute an Ironwood note commitment tree root from a hex-encoded frontier.
 //!
-//! Lightwalletd's TreeState contains an `orchardTree` field: a hex-encoded
-//! serialized `CommitmentTree<MerkleHashOrchard, 32>`. This module parses
-//! that format and computes the Sinsemilla-based root — something Go can't
-//! do natively.
+//! Ironwood uses the Orchard protocol's serialized
+//! `CommitmentTree<MerkleHashOrchard, 32>` format. This module parses the
+//! `ironwoodTree` field returned by lightwalletd and computes its root.
 //!
 //! The binary format (from zcash_primitives `write_commitment_tree`):
 //!   - Optional<H> left:   1-byte flag (0=None, 1=Some) + 32-byte hash if Some
@@ -14,15 +13,12 @@
 use incrementalmerkletree::{Hashable, Level};
 use orchard::tree::MerkleHashOrchard;
 
-/// Orchard note commitment tree depth.
+/// Ironwood note commitment tree depth.
 const DEPTH: u8 = 32;
 
-/// Parse a hex-encoded orchard frontier and compute its root.
-///
-/// This is equivalent to `zcash_client_backend`'s
-/// `TreeState::orchard_tree().root()` but without pulling in that crate.
-pub fn compute_nc_root(orchard_tree_hex: &str) -> Result<[u8; 32], String> {
-    let bytes = hex::decode(orchard_tree_hex).map_err(|e| format!("hex decode: {e}"))?;
+/// Parse a hex-encoded Ironwood frontier and compute its root.
+pub fn compute_nc_root(frontier_hex: &str) -> Result<[u8; 32], String> {
+    let bytes = hex::decode(frontier_hex).map_err(|e| format!("hex decode: {e}"))?;
 
     let (left, right, parents) = parse_commitment_tree(&bytes)?;
     let root = commitment_tree_root(left, right, &parents);
@@ -93,6 +89,9 @@ fn parse_commitment_tree(
     }
     let parent_count = data[0] as usize;
     data = &data[1..];
+    if parent_count >= usize::from(DEPTH) {
+        return Err("parents vector exceeded tree depth".into());
+    }
 
     let mut parents = Vec::with_capacity(parent_count);
     for i in 0..parent_count {
@@ -176,9 +175,15 @@ mod tests {
         assert_eq!(root, digest.to_bytes());
     }
 
-    /// Verify against the known-correct nc_root from zcash_client_backend at mainnet height 3245500.
     #[test]
-    fn test_mainnet_3245500() {
+    fn test_rejects_parent_count_at_tree_depth() {
+        let err = compute_nc_root("000020").unwrap_err();
+        assert_eq!(err, "parents vector exceeded tree depth");
+    }
+
+    /// Verify the shared frontier format against a known Orchard root.
+    #[test]
+    fn test_frontier_format_mainnet_3245500() {
         let hex_str = "01ca2a21eba4c591869db2b8fdf4dd5ba493d6bfceac23be46ca558ffed0dc921d001f0001cff1b87edbd466dbba37844dc634e456af9650eff4707e38f3ac7abadd20811d0000015b2cefe8fb1ea9a719a7ca95121b2ed30d5232a11fb2147648d1a295b8eb433e014ba2c229d7a29d9eb8d037696bd2821bcceaeb6ed295428487333d3f12e791340000000001f3715072c78b20389957accac152bcea31bdf72570c7b27fe971bf73b6890a1701882a011843c0e6e4006e0a061222047775ccb2f5e560170807f466010d3ac41b000160ba626f9d0861510dd8bad09e1479eb74a93ed48cbbdea8dd14e1f63fd1123b00015fd78b01fa7f2d305ef8c6b968027c4020ba0ad8dd6a2d12218b9a9120747c2f01fb82740a3629216088191f9cd359c52a2f35b1c58f6cc905781bd9687b66ad3801eac2b89b3f966d833626434df98d553e000324bbafb8d6e1fe03b8d7f854cf2a00017c8ece2b2ab2355d809b58809b21c7a5e95cfc693cd689387f7533ec8749261e01cc2dcaa338b312112db04b435a706d63244dd435238f0aa1e9e1598d35470810012dcc4273c8a0ed2337ecf7879380a07e7d427c7f9d82e538002bd1442978402c01daf63debf5b40df902dae98dadc029f281474d190cddecef1b10653248a234150001e2bca6a8d987d668defba89dc082196a922634ed88e065c669e526bb8815ee1b000000000000";
         let root = compute_nc_root(hex_str).unwrap();
         assert_eq!(

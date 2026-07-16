@@ -663,9 +663,9 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
 name = "orchard"
-version = "0.14.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a54f8d29bfb1e76a9d4e868a1a08cce2e57dd2bdc66232982822ad3114b91ab3"
+checksum = "cca2ede6a4a77bd729eed3be9303d98a08b217edc85190dcf4dbe004086d5a65"
 dependencies = [
  "aes",
  "bitvec",
@@ -1150,9 +1150,9 @@ dependencies = [
 
 [[package]]
 name = "voting-circuits"
-version = "0.8.0"
+version = "0.9.0-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37d8bd9964ce4aef9152a66ad8950af529de4bbbd875bfd9e5d95534abc50df9"
+checksum = "69718d99bb1c35b94e7aa95ebeeaab8bf50c19898ad0ca37d1e76f8438a10918"
 dependencies = [
  "blake2b_simd",
  "ff",

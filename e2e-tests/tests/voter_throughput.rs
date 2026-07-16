@@ -434,24 +434,20 @@ fn generate_cast_vote(
         canonical.extend_from_slice(b"SVOTE_CAST_VOTE_SIGHASH_V0");
         let mut buf32 = [0u8; 32];
         let vr = round_id.to_repr();
-        buf32[..vr.as_ref().len().min(32)]
-            .copy_from_slice(&vr.as_ref()[..vr.as_ref().len().min(32)]);
+        buf32.copy_from_slice(&vr);
         canonical.extend_from_slice(&buf32);
         canonical.extend_from_slice(&bundle.r_vpk_bytes);
         buf32 = [0u8; 32];
         let vn = bundle.instance.van_nullifier.to_repr();
-        buf32[..vn.as_ref().len().min(32)]
-            .copy_from_slice(&vn.as_ref()[..vn.as_ref().len().min(32)]);
+        buf32.copy_from_slice(&vn);
         canonical.extend_from_slice(&buf32);
         buf32 = [0u8; 32];
         let van_new = bundle.instance.vote_authority_note_new.to_repr();
-        buf32[..van_new.as_ref().len().min(32)]
-            .copy_from_slice(&van_new.as_ref()[..van_new.as_ref().len().min(32)]);
+        buf32.copy_from_slice(&van_new);
         canonical.extend_from_slice(&buf32);
         buf32 = [0u8; 32];
         let vc = bundle.instance.vote_commitment.to_repr();
-        buf32[..vc.as_ref().len().min(32)]
-            .copy_from_slice(&vc.as_ref()[..vc.as_ref().len().min(32)]);
+        buf32.copy_from_slice(&vc);
         canonical.extend_from_slice(&buf32);
         let mut pid_buf = [0u8; 32];
         pid_buf[..4].copy_from_slice(&1u32.to_le_bytes());

@@ -6,6 +6,10 @@ Historical changes before commit `704b202e2088b91caeaf2290cef85e4a9a759542` are 
 
 Instructions on coordinated upgrades can be found [here](https://setup.valargroup.org/#coordinated-upgrade).
 
+## Unreleased
+
+- Use Ironwood commitment and nullifier roots with the Ironwood voting proof verifier.
+
 ## v1.0.3
 
 - Observability improvements and operational script fixes. No changes to the node.
