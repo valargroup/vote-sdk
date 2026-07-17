@@ -47,6 +47,8 @@ jobs:
       has_secondary: ${{ steps.resolve.outputs.has_secondary }}
       release_base_url: ${{ steps.resolve.outputs.release_base_url }}
       voting_config_url: ${{ steps.resolve.outputs.voting_config_url }}
+      lwd_urls: ${{ steps.resolve.outputs.lwd_urls }}
+      zcash_network: ${{ steps.resolve.outputs.zcash_network }}
     steps:
       - name: Resolve GitHub Environment variables
         id: resolve
@@ -60,8 +62,13 @@ jobs:
           DO_SPACES_BASE: ${{ vars.DO_SPACES_BASE }}
           RELEASE_BASE_URL: ${{ vars.RELEASE_BASE_URL }}
           VOTING_CONFIG_URL: ${{ vars.VOTING_CONFIG_URL }}
+          SVOTE_LWD_URLS: ${{ vars.SVOTE_LWD_URLS }}
         run: |
           set -euo pipefail
+          if [ -z "${SVOTE_LWD_URLS//[[:space:],]/}" ]; then
+            echo "ERROR: SVOTE_LWD_URLS must list post-NU6.3 lightwalletd endpoints."
+            exit 1
+          fi
           if [ "$TARGET_ENVIRONMENT" = "production" ]; then
             default_chain_id="zvote-1"
             default_dns_prefix="prod."
@@ -84,6 +91,8 @@ jobs:
             echo "has_secondary=${HAS_SECONDARY:-$default_has_secondary}"
             echo "release_base_url=${release_base_url}"
             echo "voting_config_url=${voting_config_url}"
+            echo "lwd_urls=${SVOTE_LWD_URLS}"
+            echo "zcash_network=main"
           } >> "$GITHUB_OUTPUT"
 
   deploy-primary:
@@ -96,6 +105,8 @@ jobs:
       DNS_PREFIX: ${{ needs.resolve-environment.outputs.dns_prefix }}
       SENTRY_ENVIRONMENT: ${{ inputs.target_environment }}
       SVOTE_CONFIG_URL: ${{ needs.resolve-environment.outputs.voting_config_url }}
+      SVOTE_LWD_URLS: ${{ needs.resolve-environment.outputs.lwd_urls }}
+      SVOTE_ZCASH_NETWORK: ${{ needs.resolve-environment.outputs.zcash_network }}
     steps:
       - name: Deploy to primary Droplet
         uses: appleboy/ssh-action@v1.0.3
@@ -103,7 +114,7 @@ jobs:
           host: ${{ secrets.PRIMARY_HOST || vars.PRIMARY_HOST || format('{0}vote-chain-primary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: SENTRY_DSN,SENTRY_ENVIRONMENT,SVOTE_CONFIG_PR_GITHUB_TOKEN,SVOTE_CONFIG_URL,DNS_PREFIX,DOMAIN
+          envs: SENTRY_DSN,SENTRY_ENVIRONMENT,SVOTE_CONFIG_PR_GITHUB_TOKEN,SVOTE_CONFIG_URL,SVOTE_LWD_URLS,SVOTE_ZCASH_NETWORK,DNS_PREFIX,DOMAIN
           script: |
             sed -i '/^SENTRY_DSN=/d' /etc/default/svoted
             echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
@@ -111,6 +122,10 @@ jobs:
             echo "SENTRY_ENVIRONMENT=$SENTRY_ENVIRONMENT" >> /etc/default/svoted
             sed -i '/^SVOTE_CONFIG_URL=/d' /etc/default/svoted
             echo "SVOTE_CONFIG_URL=$SVOTE_CONFIG_URL" >> /etc/default/svoted
+            sed -i '/^SVOTE_LWD_URLS=/d' /etc/default/svoted
+            printf 'SVOTE_LWD_URLS=%s\n' "$SVOTE_LWD_URLS" >> /etc/default/svoted
+            sed -i '/^SVOTE_ZCASH_NETWORK=/d' /etc/default/svoted
+            printf 'SVOTE_ZCASH_NETWORK=%s\n' "$SVOTE_ZCASH_NETWORK" >> /etc/default/svoted
             sed -i '/^SVOTE_CONFIG_PR_GITHUB_TOKEN=/d' /etc/default/svoted
             if [ -n "${SVOTE_CONFIG_PR_GITHUB_TOKEN:-}" ]; then
               echo "SVOTE_CONFIG_PR_GITHUB_TOKEN=$SVOTE_CONFIG_PR_GITHUB_TOKEN" >> /etc/default/svoted
@@ -178,6 +193,8 @@ jobs:
     env:
       RELEASE_BASE_URL: ${{ needs.resolve-environment.outputs.release_base_url }}
       SENTRY_ENVIRONMENT: ${{ inputs.target_environment }}
+      SVOTE_LWD_URLS: ${{ needs.resolve-environment.outputs.lwd_urls }}
+      SVOTE_ZCASH_NETWORK: ${{ needs.resolve-environment.outputs.zcash_network }}
     steps:
       - name: Deploy to secondary Droplet
         uses: appleboy/ssh-action@v1.0.3
@@ -185,12 +202,16 @@ jobs:
           host: ${{ secrets.SECONDARY_HOST || vars.SECONDARY_HOST || format('{0}vote-chain-secondary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: SENTRY_DSN,SENTRY_ENVIRONMENT
+          envs: SENTRY_DSN,SENTRY_ENVIRONMENT,SVOTE_LWD_URLS,SVOTE_ZCASH_NETWORK
           script: |
             sed -i '/^SENTRY_DSN=/d' /etc/default/svoted
             echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
             sed -i '/^SENTRY_ENVIRONMENT=/d' /etc/default/svoted
             echo "SENTRY_ENVIRONMENT=$SENTRY_ENVIRONMENT" >> /etc/default/svoted
+            sed -i '/^SVOTE_LWD_URLS=/d' /etc/default/svoted
+            printf 'SVOTE_LWD_URLS=%s\n' "$SVOTE_LWD_URLS" >> /etc/default/svoted
+            sed -i '/^SVOTE_ZCASH_NETWORK=/d' /etc/default/svoted
+            printf 'SVOTE_ZCASH_NETWORK=%s\n' "$SVOTE_ZCASH_NETWORK" >> /etc/default/svoted
             mkdir -p /etc/systemd/system/svoted.service.d
             printf '[Service]\nEnvironmentFile=-/etc/default/svoted\n' \
               > /etc/systemd/system/svoted.service.d/10-envfile.conf
@@ -233,6 +254,8 @@ jobs:
       DNS_PREFIX: ${{ needs.resolve-environment.outputs.dns_prefix }}
       RELEASE_BASE_URL: ${{ needs.resolve-environment.outputs.release_base_url }}
       SENTRY_ENVIRONMENT: ${{ inputs.target_environment }}
+      SVOTE_LWD_URLS: ${{ needs.resolve-environment.outputs.lwd_urls }}
+      SVOTE_ZCASH_NETWORK: ${{ needs.resolve-environment.outputs.zcash_network }}
     steps:
       - name: Deploy to explorer Droplet
         uses: appleboy/ssh-action@v1.0.3
@@ -240,13 +263,17 @@ jobs:
           host: ${{ secrets.EXPLORER_HOST || vars.EXPLORER_HOST || format('{0}explorer.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: SENTRY_DSN,SENTRY_ENVIRONMENT,TAG,CHAIN_ID,DNS_PREFIX,DOMAIN,RELEASE_BASE_URL
+          envs: SENTRY_DSN,SENTRY_ENVIRONMENT,SVOTE_LWD_URLS,SVOTE_ZCASH_NETWORK,TAG,CHAIN_ID,DNS_PREFIX,DOMAIN,RELEASE_BASE_URL
           script: |
             set -euo pipefail
             sed -i '/^SENTRY_DSN=/d' /etc/default/svoted
             echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
             sed -i '/^SENTRY_ENVIRONMENT=/d' /etc/default/svoted
             echo "SENTRY_ENVIRONMENT=$SENTRY_ENVIRONMENT" >> /etc/default/svoted
+            sed -i '/^SVOTE_LWD_URLS=/d' /etc/default/svoted
+            printf 'SVOTE_LWD_URLS=%s\n' "$SVOTE_LWD_URLS" >> /etc/default/svoted
+            sed -i '/^SVOTE_ZCASH_NETWORK=/d' /etc/default/svoted
+            printf 'SVOTE_ZCASH_NETWORK=%s\n' "$SVOTE_ZCASH_NETWORK" >> /etc/default/svoted
             mkdir -p /etc/systemd/system/svoted.service.d
             printf '[Service]\nEnvironmentFile=-/etc/default/svoted\n' \
               > /etc/systemd/system/svoted.service.d/10-envfile.conf
@@ -326,6 +353,8 @@ jobs:
     env:
       RELEASE_BASE_URL: ${{ needs.resolve-environment.outputs.release_base_url }}
       SENTRY_ENVIRONMENT: ${{ inputs.target_environment }}
+      SVOTE_LWD_URLS: ${{ needs.resolve-environment.outputs.lwd_urls }}
+      SVOTE_ZCASH_NETWORK: ${{ needs.resolve-environment.outputs.zcash_network }}
     steps:
       - name: Deploy to snapshot Droplet
         uses: appleboy/ssh-action@v1.0.3
@@ -333,13 +362,17 @@ jobs:
           host: ${{ secrets.SNAPSHOT_HOST || vars.SNAPSHOT_HOST || format('{0}snapshots.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: SENTRY_DSN,SENTRY_ENVIRONMENT,TAG,RELEASE_BASE_URL
+          envs: SENTRY_DSN,SENTRY_ENVIRONMENT,SVOTE_LWD_URLS,SVOTE_ZCASH_NETWORK,TAG,RELEASE_BASE_URL
           script: |
             set -euo pipefail
             sed -i '/^SENTRY_DSN=/d' /etc/default/svoted
             echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
             sed -i '/^SENTRY_ENVIRONMENT=/d' /etc/default/svoted
             echo "SENTRY_ENVIRONMENT=$SENTRY_ENVIRONMENT" >> /etc/default/svoted
+            sed -i '/^SVOTE_LWD_URLS=/d' /etc/default/svoted
+            printf 'SVOTE_LWD_URLS=%s\n' "$SVOTE_LWD_URLS" >> /etc/default/svoted
+            sed -i '/^SVOTE_ZCASH_NETWORK=/d' /etc/default/svoted
+            printf 'SVOTE_ZCASH_NETWORK=%s\n' "$SVOTE_ZCASH_NETWORK" >> /etc/default/svoted
             mkdir -p /etc/systemd/system/svoted.service.d
             printf '[Service]\nEnvironmentFile=-/etc/default/svoted\n' \
               > /etc/systemd/system/svoted.service.d/10-envfile.conf

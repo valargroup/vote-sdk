@@ -8,7 +8,9 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
-- Use Ironwood commitment and nullifier roots with the Ironwood voting proof verifier.
+- Use versioned Ironwood commitment and nullifier roots with the Ironwood
+  voting proof verifier, a dedicated coordinated upgrade plan, and explicit
+  post-NU6.3 lightwalletd sources on managed nodes.
 
 ## v1.0.3
 

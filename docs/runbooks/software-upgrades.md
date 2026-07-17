@@ -44,6 +44,12 @@ curl -fsSL https://shielded-vote.nyc3.digitaloceanspaces.com/update_chain.sh | s
   --mode migrate --plan-name <plan-name> --tag <tag>
 ```
 
+## Ironwood verifier cutover
+
+Use the `ironwood-v1` plan for the Ironwood verifier binary. The earlier `v1`
+plan has already been applied and must not be reused. The Ironwood handler does
+not migrate stores; it coordinates the consensus-sensitive verifier switch.
+
 ## Scheduling a state-breaking upgrade
 
 To schedule the halt height, a current coordinator proposes a coordinator

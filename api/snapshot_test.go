@@ -134,17 +134,21 @@ func TestValidateLwdTreeStateRejectsMismatch(t *testing.T) {
 	}
 }
 
-func TestFetchNullifierRootRequiresIronwoodPool(t *testing.T) {
+func TestFetchNullifierRootRequiresIronwoodDataset(t *testing.T) {
 	const height = uint64(3_500_000)
 	tests := []struct {
-		name     string
-		pool     string
-		omitPool bool
-		wantErr  string
+		name               string
+		pool               string
+		omitPool           bool
+		datasetVersion     uint32
+		omitDatasetVersion bool
+		wantErr            string
 	}{
-		{name: "ironwood", pool: "ironwood"},
-		{name: "orchard", pool: "orchard", wantErr: `nullifier pool "orchard" is not Ironwood`},
-		{name: "missing", omitPool: true, wantErr: `nullifier pool "" is not Ironwood`},
+		{name: "ironwood", pool: "ironwood", datasetVersion: 1},
+		{name: "orchard", pool: "orchard", datasetVersion: 1, wantErr: `nullifier pool "orchard" is not Ironwood`},
+		{name: "missing pool", omitPool: true, datasetVersion: 1, wantErr: `nullifier pool "" is not Ironwood`},
+		{name: "wrong version", pool: "ironwood", datasetVersion: 2, wantErr: "dataset version 2 is not supported; expected 1"},
+		{name: "missing version", pool: "ironwood", omitDatasetVersion: true, wantErr: "missing dataset_version"},
 	}
 
 	for _, test := range tests {
@@ -156,6 +160,9 @@ func TestFetchNullifierRootRequiresIronwoodPool(t *testing.T) {
 				}
 				if !test.omitPool {
 					response["nullifier_pool"] = test.pool
+				}
+				if !test.omitDatasetVersion {
+					response["dataset_version"] = test.datasetVersion
 				}
 				if err := json.NewEncoder(w).Encode(response); err != nil {
 					t.Errorf("encode response: %v", err)

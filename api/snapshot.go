@@ -21,6 +21,11 @@ import (
 	"google.golang.org/protobuf/encoding/protowire"
 )
 
+const (
+	ironwoodNullifierPool     = "ironwood"
+	ironwoodPIRDatasetVersion = uint32(1)
+)
+
 // DefaultLightwalletdURLs is the fallback list of public lightwalletd servers.
 // They are tried in order; the first successful response wins.
 var DefaultLightwalletdURLs = []string{
@@ -194,15 +199,26 @@ func fetchNullifierRoot(ctx context.Context, pirURL string, expectedHeight uint6
 	}
 
 	var result struct {
-		Root29        string  `json:"root29"`
-		Height        *uint64 `json:"height"`
-		NullifierPool string  `json:"nullifier_pool"`
+		Root29         string  `json:"root29"`
+		Height         *uint64 `json:"height"`
+		NullifierPool  string  `json:"nullifier_pool"`
+		DatasetVersion *uint32 `json:"dataset_version"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decode PIR response: %w", err)
 	}
-	if result.NullifierPool != "ironwood" {
+	if result.NullifierPool != ironwoodNullifierPool {
 		return nil, fmt.Errorf("PIR service nullifier pool %q is not Ironwood", result.NullifierPool)
+	}
+	if result.DatasetVersion == nil {
+		return nil, fmt.Errorf("PIR service response is missing dataset_version")
+	}
+	if *result.DatasetVersion != ironwoodPIRDatasetVersion {
+		return nil, fmt.Errorf(
+			"PIR service dataset version %d is not supported; expected %d",
+			*result.DatasetVersion,
+			ironwoodPIRDatasetVersion,
+		)
 	}
 
 	// Validate that the PIR tree height matches the requested snapshot height.
