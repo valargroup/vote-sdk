@@ -10,9 +10,9 @@ shielded-vote-circuits = { path = "../circuits" }
 
 orchard = { version = "=0.15.0", features = ["unstable-voting-circuits"] }
 voting-circuits = "=0.9.0-rc.2"
-vote-commitment-tree = { version = "=0.3.2", git = "https://github.com/valargroup/zcash_voting", rev = "fd710f4b250f6ef0a68cf48b82a0687cf18a4721" }
-vote-commitment-tree-client = { version = "=0.5.2", git = "https://github.com/valargroup/zcash_voting", rev = "fd710f4b250f6ef0a68cf48b82a0687cf18a4721", features = ["http"] }
-zcash_voting = { version = "=1.0.0", git = "https://github.com/valargroup/zcash_voting", rev = "fd710f4b250f6ef0a68cf48b82a0687cf18a4721" }
+vote-commitment-tree = { version = "=0.3.2", git = "https://github.com/valargroup/zcash_voting", rev = "e1cb0b24631832b441b3285463fa569c20dbccc6" }
+vote-commitment-tree-client = { version = "=0.5.2", git = "https://github.com/valargroup/zcash_voting", rev = "e1cb0b24631832b441b3285463fa569c20dbccc6", features = ["http"] }
+zcash_voting = { version = "=1.0.0", git = "https://github.com/valargroup/zcash_voting", rev = "e1cb0b24631832b441b3285463fa569c20dbccc6" }
 
 # HTTP and JSON
 reqwest = { version = "0.12", features = ["blocking", "json"] }
@@ -48,5 +48,13 @@ incrementalmerkletree = "0.8"
 [dev-dependencies]
 rand = "0.8"
 rand_chacha = "0.3"
+
+[patch.crates-io]
+# Temporary until these PIR release candidates are published.
+pir-client = { git = "https://github.com/valargroup/vote-nullifier-pir", rev = "c8f70cb26a3c55e570fe9024cae3170e78f87bf8" }
+pir-types = { git = "https://github.com/valargroup/vote-nullifier-pir", rev = "c8f70cb26a3c55e570fe9024cae3170e78f87bf8" }
+
+[patch."https://github.com/valargroup/vote-nullifier-pir"]
+imt-tree = "=0.2.0"
 
 [workspace]

@@ -63,7 +63,6 @@ jobs:
           RELEASE_BASE_URL: ${{ vars.RELEASE_BASE_URL }}
           VOTING_CONFIG_URL: ${{ vars.VOTING_CONFIG_URL }}
           SVOTE_LWD_URLS: ${{ vars.SVOTE_LWD_URLS }}
-          CONFIGURED_ZCASH_NETWORK: ${{ vars.SVOTE_ZCASH_NETWORK }}
         run: |
           set -euo pipefail
           if [ -z "${SVOTE_LWD_URLS//[[:space:],]/}" ]; then
@@ -90,10 +89,6 @@ jobs:
               exit 1
               ;;
           esac
-          if [ -n "$CONFIGURED_ZCASH_NETWORK" ] && [ "$CONFIGURED_ZCASH_NETWORK" != "$zcash_network" ]; then
-            echo "ERROR: ${TARGET_ENVIRONMENT} requires Zcash network '${zcash_network}', not '${CONFIGURED_ZCASH_NETWORK}'."
-            exit 1
-          fi
           do_spaces_bucket="${DO_SPACES_BUCKET:-shielded-vote}"
           do_spaces_region="${DO_SPACES_REGION:-nyc3}"
           do_spaces_base="${DO_SPACES_BASE:-https://${do_spaces_bucket}.${do_spaces_region}.digitaloceanspaces.com}"

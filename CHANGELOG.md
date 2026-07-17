@@ -8,9 +8,9 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
-- Use network-bound Ironwood commitment and nullifier roots with the Ironwood
-  voting proof verifier. Staging uses Zcash Testnet, production uses Mainnet,
-  and release candidates no longer replace stable release pointers.
+- Use Ironwood commitment and nullifier roots with the Ironwood voting proof
+  verifier. Staging uses Zcash Testnet, production uses Mainnet, and release
+  candidates no longer replace stable release pointers.
 
 ## v1.0.3
 

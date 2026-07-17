@@ -661,7 +661,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "shielded-vote-circuits",
- "vote-commitment-tree 0.3.2 (git+https://github.com/valargroup/zcash_voting?rev=fd710f4b250f6ef0a68cf48b82a0687cf18a4721)",
+ "vote-commitment-tree 0.3.2 (git+https://github.com/valargroup/zcash_voting?rev=e1cb0b24631832b441b3285463fa569c20dbccc6)",
  "vote-commitment-tree-client",
  "voting-circuits",
  "zcash_voting",
@@ -1978,9 +1978,8 @@ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
 name = "pir-client"
-version = "0.4.0-rc.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d29df6d641712023d496e58151fe3e4e9513d0c7e91d09dc759bce48cd65fd48"
+version = "0.4.0-rc.2"
+source = "git+https://github.com/valargroup/vote-nullifier-pir?rev=c8f70cb26a3c55e570fe9024cae3170e78f87bf8#c8f70cb26a3c55e570fe9024cae3170e78f87bf8"
 dependencies = [
  "anyhow",
  "ff",
@@ -1997,9 +1996,8 @@ dependencies = [
 
 [[package]]
 name = "pir-types"
-version = "0.3.0-rc.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0194b40ba1f9595e6b301de84d12511f60c472b53b0df106a015bc251afe715f"
+version = "0.3.0-rc.2"
+source = "git+https://github.com/valargroup/vote-nullifier-pir?rev=c8f70cb26a3c55e570fe9024cae3170e78f87bf8#c8f70cb26a3c55e570fe9024cae3170e78f87bf8"
 dependencies = [
  "anyhow",
  "ff",
@@ -3395,7 +3393,7 @@ dependencies = [
 [[package]]
 name = "vote-commitment-tree"
 version = "0.3.2"
-source = "git+https://github.com/valargroup/zcash_voting?rev=fd710f4b250f6ef0a68cf48b82a0687cf18a4721#fd710f4b250f6ef0a68cf48b82a0687cf18a4721"
+source = "git+https://github.com/valargroup/zcash_voting?rev=e1cb0b24631832b441b3285463fa569c20dbccc6#e1cb0b24631832b441b3285463fa569c20dbccc6"
 dependencies = [
  "anyhow",
  "ff",
@@ -3411,7 +3409,7 @@ dependencies = [
 [[package]]
 name = "vote-commitment-tree-client"
 version = "0.5.2"
-source = "git+https://github.com/valargroup/zcash_voting?rev=fd710f4b250f6ef0a68cf48b82a0687cf18a4721#fd710f4b250f6ef0a68cf48b82a0687cf18a4721"
+source = "git+https://github.com/valargroup/zcash_voting?rev=e1cb0b24631832b441b3285463fa569c20dbccc6#e1cb0b24631832b441b3285463fa569c20dbccc6"
 dependencies = [
  "base64",
  "ff",
@@ -3420,7 +3418,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "vote-commitment-tree 0.3.2 (git+https://github.com/valargroup/zcash_voting?rev=fd710f4b250f6ef0a68cf48b82a0687cf18a4721)",
+ "vote-commitment-tree 0.3.2 (git+https://github.com/valargroup/zcash_voting?rev=e1cb0b24631832b441b3285463fa569c20dbccc6)",
 ]
 
 [[package]]
@@ -4090,7 +4088,7 @@ dependencies = [
 [[package]]
 name = "zcash_voting"
 version = "1.0.0"
-source = "git+https://github.com/valargroup/zcash_voting?rev=fd710f4b250f6ef0a68cf48b82a0687cf18a4721#fd710f4b250f6ef0a68cf48b82a0687cf18a4721"
+source = "git+https://github.com/valargroup/zcash_voting?rev=e1cb0b24631832b441b3285463fa569c20dbccc6#e1cb0b24631832b441b3285463fa569c20dbccc6"
 dependencies = [
  "anyhow",
  "base64",
@@ -4130,7 +4128,7 @@ dependencies = [
  "uuid",
  "valar-spiral-rs",
  "valar-ypir",
- "vote-commitment-tree 0.3.2 (git+https://github.com/valargroup/zcash_voting?rev=fd710f4b250f6ef0a68cf48b82a0687cf18a4721)",
+ "vote-commitment-tree 0.3.2 (git+https://github.com/valargroup/zcash_voting?rev=e1cb0b24631832b441b3285463fa569c20dbccc6)",
  "vote-commitment-tree-client",
  "voting-circuits",
  "zcash_client_backend",

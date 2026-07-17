@@ -69,6 +69,18 @@ func TestFetchSnapshotDataRequiresZcashNetwork(t *testing.T) {
 	}
 }
 
+func TestValidateSnapshotNetworks(t *testing.T) {
+	if err := validateSnapshotNetworks("test", "test"); err != nil {
+		t.Fatalf("matching networks returned error: %v", err)
+	}
+	for _, pirNetwork := range []string{"main", ""} {
+		err := validateSnapshotNetworks(pirNetwork, "test")
+		if err == nil || !strings.Contains(err.Error(), "does not match lightwalletd network") {
+			t.Fatalf("validateSnapshotNetworks(%q, test) error = %v", pirNetwork, err)
+		}
+	}
+}
+
 func TestDecodeLwdTreeStateSelectsIronwoodTree(t *testing.T) {
 	var encoded []byte
 	encoded = protowire.AppendTag(encoded, 1, protowire.BytesType)
@@ -150,17 +162,15 @@ func TestFetchNullifierRootRequiresIronwoodDataset(t *testing.T) {
 		datasetVersion     uint32
 		omitDatasetVersion bool
 		network            string
-		omitNetwork        bool
-		expectedNetwork    string
+		wantNetwork        string
 		wantErr            string
 	}{
-		{name: "testnet", pool: "ironwood", datasetVersion: 2, network: "test", expectedNetwork: "test"},
-		{name: "wrong network", pool: "ironwood", datasetVersion: 2, network: "main", expectedNetwork: "test", wantErr: `network "main" does not match expected network "test"`},
-		{name: "missing network", pool: "ironwood", datasetVersion: 2, omitNetwork: true, expectedNetwork: "test", wantErr: "missing zcash_network"},
-		{name: "orchard", pool: "orchard", datasetVersion: 2, network: "test", expectedNetwork: "test", wantErr: `nullifier pool "orchard" is not Ironwood`},
-		{name: "missing pool", omitPool: true, datasetVersion: 2, network: "test", expectedNetwork: "test", wantErr: `nullifier pool "" is not Ironwood`},
-		{name: "wrong version", pool: "ironwood", datasetVersion: 1, network: "test", expectedNetwork: "test", wantErr: "dataset version 1 is not supported; expected 2"},
-		{name: "missing version", pool: "ironwood", omitDatasetVersion: true, network: "test", expectedNetwork: "test", wantErr: "missing dataset_version"},
+		{name: "testnet", pool: "ironwood", datasetVersion: 1, network: "test", wantNetwork: "test"},
+		{name: "mainnet", pool: "ironwood", datasetVersion: 1, network: "main", wantNetwork: "main"},
+		{name: "orchard", pool: "orchard", datasetVersion: 1, network: "test", wantErr: `nullifier pool "orchard" is not Ironwood`},
+		{name: "missing pool", omitPool: true, datasetVersion: 1, network: "test", wantErr: `nullifier pool "" is not Ironwood`},
+		{name: "wrong version", pool: "ironwood", datasetVersion: 2, network: "test", wantErr: "dataset version 2 is not supported; expected 1"},
+		{name: "missing version", pool: "ironwood", omitDatasetVersion: true, network: "test", wantErr: "missing dataset_version"},
 	}
 
 	for _, test := range tests {
@@ -176,9 +186,7 @@ func TestFetchNullifierRootRequiresIronwoodDataset(t *testing.T) {
 				if !test.omitDatasetVersion {
 					response["dataset_version"] = test.datasetVersion
 				}
-				if !test.omitNetwork {
-					response["zcash_network"] = test.network
-				}
+				response["zcash_network"] = test.network
 				if err := json.NewEncoder(w).Encode(response); err != nil {
 					t.Errorf("encode response: %v", err)
 				}
@@ -189,7 +197,6 @@ func TestFetchNullifierRootRequiresIronwoodDataset(t *testing.T) {
 				context.Background(),
 				server.URL,
 				height,
-				test.expectedNetwork,
 			)
 			if test.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), test.wantErr) {
@@ -200,8 +207,11 @@ func TestFetchNullifierRootRequiresIronwoodDataset(t *testing.T) {
 			if err != nil {
 				t.Fatalf("fetchNullifierRoot returned error: %v", err)
 			}
-			if len(root) != 32 {
-				t.Fatalf("root length = %d, want 32", len(root))
+			if len(root.value) != 32 {
+				t.Fatalf("root length = %d, want 32", len(root.value))
+			}
+			if root.network != test.wantNetwork {
+				t.Fatalf("PIR network = %q, want %q", root.network, test.wantNetwork)
 			}
 		})
 	}

@@ -79,7 +79,6 @@ jobs:
           VOTING_CONFIG_URL: ${{ vars.VOTING_CONFIG_URL }}
           VERIFY_PUBLIC_ENDPOINTS: ${{ vars.VERIFY_PUBLIC_ENDPOINTS }}
           SVOTE_LWD_URLS: ${{ vars.SVOTE_LWD_URLS }}
-          CONFIGURED_ZCASH_NETWORK: ${{ vars.SVOTE_ZCASH_NETWORK }}
         run: |
           set -euo pipefail
           if [ -z "${SVOTE_LWD_URLS//[[:space:],]/}" ]; then
@@ -106,10 +105,6 @@ jobs:
               exit 1
               ;;
           esac
-          if [ -n "$CONFIGURED_ZCASH_NETWORK" ] && [ "$CONFIGURED_ZCASH_NETWORK" != "$zcash_network" ]; then
-            echo "ERROR: ${TARGET_ENVIRONMENT} requires Zcash network '${zcash_network}', not '${CONFIGURED_ZCASH_NETWORK}'."
-            exit 1
-          fi
           chain_id="${CHAIN_ID:-$default_chain_id}"
           dns_prefix="${DNS_PREFIX:-$default_dns_prefix}"
           has_secondary="${HAS_SECONDARY:-$default_has_secondary}"
