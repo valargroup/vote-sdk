@@ -47,6 +47,7 @@ function parsePositiveHeight(value: unknown): number | null {
 function PublishedSnapshotCard() {
   const {
     precomputedBaseURL,
+    zcashNetwork,
   } = useUIConfig();
   const [servedHeight, setServedHeight] = useState<number | null>(null);
   const [activeRoundHeights, setActiveRoundHeights] = useState<number[]>([]);
@@ -99,7 +100,7 @@ function PublishedSnapshotCard() {
 
   const validateManifest = useCallback(async (heightOverride?: number | null) => {
     const manifestHeight = heightOverride === undefined ? parsedHeight : heightOverride;
-    if (!precomputedBase || manifestHeight == null) {
+    if (!precomputedBase || !zcashNetwork || manifestHeight == null) {
       setValidation(null);
       return;
     }
@@ -107,19 +108,20 @@ function PublishedSnapshotCard() {
     try {
       const result = await chainApi.validatePublishedSnapshotManifest(
         precomputedBase,
+        zcashNetwork,
         manifestHeight
       );
       setValidation(result);
     } finally {
       setLoading(false);
     }
-  }, [precomputedBase, parsedHeight]);
+  }, [precomputedBase, zcashNetwork, parsedHeight]);
 
   useEffect(() => {
-    if (precomputedBase && parsedHeight != null) {
+    if (precomputedBase && zcashNetwork && parsedHeight != null) {
       validateManifest(parsedHeight);
     }
-  }, [precomputedBase, parsedHeight, validateManifest]);
+  }, [precomputedBase, zcashNetwork, parsedHeight, validateManifest]);
 
   useEffect(() => {
     refreshSnapshotHeight();
@@ -129,8 +131,8 @@ function PublishedSnapshotCard() {
   const totalBytes = manifest
     ? Object.values(manifest.files ?? {}).reduce((sum, f) => sum + f.size, 0)
     : 0;
-  const manifestUrl = precomputedBase && parsedHeight != null
-    ? chainApi.getPublishedSnapshotManifestUrl(precomputedBase, parsedHeight)
+  const manifestUrl = precomputedBase && zcashNetwork && parsedHeight != null
+    ? chainApi.getPublishedSnapshotManifestUrl(precomputedBase, zcashNetwork, parsedHeight)
     : null;
 
   return (
@@ -158,7 +160,7 @@ function PublishedSnapshotCard() {
         <p className="text-xs text-text-muted">Loading snapshot height…</p>
       )}
 
-      {heightLoaded && !precomputedBase && (
+      {heightLoaded && (!precomputedBase || !zcashNetwork) && (
         <div className="flex items-start gap-2 px-3 py-2.5 bg-warning/10 border border-warning/30 rounded-lg">
           <AlertTriangle size={14} className="text-warning shrink-0 mt-0.5" />
           <div>
@@ -166,9 +168,9 @@ function PublishedSnapshotCard() {
               No published snapshot declared
             </p>
             <p className="text-[10px] text-text-muted mt-0.5">
-              This svoted has no{" "}
-              <code className="font-mono">SVOTE_PRECOMPUTED_BASE_URL</code>{" "}
-              resolved.{" "}
+              This svoted has no published snapshot base or Zcash network
+              resolved. Set <code className="font-mono">SVOTE_PRECOMPUTED_BASE_URL</code>{" "}
+              and <code className="font-mono">SVOTE_ZCASH_NETWORK</code>.{" "}
               PIR servers cannot bootstrap from CDN until a snapshot height and
               bucket are available.
             </p>
@@ -176,7 +178,7 @@ function PublishedSnapshotCard() {
         </div>
       )}
 
-      {precomputedBase && (
+      {precomputedBase && zcashNetwork && (
         <div className="space-y-3">
           <div>
             <label className="text-[11px] text-text-secondary">
@@ -243,10 +245,10 @@ function PublishedSnapshotCard() {
               <p className="text-[10px] text-text-muted">CDN base</p>
               <p
                 className="text-xs text-text-primary font-mono truncate"
-                title={`${precomputedBase}${chainApi.PIR_SNAPSHOTS_PATH}`}
+                title={`${precomputedBase}${chainApi.PIR_SNAPSHOTS_PATH}/${zcashNetwork}`}
               >
                 {precomputedBase}
-                <span className="text-text-muted">{chainApi.PIR_SNAPSHOTS_PATH}</span>
+                <span className="text-text-muted">{chainApi.PIR_SNAPSHOTS_PATH}/{zcashNetwork}</span>
               </p>
             </div>
             {manifest && (

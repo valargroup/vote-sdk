@@ -785,6 +785,7 @@ export async function prepareSnapshot(height: number): Promise<{ status: string;
 // -- UI runtime config --
 
 export type UIMode = "dev" | "prod";
+export type ZcashNetwork = "main" | "test";
 
 export interface UIConfig {
   mode: UIMode;
@@ -792,12 +793,14 @@ export interface UIConfig {
   /**
    * Bucket origin this svoted's PIR siblings fetch snapshots from
    * (no trailing slash). Resolved server-side from SVOTE_PRECOMPUTED_BASE_URL
-   * with a production-bucket default. Compose with {@link PIR_SNAPSHOTS_PATH}.
+   * with a production-bucket default.
    *
    * Optional in the type so an older svoted that doesn't yet expose it
    * leaves the UI rendering an "unknown bucket" fallback rather than crashing.
    */
   precomputed_base_url?: string;
+  /** Network-scoped PIR snapshot directory selected by svoted. */
+  zcash_network?: ZcashNetwork;
 }
 
 /**
@@ -822,6 +825,8 @@ export interface PublishedSnapshotFile {
 
 export interface PublishedSnapshotManifest {
   schema_version: number;
+  nullifier_pool: string;
+  dataset_version: number;
   height: number;
   created_at: string;
   nf_server_sha256?: string;
@@ -868,20 +873,22 @@ function canonicalPublishedSnapshotBase(precomputedBase: string): string {
 
 export function getPublishedSnapshotManifestUrl(
   precomputedBase: string,
+  zcashNetwork: ZcashNetwork,
   height: number
 ): string {
   const base = canonicalPublishedSnapshotBase(precomputedBase);
-  return `${base}${PIR_SNAPSHOTS_PATH}/${height}/manifest.json`;
+  return `${base}${PIR_SNAPSHOTS_PATH}/${zcashNetwork}/${height}/manifest.json`;
 }
 
 function getPublishedSnapshotFetchUrl(
   precomputedBase: string,
+  zcashNetwork: ZcashNetwork,
   height: number
 ): string {
   if (import.meta.env.DEV) {
-    return `${PIR_SNAPSHOTS_PATH.replace(/^\/snapshots/, "/precomputed-snapshots/snapshots")}/${height}/manifest.json`;
+    return `${PIR_SNAPSHOTS_PATH.replace(/^\/snapshots/, "/precomputed-snapshots/snapshots")}/${zcashNetwork}/${height}/manifest.json`;
   }
-  return getPublishedSnapshotManifestUrl(precomputedBase, height);
+  return getPublishedSnapshotManifestUrl(precomputedBase, zcashNetwork, height);
 }
 
 export function validatePublishedSnapshotManifestShape(
@@ -892,8 +899,14 @@ export function validatePublishedSnapshotManifestShape(
   if (!isRecord(manifest)) {
     return ["manifest must be an object"];
   }
-  if (manifest.schema_version !== 1) {
-    issues.push(`schema_version must be 1, got ${String(manifest.schema_version)}`);
+  if (manifest.schema_version !== 2) {
+    issues.push(`schema_version must be 2, got ${String(manifest.schema_version)}`);
+  }
+  if (manifest.nullifier_pool !== "ironwood") {
+    issues.push(`nullifier_pool must be ironwood, got ${String(manifest.nullifier_pool)}`);
+  }
+  if (manifest.dataset_version !== 1) {
+    issues.push(`dataset_version must be 1, got ${String(manifest.dataset_version)}`);
   }
   if (manifest.height !== expectedHeight) {
     issues.push(`manifest height ${manifest.height} does not match requested height ${expectedHeight}`);
@@ -923,29 +936,29 @@ export function validatePublishedSnapshotManifestShape(
  * The manifest is uploaded last by the publisher CI, so its presence implies
  * a complete snapshot directory.
  *
- * `precomputedBase` is the bucket-level base URL exposed by svoted via
- * /api/ui-config (it's a per-deployment service config, not a wallet-facing
- * one). The PIR-specific subpath is appended here so callers don't have to
- * hard-code it.
+ * `precomputedBase` and `zcashNetwork` are exposed by svoted via
+ * /api/ui-config. The PIR-specific subpath is appended here.
  */
 export async function getPublishedSnapshotManifest(
   precomputedBase: string,
+  zcashNetwork: ZcashNetwork,
   height: number
 ): Promise<PublishedSnapshotManifest> {
-  const url = getPublishedSnapshotFetchUrl(precomputedBase, height);
+  const url = getPublishedSnapshotFetchUrl(precomputedBase, zcashNetwork, height);
   const resp = await fetch(url, { cache: "no-cache" });
   if (!resp.ok) {
-    throw new Error(`HTTP ${resp.status} fetching ${getPublishedSnapshotManifestUrl(precomputedBase, height)}`);
+    throw new Error(`HTTP ${resp.status} fetching ${getPublishedSnapshotManifestUrl(precomputedBase, zcashNetwork, height)}`);
   }
   return resp.json();
 }
 
 export async function validatePublishedSnapshotManifest(
   precomputedBase: string,
+  zcashNetwork: ZcashNetwork,
   height: number
 ): Promise<PublishedSnapshotValidationResult> {
-  const manifestUrl = getPublishedSnapshotManifestUrl(precomputedBase, height);
-  const fetchUrl = getPublishedSnapshotFetchUrl(precomputedBase, height);
+  const manifestUrl = getPublishedSnapshotManifestUrl(precomputedBase, zcashNetwork, height);
+  const fetchUrl = getPublishedSnapshotFetchUrl(precomputedBase, zcashNetwork, height);
   try {
     const resp = await fetch(fetchUrl, { cache: "no-cache" });
     if (resp.status === 404) {
@@ -1000,9 +1013,8 @@ export interface VotingConfig {
 }
 
 /**
- * Subpath under the service-level precomputed_base_url where PIR snapshots
- * live. The base itself is per-deployment (svoted exposes it via
- * /api/ui-config); the path is a fleet-wide convention.
+ * Subpath under the service-level precomputed_base_url. Snapshot directories
+ * below it are scoped by Zcash network and height.
  */
 export const PIR_SNAPSHOTS_PATH = "/snapshots";
 

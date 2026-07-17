@@ -15,6 +15,8 @@ export interface UIConfigContextValue {
    * exposing it.
    */
   precomputedBaseURL: string | null;
+  /** Zcash network used for the network-scoped PIR snapshot path. */
+  zcashNetwork: chainApi.ZcashNetwork | null;
   publishedConfig: chainApi.VotingConfig | null;
   uiConfigLoaded: boolean;
   publishedConfigLoaded: boolean;
@@ -25,6 +27,7 @@ export const DEFAULT_UI_CONFIG: UIConfigContextValue = {
   uiMode: "prod",
   devPIRControls: false,
   precomputedBaseURL: null,
+  zcashNetwork: null,
   publishedConfig: null,
   uiConfigLoaded: false,
   publishedConfigLoaded: false,

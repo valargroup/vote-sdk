@@ -23,7 +23,9 @@ const files = {
 
 function manifest(patch: Partial<PublishedSnapshotManifest> = {}): PublishedSnapshotManifest {
   return {
-    schema_version: 1,
+    schema_version: 2,
+    nullifier_pool: "ironwood",
+    dataset_version: 1,
     height: 2_800_000,
     created_at: "2026-05-14T00:00:00Z",
     files,
@@ -86,22 +88,25 @@ describe("published snapshot validation", () => {
   it("builds canonical manifest URLs from the bucket base", () => {
     expect(getPublishedSnapshotManifestUrl(
       "https://shielded-vote.nyc3.digitaloceanspaces.com/",
+      "test",
       2_800_000
-    )).toBe("https://shielded-vote.nyc3.cdn.digitaloceanspaces.com/snapshots/2800000/manifest.json");
+    )).toBe("https://shielded-vote.nyc3.cdn.digitaloceanspaces.com/snapshots/test/2800000/manifest.json");
   });
 
   it("maps any DO Spaces bucket origin to its CDN hostname", () => {
     expect(getPublishedSnapshotManifestUrl(
       "https://custom-bucket.ams3.digitaloceanspaces.com",
+      "main",
       2_800_000
-    )).toBe("https://custom-bucket.ams3.cdn.digitaloceanspaces.com/snapshots/2800000/manifest.json");
+    )).toBe("https://custom-bucket.ams3.cdn.digitaloceanspaces.com/snapshots/main/2800000/manifest.json");
   });
 
   it("leaves non-production precomputed bases unchanged", () => {
     expect(getPublishedSnapshotManifestUrl(
       "https://staging.example.com",
+      "test",
       2_800_000
-    )).toBe("https://staging.example.com/snapshots/2800000/manifest.json");
+    )).toBe("https://staging.example.com/snapshots/test/2800000/manifest.json");
   });
 
   it("accepts a valid manifest for the requested height", () => {
@@ -116,11 +121,21 @@ describe("published snapshot validation", () => {
 
   it("rejects manifests with the wrong schema or height", () => {
     expect(validatePublishedSnapshotManifestShape(
-      manifest({ schema_version: 2, height: 2_800_010 }),
+      manifest({ schema_version: 1, height: 2_800_010 }),
       2_800_000
     )).toEqual([
-      "schema_version must be 1, got 2",
+      "schema_version must be 2, got 1",
       "manifest height 2800010 does not match requested height 2800000",
+    ]);
+  });
+
+  it("requires the Ironwood dataset", () => {
+    expect(validatePublishedSnapshotManifestShape(
+      manifest({ nullifier_pool: "orchard", dataset_version: 2 }),
+      2_800_000
+    )).toEqual([
+      "nullifier_pool must be ironwood, got orchard",
+      "dataset_version must be 1, got 2",
     ]);
   });
 

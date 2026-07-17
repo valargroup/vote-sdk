@@ -24,6 +24,7 @@ const (
 
 	uiModeEnv             = "SVOTE_UI_MODE"
 	precomputedBaseURLEnv = "SVOTE_PRECOMPUTED_BASE_URL"
+	zcashNetworkEnv       = "SVOTE_ZCASH_NETWORK"
 
 	// DefaultPrecomputedBaseURL is the DigitalOcean Spaces bucket where the
 	// publish-snapshot workflow uploads pre-computed PIR snapshots.
@@ -65,11 +66,12 @@ type UIConfigResponse struct {
 	// does not need to know the meaning of each mode value.
 	DevPIRControls bool `json:"dev_pir_controls"`
 	// PrecomputedBaseURL is the bucket origin that this svoted's PIR siblings
-	// fetch their snapshots from. The UI composes the manifest URL as
-	// "<base>/snapshots/<height>/manifest.json" using a shared subpath
-	// constant. Resolved at startup from SVOTE_PRECOMPUTED_BASE_URL with a
-	// production-bucket default. Has no trailing slash.
+	// fetch their snapshots from. Resolved at startup from
+	// SVOTE_PRECOMPUTED_BASE_URL with a production-bucket default. Has no
+	// trailing slash.
 	PrecomputedBaseURL string `json:"precomputed_base_url"`
+	// ZcashNetwork selects the network-scoped snapshot directory.
+	ZcashNetwork string `json:"zcash_network"`
 }
 
 // RegisterUIConfigRoutes registers GET /api/ui-config on the given router.
@@ -80,16 +82,23 @@ type UIConfigResponse struct {
 func RegisterUIConfigRoutes(router *mux.Router, logger log.Logger) {
 	mode := resolveUIMode()
 	precomputedBase := resolvePrecomputedBaseURL()
+	zcashNetwork := strings.ToLower(strings.TrimSpace(os.Getenv(zcashNetworkEnv)))
+	if zcashNetwork != "main" && zcashNetwork != "test" {
+		zcashNetwork = ""
+	}
 	resp := UIConfigResponse{
 		Mode:               mode,
 		DevPIRControls:     mode == UIModeDev,
 		PrecomputedBaseURL: precomputedBase,
+		ZcashNetwork:       zcashNetwork,
 	}
 	logger.Info("ui config resolved",
 		"mode", string(mode),
 		"precomputed_base_url", precomputedBase,
+		"zcash_network", zcashNetwork,
 		"mode_env", uiModeEnv,
 		"precomputed_env", precomputedBaseURLEnv,
+		"zcash_network_env", zcashNetworkEnv,
 	)
 
 	router.HandleFunc("/api/ui-config", func(w http.ResponseWriter, r *http.Request) {
