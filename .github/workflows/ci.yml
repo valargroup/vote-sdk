@@ -30,6 +30,8 @@ jobs:
             ${{ runner.os }}-lint-go-
       - name: Run go vet
         run: mise run lint
+      - name: Test release channels
+        run: scripts/test_release_channel.sh
 
   admin-ui:
     name: Admin UI Lint and Build

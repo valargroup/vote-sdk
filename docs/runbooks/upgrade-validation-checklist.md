@@ -16,13 +16,18 @@ Related runbooks: [software-upgrades.md](software-upgrades.md),
 ```bash
 # From vote-sdk repo root on the upgrade PR branch
 bash -n scripts/_chain_upgrade_common.sh scripts/update_chain.sh scripts/svoted-wrapper.sh join.sh
-sed -e "s/__RELEASE_TAG__/v0.11.0/g" \
-    -e "s|__GITHUB_REPO__|valargroup/vote-sdk|g" \
-    -e "s|__DO_BASE__|https://shielded-vote.nyc3.digitaloceanspaces.com|g" \
-    scripts/update_chain.sh.template | bash -n
-diff <(sed -e "s/__RELEASE_TAG__/latest/g" -e "s|__GITHUB_REPO__|valargroup/vote-sdk|g" \
-         -e "s|__DO_BASE__|https://shielded-vote.nyc3.digitaloceanspaces.com|g" \
-         scripts/update_chain.sh.template) scripts/update_chain.sh
+scripts/render-update-chain.sh \
+  v0.11.0 \
+  https://shielded-vote.nyc3.digitaloceanspaces.com \
+  https://shielded-vote.nyc3.digitaloceanspaces.com/scripts/upgrade/v0.11.0/_chain_upgrade_common.sh \
+  https://shielded-vote.nyc3.digitaloceanspaces.com/scripts/upgrade/v0.11.0/update_chain.sh \
+  | bash -n
+diff <(scripts/render-update-chain.sh \
+         latest \
+         https://shielded-vote.nyc3.digitaloceanspaces.com \
+         https://shielded-vote.nyc3.digitaloceanspaces.com/scripts/_chain_upgrade_common.sh \
+         https://shielded-vote.nyc3.digitaloceanspaces.com/update_chain.sh) \
+  scripts/update_chain.sh
 ```
 
 | Check | PASS | FAIL |
@@ -33,7 +38,7 @@ diff <(sed -e "s/__RELEASE_TAG__/latest/g" -e "s|__GITHUB_REPO__|valargroup/vote
 
 ### Release workflow publishes upgrade scripts
 
-Confirm [`.github/workflows/release.yml`](../../.github/workflows/release.yml) uploads:
+Confirm [`.github/workflows/release.yml`](../../.github/workflows/release.yml) uploads tag-scoped copies of:
 
 - `update_chain.sh` (from template + tag substitution)
 - `scripts/_chain_upgrade_common.sh`
@@ -42,7 +47,8 @@ Confirm [`.github/workflows/release.yml`](../../.github/workflows/release.yml) u
 | Check | PASS | FAIL |
 |-------|------|------|
 | `release.yml` `distribute` job uploads all three | | |
-| Verify step lists all three URLs | | |
+| Stable releases also update the shared copies | | |
+| RC releases leave shared copies unchanged | | |
 
 ### join.sh upgrade modes
 
@@ -78,7 +84,7 @@ grep -A2 'SVOTE_UPGRADE_MODE' join.sh | head -20
 ### Actions
 
 1. Merge upgrade PR to `main`.
-2. Cut release tag `v*` (move [CHANGELOG.md](../../CHANGELOG.md) Unreleased → dated section first).
+2. Cut `vN.N.N` or `vN.N.N-rc.N` (move [CHANGELOG.md](../../CHANGELOG.md) Unreleased → a dated section for a stable release).
 3. Wait for GitHub **Release** workflow to complete.
 
 ### Post-release artifact verification
@@ -92,12 +98,13 @@ scripts/verify_upgrade_release_artifacts.sh "$TAG" "$DO_BASE"
 | Check | PASS | FAIL |
 |-------|------|------|
 | GitHub Release exists for tag | | |
-| `version.txt` on Spaces equals tag | | |
-| `update_chain.sh` fetchable; `--help` works | | |
-| `_chain_upgrade_common.sh` fetchable | | |
-| `prepare-upgrade-artifacts.sh` fetchable | | |
+| Tag-scoped `update_chain.sh` fetchable; `--help` works | | |
+| Tag-scoped `_chain_upgrade_common.sh` fetchable | | |
+| Tag-scoped `prepare-upgrade-artifacts.sh` fetchable | | |
 | `shielded-vote-${TAG}-linux-amd64.tar.gz` + `.sha256` verify | | |
-| Published `update_chain.sh` default `--tag` matches tag (not `latest`) | | |
+| Tag-scoped `update_chain.sh` default `--tag` matches tag | | |
+| Stable only: `version.txt` and shared scripts match tag | | |
+| RC only: shared release pointers remain unchanged | | |
 
 **STOP — operator sign-off before provisioning isolated network.**
 
@@ -139,25 +146,22 @@ Publish a **local-only** voting-config JSON (file or temporary host) with
 
 ### Secondary (direct-mode join)
 
-```bash
-curl -fsSL "${DO_BASE}/join.sh" | bash -s -- \
-  --upgrade-mode direct \
-  --tls-mode skip \
-  --env prod \
-  -- \
-  # plus isolated overrides via env (see below)
-```
-
-Required isolation overrides (export before join):
+Export the isolated-network settings before running the tag-scoped join script.
+`SVOTE_RELEASE_VERSION` is what pins the binary; the script path alone does not.
 
 ```bash
 export SVOTE_CHAIN_ID=upgrade-test-1
 export VOTING_CONFIG_URL=https://<your-isolated-config>/dynamic-voting-config.json
 export SVOTE_ADMIN_URL=http://<primary-ip>:1317
 export SVOTE_DO_SPACES_BASE="${DO_BASE}"
-export SVOTE_RELEASE_VERSION="${TAG}"   # pin to validation release
-export SVOTE_SKIP_SNAPSHOT=1            # genesis bootstrap on isolated net
+export SVOTE_RELEASE_VERSION="${TAG}"
+export SVOTE_SKIP_SNAPSHOT=1
 export SVOTE_MONIKER=upgrade-test-secondary
+
+curl -fsSL "${DO_BASE}/scripts/join/${TAG}/join.sh" | bash -s -- \
+  --upgrade-mode direct \
+  --tls-mode skip \
+  --env prod
 ```
 
 Pre-flight isolation check on secondary **before** join:
@@ -191,9 +195,9 @@ different moniker. Confirms discoverability is not hard-coded to stage/prod.
 
 ## Stop Point 3 — Separate-network upgrade rehearsal
 
-**Prerequisite:** Chain binary includes a registered upgrade handler for the
-test plan name (see `app/upgrades.go`). Schedule only after handler exists in
-the running binary.
+**Prerequisite:** The target release includes a registered upgrade handler for
+the test plan name (see `app/upgrades.go`). The running binary schedules the
+plan; the target binary applies the handler after Cosmovisor switches.
 
 ### 3a — Admin approval (operator)
 
@@ -209,8 +213,9 @@ On **each** validator (primary if also validating, secondary):
 TAG=<release-tag>
 PLAN=<upgrade-plan-name>
 DO_BASE=https://shielded-vote.nyc3.digitaloceanspaces.com
+UPDATER_URL="${DO_BASE}/scripts/upgrade/${TAG}/update_chain.sh"
 
-curl -fsSL "${DO_BASE}/update_chain.sh" | sudo bash -s -- \
+curl -fsSL "${UPDATER_URL}" | sudo bash -s -- \
   --mode prepare \
   --plan-name "${PLAN}" \
   --tag "${TAG}"
@@ -219,7 +224,7 @@ curl -fsSL "${DO_BASE}/update_chain.sh" | sudo bash -s -- \
 Secondary still on **direct** mode — verify staging only first:
 
 ```bash
-curl -fsSL "${DO_BASE}/update_chain.sh" | sudo bash -s -- \
+curl -fsSL "${UPDATER_URL}" | sudo bash -s -- \
   --mode verify-prestage \
   --plan-name "${PLAN}" \
   --tag "${TAG}" \
@@ -230,7 +235,7 @@ Migrate secondary to Cosmovisor before halt (one-time):
 
 ```bash
 export SVOTE_ACK_SINGLE_SIGNER=1
-curl -fsSL "${DO_BASE}/update_chain.sh" | sudo bash -s -- \
+curl -fsSL "${UPDATER_URL}" | sudo bash -s -- \
   --mode migrate \
   --plan-name "${PLAN}" \
   --tag "${TAG}"
@@ -239,7 +244,7 @@ curl -fsSL "${DO_BASE}/update_chain.sh" | sudo bash -s -- \
 Full verify (service checks enabled):
 
 ```bash
-curl -fsSL "${DO_BASE}/update_chain.sh" | sudo bash -s -- \
+curl -fsSL "${UPDATER_URL}" | sudo bash -s -- \
   --mode verify-prestage \
   --plan-name "${PLAN}" \
   --tag "${TAG}"

@@ -23,7 +23,7 @@ import (
 
 const (
 	ironwoodNullifierPool     = "ironwood"
-	ironwoodPIRDatasetVersion = uint32(1)
+	ironwoodPIRDatasetVersion = uint32(2)
 )
 
 // DefaultLightwalletdURLs is the fallback list of public lightwalletd servers.
@@ -45,12 +45,11 @@ type SnapshotConfig struct {
 	// if empty.
 	LightwalletdURLs []string
 
-	// ZcashNetwork is the expected lightwalletd TreeState network ("main" or
-	// "test"). It defaults to "main".
+	// ZcashNetwork is the expected PIR and lightwalletd network ("main" or "test").
 	ZcashNetwork string
 }
 
-// SnapshotData holds the Zcash mainnet data needed for MsgCreateVotingSession.
+// SnapshotData holds the Zcash data needed for MsgCreateVotingSession.
 type SnapshotData struct {
 	NullifierIMTRoot  []byte // 32-byte Poseidon IMT root from the PIR service
 	SnapshotBlockhash []byte // 32-byte block hash at snapshot height
@@ -63,7 +62,14 @@ type SnapshotData struct {
 // The snapshot blockhash is the real block hash from lightwalletd.
 // The nc_root is computed via Rust FFI from the Ironwood frontier.
 func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (*SnapshotData, error) {
-	// Apply defaults.
+	expectedNetwork := strings.TrimSpace(cfg.ZcashNetwork)
+	if expectedNetwork == "" {
+		return nil, errors.New("Zcash network is not configured")
+	}
+	if expectedNetwork != "main" && expectedNetwork != "test" {
+		return nil, fmt.Errorf("unsupported Zcash network %q", expectedNetwork)
+	}
+
 	pirServiceURL, err := resolvePIRServiceURL(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("resolve PIR service URL: %w", err)
@@ -71,13 +77,6 @@ func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (
 	lwdURLs := cfg.LightwalletdURLs
 	if len(lwdURLs) == 0 {
 		lwdURLs = DefaultLightwalletdURLs
-	}
-	expectedNetwork := strings.TrimSpace(cfg.ZcashNetwork)
-	if expectedNetwork == "" {
-		expectedNetwork = "main"
-	}
-	if expectedNetwork != "main" && expectedNetwork != "test" {
-		return nil, fmt.Errorf("unsupported Zcash network %q", expectedNetwork)
 	}
 
 	// Fetch PIR root and tree state in parallel.
@@ -94,7 +93,7 @@ func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (
 	tsCh := make(chan tsResult, 1)
 
 	go func() {
-		root, err := fetchNullifierRoot(ctx, pirServiceURL, height)
+		root, err := fetchNullifierRoot(ctx, pirServiceURL, height, expectedNetwork)
 		pirCh <- pirResult{root, err}
 	}()
 	go func() {
@@ -161,7 +160,12 @@ var ErrPIRRebuilding = errors.New("PIR server is rebuilding")
 //
 // If the PIR server returns 503 during a snapshot rebuild, the error wraps
 // ErrPIRRebuilding so callers can detect this case.
-func fetchNullifierRoot(ctx context.Context, pirURL string, expectedHeight uint64) ([]byte, error) {
+func fetchNullifierRoot(
+	ctx context.Context,
+	pirURL string,
+	expectedHeight uint64,
+	expectedNetwork string,
+) ([]byte, error) {
 	url := strings.TrimRight(pirURL, "/") + "/root"
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -203,6 +207,7 @@ func fetchNullifierRoot(ctx context.Context, pirURL string, expectedHeight uint6
 		Height         *uint64 `json:"height"`
 		NullifierPool  string  `json:"nullifier_pool"`
 		DatasetVersion *uint32 `json:"dataset_version"`
+		ZcashNetwork   string  `json:"zcash_network"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decode PIR response: %w", err)
@@ -218,6 +223,16 @@ func fetchNullifierRoot(ctx context.Context, pirURL string, expectedHeight uint6
 			"PIR service dataset version %d is not supported; expected %d",
 			*result.DatasetVersion,
 			ironwoodPIRDatasetVersion,
+		)
+	}
+	if result.ZcashNetwork == "" {
+		return nil, errors.New("PIR service response is missing zcash_network")
+	}
+	if result.ZcashNetwork != expectedNetwork {
+		return nil, fmt.Errorf(
+			"PIR service network %q does not match expected network %q",
+			result.ZcashNetwork,
+			expectedNetwork,
 		)
 	}
 

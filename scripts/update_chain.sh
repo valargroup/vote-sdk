@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Updates an existing join.sh validator installation for coordinated x/upgrade halts.
-# Placeholders latest, valargroup/vote-sdk, and https://shielded-vote.nyc3.digitaloceanspaces.com are substituted at
-# publish time -- do not edit the published script by hand.
+# Placeholders are substituted at publish time. Do not edit the published script.
 #
 # Modes:
 #   prepare        Stage Cosmovisor binaries only; never stop the running validator.
@@ -20,6 +19,8 @@ set -euo pipefail
 readonly UPDATE_DEFAULT_RELEASE_TAG='latest'
 readonly UPDATE_DEFAULT_GITHUB_REPO='valargroup/vote-sdk'
 readonly UPDATE_DEFAULT_DO_BASE='https://shielded-vote.nyc3.digitaloceanspaces.com'
+readonly UPDATE_DEFAULT_COMMON_URL='https://shielded-vote.nyc3.digitaloceanspaces.com/scripts/_chain_upgrade_common.sh'
+readonly UPDATE_DEFAULT_UPDATER_URL='https://shielded-vote.nyc3.digitaloceanspaces.com/update_chain.sh'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
 COMMON_LIB=""
@@ -31,10 +32,14 @@ fi
 if [ -z "$COMMON_LIB" ]; then
   COMMON_TMP="$(mktemp)"
   DO_BASE_FOR_COMMON="${SVOTE_DO_SPACES_BASE:-${UPDATE_DEFAULT_DO_BASE}}"
-  if [ "$DO_BASE_FOR_COMMON" = 'https://shielded-vote.nyc3.digitaloceanspaces.com' ]; then
+  if [ "$DO_BASE_FOR_COMMON" = '__DO_''BASE__' ]; then
     DO_BASE_FOR_COMMON='https://shielded-vote.nyc3.digitaloceanspaces.com'
   fi
-  curl -fsSL "${DO_BASE_FOR_COMMON%/}/scripts/_chain_upgrade_common.sh" -o "$COMMON_TMP"
+  COMMON_URL="$UPDATE_DEFAULT_COMMON_URL"
+  if [ "$COMMON_URL" = '__COMMON_''URL__' ]; then
+    COMMON_URL="${DO_BASE_FOR_COMMON%/}/scripts/_chain_upgrade_common.sh"
+  fi
+  curl -fsSL "$COMMON_URL" -o "$COMMON_TMP"
   COMMON_LIB="$COMMON_TMP"
 fi
 # shellcheck source=scripts/_chain_upgrade_common.sh
@@ -219,7 +224,7 @@ if [ -z "$PLAN_NAME" ] && [ "$MODE" != "migrate" ]; then
   svote_upgrade_die "--plan-name is required for mode ${MODE}."
 fi
 
-if [ "$UPDATE_DEFAULT_DO_BASE" != 'https://shielded-vote.nyc3.digitaloceanspaces.com' ]; then
+if [ "$UPDATE_DEFAULT_DO_BASE" != '__DO_''BASE__' ]; then
   SVOTE_DO_SPACES_BASE="${SVOTE_DO_SPACES_BASE:-$UPDATE_DEFAULT_DO_BASE}"
 fi
 SVOTE_GITHUB_REPO="${SVOTE_GITHUB_REPO:-$UPDATE_DEFAULT_GITHUB_REPO}"
@@ -358,9 +363,12 @@ echo "  Release tag:       ${RELEASE_TAG}"
 echo "  Validator home:    ${DAEMON_HOME}"
 echo "  Cosmovisor binary: ${COSMOVISOR_BIN}"
 echo
-VERIFY_DO_BASE="${SVOTE_DO_SPACES_BASE:-${UPDATE_DEFAULT_DO_BASE}}"
-VERIFY_DO_BASE="${VERIFY_DO_BASE%/}"
+VERIFY_UPDATER_URL="$UPDATE_DEFAULT_UPDATER_URL"
+if [ "$VERIFY_UPDATER_URL" = '__UPDATER_''URL__' ]; then
+  VERIFY_DO_BASE="${SVOTE_DO_SPACES_BASE:-${UPDATE_DEFAULT_DO_BASE}}"
+  VERIFY_UPDATER_URL="${VERIFY_DO_BASE%/}/update_chain.sh"
+fi
 echo "How to verify:"
-echo "  curl -fsSL ${VERIFY_DO_BASE}/update_chain.sh | sudo bash -s -- --mode verify-prestage --plan-name ${PLAN_NAME} --tag ${RELEASE_TAG}"
+echo "  curl -fsSL ${VERIFY_UPDATER_URL} | sudo bash -s -- --mode verify-prestage --plan-name ${PLAN_NAME} --tag ${RELEASE_TAG}"
 echo "  svoted query upgrade plan --home ${DAEMON_HOME}"
 echo "  journalctl -u ${SERVICE_NAME} -f"

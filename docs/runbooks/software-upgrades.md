@@ -50,6 +50,20 @@ Use the `ironwood-v1` plan for the Ironwood verifier binary. The earlier `v1`
 plan has already been applied and must not be reused. The Ironwood handler does
 not migrate stores; it coordinates the consensus-sensitive verifier switch.
 
+The running pre-Ironwood binary schedules the plan and reaches the halt height.
+Before then, stage the target release whose `svoted` binary registers the
+`ironwood-v1` handler. Cosmovisor starts that binary at the halt and the target
+binary applies the handler.
+
+For an RC rehearsal, use its tag-scoped updater so the stable updater remains
+unchanged:
+
+```bash
+TAG=v1.2.3-rc.1
+curl -fsSL "https://shielded-vote.nyc3.digitaloceanspaces.com/scripts/upgrade/${TAG}/update_chain.sh" | sudo bash -s -- \
+  --mode prepare --plan-name ironwood-v1 --tag "${TAG}"
+```
+
 ## Scheduling a state-breaking upgrade
 
 To schedule the halt height, a current coordinator proposes a coordinator
@@ -170,8 +184,8 @@ curl -fsSL https://shielded-vote.nyc3.digitaloceanspaces.com/update_chain.sh | s
   --tag <release-tag>
 ```
 
-Migration performs staging first, then stops the service only after staging
-validation succeeds.
+Migration requires the target binary to be staged and validated first. It then
+stops the service and switches the host to Cosmovisor.
 
 ### At/after halt height
 
