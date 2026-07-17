@@ -73,6 +73,7 @@ export function UIConfigProvider({ children }: { children: ReactNode }) {
       uiMode: uiConfig?.mode ?? "prod",
       devPIRControls: uiConfig?.dev_pir_controls ?? false,
       precomputedBaseURL: uiConfig?.precomputed_base_url ?? null,
+      zcashNetwork: uiConfig?.zcash_network ?? null,
       publishedConfig,
       uiConfigLoaded,
       publishedConfigLoaded,

@@ -218,7 +218,9 @@ server resolves from `SVOTE_PRECOMPUTED_BASE_URL` with a default of
 `https://shielded-vote.nyc3.digitaloceanspaces.com`. When that value is a DO
 Spaces origin such as `https://shielded-vote.nyc3.digitaloceanspaces.com`, the UI
 fetches PIR manifests through the matching CDN hostname
-`https://shielded-vote.nyc3.cdn.digitaloceanspaces.com`.
+`https://shielded-vote.nyc3.cdn.digitaloceanspaces.com`. The same endpoint
+exposes `zcash_network`, resolved from `SVOTE_ZCASH_NETWORK`, which selects the
+`snapshots/<network>/<height>/manifest.json` directory.
 
 Pending join rows expire after **7 days**; expired rows are removed by a background sweeper that runs every **hour** (both are fixed in code, not `app.toml` keys).
 
