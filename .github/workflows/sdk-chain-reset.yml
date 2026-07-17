@@ -60,6 +60,8 @@ jobs:
       snapshots_prefix: ${{ steps.resolve.outputs.snapshots_prefix }}
       voting_config_url: ${{ steps.resolve.outputs.voting_config_url }}
       verify_public_endpoints: ${{ steps.resolve.outputs.verify_public_endpoints }}
+      lwd_urls: ${{ steps.resolve.outputs.lwd_urls }}
+      zcash_network: ${{ steps.resolve.outputs.zcash_network }}
     steps:
       - name: Resolve GitHub Environment variables
         id: resolve
@@ -76,19 +78,33 @@ jobs:
           SNAPSHOTS_PREFIX: ${{ vars.SNAPSHOTS_PREFIX }}
           VOTING_CONFIG_URL: ${{ vars.VOTING_CONFIG_URL }}
           VERIFY_PUBLIC_ENDPOINTS: ${{ vars.VERIFY_PUBLIC_ENDPOINTS }}
+          SVOTE_LWD_URLS: ${{ vars.SVOTE_LWD_URLS }}
         run: |
           set -euo pipefail
-          if [ "$TARGET_ENVIRONMENT" = "production" ]; then
-            default_chain_id="zvote-1"
-            default_dns_prefix="prod."
-            default_has_secondary="false"
-            default_voting_config_url="https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/prod/"
-          else
-            default_chain_id="svote-1"
-            default_dns_prefix="stage."
-            default_has_secondary="true"
-            default_voting_config_url="https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/stage/"
+          if [ -z "${SVOTE_LWD_URLS//[[:space:],]/}" ]; then
+            echo "ERROR: SVOTE_LWD_URLS must list post-NU6.3 lightwalletd endpoints."
+            exit 1
           fi
+          case "$TARGET_ENVIRONMENT" in
+            staging)
+              default_chain_id="svote-1"
+              default_dns_prefix="stage."
+              default_has_secondary="true"
+              default_voting_config_url="https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/stage/"
+              zcash_network="test"
+              ;;
+            production)
+              default_chain_id="zvote-1"
+              default_dns_prefix="prod."
+              default_has_secondary="false"
+              default_voting_config_url="https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/prod/"
+              zcash_network="main"
+              ;;
+            *)
+              echo "ERROR: unsupported target environment '${TARGET_ENVIRONMENT}'."
+              exit 1
+              ;;
+          esac
           chain_id="${CHAIN_ID:-$default_chain_id}"
           dns_prefix="${DNS_PREFIX:-$default_dns_prefix}"
           has_secondary="${HAS_SECONDARY:-$default_has_secondary}"
@@ -112,6 +128,8 @@ jobs:
             echo "snapshots_prefix=${snapshots_prefix}"
             echo "voting_config_url=${voting_config_url}"
             echo "verify_public_endpoints=${verify_public_endpoints}"
+            echo "lwd_urls=${SVOTE_LWD_URLS}"
+            echo "zcash_network=${zcash_network}"
           } >> "$GITHUB_OUTPUT"
 
   validate-tag:
@@ -211,6 +229,8 @@ jobs:
       RELEASE_BASE_URL: ${{ needs.resolve-environment.outputs.release_base_url }}
       SENTRY_ENVIRONMENT: ${{ inputs.target_environment }}
       SVOTE_CONFIG_URL: ${{ needs.resolve-environment.outputs.voting_config_url }}
+      SVOTE_LWD_URLS: ${{ needs.resolve-environment.outputs.lwd_urls }}
+      SVOTE_ZCASH_NETWORK: ${{ needs.resolve-environment.outputs.zcash_network }}
       # Staging: valarg-genesis / valarg-secondary split; production: single valargroup moniker.
       MONIKER: ${{ inputs.target_environment == 'production' && 'valargroup' || 'valarg-genesis' }}
     steps:
@@ -221,7 +241,7 @@ jobs:
           host: ${{ secrets.PRIMARY_HOST || vars.PRIMARY_HOST || format('{0}vote-chain-primary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: TAG,SENTRY_DSN,SENTRY_ENVIRONMENT,SVOTE_CONFIG_PR_GITHUB_TOKEN,CHAIN_ID,DNS_PREFIX,DOMAIN,RELEASE_BASE_URL,SVOTE_CONFIG_URL,MONIKER
+          envs: TAG,SENTRY_DSN,SENTRY_ENVIRONMENT,SVOTE_CONFIG_PR_GITHUB_TOKEN,CHAIN_ID,DNS_PREFIX,DOMAIN,RELEASE_BASE_URL,SVOTE_CONFIG_URL,SVOTE_LWD_URLS,SVOTE_ZCASH_NETWORK,MONIKER
           script: |
             set -euo pipefail
             export PATH="/opt/shielded-vote/current/bin:$PATH"
@@ -240,6 +260,10 @@ jobs:
             echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
             sed -i '/^SENTRY_ENVIRONMENT=/d' /etc/default/svoted
             echo "SENTRY_ENVIRONMENT=$SENTRY_ENVIRONMENT" >> /etc/default/svoted
+            sed -i '/^SVOTE_LWD_URLS=/d' /etc/default/svoted
+            printf 'SVOTE_LWD_URLS=%s\n' "$SVOTE_LWD_URLS" >> /etc/default/svoted
+            sed -i '/^SVOTE_ZCASH_NETWORK=/d' /etc/default/svoted
+            printf 'SVOTE_ZCASH_NETWORK=%s\n' "$SVOTE_ZCASH_NETWORK" >> /etc/default/svoted
             sed -i '/^SVOTE_CONFIG_PR_GITHUB_TOKEN=/d' /etc/default/svoted
             if [ -n "${SVOTE_CONFIG_PR_GITHUB_TOKEN:-}" ]; then
               echo "SVOTE_CONFIG_PR_GITHUB_TOKEN=$SVOTE_CONFIG_PR_GITHUB_TOKEN" >> /etc/default/svoted
@@ -410,6 +434,8 @@ jobs:
       SNAPSHOT_HOST: ${{ vars.SNAPSHOT_PUBLIC_HOST || format('{0}snapshots.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
       SENTRY_ENVIRONMENT: ${{ inputs.target_environment }}
       VERIFY_PUBLIC_ENDPOINTS: ${{ needs.resolve-environment.outputs.verify_public_endpoints }}
+      SVOTE_LWD_URLS: ${{ needs.resolve-environment.outputs.lwd_urls }}
+      SVOTE_ZCASH_NETWORK: ${{ needs.resolve-environment.outputs.zcash_network }}
     steps:
       - name: Install tag and join as snapshot node
         uses: appleboy/ssh-action@v1.0.3
@@ -418,7 +444,7 @@ jobs:
           host: ${{ secrets.SNAPSHOT_HOST || vars.SNAPSHOT_HOST || format('{0}snapshots.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: TAG,CHAIN_ID,DNS_PREFIX,DO_SPACES_BASE,GENESIS_KEY,DOMAIN,PRIMARY_REST_URL,RELEASE_BASE_URL,SENTRY_DSN,SENTRY_ENVIRONMENT
+          envs: TAG,CHAIN_ID,DNS_PREFIX,DO_SPACES_BASE,GENESIS_KEY,DOMAIN,PRIMARY_REST_URL,RELEASE_BASE_URL,SENTRY_DSN,SENTRY_ENVIRONMENT,SVOTE_LWD_URLS,SVOTE_ZCASH_NETWORK
           script: |
             set -euo pipefail
             export PATH="/opt/shielded-vote/current/bin:$PATH"
@@ -429,6 +455,10 @@ jobs:
             echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
             sed -i '/^SENTRY_ENVIRONMENT=/d' /etc/default/svoted
             echo "SENTRY_ENVIRONMENT=$SENTRY_ENVIRONMENT" >> /etc/default/svoted
+            sed -i '/^SVOTE_LWD_URLS=/d' /etc/default/svoted
+            printf 'SVOTE_LWD_URLS=%s\n' "$SVOTE_LWD_URLS" >> /etc/default/svoted
+            sed -i '/^SVOTE_ZCASH_NETWORK=/d' /etc/default/svoted
+            printf 'SVOTE_ZCASH_NETWORK=%s\n' "$SVOTE_ZCASH_NETWORK" >> /etc/default/svoted
             mkdir -p /etc/systemd/system/svoted.service.d
             printf '[Service]\nEnvironmentFile=-/etc/default/svoted\n' \
               > /etc/systemd/system/svoted.service.d/10-envfile.conf
@@ -528,6 +558,8 @@ jobs:
       PRIMARY_REST_URL: ${{ vars.PRIMARY_REST_URL || format('https://{0}vote-chain-primary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
       RELEASE_BASE_URL: ${{ needs.resolve-environment.outputs.release_base_url }}
       SENTRY_ENVIRONMENT: ${{ inputs.target_environment }}
+      SVOTE_LWD_URLS: ${{ needs.resolve-environment.outputs.lwd_urls }}
+      SVOTE_ZCASH_NETWORK: ${{ needs.resolve-environment.outputs.zcash_network }}
     steps:
       - name: Install tag and join
         uses: appleboy/ssh-action@v1.0.3
@@ -536,7 +568,7 @@ jobs:
           host: ${{ secrets.SECONDARY_HOST || vars.SECONDARY_HOST || format('{0}vote-chain-secondary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: TAG,CHAIN_ID,DNS_PREFIX,DO_SPACES_BASE,GENESIS_KEY,DOMAIN,PRIMARY_REST_URL,RELEASE_BASE_URL,SENTRY_DSN,SENTRY_ENVIRONMENT
+          envs: TAG,CHAIN_ID,DNS_PREFIX,DO_SPACES_BASE,GENESIS_KEY,DOMAIN,PRIMARY_REST_URL,RELEASE_BASE_URL,SENTRY_DSN,SENTRY_ENVIRONMENT,SVOTE_LWD_URLS,SVOTE_ZCASH_NETWORK
           script: |
             set -euo pipefail
             export PATH="/opt/shielded-vote/current/bin:$PATH"
@@ -547,6 +579,10 @@ jobs:
             echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
             sed -i '/^SENTRY_ENVIRONMENT=/d' /etc/default/svoted
             echo "SENTRY_ENVIRONMENT=$SENTRY_ENVIRONMENT" >> /etc/default/svoted
+            sed -i '/^SVOTE_LWD_URLS=/d' /etc/default/svoted
+            printf 'SVOTE_LWD_URLS=%s\n' "$SVOTE_LWD_URLS" >> /etc/default/svoted
+            sed -i '/^SVOTE_ZCASH_NETWORK=/d' /etc/default/svoted
+            printf 'SVOTE_ZCASH_NETWORK=%s\n' "$SVOTE_ZCASH_NETWORK" >> /etc/default/svoted
             mkdir -p /etc/systemd/system/svoted.service.d
             printf '[Service]\nEnvironmentFile=-/etc/default/svoted\n' \
               > /etc/systemd/system/svoted.service.d/10-envfile.conf
@@ -598,6 +634,8 @@ jobs:
       SNAPSHOT_HOST: ${{ vars.SNAPSHOT_PUBLIC_HOST || format('{0}snapshots.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
       SENTRY_ENVIRONMENT: ${{ inputs.target_environment }}
       VERIFY_PUBLIC_ENDPOINTS: ${{ needs.resolve-environment.outputs.verify_public_endpoints }}
+      SVOTE_LWD_URLS: ${{ needs.resolve-environment.outputs.lwd_urls }}
+      SVOTE_ZCASH_NETWORK: ${{ needs.resolve-environment.outputs.zcash_network }}
     steps:
       - name: Install tag and join as archive
         uses: appleboy/ssh-action@v1.0.3
@@ -606,7 +644,7 @@ jobs:
           host: ${{ secrets.EXPLORER_HOST || vars.EXPLORER_HOST || format('{0}explorer.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: TAG,CHAIN_ID,DNS_PREFIX,DO_SPACES_BASE,GENESIS_KEY,DOMAIN,PRIMARY_REST_URL,RELEASE_BASE_URL,SENTRY_DSN,SENTRY_ENVIRONMENT
+          envs: TAG,CHAIN_ID,DNS_PREFIX,DO_SPACES_BASE,GENESIS_KEY,DOMAIN,PRIMARY_REST_URL,RELEASE_BASE_URL,SENTRY_DSN,SENTRY_ENVIRONMENT,SVOTE_LWD_URLS,SVOTE_ZCASH_NETWORK
           script: |
             set -euo pipefail
             export PATH="/opt/shielded-vote/current/bin:$PATH"
@@ -617,6 +655,10 @@ jobs:
             echo "SENTRY_DSN=$SENTRY_DSN" >> /etc/default/svoted
             sed -i '/^SENTRY_ENVIRONMENT=/d' /etc/default/svoted
             echo "SENTRY_ENVIRONMENT=$SENTRY_ENVIRONMENT" >> /etc/default/svoted
+            sed -i '/^SVOTE_LWD_URLS=/d' /etc/default/svoted
+            printf 'SVOTE_LWD_URLS=%s\n' "$SVOTE_LWD_URLS" >> /etc/default/svoted
+            sed -i '/^SVOTE_ZCASH_NETWORK=/d' /etc/default/svoted
+            printf 'SVOTE_ZCASH_NETWORK=%s\n' "$SVOTE_ZCASH_NETWORK" >> /etc/default/svoted
             mkdir -p /etc/systemd/system/svoted.service.d
             printf '[Service]\nEnvironmentFile=-/etc/default/svoted\n' \
               > /etc/systemd/system/svoted.service.d/10-envfile.conf

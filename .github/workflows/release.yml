@@ -20,9 +20,31 @@ permissions:
   contents: write
 
 jobs:
+  release-metadata:
+    name: Resolve release channel
+    runs-on: ubuntu-latest
+    outputs:
+      prerelease: ${{ steps.channel.outputs.prerelease }}
+      make_latest: ${{ steps.channel.outputs.make_latest }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Classify release tag
+        id: channel
+        run: |
+          channel="$(scripts/release-channel.sh "$GITHUB_REF_NAME")"
+          if [ "$channel" = "rc" ]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "make_latest=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "make_latest=true" >> "$GITHUB_OUTPUT"
+          fi
+
   build-sdk:
     name: Build SDK (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
+    needs: release-metadata
     strategy:
       fail-fast: false
       matrix:
@@ -103,6 +125,7 @@ jobs:
   build-explorer:
     name: Build explorer frontend
     runs-on: ubuntu-latest
+    needs: release-metadata
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -159,12 +182,14 @@ jobs:
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-sdk, build-explorer]
+    needs: [release-metadata, build-sdk, build-explorer]
     steps:
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          prerelease: ${{ needs.release-metadata.outputs.prerelease }}
+          make_latest: ${{ needs.release-metadata.outputs.make_latest }}
 
   release:
     name: Package and release (${{ matrix.platform }})
@@ -256,7 +281,7 @@ jobs:
   distribute:
     name: Distribute to server
     runs-on: ubuntu-latest
-    needs: release
+    needs: [release, release-metadata]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -284,10 +309,12 @@ jobs:
           DO_SECRET_KEY: ${{ secrets.DO_SECRET_KEY }}
           DO_SPACES_BUCKET: ${{ vars.DO_SPACES_BUCKET }}
           DO_SPACES_REGION: ${{ vars.DO_SPACES_REGION }}
+          DO_SPACES_BASE: ${{ vars.DO_SPACES_BASE }}
         run: |
           set -euo pipefail
           DO_SPACES_BUCKET="${DO_SPACES_BUCKET:-shielded-vote}"
           DO_SPACES_REGION="${DO_SPACES_REGION:-nyc3}"
+          DO_SPACES_BASE="${DO_SPACES_BASE:-https://${DO_SPACES_BUCKET}.${DO_SPACES_REGION}.digitaloceanspaces.com}"
           pip install --quiet s3cmd
           cat > /tmp/do-spaces.s3cfg <<EOF
           [default]
@@ -303,25 +330,20 @@ jobs:
             s3cmd -c /tmp/do-spaces.s3cfg put "${TARBALL}" "s3://${DO_SPACES_BUCKET}/binaries/vote-sdk/" --acl-public --force
             s3cmd -c /tmp/do-spaces.s3cfg put "${TARBALL}.sha256" "s3://${DO_SPACES_BUCKET}/binaries/vote-sdk/" --acl-public --force
           done
-          echo "${VERSION}" > /tmp/version.txt
-          s3cmd -c /tmp/do-spaces.s3cfg put /tmp/version.txt "s3://${DO_SPACES_BUCKET}/version.txt" --acl-public --force
-          s3cmd -c /tmp/do-spaces.s3cfg put join.sh "s3://${DO_SPACES_BUCKET}/join.sh" --acl-public --force
-          s3cmd -c /tmp/do-spaces.s3cfg put join-full.sh "s3://${DO_SPACES_BUCKET}/join-full.sh" --acl-public --force
-          s3cmd -c /tmp/do-spaces.s3cfg put scripts/_join_common.sh "s3://${DO_SPACES_BUCKET}/scripts/_join_common.sh" --acl-public --force
-          s3cmd -c /tmp/do-spaces.s3cfg put scripts/reset-validator-snapshot.sh "s3://${DO_SPACES_BUCKET}/reset-validator-snapshot.sh" --acl-public --force
-          s3cmd -c /tmp/do-spaces.s3cfg put scripts/remove-validator.sh "s3://${DO_SPACES_BUCKET}/remove-validator.sh" --acl-public --force
-          s3cmd -c /tmp/do-spaces.s3cfg put scripts/remove-pir.sh "s3://${DO_SPACES_BUCKET}/remove-pir.sh" --acl-public --force
-          s3cmd -c /tmp/do-spaces.s3cfg put scripts/svoted-wrapper.sh "s3://${DO_SPACES_BUCKET}/svoted-wrapper.sh" --acl-public --force
-          UPDATE_CHAIN="$(mktemp)"
-          sed \
-            -e "s|__RELEASE_TAG__|${VERSION}|g" \
-            -e "s|__GITHUB_REPO__|valargroup/vote-sdk|g" \
-            -e "s|__DO_BASE__|${DO_SPACES_BASE:-https://${DO_SPACES_BUCKET}.${DO_SPACES_REGION}.digitaloceanspaces.com}|g" \
-            scripts/update_chain.sh.template > "${UPDATE_CHAIN}"
-          s3cmd -c /tmp/do-spaces.s3cfg put "${UPDATE_CHAIN}" "s3://${DO_SPACES_BUCKET}/update_chain.sh" --acl-public --force
-          rm -f "${UPDATE_CHAIN}"
-          s3cmd -c /tmp/do-spaces.s3cfg put scripts/_chain_upgrade_common.sh "s3://${DO_SPACES_BUCKET}/scripts/_chain_upgrade_common.sh" --acl-public --force
-          s3cmd -c /tmp/do-spaces.s3cfg put scripts/prepare-upgrade-artifacts.sh "s3://${DO_SPACES_BUCKET}/prepare-upgrade-artifacts.sh" --acl-public --force
+          VERSIONED_UPDATE_CHAIN="$(mktemp)"
+          scripts/render-update-chain.sh \
+            "$VERSION" \
+            "$DO_SPACES_BASE" \
+            "${DO_SPACES_BASE%/}/scripts/upgrade/${VERSION}/_chain_upgrade_common.sh" \
+            "${DO_SPACES_BASE%/}/scripts/upgrade/${VERSION}/update_chain.sh" \
+            > "${VERSIONED_UPDATE_CHAIN}"
+          s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force "${VERSIONED_UPDATE_CHAIN}" \
+            "s3://${DO_SPACES_BUCKET}/scripts/upgrade/${VERSION}/update_chain.sh"
+          rm -f "${VERSIONED_UPDATE_CHAIN}"
+          s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force scripts/_chain_upgrade_common.sh \
+            "s3://${DO_SPACES_BUCKET}/scripts/upgrade/${VERSION}/_chain_upgrade_common.sh"
+          s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force scripts/prepare-upgrade-artifacts.sh \
+            "s3://${DO_SPACES_BUCKET}/scripts/upgrade/${VERSION}/prepare-upgrade-artifacts.sh"
           s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force join.sh \
             "s3://${DO_SPACES_BUCKET}/scripts/join/${VERSION}/join.sh"
           VERSIONED_JOIN_FULL="$(mktemp)"
@@ -340,6 +362,7 @@ jobs:
             "s3://${DO_SPACES_BUCKET}/scripts/remove-pir/${VERSION}/remove-pir.sh"
           s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force scripts/svoted-wrapper.sh \
             "s3://${DO_SPACES_BUCKET}/scripts/svoted-wrapper/${VERSION}/svoted-wrapper.sh"
+          scripts/publish-release-pointers.sh "$VERSION" /tmp/do-spaces.s3cfg
       - name: Verify DigitalOcean Spaces uploads
         env:
           DO_SPACES_BUCKET: ${{ vars.DO_SPACES_BUCKET }}
@@ -359,27 +382,40 @@ jobs:
             done
           done
 
-          for KEY in \
-            "version.txt" \
-            "join.sh" \
-            "join-full.sh" \
-            "scripts/_join_common.sh" \
-            "reset-validator-snapshot.sh" \
-            "remove-validator.sh" \
-            "remove-pir.sh" \
-            "svoted-wrapper.sh" \
-            "update_chain.sh" \
-            "scripts/_chain_upgrade_common.sh" \
-            "prepare-upgrade-artifacts.sh" \
+          TAG_SCOPED_KEYS=(
             "scripts/join-full/${VERSION}/join-full.sh" \
             "scripts/join-common/${VERSION}/_join_common.sh" \
             "scripts/join/${VERSION}/join.sh" \
             "scripts/reset-validator-snapshot/${VERSION}/reset-validator-snapshot.sh" \
             "scripts/remove-validator/${VERSION}/remove-validator.sh" \
             "scripts/remove-pir/${VERSION}/remove-pir.sh" \
-            "scripts/svoted-wrapper/${VERSION}/svoted-wrapper.sh"
-          do
+            "scripts/svoted-wrapper/${VERSION}/svoted-wrapper.sh" \
+            "scripts/upgrade/${VERSION}/update_chain.sh" \
+            "scripts/upgrade/${VERSION}/_chain_upgrade_common.sh" \
+            "scripts/upgrade/${VERSION}/prepare-upgrade-artifacts.sh"
+          )
+          for KEY in "${TAG_SCOPED_KEYS[@]}"; do
             URL="${DO_SPACES_BASE}/${KEY}"
             curl -fsSIL --retry 3 --retry-delay 2 "$URL" > /dev/null
             echo "[OK] $URL"
           done
+
+          if [ "$(scripts/release-channel.sh "$VERSION")" = "stable" ]; then
+            for KEY in \
+              "version.txt" \
+              "join.sh" \
+              "join-full.sh" \
+              "scripts/_join_common.sh" \
+              "reset-validator-snapshot.sh" \
+              "remove-validator.sh" \
+              "remove-pir.sh" \
+              "svoted-wrapper.sh" \
+              "update_chain.sh" \
+              "scripts/_chain_upgrade_common.sh" \
+              "prepare-upgrade-artifacts.sh"
+            do
+              URL="${DO_SPACES_BASE}/${KEY}"
+              curl -fsSIL --retry 3 --retry-delay 2 "$URL" > /dev/null
+              echo "[OK] $URL"
+            done
+          fi

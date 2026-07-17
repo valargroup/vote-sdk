@@ -10,6 +10,9 @@ TAG="${1:?usage: verify_upgrade_release_artifacts.sh <tag> [do_base]}"
 DO_BASE="${2:-${SVOTE_DO_SPACES_BASE:-https://shielded-vote.nyc3.digitaloceanspaces.com}}"
 DO_BASE="${DO_BASE%/}"
 PLATFORM="${SVOTE_PLATFORM:-linux-amd64}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CHANNEL="$("${SCRIPT_DIR}/release-channel.sh" "$TAG")"
+TAGGED_UPGRADE_BASE="${DO_BASE}/scripts/upgrade/${TAG}"
 
 failures=0
 
@@ -56,26 +59,38 @@ echo "DO base:  ${DO_BASE}"
 echo "Platform: ${PLATFORM}"
 echo
 
-check_url "${DO_BASE}/version.txt" "version.txt"
-published_version=$(curl -fsSL "${DO_BASE}/version.txt" | tr -d '[:space:]' || true)
-if [ "$published_version" = "$TAG" ]; then
-  echo "[PASS] version.txt matches ${TAG}"
-else
-  echo "[FAIL] version.txt=${published_version:-<empty>} expected ${TAG}" >&2
-  failures=$((failures + 1))
-fi
-
 for key in \
-  "update_chain.sh" \
-  "scripts/_chain_upgrade_common.sh" \
-  "prepare-upgrade-artifacts.sh" \
-  "join.sh" \
-  "svoted-wrapper.sh"
+  "scripts/upgrade/${TAG}/update_chain.sh" \
+  "scripts/upgrade/${TAG}/_chain_upgrade_common.sh" \
+  "scripts/upgrade/${TAG}/prepare-upgrade-artifacts.sh" \
+  "scripts/join/${TAG}/join.sh" \
+  "scripts/svoted-wrapper/${TAG}/svoted-wrapper.sh"
 do
   check_url "${DO_BASE}/${key}" "$key"
 done
 
-check_script_help "${DO_BASE}/update_chain.sh"
+check_script_help "${TAGGED_UPGRADE_BASE}/update_chain.sh"
+
+if [ "$CHANNEL" = "stable" ]; then
+  check_url "${DO_BASE}/version.txt" "version.txt"
+  published_version=$(curl -fsSL "${DO_BASE}/version.txt" | tr -d '[:space:]' || true)
+  if [ "$published_version" = "$TAG" ]; then
+    echo "[PASS] version.txt matches ${TAG}"
+  else
+    echo "[FAIL] version.txt=${published_version:-<empty>} expected ${TAG}" >&2
+    failures=$((failures + 1))
+  fi
+
+  for key in \
+    "update_chain.sh" \
+    "scripts/_chain_upgrade_common.sh" \
+    "prepare-upgrade-artifacts.sh" \
+    "join.sh" \
+    "svoted-wrapper.sh"
+  do
+    check_url "${DO_BASE}/${key}" "$key"
+  done
+fi
 
 tarball="shielded-vote-${TAG}-${PLATFORM}.tar.gz"
 check_url "${DO_BASE}/binaries/vote-sdk/${tarball}" "release tarball"

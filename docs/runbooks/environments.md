@@ -26,9 +26,12 @@ Create GitHub Environments named `staging` and `production`.
 | `SNAPSHOT_PUBLIC_HOST` | derived from `DNS_PREFIX` + `DOMAIN` | optional cutover host | Public snapshot hostname used for local Host-header checks. |
 | `SNAPSHOT_BASE_URL` | derived from `SNAPSHOT_PUBLIC_HOST` | optional cutover URL | Snapshot frontend and metadata base URL used by post-reset verification. |
 | `VERIFY_PUBLIC_ENDPOINTS` | `true` | `false` before DNS cutover | Set to `false` only for pre-DNS migration resets. SSH jobs still check local services, and public HTTPS checks must run after DNS cutover. |
+| `SVOTE_LWD_URLS` | Post-NU6.3 Testnet endpoints | Post-NU6.3 Mainnet endpoints | Required comma-separated lightwalletd URLs. Deploy and reset fail before changing hosts when empty. |
 
-The workflows have defaults for these values, but operators should set them
-explicitly so the selected environment is visible in GitHub's UI.
+Most workflow settings have defaults, but operators should set them explicitly
+so the selected environment is visible in GitHub's UI. `SVOTE_LWD_URLS` has no
+default and is required. The workflows install `SVOTE_ZCASH_NETWORK=test` in
+staging and `SVOTE_ZCASH_NETWORK=main` in production.
 
 Before production DNS cutover, set SSH host variables such as `PRIMARY_HOST`,
 `EXPLORER_HOST`, and `SNAPSHOT_HOST` to the destination IPs. Set
@@ -37,9 +40,14 @@ example `http://<primary-private-ip>:1317`, so snapshot and archive reset jobs
 peer with the new primary instead of whichever host public DNS still resolves
 to.
 
-`release.yml` is not tied to a GitHub Environment. If release artifacts should
-be published to a non-default bucket or region, set the repository variables
-`DO_SPACES_BUCKET` and `DO_SPACES_REGION` before pushing the release tag.
+Set `SVOTE_LWD_URLS` only to endpoints for the environment's Zcash network that
+return the Ironwood tree field. Snapshot creation rejects a PIR endpoint whose
+reported network does not match lightwalletd.
+
+`release.yml` is not tied to a GitHub Environment. Stable tags update shared
+release pointers. `vN.N.N-rc.N` tags publish prereleases and tag-scoped objects
+without changing those pointers. Set `DO_SPACES_BUCKET` and `DO_SPACES_REGION`
+before pushing a tag when the release uses a non-default bucket or region.
 
 ## Environment Secrets
 

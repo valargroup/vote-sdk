@@ -21,6 +21,11 @@ import (
 	"google.golang.org/protobuf/encoding/protowire"
 )
 
+const (
+	ironwoodNullifierPool     = "ironwood"
+	ironwoodPIRDatasetVersion = uint32(1)
+)
+
 // DefaultLightwalletdURLs is the fallback list of public lightwalletd servers.
 // They are tried in order; the first successful response wins.
 var DefaultLightwalletdURLs = []string{
@@ -40,12 +45,11 @@ type SnapshotConfig struct {
 	// if empty.
 	LightwalletdURLs []string
 
-	// ZcashNetwork is the expected lightwalletd TreeState network ("main" or
-	// "test"). It defaults to "main".
+	// ZcashNetwork is the expected lightwalletd network ("main" or "test").
 	ZcashNetwork string
 }
 
-// SnapshotData holds the Zcash mainnet data needed for MsgCreateVotingSession.
+// SnapshotData holds the Zcash data needed for MsgCreateVotingSession.
 type SnapshotData struct {
 	NullifierIMTRoot  []byte // 32-byte Poseidon IMT root from the PIR service
 	SnapshotBlockhash []byte // 32-byte block hash at snapshot height
@@ -58,7 +62,14 @@ type SnapshotData struct {
 // The snapshot blockhash is the real block hash from lightwalletd.
 // The nc_root is computed via Rust FFI from the Ironwood frontier.
 func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (*SnapshotData, error) {
-	// Apply defaults.
+	expectedNetwork := strings.TrimSpace(cfg.ZcashNetwork)
+	if expectedNetwork == "" {
+		return nil, errors.New("Zcash network is not configured")
+	}
+	if expectedNetwork != "main" && expectedNetwork != "test" {
+		return nil, fmt.Errorf("unsupported Zcash network %q", expectedNetwork)
+	}
+
 	pirServiceURL, err := resolvePIRServiceURL(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("resolve PIR service URL: %w", err)
@@ -67,17 +78,10 @@ func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (
 	if len(lwdURLs) == 0 {
 		lwdURLs = DefaultLightwalletdURLs
 	}
-	expectedNetwork := strings.TrimSpace(cfg.ZcashNetwork)
-	if expectedNetwork == "" {
-		expectedNetwork = "main"
-	}
-	if expectedNetwork != "main" && expectedNetwork != "test" {
-		return nil, fmt.Errorf("unsupported Zcash network %q", expectedNetwork)
-	}
 
 	// Fetch PIR root and tree state in parallel.
 	type pirResult struct {
-		root []byte
+		root *pirRoot
 		err  error
 	}
 	type tsResult struct {
@@ -107,6 +111,9 @@ func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (
 		return nil, fmt.Errorf("fetch tree state at height %d: %w", height, tsRes.err)
 	}
 	ts := tsRes.ts
+	if err := validateSnapshotNetworks(pirRes.root.network, ts.Network); err != nil {
+		return nil, err
+	}
 
 	// Decode block hash (hex string → bytes).
 	blockhash, err := hex.DecodeString(ts.Hash)
@@ -120,13 +127,24 @@ func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (
 	}
 
 	log.Printf("[shielded-vote-api] snapshot data fetched: height=%d blockhash=%s pir_root=%x nc_root=%x",
-		ts.Height, ts.Hash[:min(16, len(ts.Hash))]+"...", pirRes.root[:8], ncRoot[:8])
+		ts.Height, ts.Hash[:min(16, len(ts.Hash))]+"...", pirRes.root.value[:8], ncRoot[:8])
 
 	return &SnapshotData{
-		NullifierIMTRoot:  pirRes.root,
+		NullifierIMTRoot:  pirRes.root.value,
 		SnapshotBlockhash: blockhash,
 		NcRoot:            ncRoot[:],
 	}, nil
+}
+
+func validateSnapshotNetworks(pirNetwork, lightwalletdNetwork string) error {
+	if pirNetwork != lightwalletdNetwork {
+		return fmt.Errorf(
+			"PIR service network %q does not match lightwalletd network %q",
+			pirNetwork,
+			lightwalletdNetwork,
+		)
+	}
+	return nil
 }
 
 func resolvePIRServiceURL(ctx context.Context, cfg SnapshotConfig) (string, error) {
@@ -150,13 +168,22 @@ func resolvePIRServiceURL(ctx context.Context, cfg SnapshotConfig) (string, erro
 // from other PIR errors and show an appropriate message to the user.
 var ErrPIRRebuilding = errors.New("PIR server is rebuilding")
 
+type pirRoot struct {
+	value   []byte
+	network string
+}
+
 // fetchNullifierRoot queries the PIR server GET /root endpoint and
 // validates that the tree was built to exactly the expected snapshot height.
-// Returns the 32-byte Poseidon tree root (depth-29, matching the circuit).
+// It returns the 32-byte Poseidon tree root and the network reported by PIR.
 //
 // If the PIR server returns 503 during a snapshot rebuild, the error wraps
 // ErrPIRRebuilding so callers can detect this case.
-func fetchNullifierRoot(ctx context.Context, pirURL string, expectedHeight uint64) ([]byte, error) {
+func fetchNullifierRoot(
+	ctx context.Context,
+	pirURL string,
+	expectedHeight uint64,
+) (*pirRoot, error) {
 	url := strings.TrimRight(pirURL, "/") + "/root"
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -194,17 +221,28 @@ func fetchNullifierRoot(ctx context.Context, pirURL string, expectedHeight uint6
 	}
 
 	var result struct {
-		Root29        string  `json:"root29"`
-		Height        *uint64 `json:"height"`
-		NullifierPool string  `json:"nullifier_pool"`
+		Root29         string  `json:"root29"`
+		Height         *uint64 `json:"height"`
+		NullifierPool  string  `json:"nullifier_pool"`
+		DatasetVersion *uint32 `json:"dataset_version"`
+		ZcashNetwork   string  `json:"zcash_network"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decode PIR response: %w", err)
 	}
-	if result.NullifierPool != "ironwood" {
+	if result.NullifierPool != ironwoodNullifierPool {
 		return nil, fmt.Errorf("PIR service nullifier pool %q is not Ironwood", result.NullifierPool)
 	}
-
+	if result.DatasetVersion == nil {
+		return nil, fmt.Errorf("PIR service response is missing dataset_version")
+	}
+	if *result.DatasetVersion != ironwoodPIRDatasetVersion {
+		return nil, fmt.Errorf(
+			"PIR service dataset version %d is not supported; expected %d",
+			*result.DatasetVersion,
+			ironwoodPIRDatasetVersion,
+		)
+	}
 	// Validate that the PIR tree height matches the requested snapshot height.
 	if result.Height == nil {
 		return nil, fmt.Errorf("PIR service has no checkpoint height (tree not synced)")
@@ -222,7 +260,10 @@ func fetchNullifierRoot(ctx context.Context, pirURL string, expectedHeight uint6
 		return nil, fmt.Errorf("PIR root is %d bytes, expected 32", len(rootBytes))
 	}
 
-	return rootBytes, nil
+	return &pirRoot{
+		value:   rootBytes,
+		network: result.ZcashNetwork,
+	}, nil
 }
 
 // --- Lightwalletd gRPC client (manual proto encoding, no codegen) ---

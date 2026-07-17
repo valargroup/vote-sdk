@@ -10,9 +10,9 @@ shielded-vote-circuits = { path = "../circuits" }
 
 orchard = { version = "=0.15.0", features = ["unstable-voting-circuits"] }
 voting-circuits = "=0.9.0-rc.2"
-vote-commitment-tree = { version = "=0.3.2", git = "https://github.com/valargroup/zcash_voting", rev = "9ebbcb9d758177724904f69052f626abf4aa44f9" }
-vote-commitment-tree-client = { version = "=0.5.2", git = "https://github.com/valargroup/zcash_voting", rev = "9ebbcb9d758177724904f69052f626abf4aa44f9", features = ["http"] }
-zcash_voting = { version = "=1.0.0", git = "https://github.com/valargroup/zcash_voting", rev = "9ebbcb9d758177724904f69052f626abf4aa44f9" }
+vote-commitment-tree = { version = "=0.3.2", git = "https://github.com/valargroup/zcash_voting", rev = "36ab330d5f188af32756f551e63eafc48a39a96f" }
+vote-commitment-tree-client = { version = "=0.5.2", git = "https://github.com/valargroup/zcash_voting", rev = "36ab330d5f188af32756f551e63eafc48a39a96f", features = ["http"] }
+zcash_voting = { version = "=1.0.0", git = "https://github.com/valargroup/zcash_voting", rev = "36ab330d5f188af32756f551e63eafc48a39a96f" }
 
 # HTTP and JSON
 reqwest = { version = "0.12", features = ["blocking", "json"] }

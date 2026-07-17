@@ -185,6 +185,16 @@ func TestScheduledUpgradeWithHandlerAppliesAtDueHeight(t *testing.T) {
 }
 
 func TestV1UpgradeAppliesAcrossSupportedChains(t *testing.T) {
+	testNoopUpgradeAppliesAcrossSupportedChains(t, svoteapp.V1UpgradeName)
+}
+
+func TestIronwoodUpgradeAppliesAcrossSupportedChains(t *testing.T) {
+	require.NotEqual(t, svoteapp.V1UpgradeName, svoteapp.IronwoodUpgradeName)
+	testNoopUpgradeAppliesAcrossSupportedChains(t, svoteapp.IronwoodUpgradeName)
+}
+
+func testNoopUpgradeAppliesAcrossSupportedChains(t *testing.T, upgradeName string) {
+	t.Helper()
 	testChains := []string{"svote-1", "zvote-1", "upgrade-test-1"}
 	for _, chainID := range testChains {
 		t.Run(chainID, func(t *testing.T) {
@@ -195,9 +205,9 @@ func TestV1UpgradeAppliesAcrossSupportedChains(t *testing.T) {
 			dueHeight := ta.Height + 2
 			txBytes := ta.MustBuildSignedCoordinatorActionTx(voteManager, &votetypes.MsgScheduleUpgrade{
 				Creator: voteManager,
-				Name:    svoteapp.V1UpgradeName,
+				Name:    upgradeName,
 				Height:  dueHeight,
-				Info:    `{"purpose":"v1-shared-handler"}`,
+				Info:    `{"purpose":"no-op-binary-cutover"}`,
 			})
 			result := ta.DeliverVoteTx(txBytes)
 			require.Equal(t, uint32(0), result.Code, result.Log)
@@ -214,7 +224,7 @@ func TestV1UpgradeAppliesAcrossSupportedChains(t *testing.T) {
 			require.NoError(t, err)
 
 			ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
-			doneHeight, err := ta.SvoteApp.UpgradeKeeper.GetDoneHeight(ctx, svoteapp.V1UpgradeName)
+			doneHeight, err := ta.SvoteApp.UpgradeKeeper.GetDoneHeight(ctx, upgradeName)
 			require.NoError(t, err)
 			require.Equal(t, dueHeight, doneHeight)
 		})

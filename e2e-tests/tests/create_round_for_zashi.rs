@@ -108,6 +108,11 @@ fn fetch_ironwood_nullifier_root(height: u64) -> [u8; 32] {
         Some("ironwood"),
         "PIR server is not serving Ironwood nullifiers"
     );
+    assert_eq!(
+        json["dataset_version"].as_u64(),
+        Some(1),
+        "PIR server is not serving the supported Ironwood dataset version"
+    );
     let served_height = json["height"]
         .as_u64()
         .or_else(|| json["height"].as_str().and_then(|value| value.parse().ok()))
