@@ -52,9 +52,9 @@ rand_chacha = "0.3"
 [workspace]
 
 [patch.crates-io]
-vote-commitment-tree = { git = "https://github.com/valargroup/zcash_voting", rev = "a1ec065609e55c2d9b6314f5e1e1437956fa4570" }
-vote-commitment-tree-client = { git = "https://github.com/valargroup/zcash_voting", rev = "a1ec065609e55c2d9b6314f5e1e1437956fa4570" }
-zcash_voting = { git = "https://github.com/valargroup/zcash_voting", rev = "a1ec065609e55c2d9b6314f5e1e1437956fa4570" }
+vote-commitment-tree = { git = "https://github.com/valargroup/zcash_voting", rev = "b0b0233641ec53088d46d4f6e6f8f343431bf7a5" }
+vote-commitment-tree-client = { git = "https://github.com/valargroup/zcash_voting", rev = "b0b0233641ec53088d46d4f6e6f8f343431bf7a5" }
+zcash_voting = { git = "https://github.com/valargroup/zcash_voting", rev = "b0b0233641ec53088d46d4f6e6f8f343431bf7a5" }
 
 pczt = { git = "https://github.com/zcash/librustzcash", rev = "30bbc8990c3f7987868ea56fb483a7c11c56bad2" }
 zcash_client_backend = { git = "https://github.com/zcash/librustzcash", rev = "30bbc8990c3f7987868ea56fb483a7c11c56bad2" }
