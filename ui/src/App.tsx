@@ -128,7 +128,7 @@ function routeFromPath(): AppRoute {
 function App() {
   const store = useStore();
   const wallet = useWallet();
-  const { precomputedBaseURL } = useUIConfig();
+  const { precomputedBaseURL, zcashNetwork } = useUIConfig();
   const [route, setRouteState] = useState<AppRoute>(routeFromPath);
   const section = route.section;
   const [filter, setFilter] = useState<RoundStatus | "all">("all");
@@ -256,8 +256,16 @@ function App() {
       );
       return;
     }
+    if (!zcashNetwork) {
+      setPublishStatus("error");
+      setPublishError(
+        "Cannot validate the published PIR snapshot because this svoted did not expose SVOTE_ZCASH_NETWORK."
+      );
+      return;
+    }
     const validation = await chainApi.validatePublishedSnapshotManifest(
       precomputedBaseURL,
+      zcashNetwork,
       snapshotHeight
     );
     if (validation.status !== "valid") {
@@ -352,7 +360,7 @@ function App() {
       setPublishError(err instanceof Error ? err.message : String(err));
       setPublishStatus("error");
     }
-  }, [precomputedBaseURL, publishModal, store, wallet.signer]);
+  }, [precomputedBaseURL, zcashNetwork, publishModal, store, wallet.signer]);
 
   const handleNavigate = useCallback(
     (s: string) => {
@@ -3020,7 +3028,7 @@ function VoteStatusView({
   onSelectRound,
   onBackToList,
 }: VoteStatusViewProps) {
-  const { precomputedBaseURL } = useUIConfig();
+  const { precomputedBaseURL, zcashNetwork } = useUIConfig();
   const [rounds, setRounds] = useState<chainApi.ChainRound[]>([]);
   const [summaries, setSummaries] = useState<Record<string, chainApi.VoteSummaryResponse>>({});
   const [summaryErrors, setSummaryErrors] = useState<Record<string, string>>({});
@@ -3055,11 +3063,11 @@ function VoteStatusView({
         }))
         .filter((entry) => entry.roundId && Number.isFinite(entry.height) && entry.height > 0);
       if (activeSnapshotEntries.length > 0) {
-        if (!precomputedBaseURL) {
+        if (!precomputedBaseURL || !zcashNetwork) {
           setSnapshotWarnings(Object.fromEntries(
             activeSnapshotEntries.map((entry) => [
               entry.roundId,
-              "Cannot validate the published PIR snapshot because this svoted did not expose SVOTE_PRECOMPUTED_BASE_URL.",
+              "Cannot validate the published PIR snapshot because this svoted did not expose its snapshot base and Zcash network.",
             ])
           ));
         } else {
@@ -3067,6 +3075,7 @@ function VoteStatusView({
             activeSnapshotEntries.map(async (entry) => {
               const validation = await chainApi.validatePublishedSnapshotManifest(
                 precomputedBaseURL,
+                zcashNetwork,
                 entry.height
               );
               if (validation.status === "valid") return null;
@@ -3155,7 +3164,7 @@ function VoteStatusView({
     } finally {
       setLoading(false);
     }
-  }, [precomputedBaseURL]);
+  }, [precomputedBaseURL, zcashNetwork]);
 
   // Poll until the expected round count is reached after a publish.
   useEffect(() => {

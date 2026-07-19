@@ -128,7 +128,7 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
   const hasEndTime = endTime.length > 0;
 
   const chain = useChainInfo();
-  const { precomputedBaseURL } = useUIConfig();
+  const { precomputedBaseURL, zcashNetwork } = useUIConfig();
   const [chainSnapshotHeight, setChainSnapshotHeight] = useState<number | null>(null);
   const [chainSnapshotLoaded, setChainSnapshotLoaded] = useState(false);
 
@@ -233,7 +233,7 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
   const snapshotHeight = parseInt(round.settings.snapshotHeight, 10);
   const isValidHeight = !isNaN(snapshotHeight) && snapshotHeight > 0;
   useEffect(() => {
-    if (isReadonly || !isValidHeight || !precomputedBaseURL) {
+    if (isReadonly || !isValidHeight || !precomputedBaseURL || !zcashNetwork) {
       setSnapshotValidation(null);
       setSnapshotValidationLoading(false);
       return;
@@ -241,7 +241,7 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
     let cancelled = false;
     setSnapshotValidationLoading(true);
     const timer = setTimeout(() => {
-      validatePublishedSnapshotManifest(precomputedBaseURL, snapshotHeight)
+      validatePublishedSnapshotManifest(precomputedBaseURL, zcashNetwork, snapshotHeight)
         .then((result) => {
           if (!cancelled) setSnapshotValidation(result);
         })
@@ -264,7 +264,7 @@ export function RoundEditor({ round, onUpdateName, onUpdateSettings, onNavigate,
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [isReadonly, isValidHeight, precomputedBaseURL, snapshotHeight]);
+  }, [isReadonly, isValidHeight, precomputedBaseURL, zcashNetwork, snapshotHeight]);
 
   // PIR is "behind" the active chain round — typically a deploy-in-progress.
   const pirMismatch =
