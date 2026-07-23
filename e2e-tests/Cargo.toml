@@ -8,8 +8,8 @@ description = "Rust E2E API tests for Shielded-Vote voting flow (replaces TypeSc
 # Same-repo path dep (circuits/ is a sibling directory)
 shielded-vote-circuits = { path = "../circuits" }
 
-orchard = { version = "=0.15.0", features = ["unstable-voting-circuits"] }
-voting-circuits = "=0.9.0-rc.2"
+orchard = { version = "0.15", features = ["unstable-voting-circuits"] }
+voting-circuits = "=0.9.0-rc.3"
 vote-commitment-tree = "=0.3.2"
 vote-commitment-tree-client = { version = "=0.5.2", features = ["http"] }
 zcash_voting = "=1.0.0"
@@ -52,9 +52,9 @@ rand_chacha = "0.3"
 [workspace]
 
 [patch.crates-io]
-vote-commitment-tree = { git = "https://github.com/valargroup/zcash_voting", rev = "b0b0233641ec53088d46d4f6e6f8f343431bf7a5" }
-vote-commitment-tree-client = { git = "https://github.com/valargroup/zcash_voting", rev = "b0b0233641ec53088d46d4f6e6f8f343431bf7a5" }
-zcash_voting = { git = "https://github.com/valargroup/zcash_voting", rev = "b0b0233641ec53088d46d4f6e6f8f343431bf7a5" }
+vote-commitment-tree = { git = "https://github.com/valargroup/zcash_voting", rev = "5818d3ed53ea463eab31643e857bbf5de8a0b34d" }
+vote-commitment-tree-client = { git = "https://github.com/valargroup/zcash_voting", rev = "5818d3ed53ea463eab31643e857bbf5de8a0b34d" }
+zcash_voting = { git = "https://github.com/valargroup/zcash_voting", rev = "5818d3ed53ea463eab31643e857bbf5de8a0b34d" }
 
 pczt = { git = "https://github.com/zcash/librustzcash", rev = "30bbc8990c3f7987868ea56fb483a7c11c56bad2" }
 zcash_client_backend = { git = "https://github.com/zcash/librustzcash", rev = "30bbc8990c3f7987868ea56fb483a7c11c56bad2" }
