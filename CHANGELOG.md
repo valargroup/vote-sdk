@@ -6,6 +6,11 @@ Historical changes before commit `704b202e2088b91caeaf2290cef85e4a9a759542` are 
 
 Instructions on coordinated upgrades can be found [here](https://setup.valargroup.org/#coordinated-upgrade).
 
+## Unreleased
+
+- Require the upgrade scheduler to load checksum-pinned Cosmovisor archives for
+  both Linux architectures and show the exact upgrade info before signing.
+
 ## v1.1.0
 
 - Use Ironwood commitment and nullifier roots with the Ironwood voting proof
