@@ -46,22 +46,24 @@ curl -fsSL https://shielded-vote.nyc3.digitaloceanspaces.com/update_chain.sh | s
 
 ## Ironwood verifier cutover
 
-Use the `ironwood-v1` plan for the Ironwood verifier binary. The earlier `v1`
-plan has already been applied and must not be reused. The Ironwood handler does
-not migrate stores; it coordinates the consensus-sensitive verifier switch.
+Use the `v1.1.0` plan for the production Ironwood verifier binary so the plan
+matches the release tag. Staging already applied `ironwood-v1`; that handler
+remains registered for staging history, while production uses `v1.1.0`.
+The earlier `v1` plan has also been applied and must not be reused. The Ironwood
+handlers do not migrate stores; they coordinate the consensus-sensitive verifier
+switch.
 
 The running pre-Ironwood binary schedules the plan and reaches the halt height.
 Before then, stage the target release whose `svoted` binary registers the
-`ironwood-v1` handler. Cosmovisor starts that binary at the halt and the target
+`v1.1.0` handler. Cosmovisor starts that binary at the halt and the target
 binary applies the handler.
 
-For an RC rehearsal, use its tag-scoped updater so the stable updater remains
-unchanged:
+Use the tag-scoped updater to pre-stage the final release:
 
 ```bash
-TAG=v1.2.3-rc.1
+TAG=v1.1.0
 curl -fsSL "https://shielded-vote.nyc3.digitaloceanspaces.com/scripts/upgrade/${TAG}/update_chain.sh" | sudo bash -s -- \
-  --mode prepare --plan-name ironwood-v1 --tag "${TAG}"
+  --mode prepare --plan-name v1.1.0 --tag "${TAG}"
 ```
 
 ## Scheduling a state-breaking upgrade
