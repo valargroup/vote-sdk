@@ -7,6 +7,7 @@ METADATA_SCRIPT="${REPO_ROOT}/scripts/release-metadata.sh"
 POINTER_SCRIPT="${REPO_ROOT}/scripts/publish-release-pointers.sh"
 RENDER_SCRIPT="${REPO_ROOT}/scripts/render-update-chain.sh"
 PROMOTION_SCRIPT="${REPO_ROOT}/scripts/validate-release-promotion.sh"
+VERIFY_SCRIPT="${REPO_ROOT}/scripts/verify_upgrade_release_artifacts.sh"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -30,6 +31,8 @@ EXPECTED_HELD_METADATA=$'prerelease=false\nmake_latest=false\npublish_mutable_po
 EXPECTED_STABLE_METADATA=$'prerelease=false\nmake_latest=true\npublish_mutable_pointers=true'
 [ "$($METADATA_SCRIPT v1.2.3 v1.2.4)" = "$EXPECTED_STABLE_METADATA" ] \
   || fail "unheld stable release metadata"
+[ "$($METADATA_SCRIPT v1.2.3 v1.2.3 v1.2.3)" = "$EXPECTED_STABLE_METADATA" ] \
+  || fail "already promoted held release metadata"
 
 [ "$($PROMOTION_SCRIPT v1.2.3 v1.2.3 v1.2.2)" = "v1.2.3" ] \
   || fail "held stable release promotion validation"
@@ -84,5 +87,72 @@ grep -q 's3://shielded-vote/version.txt' "$S3CMD_LOG" || fail "stable version po
 grep -q 's3://shielded-vote/update_chain.sh' "$S3CMD_LOG" || fail "stable updater pointer missing"
 tail -n 1 "$S3CMD_LOG" | grep -q 's3://shielded-vote/version.txt' \
   || fail "stable version pointer was not published last"
+
+cat > "${TMPDIR}/curl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+output_file=""
+url=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o)
+      output_file="$2"
+      shift 2
+      ;;
+    --retry|--retry-delay)
+      shift 2
+      ;;
+    -*)
+      shift
+      ;;
+    *)
+      url="$1"
+      shift
+      ;;
+  esac
+done
+
+printf '%s\n' "$url" >> "$CURL_LOG"
+case "$url" in
+  */version.txt)
+    body="$VERIFY_TAG"
+    ;;
+  *.tar.gz.sha256)
+    body='c7c5c1d70c5dec4416ab6158afd0b223ef40c29b1dc1f97ed9428b94d4cadb1c  artifact'
+    ;;
+  *.tar.gz)
+    body='artifact'
+    ;;
+  */scripts/upgrade/*/update_chain.sh)
+    body="#!/usr/bin/env bash
+readonly UPDATE_DEFAULT_RELEASE_TAG='${VERIFY_TAG}'"
+    ;;
+  *)
+    body='#!/usr/bin/env bash'
+    ;;
+esac
+
+if [ -n "$output_file" ]; then
+  printf '%s' "$body" > "$output_file"
+else
+  printf '%s' "$body"
+fi
+EOF
+chmod +x "${TMPDIR}/curl"
+
+export CURL_BIN="${TMPDIR}/curl"
+export CURL_LOG="${TMPDIR}/curl.log"
+export VERIFY_TAG=v1.2.3
+
+"$VERIFY_SCRIPT" --tag-scoped-only "$VERIFY_TAG" https://objects.example >/dev/null
+if grep -Fq '/version.txt' "$CURL_LOG"; then
+  fail "tag-scoped verification checked mutable stable pointers"
+fi
+
+: > "$CURL_LOG"
+"$VERIFY_SCRIPT" "$VERIFY_TAG" https://objects.example >/dev/null
+grep -Fq '/version.txt' "$CURL_LOG" \
+  || fail "complete stable verification skipped version.txt"
 
 echo "PASS: release channel tests"

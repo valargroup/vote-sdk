@@ -82,6 +82,16 @@ audit marker because it affects only that exact tag; replace it before the next
 coordinated release. Promotion refuses to replace a newer stable release that
 has since become Latest; rerunning the current Latest tag remains safe.
 
+Before promotion, verify only the held release's immutable artifacts:
+
+```bash
+DO_BASE="${SVOTE_DO_SPACES_BASE:-https://shielded-vote.nyc3.digitaloceanspaces.com}"
+scripts/verify_upgrade_release_artifacts.sh --tag-scoped-only "$TAG" "$DO_BASE"
+```
+
+After promotion, rerun the command without `--tag-scoped-only` to verify
+`version.txt` and the unversioned installer scripts too.
+
 Promotion changes what future unversioned downloads resolve to. It does not
 install binaries or restart running validators.
 

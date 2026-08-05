@@ -12,7 +12,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-promotion
+  group: release-channel
   cancel-in-progress: false
 
 jobs:
@@ -29,24 +29,60 @@ jobs:
       DO_SPACES_BASE: ${{ vars.DO_SPACES_BASE }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: Check out held release
+      - name: Check out trusted promotion logic
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ github.event.repository.default_branch }}
 
       - name: Validate held stable release
+        id: validate
         run: |
           set -euo pipefail
-          latest_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name')"
+          repo_owner="${GITHUB_REPOSITORY%%/*}"
+          repo_name="${GITHUB_REPOSITORY#*/}"
+          latest_tag="$(
+            gh api graphql \
+              -f owner="$repo_owner" \
+              -f name="$repo_name" \
+              -f query="query(\$owner: String!, \$name: String!) {
+                repository(owner: \$owner, name: \$name) {
+                  latestRelease { tagName }
+                }
+              }" \
+              --jq '.data.repository.latestRelease.tagName // empty'
+          )"
           scripts/validate-release-promotion.sh \
             "$RELEASE_TAG" \
             "$RELEASE_HOLD_TAG" \
             "$latest_tag"
-          [ "$(git rev-list -n 1 "$RELEASE_TAG")" = "$(git rev-parse HEAD)" ]
 
           release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}")"
           [ "$(jq -r '.draft' <<<"$release_json")" = "false" ]
           [ "$(jq -r '.prerelease' <<<"$release_json")" = "false" ]
+
+          tag_ref="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}")"
+          release_object_type="$(jq -r '.object.type' <<<"$tag_ref")"
+          release_sha="$(jq -r '.object.sha' <<<"$tag_ref")"
+          while [ "$release_object_type" = "tag" ]; do
+            tag_object="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${release_sha}")"
+            release_object_type="$(jq -r '.object.type' <<<"$tag_object")"
+            release_sha="$(jq -r '.object.sha' <<<"$tag_object")"
+          done
+          if [ "$release_object_type" != "commit" ]; then
+            echo "Release tag ${RELEASE_TAG} does not resolve to a commit." >&2
+            exit 1
+          fi
+          printf 'release_sha=%s\n' "$release_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Check out held release commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.validate.outputs.release_sha }}
+
+      - name: Verify held release checkout
+        env:
+          RELEASE_SHA: ${{ steps.validate.outputs.release_sha }}
+        run: '[ "$(git rev-parse HEAD)" = "$RELEASE_SHA" ]'
 
       - name: Verify tag-scoped release artifacts
         run: |

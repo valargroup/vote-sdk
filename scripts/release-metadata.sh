@@ -3,6 +3,7 @@ set -euo pipefail
 
 tag="${1:-}"
 held_tag="${2:-}"
+latest_tag="${3:-}"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 channel="$("${repo_root}/scripts/release-channel.sh" "$tag")"
@@ -10,7 +11,7 @@ if [ "$channel" = "rc" ]; then
   prerelease=true
   make_latest=false
   publish_mutable_pointers=false
-elif [ -n "$held_tag" ] && [ "$tag" = "$held_tag" ]; then
+elif [ -n "$held_tag" ] && [ "$tag" = "$held_tag" ] && [ "$tag" != "$latest_tag" ]; then
   echo "Holding coordinated release ${tag} from mutable release channels." >&2
   prerelease=false
   make_latest=false
