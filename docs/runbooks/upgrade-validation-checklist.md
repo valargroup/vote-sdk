@@ -95,6 +95,13 @@ DO_BASE="${SVOTE_DO_SPACES_BASE:-https://shielded-vote.nyc3.digitaloceanspaces.c
 scripts/verify_upgrade_release_artifacts.sh "$TAG" "$DO_BASE"
 ```
 
+For a held stable release that has not been promoted, verify only its immutable
+artifacts:
+
+```bash
+scripts/verify_upgrade_release_artifacts.sh --tag-scoped-only "$TAG" "$DO_BASE"
+```
+
 | Check | PASS | FAIL |
 |-------|------|------|
 | GitHub Release exists for tag | | |
@@ -103,7 +110,8 @@ scripts/verify_upgrade_release_artifacts.sh "$TAG" "$DO_BASE"
 | Tag-scoped `prepare-upgrade-artifacts.sh` fetchable | | |
 | `shielded-vote-${TAG}-linux-amd64.tar.gz` + `.sha256` verify | | |
 | Tag-scoped `update_chain.sh` default `--tag` matches tag | | |
-| Stable only: `version.txt` and shared scripts match tag | | |
+| Promoted or unheld stable only: `version.txt` and shared scripts match tag | | |
+| Held stable only: tag-scoped checks pass without changing shared pointers | | |
 | RC only: shared release pointers remain unchanged | | |
 
 **STOP — operator sign-off before provisioning isolated network.**

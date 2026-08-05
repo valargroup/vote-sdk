@@ -26,20 +26,35 @@ jobs:
     outputs:
       prerelease: ${{ steps.channel.outputs.prerelease }}
       make_latest: ${{ steps.channel.outputs.make_latest }}
+      already_latest: ${{ steps.channel.outputs.already_latest }}
+      publish_mutable_pointers: ${{ steps.channel.outputs.publish_mutable_pointers }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Classify release tag
         id: channel
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_HOLD_TAG: ${{ vars.RELEASE_HOLD_TAG }}
         run: |
-          channel="$(scripts/release-channel.sh "$GITHUB_REF_NAME")"
-          if [ "$channel" = "rc" ]; then
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
-            echo "make_latest=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
-            echo "make_latest=true" >> "$GITHUB_OUTPUT"
-          fi
+          repo_owner="${GITHUB_REPOSITORY%%/*}"
+          repo_name="${GITHUB_REPOSITORY#*/}"
+          latest_tag="$(
+            gh api graphql \
+              -f owner="$repo_owner" \
+              -f name="$repo_name" \
+              -f query="query(\$owner: String!, \$name: String!) {
+                repository(owner: \$owner, name: \$name) {
+                  latestRelease { tagName }
+                }
+              }" \
+              --jq '.data.repository.latestRelease.tagName // empty'
+          )"
+          scripts/release-metadata.sh \
+            "$GITHUB_REF_NAME" \
+            "$RELEASE_HOLD_TAG" \
+            "$latest_tag" \
+            >> "$GITHUB_OUTPUT"
 
   build-sdk:
     name: Build SDK (${{ matrix.platform }})
@@ -185,11 +200,22 @@ jobs:
     needs: [release-metadata, build-sdk, build-explorer]
     steps:
       - name: Create release
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-          prerelease: ${{ needs.release-metadata.outputs.prerelease }}
-          make_latest: ${{ needs.release-metadata.outputs.make_latest }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PRERELEASE: ${{ needs.release-metadata.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          if release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" 2>/dev/null)"; then
+            [ "$(jq -r '.draft' <<<"$release_json")" = "false" ]
+            [ "$(jq -r '.prerelease' <<<"$release_json")" = "$PRERELEASE" ]
+          else
+            release_args=(--generate-notes --latest=false --verify-tag)
+            if [ "$PRERELEASE" = "true" ]; then
+              release_args+=(--prerelease)
+            fi
+            gh release create "$GITHUB_REF_NAME" "${release_args[@]}"
+          fi
 
   release:
     name: Package and release (${{ matrix.platform }})
@@ -362,7 +388,6 @@ jobs:
             "s3://${DO_SPACES_BUCKET}/scripts/remove-pir/${VERSION}/remove-pir.sh"
           s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force scripts/svoted-wrapper.sh \
             "s3://${DO_SPACES_BUCKET}/scripts/svoted-wrapper/${VERSION}/svoted-wrapper.sh"
-          scripts/publish-release-pointers.sh "$VERSION" /tmp/do-spaces.s3cfg
       - name: Verify DigitalOcean Spaces uploads
         env:
           DO_SPACES_BUCKET: ${{ vars.DO_SPACES_BUCKET }}
@@ -400,22 +425,97 @@ jobs:
             echo "[OK] $URL"
           done
 
-          if [ "$(scripts/release-channel.sh "$VERSION")" = "stable" ]; then
-            for KEY in \
-              "version.txt" \
-              "join.sh" \
-              "join-full.sh" \
-              "scripts/_join_common.sh" \
-              "reset-validator-snapshot.sh" \
-              "remove-validator.sh" \
-              "remove-pir.sh" \
-              "svoted-wrapper.sh" \
-              "update_chain.sh" \
-              "scripts/_chain_upgrade_common.sh" \
-              "prepare-upgrade-artifacts.sh"
-            do
-              URL="${DO_SPACES_BASE}/${KEY}"
-              curl -fsSIL --retry 3 --retry-delay 2 "$URL" > /dev/null
-              echo "[OK] $URL"
-            done
-          fi
+  publish-release-channel:
+    name: Publish stable release channel
+    if: needs.release-metadata.outputs.publish_mutable_pointers == 'true'
+    runs-on: ubuntu-latest
+    needs: [release-metadata, distribute]
+    concurrency:
+      group: release-channel
+      cancel-in-progress: false
+    env:
+      DO_ACCESS_KEY: ${{ secrets.DO_ACCESS_KEY }}
+      DO_SECRET_KEY: ${{ secrets.DO_SECRET_KEY }}
+      DO_SPACES_BUCKET: ${{ vars.DO_SPACES_BUCKET }}
+      DO_SPACES_REGION: ${{ vars.DO_SPACES_REGION }}
+      DO_SPACES_BASE: ${{ vars.DO_SPACES_BASE }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate stable channel update
+        run: |
+          set -euo pipefail
+          repo_owner="${GITHUB_REPOSITORY%%/*}"
+          repo_name="${GITHUB_REPOSITORY#*/}"
+          latest_tag="$(
+            gh api graphql \
+              -f owner="$repo_owner" \
+              -f name="$repo_name" \
+              -f query="query(\$owner: String!, \$name: String!) {
+                repository(owner: \$owner, name: \$name) {
+                  latestRelease { tagName }
+                }
+              }" \
+              --jq '.data.repository.latestRelease.tagName // empty'
+          )"
+          scripts/validate-release-channel-update.sh \
+            "$GITHUB_REF_NAME" \
+            "$latest_tag"
+
+      - name: Publish mutable release pointers
+        run: |
+          set -euo pipefail
+          DO_SPACES_BUCKET="${DO_SPACES_BUCKET:-shielded-vote}"
+          DO_SPACES_REGION="${DO_SPACES_REGION:-nyc3}"
+          DO_SPACES_BASE="${DO_SPACES_BASE:-https://${DO_SPACES_BUCKET}.${DO_SPACES_REGION}.digitaloceanspaces.com}"
+          DO_SPACES_BASE="${DO_SPACES_BASE%/}"
+
+          pointer_sources="$(mktemp -d)"
+          trap 'rm -rf "$pointer_sources"' EXIT
+          scripts/fetch-release-pointer-sources.sh \
+            "$GITHUB_REF_NAME" \
+            "$DO_SPACES_BASE" \
+            "$pointer_sources"
+
+          pip install --quiet s3cmd
+          cat > /tmp/do-spaces.s3cfg <<EOF
+          [default]
+          access_key = ${DO_ACCESS_KEY}
+          secret_key = ${DO_SECRET_KEY}
+          host_base = ${DO_SPACES_REGION}.digitaloceanspaces.com
+          host_bucket = %(bucket)s.${DO_SPACES_REGION}.digitaloceanspaces.com
+          bucket_location = ${DO_SPACES_REGION}
+          use_https = True
+          EOF
+
+          DO_SPACES_BUCKET="$DO_SPACES_BUCKET" \
+          DO_SPACES_REGION="$DO_SPACES_REGION" \
+          DO_SPACES_BASE="$DO_SPACES_BASE" \
+            scripts/publish-release-pointers.sh \
+              "$GITHUB_REF_NAME" \
+              /tmp/do-spaces.s3cfg \
+              "$pointer_sources"
+
+      - name: Verify mutable release pointers
+        run: |
+          set -euo pipefail
+          DO_SPACES_BUCKET="${DO_SPACES_BUCKET:-shielded-vote}"
+          DO_SPACES_REGION="${DO_SPACES_REGION:-nyc3}"
+          DO_SPACES_BASE="${DO_SPACES_BASE:-https://${DO_SPACES_BUCKET}.${DO_SPACES_REGION}.digitaloceanspaces.com}"
+
+          scripts/verify_upgrade_release_artifacts.sh \
+            --mutable-only \
+            "$GITHUB_REF_NAME" \
+            "$DO_SPACES_BASE"
+
+      - name: Mark GitHub release latest
+        if: needs.release-metadata.outputs.make_latest == 'true'
+        run: gh release edit "$GITHUB_REF_NAME" --latest --verify-tag
+
+      - name: Verify GitHub release channel
+        if: needs.release-metadata.outputs.make_latest == 'true'
+        run: |
+          set -euo pipefail
+          [ "$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name')" = "$GITHUB_REF_NAME" ]

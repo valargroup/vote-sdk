@@ -66,6 +66,40 @@ curl -fsSL "https://shielded-vote.nyc3.digitaloceanspaces.com/scripts/upgrade/${
   --mode prepare --plan-name v1.1.0 --tag "${TAG}"
 ```
 
+## Held release and promotion
+
+Set the repository variable `RELEASE_HOLD_TAG` to a stable tag before pushing
+that tag when operators need to pre-stage a coordinated release. The release
+workflow still publishes the GitHub release and every tag-scoped artifact, but
+it does not mark the release Latest or update `version.txt` and the unversioned
+installer scripts.
+
+After the coordinated upgrade is complete, run the **Promote release** workflow
+with that exact tag. It verifies the held stable release and its tag-scoped
+artifacts, updates the mutable DigitalOcean Spaces pointers, marks the GitHub
+release Latest, and verifies both channels. `RELEASE_HOLD_TAG` can remain as an
+audit marker because it affects only that exact tag; replace it before the next
+coordinated release. Promotion refuses to replace a newer stable release that
+has since become Latest; rerunning the current Latest tag remains safe.
+
+Before promotion, verify only the held release's immutable artifacts:
+
+```bash
+DO_BASE="${SVOTE_DO_SPACES_BASE:-https://shielded-vote.nyc3.digitaloceanspaces.com}"
+scripts/verify_upgrade_release_artifacts.sh --tag-scoped-only "$TAG" "$DO_BASE"
+```
+
+After promotion, rerun the command without `--tag-scoped-only` to verify
+`version.txt` and the unversioned installer scripts too.
+
+For an ordinary stable release, GitHub publishes the release without changing
+Latest, updates and verifies the mutable Spaces pointers, and only then marks
+the release Latest. Rerunning the current Latest tag preserves that status while
+the pointers are republished.
+
+Promotion changes what future unversioned downloads resolve to. It does not
+install binaries or restart running validators.
+
 ## Scheduling a state-breaking upgrade
 
 To schedule the halt height, a current coordinator proposes a coordinator

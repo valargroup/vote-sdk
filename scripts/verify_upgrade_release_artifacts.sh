@@ -4,22 +4,50 @@
 # Usage:
 #   scripts/verify_upgrade_release_artifacts.sh v0.11.0
 #   scripts/verify_upgrade_release_artifacts.sh v0.11.0 https://shielded-vote.nyc3.digitaloceanspaces.com
+#   scripts/verify_upgrade_release_artifacts.sh --tag-scoped-only v0.11.0
+#   scripts/verify_upgrade_release_artifacts.sh --mutable-only v0.11.0
 set -euo pipefail
 
-TAG="${1:?usage: verify_upgrade_release_artifacts.sh <tag> [do_base]}"
+usage() {
+  echo "usage: verify_upgrade_release_artifacts.sh [--tag-scoped-only|--mutable-only] <tag> [do_base]" >&2
+}
+
+SCOPE=complete
+case "${1:-}" in
+  --tag-scoped-only)
+    SCOPE=tag-scoped
+    shift
+    ;;
+  --mutable-only)
+    SCOPE=mutable
+    shift
+    ;;
+esac
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+  usage
+  exit 2
+fi
+
+TAG="$1"
 DO_BASE="${2:-${SVOTE_DO_SPACES_BASE:-https://shielded-vote.nyc3.digitaloceanspaces.com}}"
 DO_BASE="${DO_BASE%/}"
 PLATFORM="${SVOTE_PLATFORM:-linux-amd64}"
+CURL_BIN="${CURL_BIN:-curl}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHANNEL="$("${SCRIPT_DIR}/release-channel.sh" "$TAG")"
 TAGGED_UPGRADE_BASE="${DO_BASE}/scripts/upgrade/${TAG}"
+
+if [ "$SCOPE" = "mutable" ] && [ "$CHANNEL" != "stable" ]; then
+  echo "Mutable release pointers only exist for stable tags." >&2
+  exit 1
+fi
 
 failures=0
 
 check_url() {
   local url="$1"
   local label="$2"
-  if curl -fsSIL --retry 3 --retry-delay 2 "$url" >/dev/null 2>&1; then
+  if "$CURL_BIN" -fsSIL --retry 3 --retry-delay 2 "$url" >/dev/null 2>&1; then
     echo "[PASS] ${label}: ${url}"
   else
     echo "[FAIL] ${label}: ${url}" >&2
@@ -31,7 +59,7 @@ check_script_help() {
   local url="$1"
   local tmp
   tmp=$(mktemp)
-  if ! curl -fsSL --retry 3 "$url" -o "$tmp"; then
+  if ! "$CURL_BIN" -fsSL --retry 3 "$url" -o "$tmp"; then
     echo "[FAIL] download ${url}" >&2
     failures=$((failures + 1))
     rm -f "$tmp"
@@ -57,23 +85,35 @@ echo "=== Upgrade release artifact verification ==="
 echo "Tag:      ${TAG}"
 echo "DO base:  ${DO_BASE}"
 echo "Platform: ${PLATFORM}"
+case "$SCOPE" in
+  tag-scoped) echo "Scope:    tag-scoped only" ;;
+  mutable) echo "Scope:    mutable pointers only" ;;
+  *) echo "Scope:    complete release channel" ;;
+esac
 echo
 
-for key in \
-  "scripts/upgrade/${TAG}/update_chain.sh" \
-  "scripts/upgrade/${TAG}/_chain_upgrade_common.sh" \
-  "scripts/upgrade/${TAG}/prepare-upgrade-artifacts.sh" \
-  "scripts/join/${TAG}/join.sh" \
-  "scripts/svoted-wrapper/${TAG}/svoted-wrapper.sh"
-do
-  check_url "${DO_BASE}/${key}" "$key"
-done
+if [ "$SCOPE" != "mutable" ]; then
+  for key in \
+    "scripts/upgrade/${TAG}/update_chain.sh" \
+    "scripts/upgrade/${TAG}/_chain_upgrade_common.sh" \
+    "scripts/upgrade/${TAG}/prepare-upgrade-artifacts.sh" \
+    "scripts/join-full/${TAG}/join-full.sh" \
+    "scripts/join-common/${TAG}/_join_common.sh" \
+    "scripts/join/${TAG}/join.sh" \
+    "scripts/reset-validator-snapshot/${TAG}/reset-validator-snapshot.sh" \
+    "scripts/remove-validator/${TAG}/remove-validator.sh" \
+    "scripts/remove-pir/${TAG}/remove-pir.sh" \
+    "scripts/svoted-wrapper/${TAG}/svoted-wrapper.sh"
+  do
+    check_url "${DO_BASE}/${key}" "$key"
+  done
 
-check_script_help "${TAGGED_UPGRADE_BASE}/update_chain.sh"
+  check_script_help "${TAGGED_UPGRADE_BASE}/update_chain.sh"
+fi
 
-if [ "$CHANNEL" = "stable" ]; then
+if [ "$CHANNEL" = "stable" ] && [ "$SCOPE" != "tag-scoped" ]; then
   check_url "${DO_BASE}/version.txt" "version.txt"
-  published_version=$(curl -fsSL "${DO_BASE}/version.txt" | tr -d '[:space:]' || true)
+  published_version=$("$CURL_BIN" -fsSL "${DO_BASE}/version.txt" | tr -d '[:space:]' || true)
   if [ "$published_version" = "$TAG" ]; then
     echo "[PASS] version.txt matches ${TAG}"
   else
@@ -86,34 +126,42 @@ if [ "$CHANNEL" = "stable" ]; then
     "scripts/_chain_upgrade_common.sh" \
     "prepare-upgrade-artifacts.sh" \
     "join.sh" \
+    "join-full.sh" \
+    "scripts/_join_common.sh" \
+    "reset-validator-snapshot.sh" \
+    "remove-validator.sh" \
+    "remove-pir.sh" \
     "svoted-wrapper.sh"
   do
     check_url "${DO_BASE}/${key}" "$key"
   done
+  check_script_help "${DO_BASE}/update_chain.sh"
 fi
 
-tarball="shielded-vote-${TAG}-${PLATFORM}.tar.gz"
-check_url "${DO_BASE}/binaries/vote-sdk/${tarball}" "release tarball"
-check_url "${DO_BASE}/binaries/vote-sdk/${tarball}.sha256" "release checksum"
+if [ "$SCOPE" != "mutable" ]; then
+  tarball="shielded-vote-${TAG}-${PLATFORM}.tar.gz"
+  check_url "${DO_BASE}/binaries/vote-sdk/${tarball}" "release tarball"
+  check_url "${DO_BASE}/binaries/vote-sdk/${tarball}.sha256" "release checksum"
 
-tmp_tar=$(mktemp)
-tmp_sum=$(mktemp)
-if curl -fsSL "${DO_BASE}/binaries/vote-sdk/${tarball}" -o "$tmp_tar" \
-  && curl -fsSL "${DO_BASE}/binaries/vote-sdk/${tarball}.sha256" -o "$tmp_sum"; then
-  expected=$(awk '{print $1}' "$tmp_sum" | tr 'A-F' 'a-f')
-  if command -v sha256sum >/dev/null 2>&1; then
-    actual=$(sha256sum "$tmp_tar" | awk '{print $1}' | tr 'A-F' 'a-f')
-  else
-    actual=$(shasum -a 256 "$tmp_tar" | awk '{print $1}' | tr 'A-F' 'a-f')
+  tmp_tar=$(mktemp)
+  tmp_sum=$(mktemp)
+  if "$CURL_BIN" -fsSL "${DO_BASE}/binaries/vote-sdk/${tarball}" -o "$tmp_tar" \
+    && "$CURL_BIN" -fsSL "${DO_BASE}/binaries/vote-sdk/${tarball}.sha256" -o "$tmp_sum"; then
+    expected=$(awk '{print $1}' "$tmp_sum" | tr 'A-F' 'a-f')
+    if command -v sha256sum >/dev/null 2>&1; then
+      actual=$(sha256sum "$tmp_tar" | awk '{print $1}' | tr 'A-F' 'a-f')
+    else
+      actual=$(shasum -a 256 "$tmp_tar" | awk '{print $1}' | tr 'A-F' 'a-f')
+    fi
+    if [ "$expected" = "$actual" ]; then
+      echo "[PASS] tarball SHA256 verified"
+    else
+      echo "[FAIL] tarball checksum mismatch" >&2
+      failures=$((failures + 1))
+    fi
   fi
-  if [ "$expected" = "$actual" ]; then
-    echo "[PASS] tarball SHA256 verified"
-  else
-    echo "[FAIL] tarball checksum mismatch" >&2
-    failures=$((failures + 1))
-  fi
+  rm -f "$tmp_tar" "$tmp_sum"
 fi
-rm -f "$tmp_tar" "$tmp_sum"
 
 echo
 if [ "$failures" -gt 0 ]; then
