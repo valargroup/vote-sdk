@@ -32,7 +32,6 @@ put() {
   "$s3cmd_bin" -c "$s3_config" put "$1" "s3://${bucket}/$2" --acl-public --force
 }
 
-put "${tmp_dir}/version.txt" "version.txt"
 put "${repo_root}/join.sh" "join.sh"
 put "${repo_root}/join-full.sh" "join-full.sh"
 put "${repo_root}/scripts/_join_common.sh" "scripts/_join_common.sh"
@@ -43,3 +42,4 @@ put "${repo_root}/scripts/svoted-wrapper.sh" "svoted-wrapper.sh"
 put "${tmp_dir}/update_chain.sh" "update_chain.sh"
 put "${repo_root}/scripts/_chain_upgrade_common.sh" "scripts/_chain_upgrade_common.sh"
 put "${repo_root}/scripts/prepare-upgrade-artifacts.sh" "prepare-upgrade-artifacts.sh"
+put "${tmp_dir}/version.txt" "version.txt"

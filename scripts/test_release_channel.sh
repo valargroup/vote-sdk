@@ -5,6 +5,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CHANNEL_SCRIPT="${REPO_ROOT}/scripts/release-channel.sh"
 POINTER_SCRIPT="${REPO_ROOT}/scripts/publish-release-pointers.sh"
 RENDER_SCRIPT="${REPO_ROOT}/scripts/render-update-chain.sh"
+PROMOTION_SCRIPT="${REPO_ROOT}/scripts/validate-release-promotion.sh"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -18,6 +19,18 @@ for tag in v1.2 v1.2.3-rc v1.2.3-beta.1 v1.2.3.4; do
     fail "invalid tag accepted: $tag"
   fi
 done
+
+[ "$($PROMOTION_SCRIPT v1.2.3 v1.2.3)" = "v1.2.3" ] \
+  || fail "held stable release promotion validation"
+if "$PROMOTION_SCRIPT" v1.2.3-rc.4 v1.2.3-rc.4 >/dev/null 2>&1; then
+  fail "RC release promotion accepted"
+fi
+if "$PROMOTION_SCRIPT" v1.2.3 v1.2.4 >/dev/null 2>&1; then
+  fail "promotion tag did not match hold"
+fi
+if "$PROMOTION_SCRIPT" v1.2.3 "" >/dev/null 2>&1; then
+  fail "promotion accepted without a hold"
+fi
 
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
@@ -48,5 +61,7 @@ export S3CMD_LOG="${TMPDIR}/uploads.log"
 "$POINTER_SCRIPT" v1.2.3 "${TMPDIR}/s3cfg"
 grep -q 's3://shielded-vote/version.txt' "$S3CMD_LOG" || fail "stable version pointer missing"
 grep -q 's3://shielded-vote/update_chain.sh' "$S3CMD_LOG" || fail "stable updater pointer missing"
+tail -n 1 "$S3CMD_LOG" | grep -q 's3://shielded-vote/version.txt' \
+  || fail "stable version pointer was not published last"
 
 echo "PASS: release channel tests"

@@ -66,6 +66,22 @@ curl -fsSL "https://shielded-vote.nyc3.digitaloceanspaces.com/scripts/upgrade/${
   --mode prepare --plan-name v1.1.0 --tag "${TAG}"
 ```
 
+## Held release and promotion
+
+Set the repository variable `RELEASE_HOLD_TAG` to a stable tag before pushing
+that tag when operators need to pre-stage a coordinated release. The release
+workflow still publishes the GitHub release and every tag-scoped artifact, but
+it does not mark the release Latest or update `version.txt` and the unversioned
+installer scripts.
+
+After the coordinated upgrade is complete, run the **Promote release** workflow
+with that exact tag. It verifies the held stable release and its tag-scoped
+artifacts, updates the mutable DigitalOcean Spaces pointers, marks the GitHub
+release Latest, verifies both channels, and clears `RELEASE_HOLD_TAG`.
+
+Promotion changes what future unversioned downloads resolve to. It does not
+install binaries or restart running validators.
+
 ## Scheduling a state-breaking upgrade
 
 To schedule the halt height, a current coordinator proposes a coordinator
