@@ -316,6 +316,21 @@ export VERIFY_TAG=v1.2.3
 if grep -Fq '/version.txt' "$CURL_LOG"; then
   fail "tag-scoped verification checked mutable stable pointers"
 fi
+for key in \
+  "scripts/join-full/${VERIFY_TAG}/join-full.sh" \
+  "scripts/join-common/${VERIFY_TAG}/_join_common.sh" \
+  "scripts/join/${VERIFY_TAG}/join.sh" \
+  "scripts/reset-validator-snapshot/${VERIFY_TAG}/reset-validator-snapshot.sh" \
+  "scripts/remove-validator/${VERIFY_TAG}/remove-validator.sh" \
+  "scripts/remove-pir/${VERIFY_TAG}/remove-pir.sh" \
+  "scripts/svoted-wrapper/${VERIFY_TAG}/svoted-wrapper.sh" \
+  "scripts/upgrade/${VERIFY_TAG}/update_chain.sh" \
+  "scripts/upgrade/${VERIFY_TAG}/_chain_upgrade_common.sh" \
+  "scripts/upgrade/${VERIFY_TAG}/prepare-upgrade-artifacts.sh"
+do
+  grep -Fqx "https://objects.example/${key}" "$CURL_LOG" \
+    || fail "tag-scoped verification skipped ${key}"
+done
 
 : > "$CURL_LOG"
 "$VERIFY_SCRIPT" --mutable-only "$VERIFY_TAG" https://objects.example >/dev/null

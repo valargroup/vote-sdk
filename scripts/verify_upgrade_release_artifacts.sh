@@ -97,7 +97,12 @@ if [ "$SCOPE" != "mutable" ]; then
     "scripts/upgrade/${TAG}/update_chain.sh" \
     "scripts/upgrade/${TAG}/_chain_upgrade_common.sh" \
     "scripts/upgrade/${TAG}/prepare-upgrade-artifacts.sh" \
+    "scripts/join-full/${TAG}/join-full.sh" \
+    "scripts/join-common/${TAG}/_join_common.sh" \
     "scripts/join/${TAG}/join.sh" \
+    "scripts/reset-validator-snapshot/${TAG}/reset-validator-snapshot.sh" \
+    "scripts/remove-validator/${TAG}/remove-validator.sh" \
+    "scripts/remove-pir/${TAG}/remove-pir.sh" \
     "scripts/svoted-wrapper/${TAG}/svoted-wrapper.sh"
   do
     check_url "${DO_BASE}/${key}" "$key"
