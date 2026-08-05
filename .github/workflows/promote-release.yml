@@ -9,7 +9,6 @@ on:
         type: string
 
 permissions:
-  actions: write
   contents: write
 
 concurrency:
@@ -112,6 +111,3 @@ jobs:
           [ "$(curl -fsSL --retry 3 --retry-delay 2 "${DO_SPACES_BASE}/version.txt")" = "$RELEASE_TAG" ]
           curl -fsSL --retry 3 --retry-delay 2 "${DO_SPACES_BASE}/update_chain.sh" \
             | grep -Fq "readonly UPDATE_DEFAULT_RELEASE_TAG='${RELEASE_TAG}'"
-
-      - name: Clear release hold
-        run: gh variable delete RELEASE_HOLD_TAG --repo "$GITHUB_REPOSITORY"
