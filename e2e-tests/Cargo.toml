@@ -50,9 +50,3 @@ rand = "0.8"
 rand_chacha = "0.3"
 
 [workspace]
-
-[patch.crates-io]
-# Remove this release-candidate overlay once zcash_voting 2.0.0-rc.3 is published.
-vote-commitment-tree = { git = "https://github.com/valargroup/zcash_voting", rev = "474b365f6ca39aebc5d8f7894ed4270b52cbff12" }
-vote-commitment-tree-client = { git = "https://github.com/valargroup/zcash_voting", rev = "474b365f6ca39aebc5d8f7894ed4270b52cbff12" }
-zcash_voting = { git = "https://github.com/valargroup/zcash_voting", rev = "474b365f6ca39aebc5d8f7894ed4270b52cbff12" }
