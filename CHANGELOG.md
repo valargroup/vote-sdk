@@ -6,11 +6,13 @@ Historical changes before commit `704b202e2088b91caeaf2290cef85e4a9a759542` are 
 
 Instructions on coordinated upgrades can be found [here](https://setup.valargroup.org/#coordinated-upgrade).
 
-## Unreleased
+## v1.1.0
 
 - Use Ironwood commitment and nullifier roots with the Ironwood voting proof
   verifier. Staging uses Zcash Testnet, production uses Mainnet, and release
-  candidates no longer replace stable release pointers.
+  candidates no longer replace stable release pointers. The production
+  coordinated upgrade plan matches the `v1.1.0` release tag; the already-applied
+  staging `ironwood-v1` plan remains supported.
 
 ## v1.0.3
 
