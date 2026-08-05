@@ -35,7 +35,6 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
 
       - name: Validate held stable release
-        id: validate
         run: |
           set -euo pipefail
           repo_owner="${GITHUB_REPOSITORY%%/*}"
@@ -72,17 +71,7 @@ jobs:
             echo "Release tag ${RELEASE_TAG} does not resolve to a commit." >&2
             exit 1
           fi
-          printf 'release_sha=%s\n' "$release_sha" >> "$GITHUB_OUTPUT"
-
-      - name: Check out held release commit
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.validate.outputs.release_sha }}
-
-      - name: Verify held release checkout
-        env:
-          RELEASE_SHA: ${{ steps.validate.outputs.release_sha }}
-        run: '[ "$(git rev-parse HEAD)" = "$RELEASE_SHA" ]'
+          echo "Validated ${RELEASE_TAG} at ${release_sha}."
 
       - name: Verify tag-scoped release artifacts
         run: |
@@ -120,6 +109,32 @@ jobs:
           DO_SPACES_BUCKET="${DO_SPACES_BUCKET:-shielded-vote}"
           DO_SPACES_REGION="${DO_SPACES_REGION:-nyc3}"
           DO_SPACES_BASE="${DO_SPACES_BASE:-https://${DO_SPACES_BUCKET}.${DO_SPACES_REGION}.digitaloceanspaces.com}"
+          DO_SPACES_BASE="${DO_SPACES_BASE%/}"
+
+          pointer_sources="$(mktemp -d)"
+          trap 'rm -rf "$pointer_sources"' EXIT
+          fetch_pointer_source() {
+            curl -fsSL --retry 3 --retry-delay 2 \
+              "${DO_SPACES_BASE}/$1" \
+              -o "${pointer_sources}/$2"
+          }
+
+          fetch_pointer_source "scripts/join/${RELEASE_TAG}/join.sh" join.sh
+          fetch_pointer_source "scripts/join-full/${RELEASE_TAG}/join-full.sh" join-full.sh
+          fetch_pointer_source "scripts/join-common/${RELEASE_TAG}/_join_common.sh" _join_common.sh
+          fetch_pointer_source \
+            "scripts/reset-validator-snapshot/${RELEASE_TAG}/reset-validator-snapshot.sh" \
+            reset-validator-snapshot.sh
+          fetch_pointer_source "scripts/remove-validator/${RELEASE_TAG}/remove-validator.sh" remove-validator.sh
+          fetch_pointer_source "scripts/remove-pir/${RELEASE_TAG}/remove-pir.sh" remove-pir.sh
+          fetch_pointer_source "scripts/svoted-wrapper/${RELEASE_TAG}/svoted-wrapper.sh" svoted-wrapper.sh
+          fetch_pointer_source "scripts/upgrade/${RELEASE_TAG}/update_chain.sh" update_chain.sh
+          fetch_pointer_source \
+            "scripts/upgrade/${RELEASE_TAG}/_chain_upgrade_common.sh" \
+            _chain_upgrade_common.sh
+          fetch_pointer_source \
+            "scripts/upgrade/${RELEASE_TAG}/prepare-upgrade-artifacts.sh" \
+            prepare-upgrade-artifacts.sh
 
           pip install --quiet s3cmd
           cat > /tmp/do-spaces.s3cfg <<EOF
@@ -135,7 +150,10 @@ jobs:
           DO_SPACES_BUCKET="$DO_SPACES_BUCKET" \
           DO_SPACES_REGION="$DO_SPACES_REGION" \
           DO_SPACES_BASE="$DO_SPACES_BASE" \
-            scripts/publish-release-pointers.sh "$RELEASE_TAG" /tmp/do-spaces.s3cfg
+            scripts/publish-release-pointers.sh \
+              "$RELEASE_TAG" \
+              /tmp/do-spaces.s3cfg \
+              "$pointer_sources"
 
       - name: Mark GitHub release latest
         run: gh release edit "$RELEASE_TAG" --latest --verify-tag

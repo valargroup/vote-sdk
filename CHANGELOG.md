@@ -12,7 +12,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
   verifier. Staging uses Zcash Testnet, production uses Mainnet, and release
   candidates no longer replace stable release pointers. The production
   coordinated upgrade plan matches the `v1.1.0` release tag; the already-applied
-  staging `ironwood-v1` plan remains supported.
+  staging `ironwood-v1` plan remains supported. Stable releases become Latest
+  only after their mutable release pointers are verified.
 
 ## v1.0.3
 

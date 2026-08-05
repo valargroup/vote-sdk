@@ -30,6 +30,7 @@ jobs:
     outputs:
       prerelease: ${{ steps.channel.outputs.prerelease }}
       make_latest: ${{ steps.channel.outputs.make_latest }}
+      already_latest: ${{ steps.channel.outputs.already_latest }}
       publish_mutable_pointers: ${{ steps.channel.outputs.publish_mutable_pointers }}
     steps:
       - name: Checkout
@@ -207,7 +208,7 @@ jobs:
         with:
           generate_release_notes: true
           prerelease: ${{ needs.release-metadata.outputs.prerelease }}
-          make_latest: ${{ needs.release-metadata.outputs.make_latest }}
+          make_latest: ${{ needs.release-metadata.outputs.already_latest }}
 
   release:
     name: Package and release (${{ matrix.platform }})
@@ -440,4 +441,16 @@ jobs:
               curl -fsSIL --retry 3 --retry-delay 2 "$URL" > /dev/null
               echo "[OK] $URL"
             done
+            [ "$(curl -fsSL --retry 3 --retry-delay 2 "${DO_SPACES_BASE}/version.txt")" = "$VERSION" ]
+            curl -fsSL --retry 3 --retry-delay 2 "${DO_SPACES_BASE}/update_chain.sh" \
+              | grep -Fq "readonly UPDATE_DEFAULT_RELEASE_TAG='${VERSION}'"
           fi
+
+      - name: Mark GitHub release latest
+        if: needs.release-metadata.outputs.make_latest == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release edit "$VERSION" --latest --verify-tag
+          [ "$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name')" = "$VERSION" ]

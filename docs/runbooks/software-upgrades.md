@@ -92,6 +92,11 @@ scripts/verify_upgrade_release_artifacts.sh --tag-scoped-only "$TAG" "$DO_BASE"
 After promotion, rerun the command without `--tag-scoped-only` to verify
 `version.txt` and the unversioned installer scripts too.
 
+For an ordinary stable release, GitHub publishes the release without changing
+Latest, updates and verifies the mutable Spaces pointers, and only then marks
+the release Latest. Rerunning the current Latest tag preserves that status while
+the pointers are republished.
+
 Promotion changes what future unversioned downloads resolve to. It does not
 install binaries or restart running validators.
 
