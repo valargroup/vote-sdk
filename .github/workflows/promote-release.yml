@@ -11,14 +11,13 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: release-channel
-  cancel-in-progress: false
-
 jobs:
   promote:
     name: Promote ${{ inputs.tag }}
     runs-on: ubuntu-latest
+    concurrency:
+      group: release-channel
+      cancel-in-progress: false
     env:
       RELEASE_TAG: ${{ inputs.tag }}
       RELEASE_HOLD_TAG: ${{ vars.RELEASE_HOLD_TAG }}
@@ -113,28 +112,10 @@ jobs:
 
           pointer_sources="$(mktemp -d)"
           trap 'rm -rf "$pointer_sources"' EXIT
-          fetch_pointer_source() {
-            curl -fsSL --retry 3 --retry-delay 2 \
-              "${DO_SPACES_BASE}/$1" \
-              -o "${pointer_sources}/$2"
-          }
-
-          fetch_pointer_source "scripts/join/${RELEASE_TAG}/join.sh" join.sh
-          fetch_pointer_source "scripts/join-full/${RELEASE_TAG}/join-full.sh" join-full.sh
-          fetch_pointer_source "scripts/join-common/${RELEASE_TAG}/_join_common.sh" _join_common.sh
-          fetch_pointer_source \
-            "scripts/reset-validator-snapshot/${RELEASE_TAG}/reset-validator-snapshot.sh" \
-            reset-validator-snapshot.sh
-          fetch_pointer_source "scripts/remove-validator/${RELEASE_TAG}/remove-validator.sh" remove-validator.sh
-          fetch_pointer_source "scripts/remove-pir/${RELEASE_TAG}/remove-pir.sh" remove-pir.sh
-          fetch_pointer_source "scripts/svoted-wrapper/${RELEASE_TAG}/svoted-wrapper.sh" svoted-wrapper.sh
-          fetch_pointer_source "scripts/upgrade/${RELEASE_TAG}/update_chain.sh" update_chain.sh
-          fetch_pointer_source \
-            "scripts/upgrade/${RELEASE_TAG}/_chain_upgrade_common.sh" \
-            _chain_upgrade_common.sh
-          fetch_pointer_source \
-            "scripts/upgrade/${RELEASE_TAG}/prepare-upgrade-artifacts.sh" \
-            prepare-upgrade-artifacts.sh
+          scripts/fetch-release-pointer-sources.sh \
+            "$RELEASE_TAG" \
+            "$DO_SPACES_BASE" \
+            "$pointer_sources"
 
           pip install --quiet s3cmd
           cat > /tmp/do-spaces.s3cfg <<EOF
@@ -155,17 +136,22 @@ jobs:
               /tmp/do-spaces.s3cfg \
               "$pointer_sources"
 
-      - name: Mark GitHub release latest
-        run: gh release edit "$RELEASE_TAG" --latest --verify-tag
-
-      - name: Verify promoted release channels
+      - name: Verify mutable release pointers
         run: |
           set -euo pipefail
           DO_SPACES_BUCKET="${DO_SPACES_BUCKET:-shielded-vote}"
           DO_SPACES_REGION="${DO_SPACES_REGION:-nyc3}"
           DO_SPACES_BASE="${DO_SPACES_BASE:-https://${DO_SPACES_BUCKET}.${DO_SPACES_REGION}.digitaloceanspaces.com}"
 
+          scripts/verify_upgrade_release_artifacts.sh \
+            --mutable-only \
+            "$RELEASE_TAG" \
+            "$DO_SPACES_BASE"
+
+      - name: Mark GitHub release latest
+        run: gh release edit "$RELEASE_TAG" --latest --verify-tag
+
+      - name: Verify GitHub release channel
+        run: |
+          set -euo pipefail
           [ "$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name')" = "$RELEASE_TAG" ]
-          [ "$(curl -fsSL --retry 3 --retry-delay 2 "${DO_SPACES_BASE}/version.txt")" = "$RELEASE_TAG" ]
-          curl -fsSL --retry 3 --retry-delay 2 "${DO_SPACES_BASE}/update_chain.sh" \
-            | grep -Fq "readonly UPDATE_DEFAULT_RELEASE_TAG='${RELEASE_TAG}'"

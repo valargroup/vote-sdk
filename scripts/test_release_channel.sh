@@ -7,6 +7,8 @@ METADATA_SCRIPT="${REPO_ROOT}/scripts/release-metadata.sh"
 POINTER_SCRIPT="${REPO_ROOT}/scripts/publish-release-pointers.sh"
 RENDER_SCRIPT="${REPO_ROOT}/scripts/render-update-chain.sh"
 PROMOTION_SCRIPT="${REPO_ROOT}/scripts/validate-release-promotion.sh"
+CHANNEL_UPDATE_SCRIPT="${REPO_ROOT}/scripts/validate-release-channel-update.sh"
+FETCH_POINTER_SOURCES_SCRIPT="${REPO_ROOT}/scripts/fetch-release-pointer-sources.sh"
 VERIFY_SCRIPT="${REPO_ROOT}/scripts/verify_upgrade_release_artifacts.sh"
 RELEASE_WORKFLOW="${REPO_ROOT}/.github/workflows/release.yml"
 PROMOTION_WORKFLOW="${REPO_ROOT}/.github/workflows/promote-release.yml"
@@ -37,14 +39,63 @@ EXPECTED_CURRENT_METADATA=$'prerelease=false\nmake_latest=true\nalready_latest=t
 [ "$($METADATA_SCRIPT v1.2.3 v1.2.3 v1.2.3)" = "$EXPECTED_CURRENT_METADATA" ] \
   || fail "already promoted held release metadata"
 
-grep -Fq "make_latest: \${{ needs.release-metadata.outputs.already_latest }}" \
-  "$RELEASE_WORKFLOW" \
-  || fail "release creation can advance Latest before distribution"
+if grep -Fq 'softprops/action-gh-release' "$RELEASE_WORKFLOW"; then
+  fail "release creation can mutate Latest outside the channel lock"
+fi
+grep -Fq -- '--latest=false --verify-tag' "$RELEASE_WORKFLOW" \
+  || fail "new GitHub releases are not created outside Latest"
 pointer_line="$(grep -n 'scripts/publish-release-pointers.sh' "$RELEASE_WORKFLOW" | tail -n 1 | cut -d: -f1)"
+verify_line="$(grep -n -- '- name: Verify mutable release pointers' "$RELEASE_WORKFLOW" | cut -d: -f1)"
 latest_line="$(grep -n -- '- name: Mark GitHub release latest' "$RELEASE_WORKFLOW" | cut -d: -f1)"
 [ "$pointer_line" -lt "$latest_line" ] || fail "GitHub Latest advances before mutable pointers"
+[ "$pointer_line" -lt "$verify_line" ] && [ "$verify_line" -lt "$latest_line" ] \
+  || fail "stable pointers are not verified before GitHub Latest advances"
 [ "$(grep -Fc 'uses: actions/checkout@v4' "$PROMOTION_WORKFLOW")" -eq 1 ] \
   || fail "promotion switches away from the trusted checkout"
+
+if grep -q '^concurrency:' "$RELEASE_WORKFLOW" "$PROMOTION_WORKFLOW"; then
+  fail "workflow-level release concurrency can cancel queued artifact publication"
+fi
+[ "$(grep -Fc 'group: release-channel' "$RELEASE_WORKFLOW")" -eq 1 ] \
+  || fail "stable channel mutation job does not own one shared lock"
+[ "$(grep -Fc 'group: release-channel' "$PROMOTION_WORKFLOW")" -eq 1 ] \
+  || fail "promotion job does not own one shared lock"
+release_channel_job_line="$(grep -n '^  publish-release-channel:' "$RELEASE_WORKFLOW" | cut -d: -f1)"
+release_concurrency_line="$(grep -n '^    concurrency:' "$RELEASE_WORKFLOW" | cut -d: -f1)"
+promotion_job_line="$(grep -n '^  promote:' "$PROMOTION_WORKFLOW" | cut -d: -f1)"
+promotion_concurrency_line="$(grep -n '^    concurrency:' "$PROMOTION_WORKFLOW" | cut -d: -f1)"
+[ "$release_channel_job_line" -lt "$release_concurrency_line" ] \
+  || fail "release concurrency is not scoped to the channel mutation job"
+[ "$promotion_job_line" -lt "$promotion_concurrency_line" ] \
+  || fail "promotion concurrency is not scoped to the promotion job"
+
+promotion_pointer_line="$(grep -n 'scripts/publish-release-pointers.sh' "$PROMOTION_WORKFLOW" | cut -d: -f1)"
+promotion_verify_line="$(grep -n -- '- name: Verify mutable release pointers' "$PROMOTION_WORKFLOW" | cut -d: -f1)"
+promotion_latest_line="$(grep -n -- '- name: Mark GitHub release latest' "$PROMOTION_WORKFLOW" | cut -d: -f1)"
+[ "$promotion_pointer_line" -lt "$promotion_verify_line" ] \
+  && [ "$promotion_verify_line" -lt "$promotion_latest_line" ] \
+  || fail "promotion aliases are not verified before GitHub Latest advances"
+[ "$(grep -Fc 'scripts/fetch-release-pointer-sources.sh' "$RELEASE_WORKFLOW")" -eq 1 ] \
+  || fail "stable release channel does not use shared tagged source fetching"
+[ "$(grep -Fc 'scripts/fetch-release-pointer-sources.sh' "$PROMOTION_WORKFLOW")" -eq 1 ] \
+  || fail "promotion does not use shared tagged source fetching"
+[ "$(grep -Fc -- '--mutable-only' "$RELEASE_WORKFLOW")" -eq 1 ] \
+  || fail "stable release channel does not verify mutable pointers before Latest"
+[ "$(grep -Fc -- '--mutable-only' "$PROMOTION_WORKFLOW")" -eq 1 ] \
+  || fail "promotion does not verify mutable pointers before Latest"
+
+[ "$($CHANNEL_UPDATE_SCRIPT v1.2.3 v1.2.2)" = "v1.2.3" ] \
+  || fail "newer stable channel update validation"
+[ "$($CHANNEL_UPDATE_SCRIPT v1.2.3 v1.2.3)" = "v1.2.3" ] \
+  || fail "idempotent stable channel update validation"
+[ "$($CHANNEL_UPDATE_SCRIPT v2.0.0 v1.99.99)" = "v2.0.0" ] \
+  || fail "new major stable channel update validation"
+if "$CHANNEL_UPDATE_SCRIPT" v1.2.3 v1.2.4 >/dev/null 2>&1; then
+  fail "stable channel update replaced a newer Latest release"
+fi
+if "$CHANNEL_UPDATE_SCRIPT" v1.2.3-rc.4 v1.2.3 >/dev/null 2>&1; then
+  fail "RC release accepted for stable channel update"
+fi
 
 [ "$($PROMOTION_SCRIPT v1.2.3 v1.2.3 v1.2.2)" = "v1.2.3" ] \
   || fail "held stable release promotion validation"
@@ -70,6 +121,47 @@ fi
 
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
+
+cat > "${TMPDIR}/fetch-curl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+output_file=""
+url=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o)
+      output_file="$2"
+      shift 2
+      ;;
+    --retry|--retry-delay)
+      shift 2
+      ;;
+    -*)
+      shift
+      ;;
+    *)
+      url="$1"
+      shift
+      ;;
+  esac
+done
+printf '%s\n' "$url" >> "$FETCH_CURL_LOG"
+printf '#!/usr/bin/env bash\n' > "$output_file"
+EOF
+chmod +x "${TMPDIR}/fetch-curl"
+export CURL_BIN="${TMPDIR}/fetch-curl"
+export FETCH_CURL_LOG="${TMPDIR}/fetch-curl.log"
+FETCHED_POINTER_SOURCES="${TMPDIR}/fetched-pointer-sources"
+"$FETCH_POINTER_SOURCES_SCRIPT" \
+  v1.2.3 \
+  https://objects.example/ \
+  "$FETCHED_POINTER_SOURCES"
+[ "$(find "$FETCHED_POINTER_SOURCES" -type f | wc -l | tr -d '[:space:]')" = "10" ] \
+  || fail "shared pointer source fetch did not download every source"
+grep -Fq 'https://objects.example/scripts/join-full/v1.2.3/join-full.sh' "$FETCH_CURL_LOG" \
+  || fail "shared pointer source fetch used the wrong tag path"
+
 RC_UPDATE_URL="https://objects.example/scripts/upgrade/v1.2.3-rc.4/update_chain.sh"
 RENDERED_UPDATE_CHAIN="${TMPDIR}/rendered-update-chain"
 "$RENDER_SCRIPT" \
@@ -196,6 +288,10 @@ case "$url" in
     body="#!/usr/bin/env bash
 readonly UPDATE_DEFAULT_RELEASE_TAG='${VERIFY_TAG}'"
     ;;
+  */update_chain.sh)
+    body="#!/usr/bin/env bash
+readonly UPDATE_DEFAULT_RELEASE_TAG='${VERIFY_TAG}'"
+    ;;
   *)
     body='#!/usr/bin/env bash'
     ;;
@@ -219,8 +315,25 @@ if grep -Fq '/version.txt' "$CURL_LOG"; then
 fi
 
 : > "$CURL_LOG"
+"$VERIFY_SCRIPT" --mutable-only "$VERIFY_TAG" https://objects.example >/dev/null
+grep -Fq '/version.txt' "$CURL_LOG" \
+  || fail "mutable verification skipped version.txt"
+grep -Fq '/join-full.sh' "$CURL_LOG" \
+  || fail "mutable verification skipped join-full.sh"
+if grep -Fq "/scripts/upgrade/${VERIFY_TAG}/" "$CURL_LOG"; then
+  fail "mutable verification fetched tag-scoped scripts"
+fi
+if grep -Fq '.tar.gz' "$CURL_LOG"; then
+  fail "mutable verification downloaded release tarballs"
+fi
+
+: > "$CURL_LOG"
 "$VERIFY_SCRIPT" "$VERIFY_TAG" https://objects.example >/dev/null
 grep -Fq '/version.txt' "$CURL_LOG" \
   || fail "complete stable verification skipped version.txt"
+grep -Fq '/join-full.sh' "$CURL_LOG" \
+  || fail "complete stable verification skipped join-full.sh"
+grep -Fq '/remove-pir.sh' "$CURL_LOG" \
+  || fail "complete stable verification skipped remove-pir.sh"
 
 echo "PASS: release channel tests"
