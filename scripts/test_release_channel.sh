@@ -44,6 +44,9 @@ if grep -Fq 'softprops/action-gh-release' "$RELEASE_WORKFLOW"; then
 fi
 grep -Fq -- '--latest=false --verify-tag' "$RELEASE_WORKFLOW" \
   || fail "new GitHub releases are not created outside Latest"
+github_repo_pattern='GH_REPO: $''{{ github.repository }}'
+grep -Fq "$github_repo_pattern" "$RELEASE_WORKFLOW" \
+  || fail "release creation has no explicit GitHub repository context"
 pointer_line="$(grep -n 'scripts/publish-release-pointers.sh' "$RELEASE_WORKFLOW" | tail -n 1 | cut -d: -f1)"
 verify_line="$(grep -n -- '- name: Verify mutable release pointers' "$RELEASE_WORKFLOW" | cut -d: -f1)"
 latest_line="$(grep -n -- '- name: Mark GitHub release latest' "$RELEASE_WORKFLOW" | cut -d: -f1)"
