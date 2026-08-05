@@ -26,19 +26,35 @@ jobs:
     outputs:
       prerelease: ${{ steps.channel.outputs.prerelease }}
       make_latest: ${{ steps.channel.outputs.make_latest }}
+      publish_mutable_pointers: ${{ steps.channel.outputs.publish_mutable_pointers }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Classify release tag
         id: channel
+        env:
+          RELEASE_HOLD_TAG: ${{ vars.RELEASE_HOLD_TAG }}
         run: |
           channel="$(scripts/release-channel.sh "$GITHUB_REF_NAME")"
-          if [ "$channel" = "rc" ]; then
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
-            echo "make_latest=false" >> "$GITHUB_OUTPUT"
+          if [ -n "$RELEASE_HOLD_TAG" ] && [ "$GITHUB_REF_NAME" = "$RELEASE_HOLD_TAG" ]; then
+            echo "Holding coordinated release ${GITHUB_REF_NAME} from mutable release channels."
+            {
+              echo "prerelease=false"
+              echo "make_latest=false"
+              echo "publish_mutable_pointers=false"
+            } >> "$GITHUB_OUTPUT"
+          elif [ "$channel" = "rc" ]; then
+            {
+              echo "prerelease=true"
+              echo "make_latest=false"
+              echo "publish_mutable_pointers=false"
+            } >> "$GITHUB_OUTPUT"
           else
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
-            echo "make_latest=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "prerelease=false"
+              echo "make_latest=true"
+              echo "publish_mutable_pointers=true"
+            } >> "$GITHUB_OUTPUT"
           fi
 
   build-sdk:
@@ -362,7 +378,11 @@ jobs:
             "s3://${DO_SPACES_BUCKET}/scripts/remove-pir/${VERSION}/remove-pir.sh"
           s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force scripts/svoted-wrapper.sh \
             "s3://${DO_SPACES_BUCKET}/scripts/svoted-wrapper/${VERSION}/svoted-wrapper.sh"
-          scripts/publish-release-pointers.sh "$VERSION" /tmp/do-spaces.s3cfg
+          if [ "${{ needs.release-metadata.outputs.publish_mutable_pointers }}" = "true" ]; then
+            scripts/publish-release-pointers.sh "$VERSION" /tmp/do-spaces.s3cfg
+          else
+            echo "Skipping mutable release pointers for held or prerelease tag ${VERSION}."
+          fi
       - name: Verify DigitalOcean Spaces uploads
         env:
           DO_SPACES_BUCKET: ${{ vars.DO_SPACES_BUCKET }}
@@ -400,7 +420,7 @@ jobs:
             echo "[OK] $URL"
           done
 
-          if [ "$(scripts/release-channel.sh "$VERSION")" = "stable" ]; then
+          if [ "${{ needs.release-metadata.outputs.publish_mutable_pointers }}" = "true" ]; then
             for KEY in \
               "version.txt" \
               "join.sh" \
