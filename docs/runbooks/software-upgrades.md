@@ -79,7 +79,8 @@ with that exact tag. It verifies the held stable release and its tag-scoped
 artifacts, updates the mutable DigitalOcean Spaces pointers, marks the GitHub
 release Latest, and verifies both channels. `RELEASE_HOLD_TAG` can remain as an
 audit marker because it affects only that exact tag; replace it before the next
-coordinated release.
+coordinated release. Promotion refuses to replace a newer stable release that
+has since become Latest; rerunning the current Latest tag remains safe.
 
 Promotion changes what future unversioned downloads resolve to. It does not
 install binaries or restart running validators.

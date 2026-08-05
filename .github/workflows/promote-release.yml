@@ -37,7 +37,11 @@ jobs:
       - name: Validate held stable release
         run: |
           set -euo pipefail
-          scripts/validate-release-promotion.sh "$RELEASE_TAG" "$RELEASE_HOLD_TAG"
+          latest_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name')"
+          scripts/validate-release-promotion.sh \
+            "$RELEASE_TAG" \
+            "$RELEASE_HOLD_TAG" \
+            "$latest_tag"
           [ "$(git rev-list -n 1 "$RELEASE_TAG")" = "$(git rev-parse HEAD)" ]
 
           release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}")"

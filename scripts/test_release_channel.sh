@@ -3,6 +3,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CHANNEL_SCRIPT="${REPO_ROOT}/scripts/release-channel.sh"
+METADATA_SCRIPT="${REPO_ROOT}/scripts/release-metadata.sh"
 POINTER_SCRIPT="${REPO_ROOT}/scripts/publish-release-pointers.sh"
 RENDER_SCRIPT="${REPO_ROOT}/scripts/render-update-chain.sh"
 PROMOTION_SCRIPT="${REPO_ROOT}/scripts/validate-release-promotion.sh"
@@ -20,8 +21,28 @@ for tag in v1.2 v1.2.3-rc v1.2.3-beta.1 v1.2.3.4; do
   fi
 done
 
-[ "$($PROMOTION_SCRIPT v1.2.3 v1.2.3)" = "v1.2.3" ] \
+EXPECTED_RC_METADATA=$'prerelease=true\nmake_latest=false\npublish_mutable_pointers=false'
+[ "$($METADATA_SCRIPT v1.2.3-rc.4 v1.2.3-rc.4)" = "$EXPECTED_RC_METADATA" ] \
+  || fail "held RC was not kept as a prerelease"
+EXPECTED_HELD_METADATA=$'prerelease=false\nmake_latest=false\npublish_mutable_pointers=false'
+[ "$($METADATA_SCRIPT v1.2.3 v1.2.3)" = "$EXPECTED_HELD_METADATA" ] \
+  || fail "held stable release metadata"
+EXPECTED_STABLE_METADATA=$'prerelease=false\nmake_latest=true\npublish_mutable_pointers=true'
+[ "$($METADATA_SCRIPT v1.2.3 v1.2.4)" = "$EXPECTED_STABLE_METADATA" ] \
+  || fail "unheld stable release metadata"
+
+[ "$($PROMOTION_SCRIPT v1.2.3 v1.2.3 v1.2.2)" = "v1.2.3" ] \
   || fail "held stable release promotion validation"
+[ "$($PROMOTION_SCRIPT v1.2.3 v1.2.3 v1.2.3)" = "v1.2.3" ] \
+  || fail "idempotent promotion validation"
+[ "$($PROMOTION_SCRIPT v2.0.0 v2.0.0 v1.99.99)" = "v2.0.0" ] \
+  || fail "new major release promotion validation"
+if "$PROMOTION_SCRIPT" v1.2.3 v1.2.3 v1.2.4 >/dev/null 2>&1; then
+  fail "promotion replaced a newer Latest release"
+fi
+if "$PROMOTION_SCRIPT" v2.0.0 v2.0.0 v10.0.0 >/dev/null 2>&1; then
+  fail "promotion replaced a newer multi-digit major release"
+fi
 if "$PROMOTION_SCRIPT" v1.2.3-rc.4 v1.2.3-rc.4 >/dev/null 2>&1; then
   fail "RC release promotion accepted"
 fi

@@ -35,27 +35,10 @@ jobs:
         env:
           RELEASE_HOLD_TAG: ${{ vars.RELEASE_HOLD_TAG }}
         run: |
-          channel="$(scripts/release-channel.sh "$GITHUB_REF_NAME")"
-          if [ -n "$RELEASE_HOLD_TAG" ] && [ "$GITHUB_REF_NAME" = "$RELEASE_HOLD_TAG" ]; then
-            echo "Holding coordinated release ${GITHUB_REF_NAME} from mutable release channels."
-            {
-              echo "prerelease=false"
-              echo "make_latest=false"
-              echo "publish_mutable_pointers=false"
-            } >> "$GITHUB_OUTPUT"
-          elif [ "$channel" = "rc" ]; then
-            {
-              echo "prerelease=true"
-              echo "make_latest=false"
-              echo "publish_mutable_pointers=false"
-            } >> "$GITHUB_OUTPUT"
-          else
-            {
-              echo "prerelease=false"
-              echo "make_latest=true"
-              echo "publish_mutable_pointers=true"
-            } >> "$GITHUB_OUTPUT"
-          fi
+          scripts/release-metadata.sh \
+            "$GITHUB_REF_NAME" \
+            "$RELEASE_HOLD_TAG" \
+            >> "$GITHUB_OUTPUT"
 
   build-sdk:
     name: Build SDK (${{ matrix.platform }})
