@@ -364,8 +364,8 @@ export function UpgradesPage({ wallet }: { wallet: UseWallet }) {
           </div>
         )}
 
-        <div className="mb-6 grid gap-4 lg:grid-cols-[1fr_1fr]">
-          <section className="rounded-xl border border-border-subtle bg-surface-1 p-5">
+        <div className="mb-6 grid gap-4 lg:grid-cols-2">
+          <section className="min-w-0 rounded-xl border border-border-subtle bg-surface-1 p-5">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-xs font-semibold text-text-primary">Chain status</h2>
               {loading ? <Loader2 size={14} className="animate-spin text-text-muted" /> : null}
@@ -385,7 +385,7 @@ export function UpgradesPage({ wallet }: { wallet: UseWallet }) {
             </div>
           </section>
 
-          <section className="rounded-xl border border-border-subtle bg-surface-1 p-5">
+          <section className="min-w-0 rounded-xl border border-border-subtle bg-surface-1 p-5">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-xs font-semibold text-text-primary">Current plan</h2>
               {currentPlan ? (
@@ -410,7 +410,7 @@ export function UpgradesPage({ wallet }: { wallet: UseWallet }) {
                   />
                 </div>
                 {currentPlan.info ? (
-                  <pre className="max-h-36 overflow-auto rounded-lg border border-border-subtle bg-surface-2 p-3 text-[10px] text-text-secondary">
+                  <pre className="max-h-36 max-w-full overflow-auto whitespace-pre-wrap break-all rounded-lg border border-border-subtle bg-surface-2 p-3 text-[10px] text-text-secondary">
                     {currentPlan.info}
                   </pre>
                 ) : null}
