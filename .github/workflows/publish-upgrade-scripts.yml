@@ -19,6 +19,9 @@ jobs:
   publish:
     name: Publish tag-independent operator script revision
     runs-on: ubuntu-latest
+    concurrency:
+      group: publish-upgrade-scripts-${{ vars.DO_SPACES_BUCKET || 'shielded-vote' }}-${{ inputs.script_version }}
+      cancel-in-progress: false
     env:
       DO_ACCESS_KEY: ${{ secrets.DO_ACCESS_KEY }}
       DO_SECRET_KEY: ${{ secrets.DO_SECRET_KEY }}

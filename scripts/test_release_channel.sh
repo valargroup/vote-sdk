@@ -71,6 +71,13 @@ grep -Fq 'missing_scripts=()' "$UPGRADE_SCRIPT_WORKFLOW" \
   || fail "upgrade script publication has no complete-revision preflight"
 grep -Fq "for script in \"\${missing_scripts[@]}\"" "$UPGRADE_SCRIPT_WORKFLOW" \
   || fail "upgrade script publication does not separate validation from writes"
+publish_concurrency_group="$(grep -F 'group: publish-upgrade-scripts-' "$UPGRADE_SCRIPT_WORKFLOW")"
+printf '%s\n' "$publish_concurrency_group" | grep -Fq 'vars.DO_SPACES_BUCKET' \
+  || fail "upgrade script publication is not serialized by bucket"
+printf '%s\n' "$publish_concurrency_group" | grep -Fq 'inputs.script_version' \
+  || fail "upgrade script publication is not serialized by revision"
+grep -Fq 'cancel-in-progress: false' "$UPGRADE_SCRIPT_WORKFLOW" \
+  || fail "upgrade script publication can cancel an active writer"
 common_publish_line="$(grep -n '^            _chain_upgrade_common.sh$' "$UPGRADE_SCRIPT_WORKFLOW" | head -n 1 | cut -d: -f1)"
 update_publish_line="$(grep -n '^            update_chain.sh$' "$UPGRADE_SCRIPT_WORKFLOW" | head -n 1 | cut -d: -f1)"
 prepare_publish_line="$(grep -n '^            prepare-upgrade-artifacts.sh$' "$UPGRADE_SCRIPT_WORKFLOW" | head -n 1 | cut -d: -f1)"
