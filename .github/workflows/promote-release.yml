@@ -79,6 +79,18 @@ jobs:
           DO_SPACES_REGION="${DO_SPACES_REGION:-nyc3}"
           DO_SPACES_BASE="${DO_SPACES_BASE:-https://${DO_SPACES_BUCKET}.${DO_SPACES_REGION}.digitaloceanspaces.com}"
 
+          cosmovisor_dir="$(mktemp -d)"
+          trap 'rm -rf "$cosmovisor_dir"' EXIT
+          for platform in linux-amd64 linux-arm64; do
+            archive="shielded-vote-${RELEASE_TAG}-cosmovisor-v1-${platform}.tar.gz"
+            gh release download "$RELEASE_TAG" \
+              --pattern "$archive" \
+              --pattern "${archive}.sha256" \
+              --dir "$cosmovisor_dir"
+            (cd "$cosmovisor_dir" && sha256sum --check "${archive}.sha256")
+            [ "$(tar tzf "${cosmovisor_dir}/${archive}")" = "bin/svoted" ]
+          done
+
           for platform in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
             for suffix in "" ".sha256"; do
               curl -fsSIL --retry 3 --retry-delay 2 \
