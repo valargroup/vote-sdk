@@ -66,6 +66,43 @@ func (k *Keeper) CheckNullifiersUnique(ctx context.Context, nfType types.Nullifi
 }
 
 // ---------------------------------------------------------------------------
+// Delegation authorization keys
+// ---------------------------------------------------------------------------
+
+// HasUsedDelegationRk reports whether a delegation authorization key has been
+// recorded anywhere on the chain.
+func (k *Keeper) HasUsedDelegationRk(kvStore store.KVStore, rk []byte) (bool, error) {
+	key, err := types.UsedDelegationRkKey(rk)
+	if err != nil {
+		return false, err
+	}
+	return kvStore.Has(key)
+}
+
+// SetUsedDelegationRk records a delegation authorization key as used globally.
+func (k *Keeper) SetUsedDelegationRk(kvStore store.KVStore, rk []byte) error {
+	key, err := types.UsedDelegationRkKey(rk)
+	if err != nil {
+		return err
+	}
+	return kvStore.Set(key, []byte{1})
+}
+
+// CheckDelegationRkUnused verifies that a delegation authorization key has not
+// already been recorded.
+func (k *Keeper) CheckDelegationRkUnused(ctx context.Context, rk []byte) error {
+	kvStore := k.OpenKVStore(ctx)
+	used, err := k.HasUsedDelegationRk(kvStore, rk)
+	if err != nil {
+		return err
+	}
+	if used {
+		return fmt.Errorf("%w: %x", types.ErrDelegationRkAlreadyUsed, rk)
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
 // Commitment tree (per-round)
 // ---------------------------------------------------------------------------
 

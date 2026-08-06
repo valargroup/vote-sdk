@@ -24,6 +24,7 @@ func validGenesis() *types.GenesisState {
 			{NullifierType: 1, RoundId: roundID, Nullifier: bytes.Repeat([]byte{0xB2}, 32)},
 			{NullifierType: 2, RoundId: roundID, Nullifier: bytes.Repeat([]byte{0xB3}, 32)},
 		},
+		UsedDelegationRks:    [][]byte{bytes.Repeat([]byte{0xB4}, types.DelegationRkLen)},
 		VoteManagerAddresses: []string{"sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"},
 		TallyResults: []*types.TallyResult{
 			{VoteRoundId: roundID, ProposalId: 1, VoteDecision: 0, TotalValue: 100},
@@ -89,6 +90,22 @@ func TestValidateGenesisState_NullifierEmpty(t *testing.T) {
 	err := types.ValidateGenesisState(gs)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "nullifiers[0].nullifier is empty")
+}
+
+func TestValidateGenesisState_UsedDelegationRkBadLength(t *testing.T) {
+	gs := validGenesis()
+	gs.UsedDelegationRks[0] = []byte{0x01}
+	err := types.ValidateGenesisState(gs)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "used_delegation_rks[0] is 1 bytes")
+}
+
+func TestValidateGenesisState_DuplicateUsedDelegationRk(t *testing.T) {
+	gs := validGenesis()
+	gs.UsedDelegationRks = append(gs.UsedDelegationRks, bytes.Clone(gs.UsedDelegationRks[0]))
+	err := types.ValidateGenesisState(gs)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "duplicate rk")
 }
 
 func TestValidateGenesisState_VoteManagerBadAddress(t *testing.T) {

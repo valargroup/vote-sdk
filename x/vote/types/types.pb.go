@@ -842,6 +842,7 @@ type GenesisState struct {
 	VoteManagerThreshold    uint32                      `protobuf:"varint,16,opt,name=vote_manager_threshold,json=voteManagerThreshold,proto3" json:"vote_manager_threshold,omitempty"`
 	CoordinatorActions      []*CoordinatorAction        `protobuf:"bytes,17,rep,name=coordinator_actions,json=coordinatorActions,proto3" json:"coordinator_actions,omitempty"`
 	NextCoordinatorActionId uint64                      `protobuf:"varint,18,opt,name=next_coordinator_action_id,json=nextCoordinatorActionId,proto3" json:"next_coordinator_action_id,omitempty"`
+	UsedDelegationRks       [][]byte                    `protobuf:"bytes,19,rep,name=used_delegation_rks,json=usedDelegationRks,proto3" json:"used_delegation_rks,omitempty"`
 	unknownFields           protoimpl.UnknownFields
 	sizeCache               protoimpl.SizeCache
 }
@@ -979,6 +980,13 @@ func (x *GenesisState) GetNextCoordinatorActionId() uint64 {
 		return x.NextCoordinatorActionId
 	}
 	return 0
+}
+
+func (x *GenesisState) GetUsedDelegationRks() [][]byte {
+	if x != nil {
+		return x.UsedDelegationRks
+	}
+	return nil
 }
 
 // Endorser records a stable identifier's currently authorized bech32 address.
@@ -2326,7 +2334,7 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"next_index\x18\x01 \x01(\x04R\tnextIndex\x12\x12\n" +
 	"\x04root\x18\x02 \x01(\fR\x04root\x12\x16\n" +
 	"\x06height\x18\x03 \x01(\x04R\x06height\x12+\n" +
-	"\x12next_index_at_root\x18\x04 \x01(\x04R\x0fnextIndexAtRoot\"\xb7\a\n" +
+	"\x12next_index_at_root\x18\x04 \x01(\x04R\x0fnextIndexAtRoot\"\xe7\a\n" +
 	"\fGenesisState\x12+\n" +
 	"\x06rounds\x18\x01 \x03(\v2\x13.svote.v1.VoteRoundR\x06rounds\x128\n" +
 	"\n" +
@@ -2346,7 +2354,8 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"\x0fendorsed_rounds\x18\x0f \x03(\v2\x17.svote.v1.EndorsedRoundR\x0eendorsedRounds\x124\n" +
 	"\x16vote_manager_threshold\x18\x10 \x01(\rR\x14voteManagerThreshold\x12L\n" +
 	"\x13coordinator_actions\x18\x11 \x03(\v2\x1b.svote.v1.CoordinatorActionR\x12coordinatorActions\x12;\n" +
-	"\x1anext_coordinator_action_id\x18\x12 \x01(\x04R\x17nextCoordinatorActionId\"E\n" +
+	"\x1anext_coordinator_action_id\x18\x12 \x01(\x04R\x17nextCoordinatorActionId\x12.\n" +
+	"\x13used_delegation_rks\x18\x13 \x03(\fR\x11usedDelegationRks\"E\n" +
 	"\bEndorser\x12\x1f\n" +
 	"\vendorser_id\x18\x01 \x01(\tR\n" +
 	"endorserId\x12\x18\n" +

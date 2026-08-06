@@ -138,6 +138,39 @@ func (s *KeeperTestSuite) TestNullifier_CrossRoundIsolation() {
 }
 
 // ---------------------------------------------------------------------------
+// Delegation authorization keys
+// ---------------------------------------------------------------------------
+
+func (s *KeeperTestSuite) TestDelegationRk_GlobalUniqueness() {
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+	rk := bytes.Repeat([]byte{0xC1}, types.DelegationRkLen)
+
+	has, err := s.keeper.HasUsedDelegationRk(kv, rk)
+	s.Require().NoError(err)
+	s.Require().False(has)
+	s.Require().NoError(s.keeper.CheckDelegationRkUnused(s.ctx, rk))
+
+	s.Require().NoError(s.keeper.SetUsedDelegationRk(kv, rk))
+	has, err = s.keeper.HasUsedDelegationRk(kv, rk)
+	s.Require().NoError(err)
+	s.Require().True(has)
+	s.Require().ErrorIs(s.keeper.CheckDelegationRkUnused(s.ctx, rk), types.ErrDelegationRkAlreadyUsed)
+
+	freshRk := bytes.Repeat([]byte{0xC2}, types.DelegationRkLen)
+	s.Require().NoError(s.keeper.CheckDelegationRkUnused(s.ctx, freshRk))
+}
+
+func (s *KeeperTestSuite) TestDelegationRk_InvalidLength() {
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	_, err := s.keeper.HasUsedDelegationRk(kv, []byte{0x01})
+	s.Require().ErrorIs(err, types.ErrInvalidField)
+	s.Require().ErrorIs(s.keeper.SetUsedDelegationRk(kv, []byte{0x01}), types.ErrInvalidField)
+}
+
+// ---------------------------------------------------------------------------
 // Commitment tree
 // ---------------------------------------------------------------------------
 

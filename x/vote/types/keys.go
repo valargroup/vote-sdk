@@ -37,6 +37,9 @@ const TallyBSGSBound uint64 = 1 << 28
 // RoundIDLen is the fixed byte-length of a VoteRoundId (SHA-256 digest).
 const RoundIDLen = 32
 
+// DelegationRkLen is the fixed byte length of a delegation authorization key.
+const DelegationRkLen = 32
+
 // MinProposalID is the minimum valid proposal ID (1-indexed).
 // Bit 0 of the circuit's proposal_authority bitmask is reserved as a
 // sentinel (rejected by the non-zero gate), so valid IDs start at 1.
@@ -199,6 +202,10 @@ var (
 	// NextCoordinatorActionIDKey stores the next allocated coordinator action ID:
 	//   single key -> big-endian uint64. IDs start at 1.
 	NextCoordinatorActionIDKey = []byte{0x19}
+
+	// UsedDelegationRkPrefix stores delegation authorization keys globally:
+	//   0x1A || rk (32 bytes) -> []byte{1}
+	UsedDelegationRkPrefix = []byte{0x1A}
 )
 
 // NullifierKey returns the store key for a nullifier scoped by type and round.
@@ -212,6 +219,18 @@ func NullifierKey(nfType NullifierType, roundID, nullifier []byte) ([]byte, erro
 	key = append(key, byte(nfType))
 	key = append(key, roundID...)
 	key = append(key, nullifier...)
+	return key, nil
+}
+
+// UsedDelegationRkKey returns the global store key for a delegation
+// authorization key.
+func UsedDelegationRkKey(rk []byte) ([]byte, error) {
+	if len(rk) != DelegationRkLen {
+		return nil, fmt.Errorf("%w: delegation rk must be %d bytes, got %d", ErrInvalidField, DelegationRkLen, len(rk))
+	}
+	key := make([]byte, 0, len(UsedDelegationRkPrefix)+DelegationRkLen)
+	key = append(key, UsedDelegationRkPrefix...)
+	key = append(key, rk...)
 	return key, nil
 }
 

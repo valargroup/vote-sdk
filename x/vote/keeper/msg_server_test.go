@@ -567,11 +567,12 @@ func (s *MsgServerTestSuite) TestDelegateVote() {
 	roundID := bytes.Repeat([]byte{0x10}, 32)
 
 	tests := []struct {
-		name      string
-		setup     func()
-		msg       *types.MsgDelegateVote
-		expectErr bool
-		check     func()
+		name        string
+		setup       func()
+		msg         *types.MsgDelegateVote
+		expectErr   bool
+		errContains string
+		check       func()
 	}{
 		{
 			name:  "happy path: nullifiers recorded and commitments appended",
@@ -591,6 +592,9 @@ func (s *MsgServerTestSuite) TestDelegateVote() {
 			},
 			check: func() {
 				kv := s.keeper.OpenKVStore(s.ctx)
+				used, err := s.keeper.HasUsedDelegationRk(kv, bytes.Repeat([]byte{0xA1}, types.DelegationRkLen))
+				s.Require().NoError(err)
+				s.Require().True(used)
 
 				// Gov nullifiers recorded (scoped to gov type + round).
 				for _, nf := range [][]byte{
@@ -613,6 +617,22 @@ func (s *MsgServerTestSuite) TestDelegateVote() {
 				s.Require().Equal(fpLE(0xB2), leaf0) // van_cmx
 			},
 		},
+		{
+			name: "reused rk rejected with otherwise fresh delegation data",
+			setup: func() {
+				s.setupActiveRound(roundID)
+				kv := s.keeper.OpenKVStore(s.ctx)
+				s.Require().NoError(s.keeper.SetUsedDelegationRk(kv, bytes.Repeat([]byte{0xA1}, types.DelegationRkLen)))
+			},
+			msg: &types.MsgDelegateVote{
+				Rk:            bytes.Repeat([]byte{0xA1}, types.DelegationRkLen),
+				VanCmx:        fpLE(0xB3),
+				GovNullifiers: [][]byte{bytes.Repeat([]byte{0xC3}, 32)},
+				VoteRoundId:   roundID,
+			},
+			expectErr:   true,
+			errContains: "delegation authorization key already used",
+		},
 	}
 
 	for _, tc := range tests {
@@ -624,6 +644,9 @@ func (s *MsgServerTestSuite) TestDelegateVote() {
 			_, err := s.msgServer.DelegateVote(s.ctx, tc.msg)
 			if tc.expectErr {
 				s.Require().Error(err)
+				if tc.errContains != "" {
+					s.Require().Contains(err.Error(), tc.errContains)
+				}
 			} else {
 				s.Require().NoError(err)
 				if tc.check != nil {

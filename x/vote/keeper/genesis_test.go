@@ -88,6 +88,8 @@ func TestExportImportGenesis(t *testing.T) {
 	require.NoError(t, k.SetNullifier(kvStore, types.NullifierTypeGov, roundID, nf1))
 	require.NoError(t, k.SetNullifier(kvStore, types.NullifierTypeVoteAuthorityNote, roundID, nf2))
 	require.NoError(t, k.SetNullifier(kvStore, types.NullifierTypeShare, roundID, nf3))
+	usedRk := bytes.Repeat([]byte{0xA4}, types.DelegationRkLen)
+	require.NoError(t, k.SetUsedDelegationRk(kvStore, usedRk))
 
 	// Tally accumulators (valid ElGamal ciphertexts).
 	ct := validCiphertextBytes(t, 42)
@@ -148,6 +150,7 @@ func TestExportImportGenesis(t *testing.T) {
 	require.Equal(t, []string{"sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"}, gs.VoteManagerAddresses)
 	require.Len(t, gs.Rounds, 2)
 	require.Len(t, gs.Nullifiers, 3)
+	require.Equal(t, [][]byte{usedRk}, gs.UsedDelegationRks)
 	require.Len(t, gs.TallyResults, 1)
 	require.Len(t, gs.PallasKeys, 1)
 	require.Len(t, gs.TallyAccumulators, 1)
@@ -250,6 +253,9 @@ func TestExportImportGenesis(t *testing.T) {
 	has, err = k2.HasNullifier(kvStore2, types.NullifierTypeGov, roundID, bytes.Repeat([]byte{0xFF}, 32))
 	require.NoError(t, err)
 	require.False(t, has)
+	used, err := k2.HasUsedDelegationRk(kvStore2, usedRk)
+	require.NoError(t, err)
+	require.True(t, used)
 
 	// Verify tally accumulator.
 	accBytes, err := k2.GetTally(kvStore2, roundID, 1, 0)
@@ -386,6 +392,7 @@ func TestExportGenesisEmpty(t *testing.T) {
 	require.Empty(t, gs.Rounds)
 	require.Empty(t, gs.RoundTrees)
 	require.Empty(t, gs.Nullifiers)
+	require.Empty(t, gs.UsedDelegationRks)
 	require.Empty(t, gs.TallyResults)
 	require.Empty(t, gs.PallasKeys)
 	require.Empty(t, gs.TallyAccumulators)

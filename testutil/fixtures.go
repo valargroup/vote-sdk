@@ -20,9 +20,20 @@ import (
 const TestAuthority = "sv1authority"
 
 // DummyPallasPoint is a valid compressed Pallas curve point (the generator)
-// for use as a dummy rk / RVpk in test messages. Must be on-curve and
-// non-identity to pass UnmarshalPublicKey validation in the ante handler.
+// for use in test messages. It must be on-curve and non-identity to pass
+// UnmarshalPublicKey validation in the ante handler.
 var DummyPallasPoint = elgamal.PallasGenerator().ToAffineCompressed()
+
+func delegationRk(roundID []byte, seed uint64) []byte {
+	input := make([]byte, len(roundID)+8)
+	copy(input, roundID)
+	binary.LittleEndian.PutUint64(input[len(roundID):], seed)
+	scalar := new(curvey.ScalarPallas).Hash(input)
+	if scalar.IsZero() {
+		scalar = new(curvey.ScalarPallas).One()
+	}
+	return elgamal.PallasGenerator().Mul(scalar).ToAffineCompressed()
+}
 
 // TestValAddr generates a deterministic valid bech32 validator operator address from a seed byte.
 func TestValAddr(seed byte) string {
@@ -150,7 +161,7 @@ func ExpiredCreateVotingSessionAt(refTime time.Time) *types.MsgCreateVotingSessi
 // Sighash is set to a dummy 32-byte value; chain only checks length + signature.
 func ValidDelegation(roundID []byte, nullifierSeed byte) *types.MsgDelegateVote {
 	msg := &types.MsgDelegateVote{
-		Rk:                  append([]byte(nil), DummyPallasPoint...),
+		Rk:                  delegationRk(roundID, uint64(nullifierSeed)),
 		SpendAuthSig:        bytes.Repeat([]byte{0x02}, 64),
 		SignedNoteNullifier: bytes.Repeat([]byte{0x03}, 32),
 		CmxNew:              FpLE(0x80 + uint64(nullifierSeed)),
@@ -288,7 +299,7 @@ func ValidDelegationN(roundID []byte, n int, seed uint64) []*types.MsgDelegateVo
 	for i := range n {
 		base := seed + uint64(i)*4
 		msg := &types.MsgDelegateVote{
-			Rk:                  append([]byte(nil), DummyPallasPoint...),
+			Rk:                  delegationRk(roundID, base),
 			SpendAuthSig:        bytes.Repeat([]byte{0x02}, 64),
 			SignedNoteNullifier: makeNullifierFromUint64(base + 1),
 			CmxNew:              FpLE(base + 2),

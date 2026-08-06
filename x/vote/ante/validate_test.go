@@ -329,6 +329,12 @@ func (s *ValidateTestSuite) recordNullifier(nfType types.NullifierType, roundID,
 	s.Require().NoError(err)
 }
 
+func (s *ValidateTestSuite) recordDelegationRk(rk []byte) {
+	kvStore := s.keeper.OpenKVStore(s.ctx)
+	err := s.keeper.SetUsedDelegationRk(kvStore, rk)
+	s.Require().NoError(err)
+}
+
 // seedCommitmentRoot stores a dummy commitment tree root at the given height
 // for the test round. MsgRevealShare tests need this because verifyRevealShare
 // looks up the root.
@@ -622,6 +628,18 @@ func (s *ValidateTestSuite) TestValidateVoteTx_DelegateVote() {
 			expectErr:   true,
 			errContains: "nullifier already spent",
 		},
+		// --- Delegation authorization key uniqueness failure ---
+		{
+			name: "rk already used by another delegation",
+			msg:  func() types.VoteMessage { return newValidMsgDelegateVote() },
+			opts: mockOpts(),
+			setup: func() {
+				s.setupActiveRound()
+				s.recordDelegationRk(bytes.Repeat([]byte{0xAA}, types.DelegationRkLen))
+			},
+			expectErr:   true,
+			errContains: "delegation authorization key already used",
+		},
 		// --- Signature verification failure ---
 		{
 			name:        "signature verification fails",
@@ -657,6 +675,17 @@ func (s *ValidateTestSuite) TestValidateVoteTx_DelegateVote() {
 			},
 			expectErr:   true,
 			errContains: "nullifier already spent",
+		},
+		{
+			name: "recheck: still catches reused rk",
+			msg:  func() types.VoteMessage { return newValidMsgDelegateVote() },
+			opts: recheckOpts(),
+			setup: func() {
+				s.setupActiveRound()
+				s.recordDelegationRk(bytes.Repeat([]byte{0xAA}, types.DelegationRkLen))
+			},
+			expectErr:   true,
+			errContains: "delegation authorization key already used",
 		},
 		{
 			name:        "recheck: still catches expired round",

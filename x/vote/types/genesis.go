@@ -103,6 +103,19 @@ func ValidateGenesisState(gs *GenesisState) error {
 		}
 	}
 
+	// Validate globally used delegation authorization keys.
+	seenRks := make(map[string]struct{}, len(gs.UsedDelegationRks))
+	for i, rk := range gs.UsedDelegationRks {
+		if len(rk) != DelegationRkLen {
+			return fmt.Errorf("used_delegation_rks[%d] is %d bytes, expected %d", i, len(rk), DelegationRkLen)
+		}
+		key := string(rk)
+		if _, dup := seenRks[key]; dup {
+			return fmt.Errorf("used_delegation_rks[%d]: duplicate rk %x", i, rk)
+		}
+		seenRks[key] = struct{}{}
+	}
+
 	// Vote-manager set is required in genesis — there is no bootstrap path.
 	if _, _, err := ValidateAndNormalizeVoteManagerPolicy(gs.VoteManagerAddresses, gs.VoteManagerThreshold); err != nil {
 		return fmt.Errorf("vote_manager_addresses: %w", err)

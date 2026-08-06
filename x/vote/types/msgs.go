@@ -61,8 +61,8 @@ func (msg *MsgCreateVotingSession) ValidateBasic() error {
 
 // ValidateBasic performs stateless validation for MsgDelegateVote.
 func (msg *MsgDelegateVote) ValidateBasic() error {
-	if len(msg.Rk) != 32 {
-		return fmt.Errorf("%w: rk must be 32 bytes, got %d", ErrInvalidField, len(msg.Rk))
+	if len(msg.Rk) != DelegationRkLen {
+		return fmt.Errorf("%w: rk must be %d bytes, got %d", ErrInvalidField, DelegationRkLen, len(msg.Rk))
 	}
 	if bytes.Equal(msg.Rk, zeroPoint32[:]) {
 		return fmt.Errorf("%w: rk must not be the identity point (all zeros)", ErrInvalidField)

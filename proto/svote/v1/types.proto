@@ -129,6 +129,7 @@ message GenesisState {
   uint32                           vote_manager_threshold    = 16;
   repeated CoordinatorAction       coordinator_actions       = 17;
   uint64                           next_coordinator_action_id = 18;
+  repeated bytes                    used_delegation_rks        = 19;
 }
 
 // Endorser records a stable identifier's currently authorized bech32 address.

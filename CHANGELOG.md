@@ -8,6 +8,7 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Harden delegation authorization key handling across voting rounds.
 - Publish checksum-pinned Cosmovisor archives for both Linux architectures,
   require the upgrade scheduler to load them, and show the exact upgrade info
   before signing.

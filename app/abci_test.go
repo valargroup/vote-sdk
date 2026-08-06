@@ -335,6 +335,39 @@ func (s *ABCIIntegrationSuite) TestNullifierDoubleSpend() {
 	s.Require().Contains(result.Log, "nullifier already spent")
 }
 
+func (s *ABCIIntegrationSuite) TestDelegationRkReuseInSameBlock() {
+	setupMsg := testutil.ValidCreateVotingSessionAt(s.app.Time)
+	roundID := s.app.SeedVotingSession(setupMsg)
+
+	first := testutil.ValidDelegation(roundID, 0x20)
+	second := testutil.ValidDelegation(roundID, 0x30)
+	second.Rk = bytes.Clone(first.Rk)
+
+	results := s.app.DeliverVoteTxs([][]byte{
+		testutil.MustEncodeVoteTx(first),
+		testutil.MustEncodeVoteTx(second),
+	})
+	s.Require().Len(results, 2)
+	s.Require().Equal(uint32(0), results[0].Code, results[0].Log)
+	s.Require().NotEqual(uint32(0), results[1].Code)
+	s.Require().Contains(results[1].Log, "delegation authorization key already used")
+}
+
+func (s *ABCIIntegrationSuite) TestDelegationRkReuseAcrossRounds() {
+	firstRoundID := s.app.SeedVotingSession(testutil.ValidCreateVotingSessionAt(s.app.Time))
+	secondRoundID := s.app.SeedVotingSession(testutil.ValidCreateVotingSessionAt(s.app.Time))
+
+	first := testutil.ValidDelegation(firstRoundID, 0x40)
+	second := testutil.ValidDelegation(secondRoundID, 0x50)
+	second.Rk = bytes.Clone(first.Rk)
+
+	result := s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(first))
+	s.Require().Equal(uint32(0), result.Code, result.Log)
+	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(second))
+	s.Require().NotEqual(uint32(0), result.Code)
+	s.Require().Contains(result.Log, "delegation authorization key already used")
+}
+
 // ---------------------------------------------------------------------------
 // 6.2.3: CheckTx vs RecheckTx
 // ---------------------------------------------------------------------------

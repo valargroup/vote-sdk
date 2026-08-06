@@ -109,6 +109,11 @@ func (k *Keeper) InitGenesis(kvStore store.KVStore, genesis *types.GenesisState)
 			return err
 		}
 	}
+	for _, rk := range genesis.UsedDelegationRks {
+		if err := k.SetUsedDelegationRk(kvStore, rk); err != nil {
+			return err
+		}
+	}
 
 	// Restore tally results.
 	for _, result := range genesis.TallyResults {
@@ -247,6 +252,13 @@ func (k *Keeper) ExportGenesis(kvStore store.KVStore) (*types.GenesisState, erro
 		return nil, fmt.Errorf("export nullifiers: %w", err)
 	}
 	gs.Nullifiers = nullifiers
+
+	// Globally used delegation authorization keys (0x1A prefix).
+	usedDelegationRks, err := exportUsedDelegationRks(kvStore)
+	if err != nil {
+		return nil, fmt.Errorf("export used delegation rks: %w", err)
+	}
+	gs.UsedDelegationRks = usedDelegationRks
 
 	// Tally results (0x07 prefix).
 	tallyResults, err := exportTallyResults(kvStore)
@@ -410,6 +422,29 @@ func exportNullifiers(kvStore store.KVStore) ([]*types.NullifierEntry, error) {
 		})
 	}
 	return entries, nil
+}
+
+// exportUsedDelegationRks returns all globally recorded delegation
+// authorization keys.
+func exportUsedDelegationRks(kvStore store.KVStore) ([][]byte, error) {
+	prefix := types.UsedDelegationRkPrefix
+	iter, err := kvStore.Iterator(prefix, types.PrefixEndBytes(prefix))
+	if err != nil {
+		return nil, err
+	}
+	defer iter.Close()
+
+	var rks [][]byte
+	for ; iter.Valid(); iter.Next() {
+		key := iter.Key()
+		if len(key) != len(prefix)+types.DelegationRkLen {
+			continue
+		}
+		rk := make([]byte, types.DelegationRkLen)
+		copy(rk, key[len(prefix):])
+		rks = append(rks, rk)
+	}
+	return rks, nil
 }
 
 // exportEndorsedRounds iterates the 0x17 prefix and returns all stored endorsements.

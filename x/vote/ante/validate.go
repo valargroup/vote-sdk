@@ -9,8 +9,9 @@
 //  1. Basic field validation (stateless)
 //  2. Vote round existence and liveness check (stateful, KV read)
 //  3. Nullifier uniqueness check (stateful, KV read) — runs even on RecheckTx
-//  4. RedPallas signature verification — skipped on RecheckTx
-//  5. ZKP verification — skipped on RecheckTx
+//  4. Delegation authorization key uniqueness check — runs even on RecheckTx
+//  5. RedPallas signature verification — skipped on RecheckTx
+//  6. ZKP verification — skipped on RecheckTx
 package ante
 
 import (
@@ -29,8 +30,8 @@ import (
 type ValidateOpts struct {
 	// IsRecheck is true when running RecheckTx (mempool re-validation after
 	// a new block commit). When true, expensive signature and ZKP checks are
-	// skipped — only nullifier uniqueness is re-verified since nullifiers may
-	// have been consumed by the newly committed block.
+	// skipped. State-dependent uniqueness checks are still repeated because
+	// values may have been consumed by the newly committed block.
 	IsRecheck bool
 
 	// SigVerifier is the RedPallas signature verifier.
@@ -47,8 +48,8 @@ type ValidateOpts struct {
 // ValidateVoteTx runs the full validation pipeline for a vote module transaction.
 //
 // The pipeline is designed to be called from:
-//   - CheckTx: full validation (basic + round + nullifiers + sig + ZKP)
-//   - RecheckTx: lightweight re-validation (basic + round + nullifiers only)
+//   - CheckTx: full validation (basic + round + uniqueness + sig + ZKP)
+//   - RecheckTx: lightweight re-validation (basic + round + uniqueness only)
 //   - FinalizeBlock: full validation before keeper execution
 func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper, opts ValidateOpts) error {
 	// 1. Basic field validation (stateless).
@@ -86,12 +87,19 @@ func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper
 		}
 	}
 
-	// 4. Skip expensive cryptographic checks on RecheckTx.
+	// 4. Delegation authorization key uniqueness (ALWAYS runs, even on RecheckTx).
+	if delegation, ok := msg.(*types.MsgDelegateVote); ok {
+		if err := k.CheckDelegationRkUnused(ctx, delegation.Rk); err != nil {
+			return err
+		}
+	}
+
+	// 5. Skip expensive cryptographic checks on RecheckTx.
 	if opts.IsRecheck {
 		return nil
 	}
 
-	// 5. Per-message-type signature and ZKP verification.
+	// 6. Per-message-type signature and ZKP verification.
 	return verifyProofs(ctx, msg, k, opts)
 }
 

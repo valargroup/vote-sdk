@@ -139,11 +139,15 @@ func (ms msgServer) executeCreateVotingSession(goCtx context.Context, msg *types
 }
 
 // DelegateVote handles MsgDelegateVote (ZKP #1).
-// Records governance nullifiers, appends van_cmx to the commitment tree,
-// and emits an event.
+// Records governance nullifiers and the delegation authorization key, appends
+// van_cmx to the commitment tree, and emits an event.
 func (ms msgServer) DelegateVote(goCtx context.Context, msg *types.MsgDelegateVote) (*types.MsgDelegateVoteResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
+
+	if err := ms.k.CheckDelegationRkUnused(ctx, msg.Rk); err != nil {
+		return nil, err
+	}
 
 	// Record each governance nullifier (scoped to gov type + round).
 	for _, nf := range msg.GovNullifiers {
@@ -157,6 +161,9 @@ func (ms msgServer) DelegateVote(goCtx context.Context, msg *types.MsgDelegateVo
 	// references it; only the VAN (van_cmx) needs a Merkle path for ZKP #2.
 	vanCmxIdx, err := ms.k.AppendCommitment(kvStore, msg.VoteRoundId, msg.VanCmx)
 	if err != nil {
+		return nil, err
+	}
+	if err := ms.k.SetUsedDelegationRk(kvStore, msg.Rk); err != nil {
 		return nil, err
 	}
 

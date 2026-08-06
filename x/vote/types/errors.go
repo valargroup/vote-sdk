@@ -60,4 +60,7 @@ var (
 	ErrCoordinatorAlreadyApproved   = errors.Register(ModuleName, 47, "coordinator action already approved")
 	ErrUnsupportedCoordinatorAction = errors.Register(ModuleName, 48, "unsupported coordinator action")
 	ErrInvalidCoordinatorAction     = errors.Register(ModuleName, 49, "invalid coordinator action")
+
+	// Delegation authorization errors.
+	ErrDelegationRkAlreadyUsed = errors.Register(ModuleName, 50, "delegation authorization key already used")
 )
