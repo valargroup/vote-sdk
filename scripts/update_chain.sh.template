@@ -381,6 +381,7 @@ run_configure_autodownload() {
   if ! (
     svote_upgrade_restart_service ""
     svote_upgrade_wait_for_rpc "$TIMEOUT_SECS" 1
+    svote_upgrade_assert_autodownload_enabled
     svote_upgrade_assert_single_managed_signer
   ); then
     svote_upgrade_warn "Auto-download restart verification failed; stopping ${SERVICE_NAME} to prevent parallel signer processes."

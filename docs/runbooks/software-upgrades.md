@@ -124,22 +124,29 @@ RELEASE_BASE="https://github.com/valargroup/vote-sdk/releases/download/${TAG}"
 AMD64_ASSET="shielded-vote-${TAG}-cosmovisor-v1-linux-amd64.tar.gz"
 ARM64_ASSET="shielded-vote-${TAG}-cosmovisor-v1-linux-arm64.tar.gz"
 
-AMD64_SHA256=$(curl -fsSL "${RELEASE_BASE}/${AMD64_ASSET}.sha256" | awk '{print $1}')
-ARM64_SHA256=$(curl -fsSL "${RELEASE_BASE}/${ARM64_ASSET}.sha256" | awk '{print $1}')
-printf '%s\n' "$AMD64_SHA256" | grep -Eq '^[0-9a-fA-F]{64}$'
-printf '%s\n' "$ARM64_SHA256" | grep -Eq '^[0-9a-fA-F]{64}$'
-
-UPGRADE_INFO=$(jq -nc \
-  --arg tag "$TAG" \
-  --arg amd64 "${RELEASE_BASE}/${AMD64_ASSET}?checksum=sha256:${AMD64_SHA256}" \
-  --arg arm64 "${RELEASE_BASE}/${ARM64_ASSET}?checksum=sha256:${ARM64_SHA256}" \
-  '{tag: $tag, binaries: {"linux/amd64": $amd64, "linux/arm64": $arm64}}')
-
-printf '%s\n' "$UPGRADE_INFO" | jq
-svoted tx vote schedule-upgrade <name> <height> \
-  --info "$UPGRADE_INFO" \
-  --from <vote-manager-key> \
-  --chain-id svote-1
+if
+  AMD64_CHECKSUM=$(curl -fsSL "${RELEASE_BASE}/${AMD64_ASSET}.sha256") &&
+  ARM64_CHECKSUM=$(curl -fsSL "${RELEASE_BASE}/${ARM64_ASSET}.sha256") &&
+  AMD64_SHA256=$(printf '%s\n' "$AMD64_CHECKSUM" | awk 'NR == 1 {print $1}') &&
+  ARM64_SHA256=$(printf '%s\n' "$ARM64_CHECKSUM" | awk 'NR == 1 {print $1}') &&
+  printf '%s\n' "$AMD64_SHA256" | grep -Eq '^[0-9a-fA-F]{64}$' &&
+  printf '%s\n' "$ARM64_SHA256" | grep -Eq '^[0-9a-fA-F]{64}$' &&
+  UPGRADE_INFO=$(jq -nc \
+    --arg tag "$TAG" \
+    --arg amd64 "${RELEASE_BASE}/${AMD64_ASSET}?checksum=sha256:${AMD64_SHA256}" \
+    --arg arm64 "${RELEASE_BASE}/${ARM64_ASSET}?checksum=sha256:${ARM64_SHA256}" \
+    '{tag: $tag, binaries: {"linux/amd64": $amd64, "linux/arm64": $arm64}}') &&
+  printf '%s\n' "$UPGRADE_INFO" | jq -e . >/dev/null
+then
+  printf '%s\n' "$UPGRADE_INFO" | jq &&
+    svoted tx vote schedule-upgrade <name> <height> \
+      --info "$UPGRADE_INFO" \
+      --from <vote-manager-key> \
+      --chain-id svote-1
+else
+  printf 'ERROR: release checksums or upgrade info are invalid; upgrade was not scheduled.\n' >&2
+  false
+fi
 ```
 
 Do not schedule a tag-only plan. Cosmovisor can download a missing binary only

@@ -1580,7 +1580,7 @@ svote_upgrade_escape_systemd_env_value() {
 svote_upgrade_configure_autodownload_dropin() {
   local dropin_dir
   dropin_dir="$(dirname "$SERVICE_PATH")/${SERVICE_NAME}.service.d"
-  local dropin_path="${dropin_dir}/20-cosmovisor-autodownload.conf"
+  local dropin_path="${dropin_dir}/zz-cosmovisor-autodownload.conf"
   local backup_suffix
   [ -f "$SERVICE_PATH" ] || svote_upgrade_die "systemd unit not found: ${SERVICE_PATH}."
   install -d -m 0755 "$dropin_dir"
@@ -1596,6 +1596,18 @@ svote_upgrade_configure_autodownload_dropin() {
   chmod 0644 "${dropin_path}.new"
   mv -f "${dropin_path}.new" "$dropin_path"
   svote_upgrade_log "Enabled checksum-required Cosmovisor auto-download in ${dropin_path}."
+}
+
+# svote_upgrade_assert_autodownload_enabled
+# Confirm the effective systemd Cosmovisor download safeguards after restart.
+svote_upgrade_assert_autodownload_enabled() {
+  local effective_allow_download effective_must_checksum
+  effective_allow_download=$(svote_upgrade_systemd_effective_env_value "DAEMON_ALLOW_DOWNLOAD_BINARIES" || true)
+  effective_must_checksum=$(svote_upgrade_systemd_effective_env_value "DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM" || true)
+  [ "$effective_allow_download" = "true" ] \
+    || svote_upgrade_die "Systemd effective DAEMON_ALLOW_DOWNLOAD_BINARIES is ${effective_allow_download:-<unset>} (expected true)."
+  [ "$effective_must_checksum" = "true" ] \
+    || svote_upgrade_die "Systemd effective DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM is ${effective_must_checksum:-<unset>} (expected true)."
 }
 
 # svote_upgrade_detect_existing_execstart

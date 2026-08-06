@@ -198,7 +198,7 @@ svote_ci_configure_autodownload() {
   local service_name="$1"
   local systemd_unit_dir="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
   local dropin_dir="${systemd_unit_dir%/}/${service_name}.service.d"
-  local dropin_path="${dropin_dir}/20-cosmovisor-autodownload.conf"
+  local dropin_path="${dropin_dir}/zz-cosmovisor-autodownload.conf"
 
   mkdir -p "$dropin_dir"
   cat > "${dropin_path}.new" <<EOF

@@ -48,10 +48,29 @@ echo "=== auto-download: common helper writes checksum-required drop-in ==="
 SERVICE_PATH="${TMP_ROOT}/systemd/svoted.service"
 mkdir -p "$(dirname "$SERVICE_PATH")"
 printf '[Service]\nExecStart=/root/.local/bin/cosmovisor run start --home %s\n' "$DAEMON_HOME" > "$SERVICE_PATH"
+LEGACY_RUNTIME_DROPIN="${TMP_ROOT}/systemd/svoted.service.d/99-cosmovisor-runtime.conf"
+mkdir -p "$(dirname "$LEGACY_RUNTIME_DROPIN")"
+printf '[Service]\nEnvironment="DAEMON_ALLOW_DOWNLOAD_BINARIES=false"\n' > "$LEGACY_RUNTIME_DROPIN"
 svote_upgrade_configure_autodownload_dropin
-COMMON_AUTODOWNLOAD_DROPIN="${TMP_ROOT}/systemd/svoted.service.d/20-cosmovisor-autodownload.conf"
+COMMON_AUTODOWNLOAD_DROPIN="${TMP_ROOT}/systemd/svoted.service.d/zz-cosmovisor-autodownload.conf"
 grep -q 'DAEMON_ALLOW_DOWNLOAD_BINARIES=true' "$COMMON_AUTODOWNLOAD_DROPIN" || fail "common drop-in did not enable downloads"
 grep -q 'DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM=true' "$COMMON_AUTODOWNLOAD_DROPIN" || fail "common drop-in did not require checksums"
+[ "$(printf '%s\n' "$(basename "$LEGACY_RUNTIME_DROPIN")" "$(basename "$COMMON_AUTODOWNLOAD_DROPIN")" | LC_ALL=C sort | tail -n 1)" = "$(basename "$COMMON_AUTODOWNLOAD_DROPIN")" ] \
+  || fail "auto-download drop-in does not override the legacy runtime drop-in"
+
+AUTODOWNLOAD_EFFECTIVE_ENV='DAEMON_ALLOW_DOWNLOAD_BINARIES=false DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM=false DAEMON_ALLOW_DOWNLOAD_BINARIES=true DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM=true'
+systemctl() {
+  case "$*" in
+    "show svoted -p Environment --value") printf '%s\n' "$AUTODOWNLOAD_EFFECTIVE_ENV" ;;
+    *) return 1 ;;
+  esac
+}
+svote_upgrade_assert_autodownload_enabled
+AUTODOWNLOAD_EFFECTIVE_ENV='DAEMON_ALLOW_DOWNLOAD_BINARIES=true DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM=false'
+if (svote_upgrade_assert_autodownload_enabled) >/dev/null 2>&1; then
+  fail "invalid effective auto-download settings were accepted"
+fi
+unset -f systemctl
 
 echo "=== stale recovery: current and mismatched markers fail closed ==="
 printf '{"name":"v1.1.0","height":4890179}\n' > "${DAEMON_HOME}/data/upgrade-info.json"

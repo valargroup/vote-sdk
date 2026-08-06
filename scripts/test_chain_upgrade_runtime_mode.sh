@@ -174,10 +174,15 @@ fi
 echo "=== deploy helper: writes checksum-required auto-download drop-in ==="
 TMP_AUTODOWNLOAD_SYSTEMD="$(mktemp -d)"
 trap 'rm -f "$TMP_UNIT" "$TMP_AUTODETECT_UNIT" "$TMP_HELPER_UNIT"; rm -rf "$TMP_MIGRATE" "$TMP_AUTODOWNLOAD_SYSTEMD"' EXIT
+LEGACY_AUTODOWNLOAD_DROPIN="${TMP_AUTODOWNLOAD_SYSTEMD}/svoted.service.d/99-cosmovisor-runtime.conf"
+mkdir -p "$(dirname "$LEGACY_AUTODOWNLOAD_DROPIN")"
+printf '[Service]\nEnvironment="DAEMON_ALLOW_DOWNLOAD_BINARIES=false"\n' > "$LEGACY_AUTODOWNLOAD_DROPIN"
 SYSTEMD_UNIT_DIR="$TMP_AUTODOWNLOAD_SYSTEMD" svote_ci_configure_autodownload "svoted" >/dev/null
-AUTODOWNLOAD_DROPIN="${TMP_AUTODOWNLOAD_SYSTEMD}/svoted.service.d/20-cosmovisor-autodownload.conf"
+AUTODOWNLOAD_DROPIN="${TMP_AUTODOWNLOAD_SYSTEMD}/svoted.service.d/zz-cosmovisor-autodownload.conf"
 grep -q 'DAEMON_ALLOW_DOWNLOAD_BINARIES=true' "$AUTODOWNLOAD_DROPIN" || fail "auto-download drop-in did not enable downloads"
 grep -q 'DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM=true' "$AUTODOWNLOAD_DROPIN" || fail "auto-download drop-in did not require checksums"
+[ "$(printf '%s\n' "$(basename "$LEGACY_AUTODOWNLOAD_DROPIN")" "$(basename "$AUTODOWNLOAD_DROPIN")" | LC_ALL=C sort | tail -n 1)" = "$(basename "$AUTODOWNLOAD_DROPIN")" ] \
+  || fail "deploy helper auto-download drop-in does not override the legacy runtime drop-in"
 
 echo "=== deploy helper: sync disabled/enabled atomic stage behavior ==="
 TMP_SYNC_DIR="$(mktemp -d)"
