@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   CalendarClock,
@@ -18,6 +18,7 @@ import {
 } from "../utils/upgradeEstimate";
 import {
   fetchCosmovisorReleaseBinaries,
+  ReleaseRequestGate,
   releaseBinariesMap,
   REQUIRED_UPGRADE_PLATFORMS,
   validateUpgradeInfoJson,
@@ -102,6 +103,7 @@ export function UpgradesPage({ wallet }: { wallet: UseWallet }) {
   const [selectedBinaryPlatforms, setSelectedBinaryPlatforms] = useState<UpgradePlatform[]>([]);
   const [releaseBinariesLoading, setReleaseBinariesLoading] = useState(false);
   const [releaseBinariesError, setReleaseBinariesError] = useState("");
+  const releaseRequestGate = useRef(new ReleaseRequestGate());
 
   const [reviewAction, setReviewAction] = useState<ReviewAction | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
@@ -207,25 +209,33 @@ export function UpgradesPage({ wallet }: { wallet: UseWallet }) {
   }, [infoBytes, infoJson, releaseTag]);
 
   const updateReleaseTag = (value: string) => {
+    releaseRequestGate.current.invalidate();
     setReleaseTag(value);
     setReleaseBinaries([]);
     setSelectedBinaryPlatforms([]);
+    setReleaseBinariesLoading(false);
     setReleaseBinariesError("");
   };
 
   const loadReleaseBinaries = async () => {
+    const request = releaseRequestGate.current.begin();
+    const requestedTag = releaseTag.trim();
     setReleaseBinariesLoading(true);
     setReleaseBinariesError("");
     try {
-      const binaries = await fetchCosmovisorReleaseBinaries(releaseTag);
+      const binaries = await fetchCosmovisorReleaseBinaries(requestedTag);
+      if (!releaseRequestGate.current.isCurrent(request)) return;
       setReleaseBinaries(binaries);
       setSelectedBinaryPlatforms([...REQUIRED_UPGRADE_PLATFORMS]);
     } catch (err) {
+      if (!releaseRequestGate.current.isCurrent(request)) return;
       setReleaseBinaries([]);
       setSelectedBinaryPlatforms([]);
       setReleaseBinariesError(err instanceof Error ? err.message : String(err));
     } finally {
-      setReleaseBinariesLoading(false);
+      if (releaseRequestGate.current.isCurrent(request)) {
+        setReleaseBinariesLoading(false);
+      }
     }
   };
 

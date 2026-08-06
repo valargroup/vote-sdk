@@ -20,6 +20,23 @@ interface GitHubRelease {
   assets?: unknown;
 }
 
+export class ReleaseRequestGate {
+  private currentRequest = 0;
+
+  begin(): number {
+    this.currentRequest += 1;
+    return this.currentRequest;
+  }
+
+  invalidate(): void {
+    this.currentRequest += 1;
+  }
+
+  isCurrent(request: number): boolean {
+    return request === this.currentRequest;
+  }
+}
+
 const RELEASE_API_BASE = "https://api.github.com/repos/valargroup/vote-sdk/releases/tags";
 const SHA256_DIGEST = /^sha256:[0-9a-f]{64}$/i;
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ReleaseRequestGate,
   releaseBinariesMap,
   resolveCosmovisorReleaseBinaries,
   validateUpgradeInfoJson,
@@ -44,6 +45,21 @@ describe("resolveCosmovisorReleaseBinaries", () => {
         assets[1],
       ]),
     ).toThrow("missing a valid SHA-256 digest");
+  });
+});
+
+describe("ReleaseRequestGate", () => {
+  it("rejects responses invalidated by a tag change or newer request", () => {
+    const gate = new ReleaseRequestGate();
+    const firstRequest = gate.begin();
+
+    gate.invalidate();
+    expect(gate.isCurrent(firstRequest)).toBe(false);
+
+    const secondRequest = gate.begin();
+    const thirdRequest = gate.begin();
+    expect(gate.isCurrent(secondRequest)).toBe(false);
+    expect(gate.isCurrent(thirdRequest)).toBe(true);
   });
 });
 

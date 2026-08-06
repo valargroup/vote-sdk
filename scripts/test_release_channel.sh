@@ -10,6 +10,7 @@ PROMOTION_SCRIPT="${REPO_ROOT}/scripts/validate-release-promotion.sh"
 CHANNEL_UPDATE_SCRIPT="${REPO_ROOT}/scripts/validate-release-channel-update.sh"
 FETCH_POINTER_SOURCES_SCRIPT="${REPO_ROOT}/scripts/fetch-release-pointer-sources.sh"
 VERIFY_SCRIPT="${REPO_ROOT}/scripts/verify_upgrade_release_artifacts.sh"
+COSMOVISOR_PACKAGER="${REPO_ROOT}/scripts/package-cosmovisor-archive.sh"
 RELEASE_WORKFLOW="${REPO_ROOT}/.github/workflows/release.yml"
 PROMOTION_WORKFLOW="${REPO_ROOT}/.github/workflows/promote-release.yml"
 
@@ -47,6 +48,14 @@ grep -Fq -- '--latest=false --verify-tag' "$RELEASE_WORKFLOW" \
 github_repo_pattern='GH_REPO: $''{{ github.repository }}'
 grep -Fq "$github_repo_pattern" "$RELEASE_WORKFLOW" \
   || fail "release creation has no explicit GitHub repository context"
+grep -Fq 'scripts/package-cosmovisor-archive.sh' "$RELEASE_WORKFLOW" \
+  || fail "release workflow does not package Cosmovisor archives"
+grep -Fq "assets+=(\"\${COSMOVISOR_TARBALL}\" \"\${COSMOVISOR_TARBALL}.sha256\")" \
+  "$RELEASE_WORKFLOW" \
+  || fail "release workflow does not upload Cosmovisor archives"
+grep -Fq "shielded-vote-\${RELEASE_TAG}-cosmovisor-v1-\${platform}.tar.gz" \
+  "$PROMOTION_WORKFLOW" \
+  || fail "promotion does not verify Cosmovisor archives"
 pointer_line="$(grep -n 'scripts/publish-release-pointers.sh' "$RELEASE_WORKFLOW" | tail -n 1 | cut -d: -f1)"
 verify_line="$(grep -n -- '- name: Verify mutable release pointers' "$RELEASE_WORKFLOW" | cut -d: -f1)"
 latest_line="$(grep -n -- '- name: Mark GitHub release latest' "$RELEASE_WORKFLOW" | cut -d: -f1)"
@@ -124,6 +133,32 @@ fi
 
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
+
+FAKE_SVOTED="${TMPDIR}/svoted"
+printf '#!/usr/bin/env bash\necho svoted\n' > "$FAKE_SVOTED"
+chmod +x "$FAKE_SVOTED"
+COSMOVISOR_OUTPUT="${TMPDIR}/cosmovisor"
+COSMOVISOR_ARCHIVE="$($COSMOVISOR_PACKAGER \
+  v1.2.3 \
+  linux-amd64 \
+  "$FAKE_SVOTED" \
+  "$COSMOVISOR_OUTPUT")"
+[ "$(basename "$COSMOVISOR_ARCHIVE")" = \
+  "shielded-vote-v1.2.3-cosmovisor-v1-linux-amd64.tar.gz" ] \
+  || fail "Cosmovisor archive name does not match the upgrade loader"
+[ "$(tar tzf "$COSMOVISOR_ARCHIVE")" = "bin/svoted" ] \
+  || fail "Cosmovisor archive has the wrong layout"
+(cd "$COSMOVISOR_OUTPUT" && sha256sum --check "$(basename "$COSMOVISOR_ARCHIVE").sha256" >/dev/null) \
+  || fail "Cosmovisor archive checksum did not verify"
+COSMOVISOR_EXTRACT="${TMPDIR}/cosmovisor-extract"
+mkdir -p "$COSMOVISOR_EXTRACT"
+tar xzf "$COSMOVISOR_ARCHIVE" -C "$COSMOVISOR_EXTRACT"
+[ -x "$COSMOVISOR_EXTRACT/bin/svoted" ] \
+  || fail "Cosmovisor archive lost the executable bit"
+if "$COSMOVISOR_PACKAGER" v1.2.3 darwin-arm64 "$FAKE_SVOTED" "$COSMOVISOR_OUTPUT" \
+  >/dev/null 2>&1; then
+  fail "Cosmovisor packager accepted an unsupported platform"
+fi
 
 cat > "${TMPDIR}/fetch-curl" <<'EOF'
 #!/usr/bin/env bash

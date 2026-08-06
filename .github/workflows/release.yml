@@ -9,6 +9,7 @@
 #     scripts/init_multi.sh, reset-archive.sh, reset-validator-snapshot.sh,
 #     svoted-wrapper.sh, _vote_manager_keys_lib.sh, _join_common.sh
 #     config/Caddyfile
+# Linux releases also publish a Cosmovisor archive containing only bin/svoted.
 
 name: Release
 
@@ -257,6 +258,7 @@ jobs:
           path: explorer-artifact
       - name: Assemble tarball
         run: |
+          set -euo pipefail
           VERSION="${GITHUB_REF_NAME}"
           DIR="shielded-vote-${VERSION}-${{ matrix.platform }}"
           mkdir -p "${DIR}/bin" "${DIR}/ui" "${DIR}/explorer/dist" "${DIR}/scripts" "${DIR}/config"
@@ -292,6 +294,13 @@ jobs:
           tar czf "${DIR}.tar.gz" "${DIR}"
           sha256sum "${DIR}.tar.gz" > "${DIR}.tar.gz.sha256"
           echo "TARBALL=${DIR}.tar.gz" >> "$GITHUB_ENV"
+          if [ "${{ matrix.os_family }}" = "linux" ]; then
+            COSMOVISOR_TARBALL="$(scripts/package-cosmovisor-archive.sh \
+              "$VERSION" \
+              "${{ matrix.platform }}" \
+              sdk-binaries/svoted)"
+            echo "COSMOVISOR_TARBALL=${COSMOVISOR_TARBALL}" >> "$GITHUB_ENV"
+          fi
       - name: Upload tarball artifact
         uses: actions/upload-artifact@v4
         with:
@@ -299,8 +308,22 @@ jobs:
           path: |
             ${{ env.TARBALL }}
             ${{ env.TARBALL }}.sha256
+      - name: Upload Cosmovisor tarball artifact
+        if: matrix.os_family == 'linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cosmovisor-tarball-${{ matrix.platform }}
+          path: |
+            ${{ env.COSMOVISOR_TARBALL }}
+            ${{ env.COSMOVISOR_TARBALL }}.sha256
       - name: Attach to GitHub Release
-        run: gh release upload "${GITHUB_REF_NAME}" "${TARBALL}" "${TARBALL}.sha256" --clobber
+        run: |
+          set -euo pipefail
+          assets=("${TARBALL}" "${TARBALL}.sha256")
+          if [ -n "${COSMOVISOR_TARBALL:-}" ]; then
+            assets+=("${COSMOVISOR_TARBALL}" "${COSMOVISOR_TARBALL}.sha256")
+          fi
+          gh release upload "${GITHUB_REF_NAME}" "${assets[@]}" --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

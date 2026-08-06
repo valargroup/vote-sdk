@@ -8,8 +8,9 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
-- Require the upgrade scheduler to load checksum-pinned Cosmovisor archives for
-  both Linux architectures and show the exact upgrade info before signing.
+- Publish checksum-pinned Cosmovisor archives for both Linux architectures,
+  require the upgrade scheduler to load them, and show the exact upgrade info
+  before signing.
 
 ## v1.1.0
 
