@@ -119,18 +119,41 @@ action. It executes immediately when the threshold is 1, or after enough
 current coordinators approve it:
 
 ```bash
+TAG=v1.2.3
+RELEASE_BASE="https://github.com/valargroup/vote-sdk/releases/download/${TAG}"
+AMD64_ASSET="shielded-vote-${TAG}-cosmovisor-v1-linux-amd64.tar.gz"
+ARM64_ASSET="shielded-vote-${TAG}-cosmovisor-v1-linux-arm64.tar.gz"
+
+AMD64_SHA256=$(curl -fsSL "${RELEASE_BASE}/${AMD64_ASSET}.sha256" | awk '{print $1}')
+ARM64_SHA256=$(curl -fsSL "${RELEASE_BASE}/${ARM64_ASSET}.sha256" | awk '{print $1}')
+printf '%s\n' "$AMD64_SHA256" | grep -Eq '^[0-9a-fA-F]{64}$'
+printf '%s\n' "$ARM64_SHA256" | grep -Eq '^[0-9a-fA-F]{64}$'
+
+UPGRADE_INFO=$(jq -nc \
+  --arg tag "$TAG" \
+  --arg amd64 "${RELEASE_BASE}/${AMD64_ASSET}?checksum=sha256:${AMD64_SHA256}" \
+  --arg arm64 "${RELEASE_BASE}/${ARM64_ASSET}?checksum=sha256:${ARM64_SHA256}" \
+  '{tag: $tag, binaries: {"linux/amd64": $amd64, "linux/arm64": $arm64}}')
+
+printf '%s\n' "$UPGRADE_INFO" | jq
 svoted tx vote schedule-upgrade <name> <height> \
-  --info '{"tag":"v1.2.3","notes":"state-breaking upgrade"}' \
+  --info "$UPGRADE_INFO" \
   --from <vote-manager-key> \
   --chain-id svote-1
 ```
 
+Do not schedule a tag-only plan. Cosmovisor can download a missing binary only
+when `info.binaries` contains the validator's platform and the URL includes its
+SHA-256 checksum. The Upgrades page's **Load from release** action constructs
+and validates the same entries before signing.
+
 If another plan already exists, the tx is rejected unless the caller explicitly
-allows replacement:
+allows replacement. After changing `TAG`, rebuild `UPGRADE_INFO` with the block
+above before replacing the plan:
 
 ```bash
 svoted tx vote schedule-upgrade <name> <height> \
-  --info '{"tag":"v1.2.4"}' \
+  --info "$UPGRADE_INFO" \
   --replace-existing \
   --from <vote-manager-key> \
   --chain-id svote-1

@@ -13,6 +13,8 @@ VERIFY_SCRIPT="${REPO_ROOT}/scripts/verify_upgrade_release_artifacts.sh"
 COSMOVISOR_PACKAGER="${REPO_ROOT}/scripts/package-cosmovisor-archive.sh"
 RELEASE_WORKFLOW="${REPO_ROOT}/.github/workflows/release.yml"
 PROMOTION_WORKFLOW="${REPO_ROOT}/.github/workflows/promote-release.yml"
+UPGRADE_SCRIPT_WORKFLOW="${REPO_ROOT}/.github/workflows/publish-upgrade-scripts.yml"
+UPGRADE_RUNBOOK="${REPO_ROOT}/docs/runbooks/software-upgrades.md"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -64,6 +66,25 @@ latest_line="$(grep -n -- '- name: Mark GitHub release latest' "$RELEASE_WORKFLO
   || fail "stable pointers are not verified before GitHub Latest advances"
 [ "$(grep -Fc 'uses: actions/checkout@v4' "$PROMOTION_WORKFLOW")" -eq 1 ] \
   || fail "promotion switches away from the trusted checkout"
+
+grep -Fq 'missing_scripts=()' "$UPGRADE_SCRIPT_WORKFLOW" \
+  || fail "upgrade script publication has no complete-revision preflight"
+grep -Fq "for script in \"\${missing_scripts[@]}\"" "$UPGRADE_SCRIPT_WORKFLOW" \
+  || fail "upgrade script publication does not separate validation from writes"
+common_publish_line="$(grep -n '^            _chain_upgrade_common.sh$' "$UPGRADE_SCRIPT_WORKFLOW" | head -n 1 | cut -d: -f1)"
+update_publish_line="$(grep -n '^            update_chain.sh$' "$UPGRADE_SCRIPT_WORKFLOW" | head -n 1 | cut -d: -f1)"
+prepare_publish_line="$(grep -n '^            prepare-upgrade-artifacts.sh$' "$UPGRADE_SCRIPT_WORKFLOW" | head -n 1 | cut -d: -f1)"
+[ "$common_publish_line" -lt "$update_publish_line" ] \
+  && [ "$update_publish_line" -lt "$prepare_publish_line" ] \
+  || fail "upgrade scripts are not published in dependency order"
+grep -Fq "\"linux/amd64\": \$amd64" "$UPGRADE_RUNBOOK" \
+  || fail "upgrade scheduling runbook omits the amd64 Cosmovisor binary"
+grep -Fq "\"linux/arm64\": \$arm64" "$UPGRADE_RUNBOOK" \
+  || fail "upgrade scheduling runbook omits the arm64 Cosmovisor binary"
+grep -Fq "?checksum=sha256:\${AMD64_SHA256}" "$UPGRADE_RUNBOOK" \
+  || fail "upgrade scheduling runbook omits the amd64 checksum-pinned URL"
+grep -Fq "?checksum=sha256:\${ARM64_SHA256}" "$UPGRADE_RUNBOOK" \
+  || fail "upgrade scheduling runbook omits the arm64 checksum-pinned URL"
 
 if grep -q '^concurrency:' "$RELEASE_WORKFLOW" "$PROMOTION_WORKFLOW"; then
   fail "workflow-level release concurrency can cancel queued artifact publication"

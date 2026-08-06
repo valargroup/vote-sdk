@@ -90,7 +90,15 @@ jobs:
           use_https = True
           EOF
           trap 'rm -f /tmp/do-spaces.s3cfg' EXIT
-          for script in update_chain.sh _chain_upgrade_common.sh prepare-upgrade-artifacts.sh; do
+          scripts=(
+            _chain_upgrade_common.sh
+            update_chain.sh
+            prepare-upgrade-artifacts.sh
+          )
+          missing_scripts=()
+
+          # Validate the complete immutable revision before publishing any object.
+          for script in "${scripts[@]}"; do
             existing="${RUNNER_TEMP}/existing-${script}"
             public_url="${DO_SPACES_BASE%/}/scripts/upgrade/${SCRIPT_VERSION}/${script}"
             object_url="s3://${DO_SPACES_BUCKET}/scripts/upgrade/${SCRIPT_VERSION}/${script}"
@@ -103,6 +111,12 @@ jobs:
               echo "ERROR: immutable script revision already exists with different bytes: ${public_url}" >&2
               exit 1
             fi
+            missing_scripts+=("$script")
+          done
+
+          # Publish dependencies before the scripts that source or execute them.
+          for script in "${missing_scripts[@]}"; do
+            object_url="s3://${DO_SPACES_BUCKET}/scripts/upgrade/${SCRIPT_VERSION}/${script}"
             s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public \
               "${SCRIPT_OUTPUT_DIR}/${script}" \
               "$object_url"
@@ -119,7 +133,7 @@ jobs:
           DO_SPACES_BASE="${DO_SPACES_BASE:-https://${DO_SPACES_BUCKET}.${DO_SPACES_REGION}.digitaloceanspaces.com}"
           verify_dir="${RUNNER_TEMP}/verify-upgrade-script-revision"
           mkdir -p "$verify_dir"
-          for script in update_chain.sh _chain_upgrade_common.sh prepare-upgrade-artifacts.sh; do
+          for script in _chain_upgrade_common.sh update_chain.sh prepare-upgrade-artifacts.sh; do
             curl -fsSL --retry 5 --retry-delay 2 \
               "${DO_SPACES_BASE%/}/scripts/upgrade/${SCRIPT_VERSION}/${script}" \
               -o "${verify_dir}/${script}"
