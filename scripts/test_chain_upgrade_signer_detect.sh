@@ -28,6 +28,12 @@ assert_runtime_no_match() {
   fi
 }
 
+assert_runtime_match_with_inferred_home() {
+  local cmd="$1"
+  svote_upgrade_is_signer_runtime_cmd "$cmd" "$HOME_PATH" "$HOME_PATH" \
+    || fail "expected inferred-home runtime match: $cmd"
+}
+
 echo "=== signer detect: upgrade tooling must not match ==="
 assert_runtime_no_match "bash ${REPO_ROOT}/scripts/update_chain.sh --mode migrate --home ${HOME_PATH} --plan-name test"
 assert_runtime_no_match "bash ${REPO_ROOT}/scripts/_chain_upgrade_common.sh --home ${HOME_PATH}"
@@ -39,6 +45,9 @@ echo "=== signer detect: actual svoted/cosmovisor runtimes match ==="
 assert_runtime_match "/usr/local/bin/svoted start --home ${HOME_PATH}"
 assert_runtime_match "/usr/local/bin/svoted start --home=${HOME_PATH}"
 assert_runtime_match "/usr/local/bin/cosmovisor run start --home ${HOME_PATH}"
+assert_runtime_match "/root/.svoted/cosmovisor/genesis/bin/svoted start --home ${HOME_PATH}"
+assert_runtime_match_with_inferred_home "/usr/local/bin/svoted start"
+assert_runtime_no_match "/usr/local/bin/svoted status --home ${HOME_PATH}"
 
 echo "=== signer detect: extract direct ExecStart args ==="
 args=$(svote_upgrade_extract_direct_svoted_start_args \

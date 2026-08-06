@@ -1,0 +1,148 @@
+name: Publish upgrade script revision
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing Vote SDK release whose binary the script stages
+        required: true
+        default: v1.1.0
+      script_version:
+        description: New operator-script revision path, for example v1.1.0-r1
+        required: true
+        default: v1.1.0-r1
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish tag-independent operator script revision
+    runs-on: ubuntu-latest
+    concurrency:
+      group: publish-upgrade-scripts-${{ vars.DO_SPACES_BUCKET || 'shielded-vote' }}-${{ inputs.script_version }}
+      cancel-in-progress: false
+    env:
+      DO_ACCESS_KEY: ${{ secrets.DO_ACCESS_KEY }}
+      DO_SECRET_KEY: ${{ secrets.DO_SECRET_KEY }}
+      DO_SPACES_BUCKET: ${{ vars.DO_SPACES_BUCKET }}
+      DO_SPACES_REGION: ${{ vars.DO_SPACES_REGION }}
+      DO_SPACES_BASE: ${{ vars.DO_SPACES_BASE }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate revision inputs
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          SCRIPT_VERSION: ${{ inputs.script_version }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$RELEASE_TAG" | grep -Eq '^v[0-9]+(\.[0-9]+)*([._-][A-Za-z0-9]+)*$'
+          printf '%s\n' "$SCRIPT_VERSION" | grep -Eq '^v[0-9]+(\.[0-9]+)*([._-][A-Za-z0-9]+)*-r[1-9][0-9]*$'
+          case "$SCRIPT_VERSION" in
+            "${RELEASE_TAG}-r"*) ;;
+            *)
+              echo "ERROR: script_version must be a revision of release_tag (${RELEASE_TAG}-rN)." >&2
+              exit 1
+              ;;
+          esac
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+
+      - name: Render and test scripts
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          SCRIPT_VERSION: ${{ inputs.script_version }}
+        run: |
+          set -euo pipefail
+          DO_SPACES_BUCKET="${DO_SPACES_BUCKET:-shielded-vote}"
+          DO_SPACES_REGION="${DO_SPACES_REGION:-nyc3}"
+          DO_SPACES_BASE="${DO_SPACES_BASE:-https://${DO_SPACES_BUCKET}.${DO_SPACES_REGION}.digitaloceanspaces.com}"
+          output_dir="${RUNNER_TEMP}/upgrade-script-revision"
+          mkdir -p "$output_dir"
+          scripts/render-update-chain.sh \
+            "$RELEASE_TAG" \
+            "$DO_SPACES_BASE" \
+            "${DO_SPACES_BASE%/}/scripts/upgrade/${SCRIPT_VERSION}/_chain_upgrade_common.sh" \
+            "${DO_SPACES_BASE%/}/scripts/upgrade/${SCRIPT_VERSION}/update_chain.sh" \
+            > "${output_dir}/update_chain.sh"
+          cp scripts/_chain_upgrade_common.sh scripts/prepare-upgrade-artifacts.sh "$output_dir/"
+          chmod +x "${output_dir}/"*.sh
+          bash -n "${output_dir}/"*.sh
+          "${output_dir}/update_chain.sh" --help >/dev/null
+          echo "SCRIPT_OUTPUT_DIR=${output_dir}" >> "$GITHUB_ENV"
+
+      - name: Upload revision to DigitalOcean Spaces
+        env:
+          SCRIPT_VERSION: ${{ inputs.script_version }}
+        run: |
+          set -euo pipefail
+          DO_SPACES_BUCKET="${DO_SPACES_BUCKET:-shielded-vote}"
+          DO_SPACES_REGION="${DO_SPACES_REGION:-nyc3}"
+          DO_SPACES_BASE="${DO_SPACES_BASE:-https://${DO_SPACES_BUCKET}.${DO_SPACES_REGION}.digitaloceanspaces.com}"
+          pip install --quiet s3cmd
+          umask 077
+          cat > /tmp/do-spaces.s3cfg <<EOF
+          [default]
+          access_key = ${DO_ACCESS_KEY}
+          secret_key = ${DO_SECRET_KEY}
+          host_base = ${DO_SPACES_REGION}.digitaloceanspaces.com
+          host_bucket = %(bucket)s.${DO_SPACES_REGION}.digitaloceanspaces.com
+          bucket_location = ${DO_SPACES_REGION}
+          use_https = True
+          EOF
+          trap 'rm -f /tmp/do-spaces.s3cfg' EXIT
+          scripts=(
+            _chain_upgrade_common.sh
+            update_chain.sh
+            prepare-upgrade-artifacts.sh
+          )
+          missing_scripts=()
+
+          # Validate the complete immutable revision before publishing any object.
+          for script in "${scripts[@]}"; do
+            existing="${RUNNER_TEMP}/existing-${script}"
+            public_url="${DO_SPACES_BASE%/}/scripts/upgrade/${SCRIPT_VERSION}/${script}"
+            object_url="s3://${DO_SPACES_BUCKET}/scripts/upgrade/${SCRIPT_VERSION}/${script}"
+            if s3cmd -c /tmp/do-spaces.s3cfg info "$object_url" >/dev/null 2>&1; then
+              s3cmd -c /tmp/do-spaces.s3cfg get --force "$object_url" "$existing"
+              if cmp "${SCRIPT_OUTPUT_DIR}/${script}" "$existing"; then
+                echo "Already published with identical bytes: ${public_url}"
+                continue
+              fi
+              echo "ERROR: immutable script revision already exists with different bytes: ${public_url}" >&2
+              exit 1
+            fi
+            missing_scripts+=("$script")
+          done
+
+          # Publish dependencies before the scripts that source or execute them.
+          for script in "${missing_scripts[@]}"; do
+            object_url="s3://${DO_SPACES_BUCKET}/scripts/upgrade/${SCRIPT_VERSION}/${script}"
+            s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public \
+              "${SCRIPT_OUTPUT_DIR}/${script}" \
+              "$object_url"
+          done
+
+      - name: Verify published revision
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          SCRIPT_VERSION: ${{ inputs.script_version }}
+        run: |
+          set -euo pipefail
+          DO_SPACES_BUCKET="${DO_SPACES_BUCKET:-shielded-vote}"
+          DO_SPACES_REGION="${DO_SPACES_REGION:-nyc3}"
+          DO_SPACES_BASE="${DO_SPACES_BASE:-https://${DO_SPACES_BUCKET}.${DO_SPACES_REGION}.digitaloceanspaces.com}"
+          verify_dir="${RUNNER_TEMP}/verify-upgrade-script-revision"
+          mkdir -p "$verify_dir"
+          for script in _chain_upgrade_common.sh update_chain.sh prepare-upgrade-artifacts.sh; do
+            curl -fsSL --retry 5 --retry-delay 2 \
+              "${DO_SPACES_BASE%/}/scripts/upgrade/${SCRIPT_VERSION}/${script}" \
+              -o "${verify_dir}/${script}"
+            cmp "${SCRIPT_OUTPUT_DIR}/${script}" "${verify_dir}/${script}"
+          done
+          chmod +x "${verify_dir}/"*.sh
+          "${verify_dir}/update_chain.sh" --help >/dev/null
+          grep -Fq "readonly UPDATE_DEFAULT_RELEASE_TAG='${RELEASE_TAG}'" "${verify_dir}/update_chain.sh"
+          grep -Fq "/scripts/upgrade/${SCRIPT_VERSION}/_chain_upgrade_common.sh" "${verify_dir}/update_chain.sh"

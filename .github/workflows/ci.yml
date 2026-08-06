@@ -32,6 +32,13 @@ jobs:
         run: mise run lint
       - name: Test release channels
         run: scripts/test_release_channel.sh
+      - name: Test coordinated upgrade scripts
+        run: |
+          bash -n join.sh scripts/_chain_upgrade_common.sh scripts/update_chain.sh scripts/update_chain.sh.template scripts/svoted-wrapper.sh scripts/ci/ensure_cosmovisor_runtime.sh
+          scripts/test_chain_upgrade_signer_detect.sh
+          scripts/test_chain_upgrade_runtime_mode.sh
+          scripts/test_chain_upgrade_recovery.sh
+          scripts/test_svoted_wrapper.sh
 
   admin-ui:
     name: Admin UI Lint and Build
@@ -193,7 +200,7 @@ jobs:
       - name: Install mise
         uses: jdx/mise-action@v2
       - name: Add GOBIN to PATH
-        run: echo "$HOME/go/bin" >> $GITHUB_PATH
+        run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
       - name: Cache Rust build (circuits + e2e-tests)
         uses: actions/cache@v4
         with:

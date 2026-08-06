@@ -86,6 +86,8 @@ svote_upgrade_resolve_paths() {
   SERVICE_NAME="${SVOTE_SERVICE_NAME:-svoted}"
   SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
   GITHUB_REPO="${SVOTE_GITHUB_REPO:-${GITHUB_REPO:-$SVOTE_DEFAULT_GITHUB_REPO}}"
+  CHAIN_API="${SVOTE_CHAIN_API:-${CHAIN_API:-}}"
+  CHAIN_API="${CHAIN_API%/}"
   COSMOVISOR_VERSION="${SVOTE_COSMOVISOR_VERSION:-${COSMOVISOR_VERSION:-$SVOTE_DEFAULT_COSMOVISOR_VERSION}}"
   COSMOVISOR_BIN="${SVOTE_COSMOVISOR_BIN:-${COSMOVISOR_BIN:-${INSTALL_DIR}/cosmovisor}}"
   WRAPPER_BIN="${SVOTE_WRAPPER_SCRIPT:-${INSTALL_DIR}/svoted-wrapper.sh}"
@@ -96,7 +98,7 @@ svote_upgrade_resolve_paths() {
   SERVICE_USER="${SVOTE_SERVICE_USER:-${SERVICE_USER:-}}"
 
   export DAEMON_HOME INSTALL_DIR SERVICE_NAME SERVICE_PATH SERVICE_USER
-  export GITHUB_REPO COSMOVISOR_VERSION COSMOVISOR_BIN WRAPPER_BIN
+  export GITHUB_REPO CHAIN_API COSMOVISOR_VERSION COSMOVISOR_BIN WRAPPER_BIN
   export COSMVISOR_ROOT GENESIS_BIN_DIR GENESIS_BIN
 }
 
@@ -594,44 +596,153 @@ svote_upgrade_is_upgrade_invocation_pid() {
   return 1
 }
 
-# svote_upgrade_is_signer_runtime_cmd cmd home
-# Return 0 when cmd is a live svoted/cosmovisor runtime for home (not upgrade tooling).
+# svote_upgrade_is_signer_runtime_cmd cmd home inferred_home
+# Return 0 when cmd is a signer runtime for home. inferred_home covers a direct
+# `svoted start` that relies on the service user's default ~/.svoted path.
 svote_upgrade_is_signer_runtime_cmd() {
   local cmd="$1"
   local home="$2"
+  local inferred_home="${3:-}"
+  local arg previous="" explicit_home="" saw_home=0
+  local saw_start=0 saw_run_start=0
+  local executable_name=""
+  local -a argv=()
 
   case "$cmd" in
     *update_chain.sh*|*_chain_upgrade_common.sh*) return 1 ;;
   esac
 
-  if ! printf '%s\n' "$cmd" | grep -Eq '(^|[ /])(svoted|cosmovisor)( |$|--|$)'; then
+  if ! printf '%s\n' "$cmd" | grep -Eq '(^|[ /])(svoted|cosmovisor)([[:space:]]|$)'; then
     return 1
   fi
 
-  if printf '%s\n' "$cmd" | grep -Fq -- " --home ${home}"; then
-    return 0
+  read -r -a argv <<< "$cmd"
+  [ "${#argv[@]}" -gt 0 ] || return 1
+  executable_name="${argv[0]##*/}"
+  for arg in "${argv[@]}"; do
+    if [ "$previous" = "--home" ]; then
+      explicit_home="$arg"
+      saw_home=1
+    fi
+    case "$arg" in
+      --home=*)
+        explicit_home="${arg#--home=}"
+        saw_home=1
+        ;;
+      start)
+        saw_start=1
+        [ "$previous" = "run" ] && saw_run_start=1
+        ;;
+    esac
+    previous="$arg"
+  done
+
+  case "$executable_name" in
+    cosmovisor) [ "$saw_run_start" = "1" ] || return 1 ;;
+    "$SVOTE_DAEMON_NAME") [ "$saw_start" = "1" ] || return 1 ;;
+    *) return 1 ;;
+  esac
+
+  if [ "$saw_home" = "1" ]; then
+    [ "$explicit_home" = "$home" ]
+    return
   fi
-  if printf '%s\n' "$cmd" | grep -Fq -- "--home=${home}"; then
-    return 0
+  [ -n "$inferred_home" ] && [ "$inferred_home" = "$home" ]
+}
+
+# svote_upgrade_process_env_value pid key
+# Print a process environment value from procfs, or return 1 when unavailable.
+svote_upgrade_process_env_value() {
+  local pid="$1"
+  local key="$2"
+  local proc_root="${SVOTE_PROC_ROOT:-/proc}"
+  local value
+
+  [ -r "${proc_root}/${pid}/environ" ] || return 1
+  value=$(tr '\0' '\n' < "${proc_root}/${pid}/environ" 2>/dev/null \
+    | sed -n "s/^${key}=//p" | tail -n 1)
+  [ -n "$value" ] || return 1
+  printf '%s\n' "$value"
+}
+
+# svote_upgrade_process_default_daemon_home pid
+# Infer the default ~/.svoted path for a process owner from procfs and /etc/passwd.
+svote_upgrade_process_default_daemon_home() {
+  local pid="$1"
+  local proc_root="${SVOTE_PROC_ROOT:-/proc}"
+  local uid user_home
+
+  [ -r "${proc_root}/${pid}/status" ] || return 1
+  uid=$(awk '/^Uid:/{print $2; exit}' "${proc_root}/${pid}/status" 2>/dev/null || true)
+  case "$uid" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+
+  if command -v getent >/dev/null 2>&1; then
+    user_home=$(getent passwd "$uid" 2>/dev/null | awk -F: 'NR == 1 { print $6 }')
+  else
+    user_home=$(awk -F: -v uid="$uid" '$3 == uid { print $6; exit }' /etc/passwd 2>/dev/null || true)
   fi
-  return 1
+  [ -n "$user_home" ] || return 1
+  printf '%s/.svoted\n' "${user_home%/}"
+}
+
+# svote_upgrade_process_executable_name pid
+# Print the executable basename for pid from procfs.
+svote_upgrade_process_executable_name() {
+  local pid="$1"
+  local proc_root="${SVOTE_PROC_ROOT:-/proc}"
+  local executable
+  executable=$(readlink "${proc_root}/${pid}/exe" 2>/dev/null || true)
+  [ -n "$executable" ] || return 1
+  executable="${executable% (deleted)}"
+  printf '%s\n' "${executable##*/}"
+}
+
+# svote_upgrade_process_cmdline pid
+# Print a process command line from procfs with NUL separators converted to spaces.
+svote_upgrade_process_cmdline() {
+  local pid="$1"
+  local proc_root="${SVOTE_PROC_ROOT:-/proc}"
+  [ -r "${proc_root}/${pid}/cmdline" ] || return 1
+  tr '\0' ' ' < "${proc_root}/${pid}/cmdline" 2>/dev/null | sed 's/[[:space:]]*$//'
 }
 
 # svote_upgrade_find_signer_processes
-# Print pgrep lines for svoted/cosmovisor processes scoped to DAEMON_HOME, or nothing.
+# Print pid/cmdline for live signer processes scoped to DAEMON_HOME.
 svote_upgrade_find_signer_processes() {
-  local line pid cmd
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    pid="${line%% *}"
-    cmd="${line#"$pid "}"
+  local proc_root="${SVOTE_PROC_ROOT:-/proc}"
+  local proc_dir pid executable_name cmd inferred_home
+
+  for proc_dir in "${proc_root}"/[0-9]*; do
+    [ -d "$proc_dir" ] || continue
+    pid="${proc_dir##*/}"
     if svote_upgrade_is_upgrade_invocation_pid "$pid"; then
       continue
     fi
-    if svote_upgrade_is_signer_runtime_cmd "$cmd" "$DAEMON_HOME"; then
-      printf '%s\n' "$line"
+    executable_name=$(svote_upgrade_process_executable_name "$pid" 2>/dev/null || true)
+    case "$executable_name" in
+      "$SVOTE_DAEMON_NAME"|cosmovisor) ;;
+      *) continue ;;
+    esac
+    cmd=$(svote_upgrade_process_cmdline "$pid" 2>/dev/null || true)
+    [ -n "$cmd" ] || continue
+
+    inferred_home=$(svote_upgrade_process_env_value "$pid" "DAEMON_HOME" 2>/dev/null || true)
+    if [ -z "$inferred_home" ]; then
+      inferred_home=$(svote_upgrade_process_env_value "$pid" "SVOTE_HOME" 2>/dev/null || true)
     fi
-  done < <(pgrep -af "${SVOTE_DAEMON_NAME}|cosmovisor" 2>/dev/null || true)
+    if [ -z "$inferred_home" ]; then
+      inferred_home=$(svote_upgrade_process_env_value "$pid" "HOME" 2>/dev/null || true)
+      [ -z "$inferred_home" ] || inferred_home="${inferred_home%/}/.svoted"
+    fi
+    if [ -z "$inferred_home" ]; then
+      inferred_home=$(svote_upgrade_process_default_daemon_home "$pid" 2>/dev/null || true)
+    fi
+    if svote_upgrade_is_signer_runtime_cmd "$cmd" "$DAEMON_HOME" "$inferred_home"; then
+      printf '%s %s\n' "$pid" "$cmd"
+    fi
+  done
 }
 
 # svote_upgrade_assert_no_signer_processes
@@ -657,6 +768,100 @@ svote_upgrade_stop_validator_service() {
   svote_upgrade_assert_no_signer_processes
 }
 
+# svote_upgrade_pid_in_control_group pid control_group
+# Return 0 when procfs places pid in the service cgroup (or one of its children).
+svote_upgrade_pid_in_control_group() {
+  local pid="$1"
+  local control_group="$2"
+  local proc_root="${SVOTE_PROC_ROOT:-/proc}"
+  [ -n "$control_group" ] || return 1
+  [ -r "${proc_root}/${pid}/cgroup" ] || return 1
+  awk -F: -v expected="$control_group" '
+    $3 == expected || index($3, expected "/") == 1 { found = 1 }
+    END { exit(found ? 0 : 1) }
+  ' "${proc_root}/${pid}/cgroup"
+}
+
+# svote_upgrade_check_single_managed_signer
+# Return 0 only for one Cosmovisor supervisor and one svoted child in SERVICE_NAME's cgroup.
+svote_upgrade_check_single_managed_signer() {
+  local main_pid control_group line pid executable_name main_cmd main_is_direct=0
+  local cosmovisor_count=0 svoted_count=0
+  local running=""
+  SVOTE_MANAGED_SIGNER_ERROR=""
+
+  main_pid=$(systemctl show "$SERVICE_NAME" -p MainPID --value 2>/dev/null || true)
+  control_group=$(systemctl show "$SERVICE_NAME" -p ControlGroup --value 2>/dev/null || true)
+  case "$main_pid" in
+    ''|0|*[!0-9]*)
+      SVOTE_MANAGED_SIGNER_ERROR="${SERVICE_NAME} has no live MainPID"
+      return 1
+      ;;
+  esac
+  if [ -z "$control_group" ]; then
+    SVOTE_MANAGED_SIGNER_ERROR="${SERVICE_NAME} has no systemd ControlGroup"
+    return 1
+  fi
+  executable_name=$(svote_upgrade_process_executable_name "$main_pid" 2>/dev/null || true)
+  main_cmd=$(svote_upgrade_process_cmdline "$main_pid" 2>/dev/null || true)
+  if [ "$executable_name" = "cosmovisor" ]; then
+    main_is_direct=1
+  elif ! printf '%s\n' "$main_cmd" | grep -Eq '(^|[ /])svoted-wrapper\.sh([[:space:]]|$)'; then
+    SVOTE_MANAGED_SIGNER_ERROR="${SERVICE_NAME} MainPID ${main_pid} is not Cosmovisor or svoted-wrapper.sh"
+    return 1
+  fi
+
+  running=$(svote_upgrade_find_signer_processes || true)
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    pid="${line%% *}"
+    executable_name=$(svote_upgrade_process_executable_name "$pid" 2>/dev/null || true)
+    if ! svote_upgrade_pid_in_control_group "$pid" "$control_group"; then
+      SVOTE_MANAGED_SIGNER_ERROR="unmanaged signer process outside ${SERVICE_NAME} cgroup: ${line}"
+      return 1
+    fi
+    case "$executable_name" in
+      cosmovisor)
+        cosmovisor_count=$((cosmovisor_count + 1))
+        if [ "$main_is_direct" = "1" ] && [ "$pid" != "$main_pid" ]; then
+          SVOTE_MANAGED_SIGNER_ERROR="Cosmovisor pid ${pid} is not ${SERVICE_NAME} MainPID ${main_pid}"
+          return 1
+        fi
+        ;;
+      "$SVOTE_DAEMON_NAME") svoted_count=$((svoted_count + 1)) ;;
+    esac
+  done <<< "$running"
+
+  if [ "$cosmovisor_count" -ne 1 ] || [ "$svoted_count" -ne 1 ]; then
+    SVOTE_MANAGED_SIGNER_ERROR="expected one Cosmovisor supervisor and one svoted child; found cosmovisor=${cosmovisor_count}, svoted=${svoted_count}"
+    return 1
+  fi
+  return 0
+}
+
+# svote_upgrade_assert_no_unmanaged_signers
+# Die if any signer for DAEMON_HOME is outside SERVICE_NAME's systemd cgroup.
+svote_upgrade_assert_no_unmanaged_signers() {
+  local control_group line pid
+  control_group=$(systemctl show "$SERVICE_NAME" -p ControlGroup --value 2>/dev/null || true)
+  [ -n "$control_group" ] || svote_upgrade_die "${SERVICE_NAME} has no systemd ControlGroup."
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    pid="${line%% *}"
+    if ! svote_upgrade_pid_in_control_group "$pid" "$control_group"; then
+      svote_upgrade_die "Unmanaged signer process outside ${SERVICE_NAME} cgroup: ${line}"
+    fi
+  done < <(svote_upgrade_find_signer_processes || true)
+}
+
+# svote_upgrade_assert_single_managed_signer
+# Die unless exactly one Cosmovisor-managed validator signer is running.
+svote_upgrade_assert_single_managed_signer() {
+  if ! svote_upgrade_check_single_managed_signer; then
+    svote_upgrade_die "Signer supervision check failed: ${SVOTE_MANAGED_SIGNER_ERROR}"
+  fi
+}
+
 # svote_upgrade_parse_plan_name plan_json
 # Extract scheduled plan name from JSON (.plan.name or .name); print empty string when absent.
 svote_upgrade_parse_plan_name() {
@@ -669,6 +874,37 @@ svote_upgrade_parse_plan_name() {
 svote_upgrade_parse_plan_height() {
   local plan_json="$1"
   printf '%s\n' "$plan_json" | jq -r '.plan.height // .height // empty' 2>/dev/null || true
+}
+
+# svote_upgrade_chain_api_get api_path
+# Fetch one JSON endpoint from the configured HTTPS chain API.
+svote_upgrade_chain_api_get() {
+  local api_path="$1"
+  [ -n "${CHAIN_API:-}" ] || return 1
+  case "$CHAIN_API" in
+    https://*) ;;
+    http://127.0.0.1:*|http://localhost:*) ;;
+    *) svote_upgrade_die "--chain-api must use HTTPS (localhost HTTP is allowed for tests)." ;;
+  esac
+  curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 \
+    "${CHAIN_API}${api_path}"
+}
+
+# svote_upgrade_validate_chain_api
+# Require the remote API chain ID to match the validator's local genesis.
+svote_upgrade_validate_chain_api() {
+  local node_info local_chain_id remote_chain_id
+  [ -n "${CHAIN_API:-}" ] || return 1
+  local_chain_id=$(svote_upgrade_derive_chain_id_from_home "$DAEMON_HOME" || true)
+  [ -n "$local_chain_id" ] || svote_upgrade_die "Could not derive chain ID from ${DAEMON_HOME}/config/genesis.json."
+  node_info=$(svote_upgrade_chain_api_get "/cosmos/base/tendermint/v1beta1/node_info") \
+    || svote_upgrade_die "Could not reach chain API ${CHAIN_API}."
+  remote_chain_id=$(printf '%s\n' "$node_info" \
+    | jq -r '.default_node_info.network // empty' 2>/dev/null || true)
+  [ -n "$remote_chain_id" ] || svote_upgrade_die "Chain API ${CHAIN_API} returned no network ID."
+  if [ "$remote_chain_id" != "$local_chain_id" ]; then
+    svote_upgrade_die "Chain API network mismatch: local=${local_chain_id}, remote=${remote_chain_id}."
+  fi
 }
 
 # svote_upgrade_resolve_query_svoted [allow_empty]
@@ -732,24 +968,87 @@ svote_upgrade_resolve_query_svoted() {
 # svote_upgrade_query_upgrade_plan
 # Query on-chain upgrade plan as JSON; return empty on "no plan"; die on RPC/parse errors.
 svote_upgrade_query_upgrade_plan() {
-  local query_bin plan_json query_err
-  query_bin=$(svote_upgrade_resolve_query_svoted)
-  query_err=$(mktemp)
-  if ! plan_json=$("$query_bin" query upgrade plan --home "$DAEMON_HOME" --output json 2>"$query_err"); then
+  local query_bin plan_json query_err local_error=""
+  query_bin=$(svote_upgrade_resolve_query_svoted 1 2>/dev/null || true)
+  if [ -n "$query_bin" ]; then
+    query_err=$(mktemp)
+    if plan_json=$("$query_bin" query upgrade plan --home "$DAEMON_HOME" --output json 2>"$query_err"); then
+      rm -f "$query_err"
+      if [ -z "$plan_json" ] || [ "$plan_json" = "null" ]; then
+        return 0
+      fi
+      if ! printf '%s\n' "$plan_json" | jq empty >/dev/null 2>&1; then
+        svote_upgrade_die "Upgrade plan query returned invalid JSON."
+      fi
+      printf '%s\n' "$plan_json"
+      return 0
+    fi
     if grep -qi 'no upgrade plan\|not found\|no plan' "$query_err" 2>/dev/null; then
       rm -f "$query_err"
       return 0
     fi
-    svote_upgrade_die "Failed to query upgrade plan: $(tr -d '\n' < "$query_err")"
+    local_error=$(tr -d '\n' < "$query_err")
+    rm -f "$query_err"
   fi
-  rm -f "$query_err"
-  if [ -z "$plan_json" ] || [ "$plan_json" = "null" ]; then
+
+  if [ -n "${CHAIN_API:-}" ]; then
+    svote_upgrade_validate_chain_api
+    plan_json=$(svote_upgrade_chain_api_get "/cosmos/upgrade/v1beta1/current_plan") \
+      || svote_upgrade_die "Failed to query current plan from ${CHAIN_API}."
+    if ! printf '%s\n' "$plan_json" | jq empty >/dev/null 2>&1; then
+      svote_upgrade_die "Chain API returned invalid current-plan JSON."
+    fi
+    if [ "$(printf '%s\n' "$plan_json" | jq -r '.plan // empty')" = "" ]; then
+      return 0
+    fi
+    printf '%s\n' "$plan_json"
     return 0
   fi
-  if ! printf '%s\n' "$plan_json" | jq empty >/dev/null 2>&1; then
-    svote_upgrade_die "Upgrade plan query returned invalid JSON."
+
+  if [ -n "$local_error" ]; then
+    svote_upgrade_die "Failed to query upgrade plan: ${local_error}. Re-run with --chain-api when the local RPC is offline."
   fi
-  printf '%s\n' "$plan_json"
+  svote_upgrade_die "No svoted binary or chain API is available to query the upgrade plan."
+}
+
+# svote_upgrade_query_applied_plan_height plan_name
+# Print the applied height for plan_name, using the local RPC with chain API fallback.
+svote_upgrade_query_applied_plan_height() {
+  local plan_name="$1"
+  local query_bin result query_err local_error="" height
+  case "$plan_name" in
+    ''|*[!A-Za-z0-9._-]*) svote_upgrade_die "Unsafe upgrade plan name: ${plan_name:-<empty>}." ;;
+  esac
+
+  query_bin=$(svote_upgrade_resolve_query_svoted 1 2>/dev/null || true)
+  if [ -n "$query_bin" ]; then
+    query_err=$(mktemp)
+    if result=$("$query_bin" query upgrade applied "$plan_name" --home "$DAEMON_HOME" --output json 2>"$query_err"); then
+      rm -f "$query_err"
+      height=$(printf '%s\n' "$result" | jq -r '.height // empty' 2>/dev/null || true)
+      case "$height" in
+        ''|0|*[!0-9]*) svote_upgrade_die "Applied-plan query returned an invalid height for ${plan_name}." ;;
+      esac
+      printf '%s\n' "$height"
+      return 0
+    fi
+    local_error=$(tr -d '\n' < "$query_err")
+    rm -f "$query_err"
+  fi
+
+  if [ -n "${CHAIN_API:-}" ]; then
+    svote_upgrade_validate_chain_api
+    result=$(svote_upgrade_chain_api_get "/cosmos/upgrade/v1beta1/applied_plan/${plan_name}") \
+      || svote_upgrade_die "Chain API does not confirm applied plan ${plan_name}."
+    height=$(printf '%s\n' "$result" | jq -r '.height // empty' 2>/dev/null || true)
+    case "$height" in
+      ''|0|*[!0-9]*) svote_upgrade_die "Chain API returned an invalid applied height for ${plan_name}." ;;
+    esac
+    printf '%s\n' "$height"
+    return 0
+  fi
+
+  svote_upgrade_die "Could not confirm applied plan ${plan_name}${local_error:+: ${local_error}}. Re-run with --chain-api when the local RPC is offline."
 }
 
 # svote_upgrade_validate_scheduled_plan expected_name allow_no_plan
@@ -797,9 +1096,114 @@ svote_upgrade_validate_scheduled_plan() {
 # svote_upgrade_query_block_height
 # Print latest block height from svoted status JSON, or return 1 when query fails.
 svote_upgrade_query_block_height() {
-  local query_bin
-  query_bin=$(svote_upgrade_resolve_query_svoted 1) || return 1
-  "$query_bin" status --home "$DAEMON_HOME" 2>/dev/null | jq -r '.sync_info.latest_block_height // empty'
+  local query_bin height result
+  query_bin=$(svote_upgrade_resolve_query_svoted 1 2>/dev/null || true)
+  if [ -n "$query_bin" ]; then
+    height=$("$query_bin" status --home "$DAEMON_HOME" 2>/dev/null \
+      | jq -r '.sync_info.latest_block_height // empty' 2>/dev/null || true)
+    case "$height" in
+      ''|*[!0-9]*) ;;
+      *) printf '%s\n' "$height"; return 0 ;;
+    esac
+  fi
+
+  [ -n "${CHAIN_API:-}" ] || return 1
+  svote_upgrade_validate_chain_api
+  result=$(svote_upgrade_chain_api_get "/cosmos/base/tendermint/v1beta1/blocks/latest") || return 1
+  height=$(printf '%s\n' "$result" | jq -r '.block.header.height // empty' 2>/dev/null || true)
+  case "$height" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  printf '%s\n' "$height"
+}
+
+# svote_upgrade_read_upgrade_info
+# Print NAME<TAB>HEIGHT from data/upgrade-info.json, or return 1 if malformed.
+svote_upgrade_read_upgrade_info() {
+  local upgrade_info="${DAEMON_HOME}/data/upgrade-info.json"
+  local name height
+  [ -f "$upgrade_info" ] || return 1
+  name=$(jq -er '.name | select(type == "string" and length > 0)' "$upgrade_info" 2>/dev/null || true)
+  height=$(jq -er '.height | tostring | select(test("^[0-9]+$"))' "$upgrade_info" 2>/dev/null || true)
+  case "$name" in
+    ''|*[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+  case "$height" in
+    ''|0|*[!0-9]*) return 1 ;;
+  esac
+  printf '%s\t%s\n' "$name" "$height"
+}
+
+# svote_upgrade_prepare_stale_plan_recovery current_plan
+# Prove a non-current upgrade-info marker was already applied before any service stop.
+svote_upgrade_prepare_stale_plan_recovery() {
+  local current_plan="$1"
+  local upgrade_info="${DAEMON_HOME}/data/upgrade-info.json"
+  local parsed marker_name marker_height applied_height
+  SVOTE_STALE_PLAN_NAME=""
+  SVOTE_STALE_PLAN_HEIGHT=""
+
+  [ -e "$upgrade_info" ] || return 0
+  parsed=$(svote_upgrade_read_upgrade_info) \
+    || svote_upgrade_die "Refusing to alter malformed ${upgrade_info}."
+  marker_name="${parsed%%$'\t'*}"
+  marker_height="${parsed#*$'\t'}"
+
+  if [ "$marker_name" = "$current_plan" ]; then
+    svote_upgrade_die "${upgrade_info} contains the current plan ${current_plan}; refusing stale-plan recovery."
+  fi
+  applied_height=$(svote_upgrade_query_applied_plan_height "$marker_name")
+  if [ "$applied_height" != "$marker_height" ]; then
+    svote_upgrade_die "Refusing stale-plan recovery: ${marker_name} marker height ${marker_height} does not match applied height ${applied_height}."
+  fi
+
+  SVOTE_STALE_PLAN_NAME="$marker_name"
+  SVOTE_STALE_PLAN_HEIGHT="$marker_height"
+  export SVOTE_STALE_PLAN_NAME SVOTE_STALE_PLAN_HEIGHT
+  svote_upgrade_log "Confirmed stale applied-plan marker ${marker_name} at height ${marker_height}."
+}
+
+# svote_upgrade_archive_stale_plan_marker
+# With the signer stopped, point current at genesis and archive the proven stale marker.
+svote_upgrade_archive_stale_plan_marker() {
+  local marker_name="${SVOTE_STALE_PLAN_NAME:-}"
+  local marker_height="${SVOTE_STALE_PLAN_HEIGHT:-}"
+  local upgrade_info="${DAEMON_HOME}/data/upgrade-info.json"
+  local current_link="${COSMVISOR_ROOT}/current"
+  local current_target="" expected_genesis="${COSMVISOR_ROOT}/genesis"
+  local expected_stale="${COSMVISOR_ROOT}/upgrades/${marker_name}"
+  local parsed recovery_dir archive_path
+
+  [ -n "$marker_name" ] || return 0
+  parsed=$(svote_upgrade_read_upgrade_info) \
+    || svote_upgrade_die "Stale upgrade marker changed before recovery: ${upgrade_info}."
+  if [ "$parsed" != "${marker_name}"$'\t'"${marker_height}" ]; then
+    svote_upgrade_die "Stale upgrade marker changed before recovery: expected ${marker_name}/${marker_height}."
+  fi
+  [ -x "$GENESIS_BIN" ] || svote_upgrade_die "Cannot recover stale marker without genesis binary ${GENESIS_BIN}."
+
+  if [ -e "$current_link" ] && [ ! -L "$current_link" ]; then
+    svote_upgrade_die "Cosmovisor current path is not a symlink: ${current_link}."
+  fi
+  if [ -L "$current_link" ]; then
+    current_target=$(readlink "$current_link" 2>/dev/null || true)
+    case "$current_target" in
+      "$expected_genesis"|genesis|"$expected_stale"|"upgrades/${marker_name}") ;;
+      *) svote_upgrade_die "Cosmovisor current points to unexpected target ${current_target:-<unreadable>}; refusing recovery." ;;
+    esac
+  fi
+
+  install -d -m 0700 "$COSMVISOR_ROOT"
+  ln -sfn "$expected_genesis" "$current_link"
+
+  recovery_dir="${COSMVISOR_ROOT}/recovery"
+  install -d -m 0700 "$recovery_dir"
+  archive_path="${recovery_dir}/upgrade-info.${marker_name}.${marker_height}.$(date -u +%Y%m%dT%H%M%SZ).$$.json"
+  mv "$upgrade_info" "$archive_path"
+  chmod 0600 "$archive_path"
+  SVOTE_STALE_UPGRADE_INFO_ARCHIVE="$archive_path"
+  export SVOTE_STALE_UPGRADE_INFO_ARCHIVE
+  svote_upgrade_log "Archived stale applied-plan marker at ${archive_path}."
 }
 
 # svote_upgrade_assert_layout_ready plan_name
@@ -896,6 +1300,7 @@ svote_upgrade_verify_prestage() {
 
   if [ "$require_cosmovisor_service" = "1" ]; then
     local effective_mode effective_daemon_home effective_svote_home effective_exec
+    local effective_allow_download effective_must_checksum
     echo "=== Service checks ==="
     effective_mode=$(svote_upgrade_systemd_effective_env_value "SVOTE_UPGRADE_MODE" || true)
     if [ "$effective_mode" = "cosmovisor" ]; then
@@ -921,12 +1326,29 @@ svote_upgrade_verify_prestage() {
       service_failures=$((service_failures + 1))
     fi
 
-    effective_exec=$(svote_upgrade_systemd_effective_execstart || true)
-    if [ -n "$effective_exec" ] && [ "${effective_exec##*/}" = "cosmovisor" ] \
-      && svote_upgrade_systemd_effective_execstart_is_cosmovisor_run_start; then
-      svote_upgrade_checklist_line PASS "systemd effective ExecStart is cosmovisor run start"
+    effective_allow_download=$(svote_upgrade_systemd_effective_env_value "DAEMON_ALLOW_DOWNLOAD_BINARIES" || true)
+    if [ "$effective_allow_download" = "true" ]; then
+      svote_upgrade_checklist_line PASS "Cosmovisor binary auto-download is enabled"
     else
-      svote_upgrade_checklist_line FAIL "systemd effective ExecStart is ${effective_exec:-<unset>} (expected cosmovisor run start)"
+      svote_upgrade_checklist_line FAIL "systemd effective DAEMON_ALLOW_DOWNLOAD_BINARIES is ${effective_allow_download:-<unset>} (expected true)"
+      service_failures=$((service_failures + 1))
+    fi
+
+    effective_must_checksum=$(svote_upgrade_systemd_effective_env_value "DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM" || true)
+    if [ "$effective_must_checksum" = "true" ]; then
+      svote_upgrade_checklist_line PASS "Cosmovisor requires download checksums"
+    else
+      svote_upgrade_checklist_line FAIL "systemd effective DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM is ${effective_must_checksum:-<unset>} (expected true)"
+      service_failures=$((service_failures + 1))
+    fi
+
+    effective_exec=$(svote_upgrade_systemd_effective_execstart || true)
+    if { [ -n "$effective_exec" ] && [ "${effective_exec##*/}" = "cosmovisor" ] \
+      && svote_upgrade_systemd_effective_execstart_is_cosmovisor_run_start; } \
+      || { [ -n "$effective_exec" ] && [ "${effective_exec##*/}" = "svoted-wrapper.sh" ]; }; then
+      svote_upgrade_checklist_line PASS "systemd effective ExecStart is Cosmovisor-managed"
+    else
+      svote_upgrade_checklist_line FAIL "systemd effective ExecStart is ${effective_exec:-<unset>} (expected cosmovisor run start or svoted-wrapper.sh)"
       service_failures=$((service_failures + 1))
     fi
 
@@ -934,6 +1356,13 @@ svote_upgrade_verify_prestage() {
       svote_upgrade_checklist_line PASS "cosmovisor runtime process is active for ${DAEMON_HOME}"
     else
       svote_upgrade_checklist_line FAIL "cosmovisor runtime process missing for ${DAEMON_HOME}"
+      service_failures=$((service_failures + 1))
+    fi
+
+    if svote_upgrade_check_single_managed_signer; then
+      svote_upgrade_checklist_line PASS "exactly one Cosmovisor-managed svoted signer is active"
+    else
+      svote_upgrade_checklist_line FAIL "signer supervision: ${SVOTE_MANAGED_SIGNER_ERROR}"
       service_failures=$((service_failures + 1))
     fi
   else
@@ -970,6 +1399,8 @@ svote_upgrade_extract_direct_svoted_start_args() {
   local exec_start_cmd="$1"
   local home="$2"
   local remainder
+  local spaced_home_arg="--home ${home}"
+  local equals_home_arg="--home=${home}"
 
   case "$exec_start_cmd" in
     *svoted-wrapper*|*cosmovisor*) return 0 ;;
@@ -979,10 +1410,10 @@ svote_upgrade_extract_direct_svoted_start_args() {
     *) return 0 ;;
   esac
 
-  if [[ "$exec_start_cmd" == *"--home ${home}"* ]]; then
-    remainder="${exec_start_cmd#*--home ${home}}"
-  elif [[ "$exec_start_cmd" == *"--home=${home}"* ]]; then
-    remainder="${exec_start_cmd#*--home=${home}}"
+  if [[ "$exec_start_cmd" == *"$spaced_home_arg"* ]]; then
+    remainder="${exec_start_cmd#*"$spaced_home_arg"}"
+  elif [[ "$exec_start_cmd" == *"$equals_home_arg"* ]]; then
+    remainder="${exec_start_cmd#*"$equals_home_arg"}"
   else
     return 0
   fi
@@ -1032,14 +1463,15 @@ svote_upgrade_set_systemd_environment_key() {
 svote_upgrade_extract_effective_env_value() {
   local env_blob="$1"
   local key="$2"
+  local key_prefix="${key}="
   local token value=""
 
   for token in $env_blob; do
     token="${token#\"}"
     token="${token%\"}"
     case "$token" in
-      "${key}="*)
-        value="${token#${key}=}"
+      "$key_prefix"*)
+        value="${token#"$key_prefix"}"
         ;;
     esac
   done
@@ -1143,6 +1575,41 @@ svote_upgrade_escape_systemd_env_value() {
   printf '%s\n' "$escaped"
 }
 
+# svote_upgrade_configure_autodownload_dropin
+# Enable Cosmovisor downloads while requiring checksums in a systemd drop-in.
+svote_upgrade_configure_autodownload_dropin() {
+  local dropin_dir
+  dropin_dir="$(dirname "$SERVICE_PATH")/${SERVICE_NAME}.service.d"
+  local dropin_path="${dropin_dir}/zz-cosmovisor-autodownload.conf"
+  local backup_suffix
+  [ -f "$SERVICE_PATH" ] || svote_upgrade_die "systemd unit not found: ${SERVICE_PATH}."
+  install -d -m 0755 "$dropin_dir"
+  if [ -f "$dropin_path" ]; then
+    backup_suffix="$(date -u +%Y%m%dT%H%M%SZ)"
+    cp -p "$dropin_path" "${dropin_path}.bak.${backup_suffix}"
+  fi
+  {
+    printf '[Service]\n'
+    printf 'Environment="DAEMON_ALLOW_DOWNLOAD_BINARIES=true"\n'
+    printf 'Environment="DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM=true"\n'
+  } > "${dropin_path}.new"
+  chmod 0644 "${dropin_path}.new"
+  mv -f "${dropin_path}.new" "$dropin_path"
+  svote_upgrade_log "Enabled checksum-required Cosmovisor auto-download in ${dropin_path}."
+}
+
+# svote_upgrade_assert_autodownload_enabled
+# Confirm the effective systemd Cosmovisor download safeguards after restart.
+svote_upgrade_assert_autodownload_enabled() {
+  local effective_allow_download effective_must_checksum
+  effective_allow_download=$(svote_upgrade_systemd_effective_env_value "DAEMON_ALLOW_DOWNLOAD_BINARIES" || true)
+  effective_must_checksum=$(svote_upgrade_systemd_effective_env_value "DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM" || true)
+  [ "$effective_allow_download" = "true" ] \
+    || svote_upgrade_die "Systemd effective DAEMON_ALLOW_DOWNLOAD_BINARIES is ${effective_allow_download:-<unset>} (expected true)."
+  [ "$effective_must_checksum" = "true" ] \
+    || svote_upgrade_die "Systemd effective DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM is ${effective_must_checksum:-<unset>} (expected true)."
+}
+
 # svote_upgrade_detect_existing_execstart
 # Return the last merged ExecStart command (after reset semantics) from service + drop-ins.
 svote_upgrade_detect_existing_execstart() {
@@ -1166,7 +1633,8 @@ svote_upgrade_detect_existing_execstart() {
 # svote_upgrade_patch_systemd_unit_for_cosmovisor
 # Rewrite main unit for direct cosmovisor startup and remove drop-ins; print backup path.
 svote_upgrade_patch_systemd_unit_for_cosmovisor() {
-  local backup_path="${SERVICE_PATH}.bak.$(date +%Y%m%d%H%M%S)"
+  local backup_path
+  backup_path="${SERVICE_PATH}.bak.$(date +%Y%m%d%H%M%S)"
   local dropin_dir old_exec inferred_args derived_chain_id service_desc service_user
   local daemon_home_escaped cosmovisor_bin_escaped chain_id_escaped install_dir_escaped svoted_bin_escaped
   local start_args_escaped
@@ -1235,7 +1703,8 @@ svote_upgrade_patch_systemd_unit_for_cosmovisor() {
     printf 'Environment="SVOTE_CHAIN_ID=%s"\n' "$chain_id_escaped"
     printf 'Environment="COSMOVISOR_BIN=%s"\n' "$cosmovisor_bin_escaped"
     printf 'Environment="DAEMON_NAME=%s"\n' "$SVOTE_DAEMON_NAME"
-    printf 'Environment="DAEMON_ALLOW_DOWNLOAD_BINARIES=false"\n'
+    printf 'Environment="DAEMON_ALLOW_DOWNLOAD_BINARIES=true"\n'
+    printf 'Environment="DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM=true"\n'
     printf 'Environment="SVOTE_INSTALL_DIR=%s"\n' "$install_dir_escaped"
     printf 'Environment="SVOTED_BIN=%s"\n' "$svoted_bin_escaped"
     if [ -n "${SVOTE_WRAPPER_SVOTED_START_ARGS:-}" ]; then
@@ -1267,25 +1736,22 @@ svote_upgrade_patch_systemd_unit_for_cosmovisor() {
 }
 
 # svote_upgrade_restart_service backup_unit
-# daemon-reload and restart SERVICE_NAME; restore backup_unit on failure then die.
+# daemon-reload and restart SERVICE_NAME. Leave it stopped on failure so a direct
+# signer is never started alongside a partially migrated Cosmovisor service.
 svote_upgrade_restart_service() {
   local backup_unit="$1"
   systemctl daemon-reload
   if ! systemctl restart "$SERVICE_NAME"; then
-    if [ -n "$backup_unit" ] && [ -f "$backup_unit" ]; then
-      svote_upgrade_warn "Restart failed; restoring previous systemd unit from ${backup_unit}"
-      cp -p "$backup_unit" "$SERVICE_PATH"
-      systemctl daemon-reload
-      systemctl restart "$SERVICE_NAME" || true
-    fi
-    svote_upgrade_die "Failed to restart ${SERVICE_NAME} after migration."
+    svote_upgrade_warn "Failed to restart ${SERVICE_NAME}; previous unit remains at ${backup_unit:-<none>}."
+    return 1
   fi
 }
 
-# svote_upgrade_wait_for_rpc timeout_secs
+# svote_upgrade_wait_for_rpc timeout_secs [allow_wrapper]
 # Poll svoted status until RPC responds or timeout_secs elapses; fail fast on broken runtime.
 svote_upgrade_wait_for_rpc() {
   local timeout_secs="${1:-120}"
+  local allow_wrapper="${2:-0}"
   local deadline=$((SECONDS + timeout_secs))
   local query_bin="${GENESIS_BIN}"
   local effective_mode effective_exec unit_active missing_runtime_checks=0
@@ -1303,11 +1769,15 @@ svote_upgrade_wait_for_rpc() {
     fi
 
     effective_exec=$(svote_upgrade_systemd_effective_execstart || true)
-    if [ -n "$effective_exec" ] && [ "${effective_exec##*/}" != "cosmovisor" ]; then
-      svote_upgrade_die "Service migrated with unexpected ExecStart=${effective_exec} (expected cosmovisor binary)."
-    fi
-    if ! svote_upgrade_systemd_effective_execstart_is_cosmovisor_run_start; then
-      svote_upgrade_die "Service migrated with unexpected ExecStart command (expected cosmovisor run start)."
+    if [ "$allow_wrapper" = "1" ] && [ "${effective_exec##*/}" = "svoted-wrapper.sh" ]; then
+      :
+    else
+      if [ -n "$effective_exec" ] && [ "${effective_exec##*/}" != "cosmovisor" ]; then
+        svote_upgrade_die "Service migrated with unexpected ExecStart=${effective_exec} (expected cosmovisor binary)."
+      fi
+      if ! svote_upgrade_systemd_effective_execstart_is_cosmovisor_run_start; then
+        svote_upgrade_die "Service migrated with unexpected ExecStart command (expected cosmovisor run start)."
+      fi
     fi
 
     if systemctl is-failed --quiet "$SERVICE_NAME" 2>/dev/null; then
@@ -1318,6 +1788,8 @@ svote_upgrade_wait_for_rpc() {
     if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
       unit_active=1
     fi
+
+    svote_upgrade_assert_no_unmanaged_signers
 
     if [ -n "$query_bin" ] && "$query_bin" status --home "$DAEMON_HOME" >/dev/null 2>&1; then
       return 0

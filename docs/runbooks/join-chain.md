@@ -288,7 +288,8 @@ Full operator checklist: [software-upgrades.md](software-upgrades.md).
 
 ### Fresh install with Cosmovisor (Linux default)
 
-Linux `join.sh` installs bootstrap Cosmovisor by default. To run svoted directly instead:
+Linux `join.sh` installs Cosmovisor with checksum-required binary auto-download
+by default. To run svoted directly instead:
 
 ```bash
 curl -fsSL https://setup.valargroup.org/ | bash -s -- --env prod --upgrade-mode direct

@@ -13,6 +13,8 @@ VERIFY_SCRIPT="${REPO_ROOT}/scripts/verify_upgrade_release_artifacts.sh"
 COSMOVISOR_PACKAGER="${REPO_ROOT}/scripts/package-cosmovisor-archive.sh"
 RELEASE_WORKFLOW="${REPO_ROOT}/.github/workflows/release.yml"
 PROMOTION_WORKFLOW="${REPO_ROOT}/.github/workflows/promote-release.yml"
+UPGRADE_SCRIPT_WORKFLOW="${REPO_ROOT}/.github/workflows/publish-upgrade-scripts.yml"
+UPGRADE_RUNBOOK="${REPO_ROOT}/docs/runbooks/software-upgrades.md"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -64,6 +66,34 @@ latest_line="$(grep -n -- '- name: Mark GitHub release latest' "$RELEASE_WORKFLO
   || fail "stable pointers are not verified before GitHub Latest advances"
 [ "$(grep -Fc 'uses: actions/checkout@v4' "$PROMOTION_WORKFLOW")" -eq 1 ] \
   || fail "promotion switches away from the trusted checkout"
+
+grep -Fq 'missing_scripts=()' "$UPGRADE_SCRIPT_WORKFLOW" \
+  || fail "upgrade script publication has no complete-revision preflight"
+grep -Fq "for script in \"\${missing_scripts[@]}\"" "$UPGRADE_SCRIPT_WORKFLOW" \
+  || fail "upgrade script publication does not separate validation from writes"
+publish_concurrency_group="$(grep -F 'group: publish-upgrade-scripts-' "$UPGRADE_SCRIPT_WORKFLOW")"
+printf '%s\n' "$publish_concurrency_group" | grep -Fq 'vars.DO_SPACES_BUCKET' \
+  || fail "upgrade script publication is not serialized by bucket"
+printf '%s\n' "$publish_concurrency_group" | grep -Fq 'inputs.script_version' \
+  || fail "upgrade script publication is not serialized by revision"
+grep -Fq 'cancel-in-progress: false' "$UPGRADE_SCRIPT_WORKFLOW" \
+  || fail "upgrade script publication can cancel an active writer"
+common_publish_line="$(grep -n '^            _chain_upgrade_common.sh$' "$UPGRADE_SCRIPT_WORKFLOW" | head -n 1 | cut -d: -f1)"
+update_publish_line="$(grep -n '^            update_chain.sh$' "$UPGRADE_SCRIPT_WORKFLOW" | head -n 1 | cut -d: -f1)"
+prepare_publish_line="$(grep -n '^            prepare-upgrade-artifacts.sh$' "$UPGRADE_SCRIPT_WORKFLOW" | head -n 1 | cut -d: -f1)"
+[ "$common_publish_line" -lt "$update_publish_line" ] \
+  && [ "$update_publish_line" -lt "$prepare_publish_line" ] \
+  || fail "upgrade scripts are not published in dependency order"
+grep -Fq "\"linux/amd64\": \$amd64" "$UPGRADE_RUNBOOK" \
+  || fail "upgrade scheduling runbook omits the amd64 Cosmovisor binary"
+grep -Fq "\"linux/arm64\": \$arm64" "$UPGRADE_RUNBOOK" \
+  || fail "upgrade scheduling runbook omits the arm64 Cosmovisor binary"
+grep -Fq "?checksum=sha256:\${AMD64_SHA256}" "$UPGRADE_RUNBOOK" \
+  || fail "upgrade scheduling runbook omits the amd64 checksum-pinned URL"
+grep -Fq "?checksum=sha256:\${ARM64_SHA256}" "$UPGRADE_RUNBOOK" \
+  || fail "upgrade scheduling runbook omits the arm64 checksum-pinned URL"
+grep -Fq 'upgrade was not scheduled' "$UPGRADE_RUNBOOK" \
+  || fail "upgrade scheduling runbook does not fail closed on invalid metadata"
 
 if grep -q '^concurrency:' "$RELEASE_WORKFLOW" "$PROMOTION_WORKFLOW"; then
   fail "workflow-level release concurrency can cancel queued artifact publication"
@@ -133,6 +163,51 @@ fi
 
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
+
+RUNBOOK_BIN="${TMPDIR}/runbook-bin"
+RUNBOOK_EXAMPLE="${TMPDIR}/schedule-upgrade-example.sh"
+RUNBOOK_SVOTED_CALLED="${TMPDIR}/runbook-svoted-called"
+mkdir -p "$RUNBOOK_BIN"
+awk '
+  $0 == "TAG=v1.2.3" { capture = 1 }
+  capture && $0 == "```" { exit }
+  capture { print }
+' "$UPGRADE_RUNBOOK" \
+  | sed \
+      -e 's/<name>/test-upgrade/g' \
+      -e 's/<height>/123/g' \
+      -e 's/<vote-manager-key>/test-key/g' \
+  > "$RUNBOOK_EXAMPLE"
+cat > "${RUNBOOK_BIN}/curl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${RUNBOOK_CURL_FAIL:-false}" = "true" ]; then
+  exit 22
+fi
+printf '%s\n' "${RUNBOOK_CHECKSUM_BODY:-not-a-checksum}"
+EOF
+cat > "${RUNBOOK_BIN}/svoted" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+: > "$RUNBOOK_SVOTED_CALLED"
+EOF
+chmod +x "${RUNBOOK_BIN}/curl" "${RUNBOOK_BIN}/svoted"
+export RUNBOOK_SVOTED_CALLED
+
+if RUNBOOK_CURL_FAIL=true PATH="${RUNBOOK_BIN}:$PATH" bash "$RUNBOOK_EXAMPLE" >/dev/null 2>&1; then
+  fail "upgrade scheduling example accepted a failed checksum download"
+fi
+[ ! -e "$RUNBOOK_SVOTED_CALLED" ] \
+  || fail "upgrade scheduling example submitted after a failed checksum download"
+if RUNBOOK_CHECKSUM_BODY=not-a-checksum PATH="${RUNBOOK_BIN}:$PATH" bash "$RUNBOOK_EXAMPLE" >/dev/null 2>&1; then
+  fail "upgrade scheduling example accepted a malformed checksum"
+fi
+[ ! -e "$RUNBOOK_SVOTED_CALLED" ] \
+  || fail "upgrade scheduling example submitted with a malformed checksum"
+RUNBOOK_CHECKSUM_BODY='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  artifact' \
+  PATH="${RUNBOOK_BIN}:$PATH" bash "$RUNBOOK_EXAMPLE" >/dev/null
+[ -e "$RUNBOOK_SVOTED_CALLED" ] \
+  || fail "upgrade scheduling example did not submit with valid checksums"
 
 FAKE_SVOTED="${TMPDIR}/svoted"
 printf '#!/usr/bin/env bash\necho svoted\n' > "$FAKE_SVOTED"
