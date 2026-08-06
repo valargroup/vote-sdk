@@ -66,10 +66,10 @@ fn generate_halo2_fixtures() {
 
     // Write valid public input.
     let input_path = testdata_dir.join("toy_valid_input.bin");
-    fs::write(&input_path, c_bytes.as_ref()).expect("failed to write input fixture");
+    fs::write(&input_path, &c_bytes[..]).expect("failed to write input fixture");
     println!(
         "Wrote valid input ({} bytes) to {}",
-        c_bytes.as_ref().len(),
+        c_bytes.len(),
         input_path.display()
     );
 
@@ -78,10 +78,10 @@ fn generate_halo2_fixtures() {
     let wrong_c = Fp::from(999u64);
     let wrong_bytes = wrong_c.to_repr();
     let wrong_path = testdata_dir.join("toy_wrong_input.bin");
-    fs::write(&wrong_path, wrong_bytes.as_ref()).expect("failed to write wrong input fixture");
+    fs::write(&wrong_path, &wrong_bytes[..]).expect("failed to write wrong input fixture");
     println!(
         "Wrote wrong input ({} bytes) to {}",
-        wrong_bytes.as_ref().len(),
+        wrong_bytes.len(),
         wrong_path.display()
     );
 

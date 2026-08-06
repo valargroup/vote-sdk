@@ -110,6 +110,9 @@ func (msg *MsgDelegateVote) ValidateBasic() error {
 	if len(msg.Sighash) != 32 {
 		return fmt.Errorf("%w: sighash must be 32 bytes, got %d", ErrInvalidField, len(msg.Sighash))
 	}
+	if err := validateDelegationTX1Effects(msg); err != nil {
+		return err
+	}
 	return nil
 }
 

@@ -3,7 +3,6 @@
 package ante_test
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -14,6 +13,7 @@ import (
 	"github.com/valargroup/vote-sdk/ffi/redpallas"
 	"github.com/valargroup/vote-sdk/ffi/zkp"
 	"github.com/valargroup/vote-sdk/ffi/zkp/halo2"
+	svtest "github.com/valargroup/vote-sdk/testutil"
 	"github.com/valargroup/vote-sdk/x/vote/ante"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
@@ -67,7 +67,7 @@ func TestHalo2DelegationValidProof(t *testing.T) {
 	// VanCmx carries the toy circuit public input; Rk is a non-zero dummy
 	// (not used by the toy circuit, but must pass ValidateBasic's identity check).
 	msg := &types.MsgDelegateVote{
-		Rk:                  bytes.Repeat([]byte{0xAA}, 32),
+		Rk:                  append([]byte(nil), svtest.DummyPallasPoint...),
 		SpendAuthSig:        make([]byte, 64),
 		SignedNoteNullifier: make([]byte, 32),
 		CmxNew:              make([]byte, 32),
@@ -78,7 +78,7 @@ func TestHalo2DelegationValidProof(t *testing.T) {
 		Proof:       proof,
 		VoteRoundId: testRoundID,
 	}
-	msg.Sighash = make([]byte, 32) // any 32 bytes; chain checks length + sig only, mock sig verifier accepts any sig
+	svtest.SetDelegationTX1(msg)
 
 	// Use toy-as-delegation verifier so the toy proof fixture passes; mock the
 	// signature verifier (RedPallas is not under test here).
@@ -106,7 +106,7 @@ func TestHalo2DelegationWrongInput(t *testing.T) {
 	wrongInput := mustReadFixture(t, "toy_wrong_input.bin")
 
 	msg := &types.MsgDelegateVote{
-		Rk:                  bytes.Repeat([]byte{0xAA}, 32),
+		Rk:                  append([]byte(nil), svtest.DummyPallasPoint...),
 		SpendAuthSig:        make([]byte, 64),
 		SignedNoteNullifier: make([]byte, 32),
 		CmxNew:              make([]byte, 32),
@@ -117,7 +117,7 @@ func TestHalo2DelegationWrongInput(t *testing.T) {
 		Proof:       proof,
 		VoteRoundId: testRoundID,
 	}
-	msg.Sighash = make([]byte, 32) // any 32 bytes; mock sig accepts; ZKP will fail
+	svtest.SetDelegationTX1(msg)
 
 	opts := ante.ValidateOpts{
 		SigVerifier: redpallas.NewMockVerifier(),

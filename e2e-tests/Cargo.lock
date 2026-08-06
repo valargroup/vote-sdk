@@ -2701,12 +2701,15 @@ dependencies = [
  "hex",
  "imt-tree",
  "incrementalmerkletree",
+ "nonempty",
  "orchard",
  "pasta_curves",
  "rand_core",
  "reddsa",
  "vote-commitment-tree",
  "voting-circuits",
+ "zcash_primitives",
+ "zcash_protocol",
 ]
 
 [[package]]

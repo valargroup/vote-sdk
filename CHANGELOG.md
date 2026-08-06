@@ -8,6 +8,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Accept versioned Ironwood transaction effects in delegation messages for
+  deterministic RedPallas signing-digest reconstruction.
 - Publish checksum-pinned Cosmovisor archives for both Linux architectures,
   require the upgrade scheduler to load them, and show the exact upgrade info
   before signing. New and migrated validators enable checksum-required

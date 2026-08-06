@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/valargroup/vote-sdk/ffi/tx1"
 	svtest "github.com/valargroup/vote-sdk/testutil"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
@@ -416,23 +417,15 @@ func (s *ValidateBasicTestSuite) TestSubmitTally_ValidateBasic() {
 // ---------------------------------------------------------------------------
 
 func validDelegateVote() *types.MsgDelegateVote {
-	return &types.MsgDelegateVote{
-		Rk:                  bytes.Repeat([]byte{0x01}, 32),
-		SpendAuthSig:        bytes.Repeat([]byte{0x02}, 64),
-		SignedNoteNullifier: bytes.Repeat([]byte{0x03}, 32),
-		CmxNew:              bytes.Repeat([]byte{0x04}, 32),
-		VanCmx:              bytes.Repeat([]byte{0x05}, 32),
-		GovNullifiers: [][]byte{
-			bytes.Repeat([]byte{0x10}, 32),
-			bytes.Repeat([]byte{0x11}, 32),
-			bytes.Repeat([]byte{0x12}, 32),
-			bytes.Repeat([]byte{0x13}, 32),
-			bytes.Repeat([]byte{0x14}, 32),
-		},
-		Proof:       bytes.Repeat([]byte{0x06}, 128),
-		VoteRoundId: bytes.Repeat([]byte{0x07}, 32),
-		Sighash:     bytes.Repeat([]byte{0x08}, 32),
+	msg := svtest.ValidDelegation(bytes.Repeat([]byte{0x07}, 32), 0x10)
+	msg.GovNullifiers = [][]byte{
+		svtest.MakeNullifier(0x10),
+		svtest.MakeNullifier(0x11),
+		svtest.MakeNullifier(0x12),
+		svtest.MakeNullifier(0x13),
+		svtest.MakeNullifier(0x14),
 	}
+	return msg
 }
 
 // ---------------------------------------------------------------------------
@@ -542,6 +535,39 @@ func (s *ValidateBasicTestSuite) TestDelegateVote_ValidateBasic() {
 			},
 			expectErr:   true,
 			errContains: "duplicate gov_nullifiers",
+		},
+		{
+			name: "invalid: missing tx1 effects",
+			modify: func(m *types.MsgDelegateVote) {
+				m.Tx1Effects = nil
+			},
+			expectErr:   true,
+			errContains: "tx1 effects must be 1641 bytes",
+		},
+		{
+			name: "invalid: unsupported tx1 effects version",
+			modify: func(m *types.MsgDelegateVote) {
+				m.Tx1Effects[0]++
+			},
+			expectErr:   true,
+			errContains: "unsupported tx1 effects version",
+		},
+		{
+			name: "invalid: tx1 action does not match delegation fields",
+			modify: func(m *types.MsgDelegateVote) {
+				m.CmxNew = svtest.FpLE(0x9999)
+			},
+			expectErr:   true,
+			errContains: "tx1 action with delegation rk must match signed_note_nullifier and cmx_new",
+		},
+		{
+			name: "invalid: duplicate delegation rk across tx1 actions",
+			modify: func(m *types.MsgDelegateVote) {
+				const secondActionRkOffset = 1 + tx1.ActionEffectsLen + 64
+				copy(m.Tx1Effects[secondActionRkOffset:secondActionRkOffset+32], m.Rk)
+			},
+			expectErr:   true,
+			errContains: "exactly one action with delegation rk, got 2",
 		},
 	}
 

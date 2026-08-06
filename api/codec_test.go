@@ -33,6 +33,7 @@ func TestEncodeDecodeDelegateVote(t *testing.T) {
 		Proof:               []byte("proof"),
 		VoteRoundId:         []byte("roundid"),
 		Sighash:             make([]byte, 32),
+		Tx1Effects:          []byte("effects"),
 	}
 
 	raw, err := EncodeVoteTx(msg)
@@ -47,6 +48,7 @@ func TestEncodeDecodeDelegateVote(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, msg.Rk, decodedMsg.Rk)
 	require.Equal(t, msg.Sighash, decodedMsg.Sighash)
+	require.Equal(t, msg.Tx1Effects, decodedMsg.Tx1Effects)
 	require.Equal(t, len(msg.GovNullifiers), len(decodedMsg.GovNullifiers))
 }
 

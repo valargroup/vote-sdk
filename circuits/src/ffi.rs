@@ -20,6 +20,7 @@ use crate::proof::{verify_halo2_proof_bytes, ProofVerifyError};
 use crate::redpallas;
 use crate::share_reveal;
 use crate::toy;
+use crate::tx1;
 use crate::vote_proof;
 use crate::votetree;
 
@@ -306,6 +307,68 @@ pub unsafe extern "C" fn sv_verify_redpallas_sig(
         Ok(code) => code,
         Err(_) => {
             set_ffi_error("sv_verify_redpallas_sig: internal panic");
+            -6
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Delegation TX1 signature digest
+// ---------------------------------------------------------------------------
+
+/// Compute the canonical V6 shielded signature digest from delegation TX1 effects.
+///
+/// # Arguments
+/// * `effects_ptr` - Pointer to the versioned TX1 effects payload.
+/// * `effects_len` - Length of the payload (must be [`tx1::EFFECTS_LEN`]).
+/// * `out_ptr` - Pointer to a caller-owned 32-byte output buffer.
+/// * `out_len` - Length of the output buffer (must be 32).
+///
+/// # Returns
+/// * `0` on success.
+/// * `-1` for null pointers, wrong lengths, or an unsupported effects version.
+/// * `-3` if an encoded Ironwood action or bundle field is invalid.
+/// * `-6` if an internal panic is caught at the FFI boundary.
+///
+/// # Safety
+/// Caller must ensure the input and output pointers are valid for their lengths
+/// and do not overlap.
+#[no_mangle]
+pub unsafe extern "C" fn sv_compute_delegation_sighash(
+    effects_ptr: *const u8,
+    effects_len: usize,
+    out_ptr: *mut u8,
+    out_len: usize,
+) -> i32 {
+    if effects_ptr.is_null() || out_ptr.is_null() || out_len != 32 {
+        set_ffi_error("delegation sighash: invalid pointer or output length");
+        return -1;
+    }
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let effects = std::slice::from_raw_parts(effects_ptr, effects_len);
+        match tx1::sighash(effects) {
+            Ok(sighash) => {
+                std::ptr::copy_nonoverlapping(sighash.as_ptr(), out_ptr, sighash.len());
+                0
+            }
+            Err(
+                err @ (tx1::Error::InvalidLength { .. } | tx1::Error::UnsupportedVersion { .. }),
+            ) => {
+                set_ffi_error(format!("delegation sighash: {err}"));
+                -1
+            }
+            Err(err) => {
+                set_ffi_error(format!("delegation sighash: {err}"));
+                -3
+            }
+        }
+    }));
+
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_ffi_error("sv_compute_delegation_sighash: internal panic");
             -6
         }
     }

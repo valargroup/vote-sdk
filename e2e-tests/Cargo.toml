@@ -26,7 +26,7 @@ hex = "0.4"
 # Round ID derivation (Poseidon hash)
 halo2_gadgets = "=0.5.0"
 
-# Blake2b (still used for sighash in e2e setup)
+# Blake2b (used by the voter throughput fixture)
 blake2b_simd = "1"
 
 # ElGamal on Pallas

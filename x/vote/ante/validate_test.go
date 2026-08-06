@@ -147,21 +147,7 @@ func newValidMsgCreateVotingSession() *types.MsgCreateVotingSession {
 }
 
 func newValidMsgDelegateVote() *types.MsgDelegateVote {
-	msg := &types.MsgDelegateVote{
-		Rk:                  bytes.Repeat([]byte{0xAA}, 32),
-		SpendAuthSig:        bytes.Repeat([]byte{0xBB}, 64),
-		SignedNoteNullifier: bytes.Repeat([]byte{0xCC}, 32),
-		CmxNew:              bytes.Repeat([]byte{0xDD}, 32),
-		VanCmx:              bytes.Repeat([]byte{0xFF}, 32),
-		GovNullifiers: [][]byte{
-			bytes.Repeat([]byte{0x11}, 32),
-			bytes.Repeat([]byte{0x12}, 32),
-		},
-		Proof:       bytes.Repeat([]byte{0x22}, 192),
-		VoteRoundId: testRoundID,
-		Sighash:     bytes.Repeat([]byte{0x99}, 32), // any 32 bytes; chain only checks length + sig
-	}
-	return msg
+	return svtest.ValidDelegation(testRoundID, 0x11)
 }
 
 func newValidMsgCastVote() *types.MsgCastVote {
@@ -447,14 +433,16 @@ func (s *ValidateTestSuite) TestValidateVoteTx_DelegateVote() {
 			setup: func() { s.setupActiveRound() },
 		},
 		{
-			name: "valid: non-canonical 32-byte sighash accepted when signature verifies",
+			name: "invalid: supplied sighash does not match transaction effects",
 			msg: func() types.VoteMessage {
 				m := newValidMsgDelegateVote()
 				m.Sighash = bytes.Repeat([]byte{0x99}, 32)
 				return m
 			},
-			opts:  mockOpts(),
-			setup: func() { s.setupActiveRound() },
+			opts:        mockOpts(),
+			setup:       func() { s.setupActiveRound() },
+			expectErr:   true,
+			errContains: "sighash does not match message",
 		},
 		// --- ValidateBasic failures ---
 		{
@@ -486,6 +474,7 @@ func (s *ValidateTestSuite) TestValidateVoteTx_DelegateVote() {
 			msg: func() types.VoteMessage {
 				m := newValidMsgDelegateVote()
 				m.Rk = bytes.Repeat([]byte{0xFF}, 32)
+				m.Tx1Effects = svtest.DelegationTX1Effects(m.Rk, m.SignedNoteNullifier, m.CmxNew)
 				return m
 			},
 			opts:        mockOpts(),

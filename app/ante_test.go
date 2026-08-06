@@ -186,21 +186,14 @@ func TestDualAnteHandler_StandardTxRestrictions(t *testing.T) {
 			},
 			{
 				name: "MsgSend+MsgDelegateVote",
-				msgs: []sdk.Msg{carrier, &votetypes.MsgDelegateVote{
-					Rk: append([]byte(nil), testutil.DummyPallasPoint...), SpendAuthSig: bytes.Repeat([]byte{0xBB}, 64),
-					SignedNoteNullifier: bytes.Repeat([]byte{0xCC}, 32),
-					CmxNew: testutil.FpLE(0xBEEF), VanCmx: testutil.FpLE(0xDEAD),
-					GovNullifiers: [][]byte{bytes.Repeat([]byte{0xFF}, 32)},
-					Proof: []byte{0x42}, VoteRoundId: roundID,
-					Sighash: bytes.Repeat([]byte{0x99}, 32),
-				}},
+				msgs: []sdk.Msg{carrier, testutil.ValidDelegation(roundID, 0xF0)},
 			},
 			{
 				name: "MsgSend+MsgRevealShare",
 				msgs: []sdk.Msg{carrier, &votetypes.MsgRevealShare{
 					ShareNullifier: bytes.Repeat([]byte{0xE1}, 32),
-					EncShare: elgamal.IdentityCiphertextBytes(),
-					ProposalId: 1, VoteDecision: 1, Proof: []byte{0x42},
+					EncShare:       elgamal.IdentityCiphertextBytes(),
+					ProposalId:     1, VoteDecision: 1, Proof: []byte{0x42},
 					VoteRoundId: roundID, VoteCommTreeAnchorHeight: anchorHeight,
 				}},
 			},
@@ -230,31 +223,24 @@ func TestDualAnteHandler_StandardTxRestrictions(t *testing.T) {
 		}{
 			{
 				name: "MsgDelegateVote",
-				msg: &votetypes.MsgDelegateVote{
-					Rk: append([]byte(nil), testutil.DummyPallasPoint...), SpendAuthSig: bytes.Repeat([]byte{0xBB}, 64),
-					SignedNoteNullifier: bytes.Repeat([]byte{0xCC}, 32),
-					CmxNew: testutil.FpLE(0xBEEF), VanCmx: testutil.FpLE(0xDEAD),
-					GovNullifiers: [][]byte{bytes.Repeat([]byte{0xFF}, 32)},
-					Proof: []byte{0x42}, VoteRoundId: roundID,
-					Sighash: bytes.Repeat([]byte{0x99}, 32),
-				},
+				msg:  testutil.ValidDelegation(roundID, 0xF2),
 			},
 			{
 				name: "MsgCastVote",
 				msg: &votetypes.MsgCastVote{
-					VanNullifier: bytes.Repeat([]byte{0xD1}, 32),
+					VanNullifier:         bytes.Repeat([]byte{0xD1}, 32),
 					VoteAuthorityNoteNew: testutil.FpLE(0xA1A1), VoteCommitment: testutil.FpLE(0xB2B2),
 					ProposalId: 1, Proof: []byte{0x42}, VoteRoundId: roundID,
 					VoteCommTreeAnchorHeight: anchorHeight,
-					VoteAuthSig: bytes.Repeat([]byte{0xC3}, 64), RVpk: append([]byte(nil), testutil.DummyPallasPoint...),
+					VoteAuthSig:              bytes.Repeat([]byte{0xC3}, 64), RVpk: append([]byte(nil), testutil.DummyPallasPoint...),
 				},
 			},
 			{
 				name: "MsgRevealShare",
 				msg: &votetypes.MsgRevealShare{
 					ShareNullifier: bytes.Repeat([]byte{0xE1}, 32),
-					EncShare: elgamal.IdentityCiphertextBytes(),
-					ProposalId: 1, VoteDecision: 1, Proof: []byte{0x42},
+					EncShare:       elgamal.IdentityCiphertextBytes(),
+					ProposalId:     1, VoteDecision: 1, Proof: []byte{0x42},
 					VoteRoundId: roundID, VoteCommTreeAnchorHeight: anchorHeight,
 				},
 			},
@@ -369,8 +355,8 @@ func TestNoopSignerBypass_DelegateVote(t *testing.T) {
 		GovNullifiers:       [][]byte{fakeGovNullifier},
 		Proof:               []byte{0x42},
 		VoteRoundId:         roundID,
-		Sighash:             bytes.Repeat([]byte{0x99}, 32),
 	}
+	testutil.SetDelegationTX1(voteMsg)
 	require.NoError(t, voteMsg.ValidateBasic(), "exploit payload must pass ValidateBasic")
 
 	// Build the carrier: a self-transfer MsgSend that provides a real signer.
@@ -617,8 +603,8 @@ func TestAuthzExecBypass_DelegateVote(t *testing.T) {
 		GovNullifiers:       [][]byte{bytes.Repeat([]byte{0xFF}, 32)},
 		Proof:               []byte{0x42},
 		VoteRoundId:         roundID,
-		Sighash:             bytes.Repeat([]byte{0x99}, 32),
 	}
+	testutil.SetDelegationTX1(fakeDelegate)
 
 	execMsg := authz.NewMsgExec(signerAddr, []sdk.Msg{fakeDelegate})
 
