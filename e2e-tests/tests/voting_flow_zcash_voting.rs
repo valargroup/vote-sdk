@@ -656,12 +656,6 @@ fn voting_flow_zcash_voting_path() {
     );
     assert_eq!(single_payloads[0].proposal_id, 2);
     assert_eq!(single_payloads[0].vote_decision, 1);
-    // The all_enc_shares field should still contain all 16 shares (needed by the helper for ZKP #3)
-    assert_eq!(
-        single_payloads[0].all_enc_shares.len(),
-        16,
-        "all_enc_shares must still contain all 16 shares for ZKP #3"
-    );
     log_step(
         "Step 9b",
         "single_share=true: proof valid, 1 payload produced ✓",
@@ -677,12 +671,6 @@ fn voting_flow_zcash_voting_path() {
         ),
     );
 
-    let all_enc: Vec<(&[u8], &[u8], u32)> = payloads[0]
-        .all_enc_shares
-        .iter()
-        .map(|s| (s.c1.as_slice(), s.c2.as_slice(), s.share_index))
-        .collect();
-
     for (i, p) in payloads.iter().enumerate() {
         let body = helper_share_payload(
             &round_id,
@@ -693,7 +681,6 @@ fn voting_flow_zcash_voting_path() {
             &p.enc_share.c2,
             p.enc_share.share_index,
             p.tree_position,
-            &all_enc,
             &p.share_comms,
             &p.primary_blind,
         );
