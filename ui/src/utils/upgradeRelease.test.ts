@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  createScheduleUpgradeReview,
   ReleaseRequestGate,
   releaseBinariesMap,
   resolveCosmovisorReleaseBinaries,
+  validateScheduleUpgradeReview,
   validateUpgradeInfoJson,
 } from "./upgradeRelease";
 
@@ -21,6 +23,13 @@ const assets = [
     digest: arm64Digest,
   },
 ];
+const validInfo = JSON.stringify({
+  tag,
+  binaries: releaseBinariesMap(resolveCosmovisorReleaseBinaries(tag, assets), [
+    "linux/amd64",
+    "linux/arm64",
+  ]),
+});
 
 describe("resolveCosmovisorReleaseBinaries", () => {
   it("selects the two Cosmovisor archives and pins their SHA-256 digests", () => {
@@ -64,14 +73,6 @@ describe("ReleaseRequestGate", () => {
 });
 
 describe("validateUpgradeInfoJson", () => {
-  const validInfo = JSON.stringify({
-    tag,
-    binaries: releaseBinariesMap(resolveCosmovisorReleaseBinaries(tag, assets), [
-      "linux/amd64",
-      "linux/arm64",
-    ]),
-  });
-
   it("accepts both checksum-pinned Linux binaries", () => {
     expect(validateUpgradeInfoJson(validInfo, tag)).toBe("");
   });
@@ -88,5 +89,34 @@ describe("validateUpgradeInfoJson", () => {
         "linux/arm64": "https://example.com/arm64.tar.gz",
       },
     }), tag)).toBe("binaries.linux/amd64 must include one checksum=sha256:<64 hex> value");
+  });
+});
+
+describe("createScheduleUpgradeReview", () => {
+  it("keeps the reviewed payload unchanged when the live form changes", () => {
+    const form = {
+      planName: " v1.1.0 ",
+      height: 4_890_179,
+      infoJson: validInfo,
+      releaseTag: tag,
+      replaceExisting: false,
+      estimatedTimeMs: 1_786_377_600_000,
+      requestedTimeMs: 1_786_377_600_000,
+    };
+    const review = createScheduleUpgradeReview(form);
+
+    form.planName = "changed";
+    form.height = 1;
+    form.infoJson = JSON.stringify({ tag });
+
+    expect(review.payload).toEqual({
+      name: "v1.1.0",
+      height: 4_890_179,
+      info: validInfo,
+      replaceExisting: false,
+    });
+    expect(Object.isFrozen(review)).toBe(true);
+    expect(Object.isFrozen(review.payload)).toBe(true);
+    expect(validateScheduleUpgradeReview(review, 4096)).toBe("");
   });
 });

@@ -10,6 +10,20 @@ export interface ReleaseBinary {
   planUrl: string;
 }
 
+export interface ScheduleUpgradePayload {
+  readonly name: string;
+  readonly height: number;
+  readonly info: string;
+  readonly replaceExisting: boolean;
+}
+
+export interface ScheduleUpgradeReview {
+  readonly payload: ScheduleUpgradePayload;
+  readonly releaseTag: string;
+  readonly estimatedTimeMs: number;
+  readonly requestedTimeMs: number;
+}
+
 interface GitHubReleaseAsset {
   name?: unknown;
   browser_download_url?: unknown;
@@ -35,6 +49,29 @@ export class ReleaseRequestGate {
   isCurrent(request: number): boolean {
     return request === this.currentRequest;
   }
+}
+
+/** Snapshot the schedule fields shown in the review modal and later signed. */
+export function createScheduleUpgradeReview(input: {
+  planName: string;
+  height: number;
+  infoJson: string;
+  releaseTag: string;
+  replaceExisting: boolean;
+  estimatedTimeMs: number;
+  requestedTimeMs: number;
+}): ScheduleUpgradeReview {
+  return Object.freeze({
+    payload: Object.freeze({
+      name: input.planName.trim(),
+      height: input.height,
+      info: input.infoJson,
+      replaceExisting: input.replaceExisting,
+    }),
+    releaseTag: input.releaseTag.trim(),
+    estimatedTimeMs: input.estimatedTimeMs,
+    requestedTimeMs: input.requestedTimeMs,
+  });
 }
 
 const RELEASE_API_BASE = "https://api.github.com/repos/valargroup/vote-sdk/releases/tags";
@@ -152,4 +189,20 @@ export function validateUpgradeInfoJson(infoJson: string, expectedTag: string): 
   }
 
   return "";
+}
+
+/** Revalidate the immutable schedule snapshot immediately before signing. */
+export function validateScheduleUpgradeReview(
+  review: ScheduleUpgradeReview,
+  maxInfoBytes: number,
+): string {
+  if (!review.payload.name) return "Reviewed plan name is required";
+  if (!Number.isSafeInteger(review.payload.height) || review.payload.height <= 0) {
+    return "Reviewed upgrade height must be a positive integer";
+  }
+  const infoBytes = new TextEncoder().encode(review.payload.info).length;
+  if (infoBytes > maxInfoBytes) {
+    return `Reviewed info JSON is ${infoBytes} bytes; maximum is ${maxInfoBytes}`;
+  }
+  return validateUpgradeInfoJson(review.payload.info, review.releaseTag);
 }

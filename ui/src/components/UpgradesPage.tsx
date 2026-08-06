@@ -17,12 +17,15 @@ import {
   type UpgradeHeightEstimate,
 } from "../utils/upgradeEstimate";
 import {
+  createScheduleUpgradeReview,
   fetchCosmovisorReleaseBinaries,
   ReleaseRequestGate,
   releaseBinariesMap,
   REQUIRED_UPGRADE_PLATFORMS,
+  validateScheduleUpgradeReview,
   validateUpgradeInfoJson,
   type ReleaseBinary,
+  type ScheduleUpgradeReview,
   type UpgradePlatform,
 } from "../utils/upgradeRelease";
 
@@ -30,7 +33,7 @@ const DEFAULT_AVERAGING_WINDOW = 50;
 const MAX_UPGRADE_INFO_BYTES = 4096;
 
 type ReviewAction =
-  | { kind: "schedule"; replaceExisting: boolean }
+  | { kind: "schedule"; review: ScheduleUpgradeReview }
   | { kind: "cancel" };
 
 function pad2(value: number): string {
@@ -258,6 +261,7 @@ export function UpgradesPage({ wallet }: { wallet: UseWallet }) {
     !estimateState.estimate ||
     planNameError ||
     infoError ||
+    releaseBinariesLoading ||
     pendingPlanRequiresReplace ||
     !wallet.signer ||
     actionBusy,
@@ -266,8 +270,19 @@ export function UpgradesPage({ wallet }: { wallet: UseWallet }) {
   const startScheduleReview = () => {
     setResultMsg("");
     setActionError("");
-    if (scheduleDisabled) return;
-    setReviewAction({ kind: "schedule", replaceExisting });
+    if (scheduleDisabled || !estimateState.estimate) return;
+    setReviewAction({
+      kind: "schedule",
+      review: createScheduleUpgradeReview({
+        planName,
+        height: estimateState.estimate.targetHeight,
+        infoJson,
+        releaseTag,
+        replaceExisting,
+        estimatedTimeMs: estimateState.estimate.estimatedTimeMs,
+        requestedTimeMs: estimateState.targetTimeMs,
+      }),
+    });
   };
 
   const startCancelReview = () => {
@@ -279,18 +294,23 @@ export function UpgradesPage({ wallet }: { wallet: UseWallet }) {
 
   const confirmReviewAction = async () => {
     if (!reviewAction || !wallet.signer) return;
+    if (reviewAction.kind === "schedule") {
+      const reviewError = validateScheduleUpgradeReview(
+        reviewAction.review,
+        MAX_UPGRADE_INFO_BYTES,
+      );
+      if (reviewError) {
+        setActionError(reviewError);
+        return;
+      }
+    }
     setActionBusy(true);
     setActionError("");
     try {
       const base = chainApi.getApiBase();
       const result =
         reviewAction.kind === "schedule"
-          ? await cosmosTx.scheduleUpgrade(base, wallet.signer, {
-              name: planName.trim(),
-              height: estimateState.estimate?.targetHeight ?? 0,
-              info: infoJson,
-              replaceExisting: reviewAction.replaceExisting,
-            })
+          ? await cosmosTx.scheduleUpgrade(base, wallet.signer, reviewAction.review.payload)
           : await cosmosTx.cancelUpgrade(base, wallet.signer);
       if (result.code !== 0) {
         setActionError(result.log || `tx failed with code ${result.code}`);
@@ -644,7 +664,11 @@ export function UpgradesPage({ wallet }: { wallet: UseWallet }) {
             <div className="mb-4 flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-sm font-semibold text-text-primary">
-                  {reviewAction.kind === "schedule" ? primaryButtonText : "Cancel upgrade plan"}
+                  {reviewAction.kind === "schedule"
+                    ? reviewAction.review.payload.replaceExisting
+                      ? "Replace upgrade plan"
+                      : "Schedule upgrade"
+                    : "Cancel upgrade plan"}
                 </h2>
                 <p className="mt-1 text-[11px] text-text-muted">Review the transaction before signing.</p>
               </div>
@@ -663,11 +687,11 @@ export function UpgradesPage({ wallet }: { wallet: UseWallet }) {
               <InfoRow label="Signer" value={<span className="font-mono">{wallet.address}</span>} />
               {reviewAction.kind === "schedule" ? (
                 <>
-                  <InfoRow label="Plan name" value={<span className="font-mono text-text-primary">{planName.trim()}</span>} />
-                  <InfoRow label="Height" value={<span className="font-mono text-text-primary">{selectedHeight.toLocaleString()}</span>} />
-                  <InfoRow label="Estimated time" value={estimateState.estimate ? formatDateTime(estimateState.estimate.estimatedTimeMs) : "-"} />
-                  <InfoRow label="Requested time" value={estimateState.targetTimeMs ? formatDateTime(estimateState.targetTimeMs) : "-"} />
-                  <InfoRow label="Replace existing" value={reviewAction.replaceExisting ? "Yes" : "No"} />
+                  <InfoRow label="Plan name" value={<span className="font-mono text-text-primary">{reviewAction.review.payload.name}</span>} />
+                  <InfoRow label="Height" value={<span className="font-mono text-text-primary">{reviewAction.review.payload.height.toLocaleString()}</span>} />
+                  <InfoRow label="Estimated time" value={formatDateTime(reviewAction.review.estimatedTimeMs)} />
+                  <InfoRow label="Requested time" value={formatDateTime(reviewAction.review.requestedTimeMs)} />
+                  <InfoRow label="Replace existing" value={reviewAction.review.payload.replaceExisting ? "Yes" : "No"} />
                 </>
               ) : currentPlan ? (
                 <>
@@ -681,7 +705,7 @@ export function UpgradesPage({ wallet }: { wallet: UseWallet }) {
               <div className="mb-4">
                 <p className="mb-1.5 text-[10px] uppercase tracking-wider text-text-muted">Signed info JSON</p>
                 <pre className="max-h-52 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-border-subtle bg-surface-2 p-3 font-mono text-[10px] text-text-secondary">
-                  {infoJson}
+                  {reviewAction.review.payload.info}
                 </pre>
               </div>
             ) : null}
