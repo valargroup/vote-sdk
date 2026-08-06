@@ -194,6 +194,22 @@ svote_ci_is_cosmovisor_execstart() {
   return 1
 }
 
+svote_ci_configure_autodownload() {
+  local service_name="$1"
+  local systemd_unit_dir="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
+  local dropin_dir="${systemd_unit_dir%/}/${service_name}.service.d"
+  local dropin_path="${dropin_dir}/20-cosmovisor-autodownload.conf"
+
+  mkdir -p "$dropin_dir"
+  cat > "${dropin_path}.new" <<EOF
+[Service]
+Environment="DAEMON_ALLOW_DOWNLOAD_BINARIES=true"
+Environment="DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM=true"
+EOF
+  mv -f "${dropin_path}.new" "$dropin_path"
+  svote_ci_log "configured checksum-required Cosmovisor auto-download"
+}
+
 svote_ci_migrate_direct_service_to_cosmovisor() {
   local service_name="$1"
   local daemon_home="$2"
@@ -233,7 +249,8 @@ Environment="SVOTE_UPGRADE_MODE=cosmovisor"
 Environment="DAEMON_HOME=${daemon_home}"
 Environment="SVOTE_HOME=${daemon_home}"
 Environment="DAEMON_NAME=svoted"
-Environment="DAEMON_ALLOW_DOWNLOAD_BINARIES=false"
+Environment="DAEMON_ALLOW_DOWNLOAD_BINARIES=true"
+Environment="DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM=true"
 Environment="COSMOVISOR_BIN=${cosmovisor_bin}"
 Environment="SVOTED_BIN=${source_bin}"
 EOF
@@ -252,6 +269,7 @@ main() {
   local runtime_cmd
   local applied_plan
   local plan_bin
+  local effective_env
 
   [ -x "$source_bin" ] || svote_ci_die "source binary missing or not executable: ${source_bin}"
   command -v systemctl >/dev/null 2>&1 || svote_ci_die "systemctl is required"
@@ -277,6 +295,9 @@ main() {
     fi
   fi
 
+  svote_ci_configure_autodownload "$service_name"
+  systemctl daemon-reload
+
   runtime_link="${daemon_home%/}/cosmovisor/current/bin/svoted"
   runtime_target="$(readlink -f "$runtime_link" 2>/dev/null || true)"
   [ -n "$runtime_target" ] || svote_ci_die "unable to resolve runtime target from ${runtime_link}"
@@ -299,6 +320,12 @@ main() {
   svote_ci_log "restarting ${service_name}"
   systemctl restart "$service_name"
   systemctl is-active --quiet "$service_name" || svote_ci_die "service ${service_name} is not active after restart"
+
+  effective_env="$(systemctl show "$service_name" -p Environment --value 2>/dev/null || true)"
+  printf '%s\n' "$effective_env" | grep -Eq '(^|[[:space:]"])DAEMON_ALLOW_DOWNLOAD_BINARIES=true([[:space:]"]|$)' \
+    || svote_ci_die "Cosmovisor binary auto-download is not enabled"
+  printf '%s\n' "$effective_env" | grep -Eq '(^|[[:space:]"])DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM=true([[:space:]"]|$)' \
+    || svote_ci_die "Cosmovisor download checksums are not required"
 
   runtime_pid="$(pgrep -f "cosmovisor.*run start --home ${daemon_home}" | head -n 1 || true)"
   [ -n "$runtime_pid" ] || svote_ci_die "unable to find running cosmovisor process for ${daemon_home}"

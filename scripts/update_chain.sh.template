@@ -9,6 +9,8 @@
 #                  refuses to run if the genesis binary already equals the target tag.
 #                  Rewrites the main systemd unit and removes conflicting drop-ins (e.g. primary.conf).
 #                  Can infer --serve-ui style args from the current direct ExecStart when not supplied.
+#   configure-autodownload
+#                  Enable checksum-required Cosmovisor downloads and safely restart the service.
 #   verify-prestage Read-only PASS/FAIL checklist for operator runbooks.
 #
 # Example:
@@ -48,6 +50,7 @@ source "$COMMON_LIB"
 MODE="prepare"
 PLAN_NAME=""
 RELEASE_TAG="$UPDATE_DEFAULT_RELEASE_TAG"
+CHAIN_API="${SVOTE_CHAIN_API:-}"
 ALLOW_NO_PLAN=0
 REQUIRE_COSMOVISOR_SERVICE=1
 HOME_CLI_SET=0
@@ -62,12 +65,13 @@ usage() {
 usage: update_chain.sh [options]
 
 Options:
-  --mode MODE             prepare | migrate | verify-prestage (default: prepare)
+  --mode MODE             prepare | migrate | configure-autodownload | verify-prestage (default: prepare)
   --plan-name NAME        x/upgrade plan name (required for prepare/verify-prestage)
   --tag TAG               Release tag to stage (default: ${UPDATE_DEFAULT_RELEASE_TAG})
   --home PATH             Validator home (default: \$SVOTE_HOME or \$HOME/.svoted)
   --install-dir PATH      Binary install dir (default: \$SVOTE_INSTALL_DIR or \$HOME/.local/bin)
   --service-name NAME     systemd service name (default: svoted)
+  --chain-api URL         HTTPS chain REST API fallback when the local RPC is offline
   --allow-no-plan         Allow staging before a plan is scheduled on-chain
   --skip-cosmovisor-service  verify-prestage: skip systemd Cosmovisor service checks
   --timeout-secs N        RPC readiness timeout after migrate restart (default: 120)
@@ -157,6 +161,15 @@ while [ "$#" -gt 0 ]; do
       SVOTE_SERVICE_NAME="${1#--service-name=}"
       shift
       ;;
+    --chain-api)
+      [ "$#" -ge 2 ] || svote_upgrade_die "--chain-api requires a URL."
+      CHAIN_API="$2"
+      shift 2
+      ;;
+    --chain-api=*)
+      CHAIN_API="${1#--chain-api=}"
+      shift
+      ;;
     --allow-no-plan)
       ALLOW_NO_PLAN=1
       shift
@@ -212,7 +225,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$MODE" in
-  prepare|migrate|verify-prestage) ;;
+  prepare|migrate|configure-autodownload|verify-prestage) ;;
   *) svote_upgrade_die "Unsupported --mode: ${MODE}" ;;
 esac
 
@@ -220,7 +233,7 @@ case "$TIMEOUT_SECS" in
   ''|*[!0-9]*) svote_upgrade_die "--timeout-secs must be a non-negative integer." ;;
 esac
 
-if [ -z "$PLAN_NAME" ] && [ "$MODE" != "migrate" ]; then
+if [ -z "$PLAN_NAME" ] && [ "$MODE" != "migrate" ] && [ "$MODE" != "configure-autodownload" ]; then
   svote_upgrade_die "--plan-name is required for mode ${MODE}."
 fi
 
@@ -228,8 +241,9 @@ if [ "$UPDATE_DEFAULT_DO_BASE" != '__DO_''BASE__' ]; then
   SVOTE_DO_SPACES_BASE="${SVOTE_DO_SPACES_BASE:-$UPDATE_DEFAULT_DO_BASE}"
 fi
 SVOTE_GITHUB_REPO="${SVOTE_GITHUB_REPO:-$UPDATE_DEFAULT_GITHUB_REPO}"
+SVOTE_CHAIN_API="$CHAIN_API"
 SVOTE_WRAPPER_SVOTED_START_ARGS="$WRAPPER_SVOTED_START_ARGS"
-export SVOTE_WRAPPER_SVOTED_START_ARGS
+export SVOTE_CHAIN_API SVOTE_WRAPPER_SVOTED_START_ARGS
 
 svote_upgrade_require_linux_systemd_root
 svote_upgrade_require_curl
@@ -326,14 +340,58 @@ run_migrate() {
   svote_upgrade_assert_layout_ready "$PLAN_NAME"
   svote_upgrade_verify_binary_tag "$(svote_upgrade_upgrade_bin_path "$PLAN_NAME")" "$RELEASE_TAG"
   svote_upgrade_assert_genesis_pre_upgrade "$RELEASE_TAG"
+  svote_upgrade_validate_scheduled_plan "$PLAN_NAME" "$ALLOW_NO_PLAN"
+  svote_upgrade_prepare_stale_plan_recovery "$PLAN_NAME"
 
   svote_upgrade_stop_validator_service
+  svote_upgrade_archive_stale_plan_marker
+  svote_upgrade_fixup_cosmovisor_ownership
 
   backup_unit=$(svote_upgrade_patch_systemd_unit_for_cosmovisor)
-  svote_upgrade_restart_service "$backup_unit"
-  svote_upgrade_wait_for_rpc "$TIMEOUT_SECS"
-  svote_upgrade_assert_cosmovisor_runtime
+  if ! (
+    svote_upgrade_assert_no_signer_processes
+    svote_upgrade_restart_service "$backup_unit"
+    svote_upgrade_wait_for_rpc "$TIMEOUT_SECS"
+    svote_upgrade_assert_cosmovisor_runtime
+    svote_upgrade_assert_single_managed_signer
+  ); then
+    svote_upgrade_warn "Migration verification failed; stopping ${SERVICE_NAME} to prevent parallel signer processes."
+    systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+    if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+      svote_upgrade_die "CRITICAL: ${SERVICE_NAME} remained active after failed migration."
+    fi
+    svote_upgrade_assert_no_signer_processes
+    svote_upgrade_die "Migration failed closed. ${SERVICE_NAME} is stopped; correct the reported error and rerun migrate. Previous unit: ${backup_unit}."
+  fi
   svote_upgrade_log "Migration to Cosmovisor service completed."
+}
+
+# run_configure_autodownload
+# Guard the existing Cosmovisor runtime, enable checksum-required downloads, restart, and recheck.
+run_configure_autodownload() {
+  local effective_mode
+  svote_upgrade_verify_validator_identity_files
+  effective_mode=$(svote_upgrade_systemd_effective_env_value "SVOTE_UPGRADE_MODE" || true)
+  [ "$effective_mode" = "cosmovisor" ] \
+    || svote_upgrade_die "${SERVICE_NAME} is not in Cosmovisor mode. Choose the migration path instead."
+  systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null \
+    || svote_upgrade_die "${SERVICE_NAME} must be active before configuring auto-download."
+  svote_upgrade_assert_single_managed_signer
+  svote_upgrade_configure_autodownload_dropin
+  if ! (
+    svote_upgrade_restart_service ""
+    svote_upgrade_wait_for_rpc "$TIMEOUT_SECS" 1
+    svote_upgrade_assert_single_managed_signer
+  ); then
+    svote_upgrade_warn "Auto-download restart verification failed; stopping ${SERVICE_NAME} to prevent parallel signer processes."
+    systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+    if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+      svote_upgrade_die "CRITICAL: ${SERVICE_NAME} remained active after failed restart."
+    fi
+    svote_upgrade_assert_no_signer_processes
+    svote_upgrade_die "Auto-download configuration failed closed. ${SERVICE_NAME} is stopped; correct the reported error and rerun."
+  fi
+  svote_upgrade_log "Checksum-required Cosmovisor auto-download is active."
 }
 
 case "$MODE" in
@@ -350,6 +408,9 @@ case "$MODE" in
     run_migrate
     svote_upgrade_verify_prestage "$PLAN_NAME" "$RELEASE_TAG" "$ALLOW_NO_PLAN" "$REQUIRE_COSMOVISOR_SERVICE"
     ;;
+  configure-autodownload)
+    run_configure_autodownload
+    ;;
 esac
 
 echo
@@ -362,6 +423,7 @@ echo "  Plan name:         ${PLAN_NAME:-<none>}"
 echo "  Release tag:       ${RELEASE_TAG}"
 echo "  Validator home:    ${DAEMON_HOME}"
 echo "  Cosmovisor binary: ${COSMOVISOR_BIN}"
+echo "  Chain API fallback: ${CHAIN_API:-<none>}"
 echo
 VERIFY_UPDATER_URL="$UPDATE_DEFAULT_UPDATER_URL"
 if [ "$VERIFY_UPDATER_URL" = '__UPDATER_''URL__' ]; then

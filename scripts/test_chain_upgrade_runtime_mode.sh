@@ -137,6 +137,8 @@ grep -q 'Environment="SVOTE_UPGRADE_MODE=cosmovisor"' "${SERVICE_PATH}" || fail 
 grep -q "Environment=\"DAEMON_HOME=${DAEMON_HOME}\"" "${SERVICE_PATH}" || fail "service missing daemon home env"
 grep -q 'Environment="DAEMON_NAME=svoted"' "${SERVICE_PATH}" || fail "service missing daemon name env"
 grep -q "Environment=\"COSMOVISOR_BIN=${COSMOVISOR_BIN}\"" "${SERVICE_PATH}" || fail "service missing cosmovisor env"
+grep -q 'Environment="DAEMON_ALLOW_DOWNLOAD_BINARIES=true"' "${SERVICE_PATH}" || fail "service missing auto-download env"
+grep -q 'Environment="DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM=true"' "${SERVICE_PATH}" || fail "service missing checksum requirement"
 grep -q '^EnvironmentFile=-/etc/default/svoted$' "${SERVICE_PATH}" || fail "service missing default env file"
 grep -q '^Restart=on-failure$' "${SERVICE_PATH}" || fail "service missing restart policy"
 
@@ -169,9 +171,17 @@ if svote_ci_is_cosmovisor_execstart "$TMP_HELPER_UNIT"; then
   fail "helper incorrectly detected direct ExecStart as cosmovisor"
 fi
 
+echo "=== deploy helper: writes checksum-required auto-download drop-in ==="
+TMP_AUTODOWNLOAD_SYSTEMD="$(mktemp -d)"
+trap 'rm -f "$TMP_UNIT" "$TMP_AUTODETECT_UNIT" "$TMP_HELPER_UNIT"; rm -rf "$TMP_MIGRATE" "$TMP_AUTODOWNLOAD_SYSTEMD"' EXIT
+SYSTEMD_UNIT_DIR="$TMP_AUTODOWNLOAD_SYSTEMD" svote_ci_configure_autodownload "svoted" >/dev/null
+AUTODOWNLOAD_DROPIN="${TMP_AUTODOWNLOAD_SYSTEMD}/svoted.service.d/20-cosmovisor-autodownload.conf"
+grep -q 'DAEMON_ALLOW_DOWNLOAD_BINARIES=true' "$AUTODOWNLOAD_DROPIN" || fail "auto-download drop-in did not enable downloads"
+grep -q 'DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM=true' "$AUTODOWNLOAD_DROPIN" || fail "auto-download drop-in did not require checksums"
+
 echo "=== deploy helper: sync disabled/enabled atomic stage behavior ==="
 TMP_SYNC_DIR="$(mktemp -d)"
-trap 'rm -f "$TMP_UNIT" "$TMP_AUTODETECT_UNIT" "$TMP_HELPER_UNIT"; rm -rf "$TMP_MIGRATE" "$TMP_SYNC_DIR"' EXIT
+trap 'rm -f "$TMP_UNIT" "$TMP_AUTODETECT_UNIT" "$TMP_HELPER_UNIT"; rm -rf "$TMP_MIGRATE" "$TMP_AUTODOWNLOAD_SYSTEMD" "$TMP_SYNC_DIR"' EXIT
 SRC_BIN="${TMP_SYNC_DIR}/source.bin"
 DST_BIN="${TMP_SYNC_DIR}/target.bin"
 printf 'old-runtime' > "$DST_BIN"
@@ -198,7 +208,7 @@ fi
 
 echo "=== deploy helper: reads safe applied plan from upgrade-info ==="
 TMP_UPGRADE_HOME="$(mktemp -d)"
-trap 'rm -f "$TMP_UNIT" "$TMP_AUTODETECT_UNIT" "$TMP_HELPER_UNIT"; rm -rf "$TMP_MIGRATE" "$TMP_SYNC_DIR" "$TMP_UPGRADE_HOME"' EXIT
+trap 'rm -f "$TMP_UNIT" "$TMP_AUTODETECT_UNIT" "$TMP_HELPER_UNIT"; rm -rf "$TMP_MIGRATE" "$TMP_AUTODOWNLOAD_SYSTEMD" "$TMP_SYNC_DIR" "$TMP_UPGRADE_HOME"' EXIT
 mkdir -p "${TMP_UPGRADE_HOME}/data"
 cat > "${TMP_UPGRADE_HOME}/data/upgrade-info.json" <<'EOF'
 {"name":"v1","height":123}
@@ -214,7 +224,7 @@ fi
 
 echo "=== deploy helper: direct migration seeds applied plan runtime ==="
 TMP_MIGRATE_RUNTIME="$(mktemp -d)"
-trap 'rm -f "$TMP_UNIT" "$TMP_AUTODETECT_UNIT" "$TMP_HELPER_UNIT"; rm -rf "$TMP_MIGRATE" "$TMP_SYNC_DIR" "$TMP_UPGRADE_HOME" "$TMP_MIGRATE_RUNTIME"' EXIT
+trap 'rm -f "$TMP_UNIT" "$TMP_AUTODETECT_UNIT" "$TMP_HELPER_UNIT"; rm -rf "$TMP_MIGRATE" "$TMP_AUTODOWNLOAD_SYSTEMD" "$TMP_SYNC_DIR" "$TMP_UPGRADE_HOME" "$TMP_MIGRATE_RUNTIME"' EXIT
 MIGRATE_HOME="${TMP_MIGRATE_RUNTIME}/home"
 SOURCE_BIN="${TMP_MIGRATE_RUNTIME}/source/svoted"
 COSMOVISOR_BIN_TEST="${TMP_MIGRATE_RUNTIME}/bin/cosmovisor"
@@ -240,6 +250,8 @@ DROPIN_PATH="${SYSTEMD_UNIT_DIR}/svoted.service.d/99-cosmovisor-runtime.conf"
 [ -x "$PLAN_BIN" ] || fail "applied plan binary was not seeded during migration"
 [ "$(readlink "$CURRENT_LINK")" = "${MIGRATE_HOME}/cosmovisor/upgrades/v1" ] || fail "current symlink did not point to applied plan path"
 grep -q "^ExecStart=${COSMOVISOR_BIN_TEST} run start --home ${MIGRATE_HOME}$" "$DROPIN_PATH" || fail "drop-in ExecStart did not use resolved cosmovisor binary"
+grep -q 'DAEMON_ALLOW_DOWNLOAD_BINARIES=true' "$DROPIN_PATH" || fail "direct migration did not enable auto-download"
+grep -q 'DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM=true' "$DROPIN_PATH" || fail "direct migration did not require checksums"
 [ "$(svote_ci_hash_file "$SOURCE_BIN")" = "$(svote_ci_hash_file "$PLAN_BIN")" ] || fail "applied plan binary does not match source binary"
 
 echo "=== deploy helper: direct migration falls back to genesis current ==="

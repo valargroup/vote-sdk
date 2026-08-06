@@ -168,6 +168,8 @@ cat > "${COS4}/cosmovisor" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" > "${STATE_DIR}/cosmovisor.args"
+printf '%s\n' "${DAEMON_ALLOW_DOWNLOAD_BINARIES:-}" > "${STATE_DIR}/cosmovisor.allow-download"
+printf '%s\n' "${DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM:-}" > "${STATE_DIR}/cosmovisor.must-checksum"
 trap 'exit 0' TERM INT HUP
 touch "${STATE_DIR}/svoted-started"
 while true; do sleep 1; done
@@ -194,6 +196,8 @@ grep -q -- '--serve-ui --ui-dist /opt/ui/dist' "${STATE4}/cosmovisor.args" || {
   cat "${STATE4}/cosmovisor.args" >&2
   fail "cosmovisor missing forwarded extra args"
 }
+[ "$(cat "${STATE4}/cosmovisor.allow-download")" = "true" ] || fail "cosmovisor wrapper did not default auto-download to true"
+[ "$(cat "${STATE4}/cosmovisor.must-checksum")" = "true" ] || fail "cosmovisor wrapper did not require checksums"
 stop_wrapper "${PID4}"
 
 echo "=== PASS: svoted-wrapper tests ==="

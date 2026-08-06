@@ -7,9 +7,10 @@ or cancel plans through `x/vote` coordinator actions.
 
 Routine binary swaps that preserve state still use `sdk-chain-deploy.yml`.
 
-Validator hosts installed through `join.sh` should use **Cosmovisor pre-staging**
-via `update_chain.sh` so the binary switches deterministically at the scheduled
-halt height without manual restart coordination.
+Validator hosts installed through `join.sh` use Cosmovisor with binary downloads
+enabled and checksums required. Pre-staging through `update_chain.sh` removes the
+network dependency at the halt, while the automatic path remains available for
+future checksum-pinned plans.
 
 ## First rollout with x/upgrade
 
@@ -41,7 +42,18 @@ Existing direct-mode installs migrate once:
 
 ```bash
 curl -fsSL https://shielded-vote.nyc3.digitaloceanspaces.com/update_chain.sh | sudo bash -s -- \
-  --mode migrate --plan-name <plan-name> --tag <tag>
+  --mode migrate --plan-name <plan-name> --tag <tag> --chain-api <chain-rest-url>
+```
+
+`--chain-api` lets migration verify scheduled and previously applied plans even
+when a partial migration has left the local RPC offline. Its network ID must
+match the validator's local genesis.
+
+Existing Cosmovisor installs enable the same guarded defaults once:
+
+```bash
+curl -fsSL https://shielded-vote.nyc3.digitaloceanspaces.com/update_chain.sh | sudo bash -s -- \
+  --mode configure-autodownload --plan-name <plan-name> --tag <tag> --chain-api <chain-rest-url>
 ```
 
 ## Ironwood verifier cutover
@@ -268,19 +280,27 @@ join and upgrade time.
 - **Fail-closed**: staging or config failure aborts with a clear error and leaves
   the running validator untouched.
 - **Signer-stop gate** (migrate mode only): stop service, verify inactive, verify
-  no residual `svoted`/`cosmovisor` process for the same home.
-- **Double-sign controls**: require `priv_validator_state.json`, print consensus
-  pubkey fingerprint, and require explicit single-signer acknowledgment
-  (`SVOTE_ACK_SINGLE_SIGNER=1` or interactive `YES`).
+  no residual `svoted`/`cosmovisor` process for the same home, including a
+  manually started `svoted` that relies on its default home.
+- **Double-sign controls**: require `priv_validator_state.json`, then require one
+  Cosmovisor supervisor and one `svoted` child in the service cgroup. Any signer
+  outside that cgroup fails the migration and leaves the service stopped.
 - **Plan-name strictness**: staged directory must match scheduled plan name unless
   `--allow-no-plan` is explicitly set for early staging.
+- **Stale-plan recovery**: an old `data/upgrade-info.json` is archived only when
+  its name and height exactly match the chain's applied-plan response. Current,
+  malformed, unknown, or mismatched markers fail closed.
+- **Checksum-required auto-download**: migrated services set both
+  `DAEMON_ALLOW_DOWNLOAD_BINARIES=true` and
+  `DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM=true`.
 
 Modes:
 
 | Mode | Purpose |
 |------|---------|
 | `prepare` | Stage genesis + upgrade binaries only |
-| `migrate` | Stage, then migrate systemd service to Cosmovisor |
+| `migrate` | Migrate a previously staged direct systemd service to Cosmovisor |
+| `configure-autodownload` | Guard the current signer, enable checksum-required downloads, and restart |
 | `verify-prestage` | Read-only PASS/FAIL checklist (staging + service sections) |
 
 Use `--skip-cosmovisor-service` with `verify-prestage` to validate staged
@@ -300,6 +320,7 @@ Post-release artifact smoke checks: `scripts/verify_upgrade_release_artifacts.sh
 | `Scheduled plan name mismatch` | Wrong `--plan-name` | Match `svoted query upgrade plan` exactly |
 | `priv_validator_state.json is missing` | Data dir incomplete | Restore from backup or snapshot reset script; do not proceed |
 | Service restart loop after migrate | Bad unit env or cosmovisor path | Check `journalctl -u svoted`; restore unit backup under `/etc/systemd/system/svoted.service.bak.*` |
+| Cosmovisor requests an old plan such as `v1` | Direct-mode history left a stale applied-plan marker | Re-run the current migrate instructions with `--chain-api`; do not delete the marker or start `svoted` manually |
 | Checksum mismatch | Corrupted download | Retry; verify tag exists in Spaces/GitHub release |
 
 ## Rollback policy

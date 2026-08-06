@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# Unit tests for stale-plan recovery and managed-signer enforcement.
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+COMMON="${REPO_ROOT}/scripts/_chain_upgrade_common.sh"
+
+fail() {
+  echo "FAIL: $*" >&2
+  exit 1
+}
+
+# shellcheck source=scripts/_chain_upgrade_common.sh
+source "$COMMON"
+
+TMP_ROOT="$(mktemp -d)"
+trap 'rm -rf "$TMP_ROOT"' EXIT
+
+DAEMON_HOME="${TMP_ROOT}/home"
+COSMVISOR_ROOT="${DAEMON_HOME}/cosmovisor"
+GENESIS_BIN="${COSMVISOR_ROOT}/genesis/bin/svoted"
+SERVICE_NAME="svoted"
+mkdir -p "${DAEMON_HOME}/data" "$(dirname "$GENESIS_BIN")"
+printf '#!/usr/bin/env bash\n' > "$GENESIS_BIN"
+chmod +x "$GENESIS_BIN"
+
+svote_upgrade_query_applied_plan_height() {
+  [ "$1" = "v1" ] || fail "unexpected applied-plan query: $1"
+  printf '802461\n'
+}
+
+echo "=== stale recovery: archive an exactly matched applied marker ==="
+printf '{"name":"v1","height":802461}\n' > "${DAEMON_HOME}/data/upgrade-info.json"
+mkdir -p "${COSMVISOR_ROOT}/upgrades"
+ln -s "${COSMVISOR_ROOT}/upgrades/v1" "${COSMVISOR_ROOT}/current"
+svote_upgrade_prepare_stale_plan_recovery "v1.1.0"
+[ "$SVOTE_STALE_PLAN_NAME" = "v1" ] || fail "stale plan name was not captured"
+[ "$SVOTE_STALE_PLAN_HEIGHT" = "802461" ] || fail "stale plan height was not captured"
+svote_upgrade_archive_stale_plan_marker
+[ ! -e "${DAEMON_HOME}/data/upgrade-info.json" ] || fail "stale marker remained in watched location"
+[ "$(readlink "${COSMVISOR_ROOT}/current")" = "${COSMVISOR_ROOT}/genesis" ] \
+  || fail "current did not point to genesis after recovery"
+[ -f "$SVOTE_STALE_UPGRADE_INFO_ARCHIVE" ] || fail "stale marker audit archive is missing"
+grep -q '"name":"v1"' "$SVOTE_STALE_UPGRADE_INFO_ARCHIVE" || fail "archive contents changed"
+
+echo "=== auto-download: common helper writes checksum-required drop-in ==="
+SERVICE_PATH="${TMP_ROOT}/systemd/svoted.service"
+mkdir -p "$(dirname "$SERVICE_PATH")"
+printf '[Service]\nExecStart=/root/.local/bin/cosmovisor run start --home %s\n' "$DAEMON_HOME" > "$SERVICE_PATH"
+svote_upgrade_configure_autodownload_dropin
+COMMON_AUTODOWNLOAD_DROPIN="${TMP_ROOT}/systemd/svoted.service.d/20-cosmovisor-autodownload.conf"
+grep -q 'DAEMON_ALLOW_DOWNLOAD_BINARIES=true' "$COMMON_AUTODOWNLOAD_DROPIN" || fail "common drop-in did not enable downloads"
+grep -q 'DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM=true' "$COMMON_AUTODOWNLOAD_DROPIN" || fail "common drop-in did not require checksums"
+
+echo "=== stale recovery: current and mismatched markers fail closed ==="
+printf '{"name":"v1.1.0","height":4890179}\n' > "${DAEMON_HOME}/data/upgrade-info.json"
+if (svote_upgrade_prepare_stale_plan_recovery "v1.1.0") >/dev/null 2>&1; then
+  fail "current plan marker should not be archived"
+fi
+
+printf '{"name":"v1","height":802460}\n' > "${DAEMON_HOME}/data/upgrade-info.json"
+if (svote_upgrade_prepare_stale_plan_recovery "v1.1.0") >/dev/null 2>&1; then
+  fail "mismatched applied height should not be archived"
+fi
+
+echo "=== signer guard: exactly one managed Cosmovisor/svoted pair ==="
+SVOTE_PROC_ROOT="${TMP_ROOT}/proc"
+export SVOTE_PROC_ROOT
+mkdir -p "${SVOTE_PROC_ROOT}"
+
+make_process() {
+  local pid="$1"
+  local executable_name="$2"
+  local cmdline="$3"
+  local cgroup="$4"
+  local -a argv=()
+  local process_dir="${SVOTE_PROC_ROOT}/${pid}"
+  local executable="${TMP_ROOT}/bin/${executable_name}"
+  mkdir -p "$process_dir" "$(dirname "$executable")"
+  : > "$executable"
+  ln -s "$executable" "${process_dir}/exe"
+  read -r -a argv <<< "$cmdline"
+  printf '%s\0' "${argv[@]}" > "${process_dir}/cmdline"
+  printf 'DAEMON_HOME=%s\0' "$DAEMON_HOME" > "${process_dir}/environ"
+  printf 'Uid:\t%s\t%s\t%s\t%s\n' "$(id -u)" "$(id -u)" "$(id -u)" "$(id -u)" > "${process_dir}/status"
+  printf '0::%s\n' "$cgroup" > "${process_dir}/cgroup"
+}
+
+make_process 91001 cosmovisor "/usr/local/bin/cosmovisor run start --home ${DAEMON_HOME}" "/system.slice/svoted.service"
+make_process 91002 svoted "${COSMVISOR_ROOT}/genesis/bin/svoted start --home ${DAEMON_HOME}" "/system.slice/svoted.service"
+rm "${SVOTE_PROC_ROOT}/91002/exe"
+ln -s "${TMP_ROOT}/bin/svoted (deleted)" "${SVOTE_PROC_ROOT}/91002/exe"
+
+systemctl() {
+  case "$*" in
+    "show svoted -p MainPID --value") printf '91001\n' ;;
+    "show svoted -p ControlGroup --value") printf '/system.slice/svoted.service\n' ;;
+    *) return 1 ;;
+  esac
+}
+
+svote_upgrade_check_single_managed_signer \
+  || fail "valid managed signer pair was rejected: ${SVOTE_MANAGED_SIGNER_ERROR}"
+
+echo "=== signer guard: unmanaged second signer is rejected ==="
+make_process 91003 svoted "/usr/local/bin/svoted start --home ${DAEMON_HOME}" "/user.slice/session.scope"
+if svote_upgrade_check_single_managed_signer; then
+  fail "unmanaged second signer was accepted"
+fi
+case "$SVOTE_MANAGED_SIGNER_ERROR" in
+  *"outside svoted cgroup"*) ;;
+  *) fail "unexpected unmanaged signer error: ${SVOTE_MANAGED_SIGNER_ERROR}" ;;
+esac
+
+echo "=== signer guard: join.sh wrapper supervision is accepted ==="
+SVOTE_PROC_ROOT="${TMP_ROOT}/proc-wrapper"
+mkdir -p "$SVOTE_PROC_ROOT"
+make_process 92001 bash "/usr/bin/bash /root/.local/bin/svoted-wrapper.sh" "/system.slice/svoted.service"
+make_process 92002 cosmovisor "/root/.local/bin/cosmovisor run start --home ${DAEMON_HOME}" "/system.slice/svoted.service"
+make_process 92003 svoted "${COSMVISOR_ROOT}/genesis/bin/svoted start --home ${DAEMON_HOME}" "/system.slice/svoted.service"
+systemctl() {
+  case "$*" in
+    "show svoted -p MainPID --value") printf '92001\n' ;;
+    "show svoted -p ControlGroup --value") printf '/system.slice/svoted.service\n' ;;
+    *) return 1 ;;
+  esac
+}
+svote_upgrade_check_single_managed_signer \
+  || fail "wrapper-managed signer pair was rejected: ${SVOTE_MANAGED_SIGNER_ERROR}"
+
+echo "=== PASS: chain upgrade recovery tests ==="

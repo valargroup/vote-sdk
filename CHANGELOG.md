@@ -10,7 +10,9 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 - Publish checksum-pinned Cosmovisor archives for both Linux architectures,
   require the upgrade scheduler to load them, and show the exact upgrade info
-  before signing.
+  before signing. New and migrated validators enable checksum-required
+  auto-downloads, recover only chain-confirmed stale upgrade markers, and
+  refuse migrations that leave an unmanaged or duplicate signer process.
 
 ## v1.1.0
 
