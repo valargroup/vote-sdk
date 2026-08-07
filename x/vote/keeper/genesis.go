@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"bytes"
 	"fmt"
 
 	"cosmossdk.io/core/store"
@@ -331,8 +332,14 @@ func exportRoundTree(k *Keeper, kvStore store.KVStore, roundID []byte) (*types.G
 	innerOffset := len(prefix)
 	for ; iter.Valid(); iter.Next() {
 		key := iter.Key()
+		if len(key) != innerOffset+8 {
+			return nil, fmt.Errorf("commitment leaf key %x has %d bytes, expected %d", key, len(key), innerOffset+8)
+		}
 		index := getUint64BE(key[innerOffset:])
 		val := iter.Value()
+		if len(val) != 32 {
+			return nil, fmt.Errorf("commitment leaf at key %x has %d-byte value, expected 32", key, len(val))
+		}
 		leaf := make([]byte, len(val))
 		copy(leaf, val)
 		rt.CommitmentLeaves = append(rt.CommitmentLeaves, &types.CommitmentLeaf{
@@ -354,8 +361,14 @@ func exportRoundTree(k *Keeper, kvStore store.KVStore, roundID []byte) (*types.G
 	rootInnerOffset := len(rootPrefix)
 	for ; rootIter.Valid(); rootIter.Next() {
 		key := rootIter.Key()
+		if len(key) != rootInnerOffset+8 {
+			return nil, fmt.Errorf("commitment root key %x has %d bytes, expected %d", key, len(key), rootInnerOffset+8)
+		}
 		height := getUint64BE(key[rootInnerOffset:])
 		val := rootIter.Value()
+		if len(val) != 32 {
+			return nil, fmt.Errorf("commitment root at key %x has %d-byte value, expected 32", key, len(val))
+		}
 		root := make([]byte, len(val))
 		copy(root, val)
 		rt.CommitmentRoots = append(rt.CommitmentRoots, &types.GenesisCommitmentRoot{
@@ -376,10 +389,13 @@ func exportRoundTree(k *Keeper, kvStore store.KVStore, roundID []byte) (*types.G
 	bliInnerOffset := len(bliPrefix)
 	for ; bliIter.Valid(); bliIter.Next() {
 		key := bliIter.Key()
+		if len(key) != bliInnerOffset+8 {
+			return nil, fmt.Errorf("block leaf index key %x has %d bytes, expected %d", key, len(key), bliInnerOffset+8)
+		}
 		height := getUint64BE(key[bliInnerOffset:])
 		val := bliIter.Value()
-		if len(val) < 16 {
-			continue
+		if len(val) != 16 {
+			return nil, fmt.Errorf("block leaf index at key %x has %d-byte value, expected 16", key, len(val))
 		}
 		startIdx := getUint64BE(val[0:8])
 		count := getUint64BE(val[8:16])
@@ -410,10 +426,18 @@ func exportNullifiers(kvStore store.KVStore) ([]*types.NullifierEntry, error) {
 	for ; iter.Valid(); iter.Next() {
 		key := iter.Key()
 		// key layout: prefix(1) || type(1) || round_id(32) || nullifier(rest)
-		if len(key) < prefixLen+1+types.RoundIDLen {
-			continue
+		minKeyLen := prefixLen + 1 + types.RoundIDLen + 1
+		if len(key) < minKeyLen {
+			return nil, fmt.Errorf("nullifier key %x has %d bytes, expected at least %d", key, len(key), minKeyLen)
 		}
 		nfType := key[prefixLen]
+		if nfType > byte(types.NullifierTypeShare) {
+			return nil, fmt.Errorf("nullifier key %x has invalid type %d", key, nfType)
+		}
+		val := iter.Value()
+		if len(val) != 1 || val[0] != 1 {
+			return nil, fmt.Errorf("nullifier at key %x has invalid marker value %x", key, val)
+		}
 		roundID := make([]byte, types.RoundIDLen)
 		copy(roundID, key[prefixLen+1:prefixLen+1+types.RoundIDLen])
 		nf := make([]byte, len(key)-(prefixLen+1+types.RoundIDLen))
@@ -445,7 +469,7 @@ func exportEndorsedRounds(kvStore store.KVStore) ([]*types.EndorsedRound, error)
 	for ; iter.Valid(); iter.Next() {
 		key := iter.Key()
 		if len(key) < prefixLen+1+types.RoundIDLen {
-			continue
+			return nil, fmt.Errorf("endorsed round key %x is too short", key)
 		}
 		rest := key[prefixLen:]
 		separator := -1
@@ -456,12 +480,20 @@ func exportEndorsedRounds(kvStore store.KVStore) ([]*types.EndorsedRound, error)
 			}
 		}
 		if separator <= 0 || len(rest[separator+1:]) != types.RoundIDLen {
-			continue
+			return nil, fmt.Errorf("endorsed round key %x has invalid layout", key)
+		}
+		endorserID := string(rest[:separator])
+		if err := types.ValidateEndorserID(endorserID); err != nil {
+			return nil, fmt.Errorf("endorsed round key %x: %w", key, err)
+		}
+		val := iter.Value()
+		if len(val) != 1 || val[0] != 1 {
+			return nil, fmt.Errorf("endorsed round at key %x has invalid marker value %x", key, val)
 		}
 		roundID := make([]byte, types.RoundIDLen)
 		copy(roundID, rest[separator+1:])
 		entries = append(entries, &types.EndorsedRound{
-			EndorserId:  string(rest[:separator]),
+			EndorserId:  endorserID,
 			VoteRoundId: roundID,
 		})
 	}
@@ -480,10 +512,22 @@ func exportTallyResults(kvStore store.KVStore) ([]*types.TallyResult, error) {
 	defer iter.Close()
 
 	var results []*types.TallyResult
+	prefixLen := len(prefix)
+	expectedKeyLen := prefixLen + types.RoundIDLen + 8
 	for ; iter.Valid(); iter.Next() {
+		key := iter.Key()
+		if len(key) != expectedKeyLen {
+			return nil, fmt.Errorf("tally result key %x has %d bytes, expected %d", key, len(key), expectedKeyLen)
+		}
 		var result types.TallyResult
 		if err := unmarshal(iter.Value(), &result); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("tally result at key %x: %w", key, err)
+		}
+		roundID := key[prefixLen : prefixLen+types.RoundIDLen]
+		proposalID := getUint32BE(key[prefixLen+types.RoundIDLen:])
+		decision := getUint32BE(key[prefixLen+types.RoundIDLen+4:])
+		if !bytes.Equal(result.VoteRoundId, roundID) || result.ProposalId != proposalID || result.VoteDecision != decision {
+			return nil, fmt.Errorf("tally result at key %x does not match its key tuple", key)
 		}
 		results = append(results, &result)
 	}
@@ -507,8 +551,9 @@ func exportTallyAccumulators(kvStore store.KVStore) ([]*types.GenesisTallyAccumu
 	for ; iter.Valid(); iter.Next() {
 		key := iter.Key()
 		// key layout: prefix(1) || round_id(32) || proposal_id(4) || decision(4)
-		if len(key) < prefixLen+types.RoundIDLen+8 {
-			continue
+		expectedKeyLen := prefixLen + types.RoundIDLen + 8
+		if len(key) != expectedKeyLen {
+			return nil, fmt.Errorf("tally accumulator key %x has %d bytes, expected %d", key, len(key), expectedKeyLen)
 		}
 		roundID := make([]byte, types.RoundIDLen)
 		copy(roundID, key[prefixLen:prefixLen+types.RoundIDLen])
@@ -516,6 +561,9 @@ func exportTallyAccumulators(kvStore store.KVStore) ([]*types.GenesisTallyAccumu
 		decision := getUint32BE(key[prefixLen+types.RoundIDLen+4:])
 
 		val := iter.Value()
+		if len(val) != 64 {
+			return nil, fmt.Errorf("tally accumulator at key %x has %d-byte value, expected 64", key, len(val))
+		}
 		ct := make([]byte, len(val))
 		copy(ct, val)
 
@@ -546,8 +594,9 @@ func exportPartialDecryptions(kvStore store.KVStore) ([]*types.GenesisPartialDec
 	for ; iter.Valid(); iter.Next() {
 		key := iter.Key()
 		// key layout: prefix(1) || round_id(32) || validator_index(4) || proposal_id(4) || decision(4)
-		if len(key) < prefixLen+types.RoundIDLen+12 {
-			continue
+		expectedKeyLen := prefixLen + types.RoundIDLen + 12
+		if len(key) != expectedKeyLen {
+			return nil, fmt.Errorf("partial decryption key %x has %d bytes, expected %d", key, len(key), expectedKeyLen)
 		}
 		roundID := make([]byte, types.RoundIDLen)
 		copy(roundID, key[prefixLen:prefixLen+types.RoundIDLen])
@@ -557,7 +606,16 @@ func exportPartialDecryptions(kvStore store.KVStore) ([]*types.GenesisPartialDec
 
 		var entry types.PartialDecryptionEntry
 		if err := unmarshal(iter.Value(), &entry); err != nil {
-			return nil, fmt.Errorf("partial decryption unmarshal: %w", err)
+			return nil, fmt.Errorf("partial decryption at key %x: %w", key, err)
+		}
+		if validatorIndex == 0 {
+			return nil, fmt.Errorf("partial decryption key %x has zero validator index", key)
+		}
+		if entry.ProposalId != proposalID || entry.VoteDecision != decision {
+			return nil, fmt.Errorf("partial decryption at key %x does not match its key tuple", key)
+		}
+		if len(entry.PartialDecrypt) != 32 {
+			return nil, fmt.Errorf("partial decryption at key %x has %d-byte point, expected 32", key, len(entry.PartialDecrypt))
 		}
 
 		partials = append(partials, &types.GenesisPartialDecryption{
@@ -589,8 +647,9 @@ func exportShareCounts(kvStore store.KVStore) ([]*types.GenesisShareCount, error
 	for ; iter.Valid(); iter.Next() {
 		key := iter.Key()
 		// key layout: prefix(1) || round_id(32) || proposal_id(4) || decision(4)
-		if len(key) < prefixLen+types.RoundIDLen+8 {
-			continue
+		expectedKeyLen := prefixLen + types.RoundIDLen + 8
+		if len(key) != expectedKeyLen {
+			return nil, fmt.Errorf("share count key %x has %d bytes, expected %d", key, len(key), expectedKeyLen)
 		}
 		roundID := make([]byte, types.RoundIDLen)
 		copy(roundID, key[prefixLen:prefixLen+types.RoundIDLen])
@@ -598,8 +657,8 @@ func exportShareCounts(kvStore store.KVStore) ([]*types.GenesisShareCount, error
 		decision := getUint32BE(key[prefixLen+types.RoundIDLen+4:])
 
 		val := iter.Value()
-		if len(val) < 8 {
-			continue
+		if len(val) != 8 {
+			return nil, fmt.Errorf("share count at key %x has %d-byte value, expected 8", key, len(val))
 		}
 		count := getUint64BE(val)
 

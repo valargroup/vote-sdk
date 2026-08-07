@@ -14,6 +14,7 @@ import (
 
 	"github.com/cosmos/cosmos-sdk/runtime"
 	"github.com/cosmos/cosmos-sdk/testutil"
+	"google.golang.org/protobuf/proto"
 
 	svtest "github.com/valargroup/vote-sdk/testutil"
 	"github.com/valargroup/vote-sdk/x/vote/keeper"
@@ -433,6 +434,76 @@ func TestExportGenesisPropagatesRoundTreeError(t *testing.T) {
 	_, err := k.ExportGenesis(kvStore)
 	require.ErrorContains(t, err, "export round trees")
 	require.ErrorContains(t, err, fmt.Sprintf("round %x", roundID))
+}
+
+func TestExportGenesisRejectsMalformedRecords(t *testing.T) {
+	roundID := bytes.Repeat([]byte{0xA7}, types.RoundIDLen)
+	withSuffix := func(prefix []byte, suffix ...byte) []byte {
+		key := append([]byte(nil), prefix...)
+		return append(key, suffix...)
+	}
+
+	nullifierKey, err := types.NullifierKey(types.NullifierTypeGov, roundID, []byte{0x01})
+	require.NoError(t, err)
+	endorsedRoundKey, err := types.EndorsedRoundKey("zodl", roundID)
+	require.NoError(t, err)
+	tallyKey, err := types.TallyKey(roundID, 1, 0)
+	require.NoError(t, err)
+	partialKey, err := types.PartialDecryptionKey(roundID, 1, 1, 0)
+	require.NoError(t, err)
+	partialValue, err := proto.Marshal(&types.PartialDecryptionEntry{ProposalId: 1, VoteDecision: 0})
+	require.NoError(t, err)
+	shareCountKey, err := types.ShareCountKey(roundID, 1, 0)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name     string
+		key      []byte
+		value    []byte
+		seedTree bool
+		wantErr  string
+	}{
+		{"commitment leaf key", withSuffix(types.CommitmentLeafPrefixForRound(roundID), 0x01), bytes.Repeat([]byte{0x01}, 32), true, "commitment leaf key"},
+		{"commitment leaf value", types.CommitmentLeafKey(roundID, 0), []byte{0x01}, true, "commitment leaf at key"},
+		{"commitment root key", withSuffix(types.CommitmentRootPrefixForRound(roundID), 0x01), bytes.Repeat([]byte{0x01}, 32), true, "commitment root key"},
+		{"commitment root value", types.CommitmentRootKey(roundID, 1), []byte{0x01}, true, "commitment root at key"},
+		{"block leaf index key", withSuffix(types.BlockLeafIndexPrefixForRound(roundID), 0x01), make([]byte, 16), true, "block leaf index key"},
+		{"block leaf index value", types.BlockLeafIndexKey(roundID, 1), []byte{0x01}, true, "block leaf index at key"},
+		{"nullifier key", withSuffix(types.NullifierPrefix, 0x00), []byte{1}, false, "nullifier key"},
+		{"nullifier marker", nullifierKey, []byte{0}, false, "invalid marker value"},
+		{"endorsed round key", withSuffix(types.EndorsedRoundPrefix, []byte("zodl")...), []byte{1}, false, "endorsed round key"},
+		{"endorsed round marker", endorsedRoundKey, []byte{0}, false, "invalid marker value"},
+		{"tally result key", withSuffix(types.TallyResultPrefix, 0x01), []byte{0x01}, false, "tally result key"},
+		{"tally accumulator key", withSuffix(types.TallyPrefix, 0x01), make([]byte, 64), false, "tally accumulator key"},
+		{"tally accumulator value", tallyKey, []byte{0x01}, false, "tally accumulator at key"},
+		{"partial decryption key", withSuffix(types.PartialDecryptionPrefix, 0x01), []byte{0x01}, false, "partial decryption key"},
+		{"partial decryption value", partialKey, partialValue, false, "has 0-byte point"},
+		{"share count key", withSuffix(types.ShareCountPrefix, 0x01), make([]byte, 8), false, "share count key"},
+		{"share count value", shareCountKey, []byte{0x01}, false, "share count at key"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			key := storetypes.NewKVStoreKey(types.StoreKey)
+			tkey := storetypes.NewTransientStoreKey("transient_test")
+			testCtx := testutil.DefaultContextWithDB(t, key, tkey)
+			storeService := runtime.NewKVStoreService(key)
+			k := keeper.NewKeeper(storeService, svtest.TestAuthority, log.NewNopLogger(), nil, nil)
+			kvStore := k.OpenKVStore(testCtx.Ctx)
+
+			if tc.seedTree {
+				require.NoError(t, k.SetVoteRound(kvStore, &types.VoteRound{
+					VoteRoundId: roundID,
+					VoteEndTime: 2_000_000,
+				}))
+				require.NoError(t, k.SetCommitmentTreeState(kvStore, roundID, &types.CommitmentTreeState{NextIndex: 1}))
+			}
+			require.NoError(t, kvStore.Set(tc.key, tc.value))
+
+			_, err := k.ExportGenesis(kvStore)
+			require.ErrorContains(t, err, tc.wantErr)
+		})
+	}
 }
 
 // TestInitGenesisPopulatesPallasKeyReverseIndex verifies that InitGenesis
