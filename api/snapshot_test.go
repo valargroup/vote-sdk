@@ -242,3 +242,41 @@ func TestFetchNullifierRootAcceptsDatasetV2SemanticCircuitRoot(t *testing.T) {
 		t.Fatalf("root = %x, want semantic circuit_root", root.value)
 	}
 }
+
+func TestFetchNullifierRootRejectsInvalidDatasetV2CircuitRoot(t *testing.T) {
+	const height = uint64(3_500_000)
+	tests := []struct {
+		name        string
+		circuitRoot string
+		wantErr     string
+	}{
+		{name: "missing", wantErr: "dataset version 2 response is missing circuit_root"},
+		{name: "malformed", circuitRoot: "not-hex", wantErr: "decode PIR circuit_root hex"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				response := map[string]any{
+					"root29":          strings.Repeat("00", 32),
+					"height":          height,
+					"nullifier_pool":  "ironwood",
+					"dataset_version": 2,
+					"zcash_network":   "test",
+				}
+				if test.circuitRoot != "" {
+					response["circuit_root"] = test.circuitRoot
+				}
+				if err := json.NewEncoder(w).Encode(response); err != nil {
+					t.Errorf("encode response: %v", err)
+				}
+			}))
+			defer server.Close()
+
+			_, err := fetchNullifierRoot(context.Background(), server.URL, height)
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("fetchNullifierRoot error = %v, want %q", err, test.wantErr)
+			}
+		})
+	}
+}

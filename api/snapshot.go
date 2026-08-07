@@ -254,14 +254,18 @@ func fetchNullifierRoot(
 	}
 
 	// The PIR service returns raw hex (no 0x prefix) of a Pallas Fp element (32 bytes LE).
-	rootHex := result.CircuitRoot
-	rootField := "circuit_root"
-	if rootHex == "" {
-		rootHex = result.Root29
-		rootField = "root29"
+	rootHex := result.Root29
+	rootField := "root29"
+	if *result.DatasetVersion == ironwoodRuntimeTwoTierPIRDatasetVersion {
+		rootHex = result.CircuitRoot
+		rootField = "circuit_root"
 	}
 	if rootHex == "" {
-		return nil, errors.New("PIR service response is missing circuit_root/root29")
+		return nil, fmt.Errorf(
+			"PIR service dataset version %d response is missing %s",
+			*result.DatasetVersion,
+			rootField,
+		)
 	}
 	rootBytes, err := hex.DecodeString(rootHex)
 	if err != nil {
