@@ -3,6 +3,7 @@ package types
 import (
 	"bytes"
 	"fmt"
+	"math"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
@@ -261,6 +262,9 @@ func ValidateGenesisState(gs *GenesisState) error {
 		}
 		if action.ActionId == 0 {
 			return fmt.Errorf("coordinator_actions[%d].action_id cannot be zero", i)
+		}
+		if action.ActionId == math.MaxUint64 {
+			return fmt.Errorf("coordinator_actions[%d].action_id cannot be %d", i, uint64(math.MaxUint64))
 		}
 		if _, dup := seenCoordinatorActions[action.ActionId]; dup {
 			return fmt.Errorf("coordinator_actions[%d]: duplicate action_id %d", i, action.ActionId)

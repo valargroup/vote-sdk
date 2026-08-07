@@ -2,6 +2,7 @@ package types_test
 
 import (
 	"bytes"
+	"math"
 	"strings"
 	"testing"
 
@@ -232,6 +233,12 @@ func TestValidateGenesisState_NullifierTypeTooHigh(t *testing.T) {
 	err := types.ValidateGenesisState(gs)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "nullifiers[0].nullifier_type is 3")
+}
+
+func TestValidateGenesisState_RejectsExhaustedCoordinatorActionID(t *testing.T) {
+	gs := validGenesis()
+	gs.CoordinatorActions = []*types.CoordinatorAction{{ActionId: math.MaxUint64}}
+	require.ErrorContains(t, types.ValidateGenesisState(gs), "action_id cannot be 18446744073709551615")
 }
 
 func TestValidateGenesisState_NullifierRoundIDBadLength(t *testing.T) {

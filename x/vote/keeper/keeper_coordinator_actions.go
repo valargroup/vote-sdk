@@ -2,6 +2,7 @@ package keeper
 
 import (
 	"fmt"
+	"math"
 
 	"cosmossdk.io/core/store"
 
@@ -41,6 +42,9 @@ func (k *Keeper) AllocateCoordinatorActionID(kvStore store.KVStore) (uint64, err
 	if err != nil {
 		return 0, err
 	}
+	if actionID == math.MaxUint64 {
+		return 0, fmt.Errorf("%w: coordinator action ids are exhausted", types.ErrInvalidCoordinatorAction)
+	}
 	if err := k.SetNextCoordinatorActionID(kvStore, actionID+1); err != nil {
 		return 0, err
 	}
@@ -73,6 +77,9 @@ func (k *Keeper) SetCoordinatorAction(kvStore store.KVStore, action *types.Coord
 	}
 	if action.ActionId == 0 {
 		return fmt.Errorf("%w: action_id cannot be zero", types.ErrInvalidCoordinatorAction)
+	}
+	if action.ActionId == math.MaxUint64 {
+		return fmt.Errorf("%w: action_id cannot be %d", types.ErrInvalidCoordinatorAction, uint64(math.MaxUint64))
 	}
 	bz, err := marshal(action)
 	if err != nil {

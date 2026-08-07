@@ -2,6 +2,7 @@ package keeper_test
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -31,6 +32,22 @@ func (s *MsgServerTestSuite) proposeCoordinatorAction(ctx context.Context, creat
 		Creator: creator,
 		Payload: coordinatorPayloadForMessage(s.T(), msg),
 	})
+}
+
+func (s *MsgServerTestSuite) TestCoordinatorAction_IDExhaustion() {
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	s.Require().NoError(s.keeper.SetNextCoordinatorActionID(kv, math.MaxUint64))
+	_, err := s.keeper.AllocateCoordinatorActionID(kv)
+	s.Require().ErrorIs(err, types.ErrInvalidCoordinatorAction)
+
+	next, err := s.keeper.GetNextCoordinatorActionID(kv)
+	s.Require().NoError(err)
+	s.Require().Equal(uint64(math.MaxUint64), next)
+
+	err = s.keeper.SetCoordinatorAction(kv, &types.CoordinatorAction{ActionId: math.MaxUint64})
+	s.Require().ErrorIs(err, types.ErrInvalidCoordinatorAction)
 }
 
 func (s *MsgServerTestSuite) createVotingSessionViaCoordinator(ctx sdk.Context, msg *types.MsgCreateVotingSession) (*types.MsgCreateVotingSessionResponse, error) {
