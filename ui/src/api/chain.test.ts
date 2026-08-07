@@ -14,11 +14,17 @@ import {
   validatePublishedSnapshotManifestShape,
 } from "./chain";
 
-const files = {
+const legacyFiles = {
   "tier0.bin": { size: 1, sha256: "a".repeat(64) },
   "tier1.bin": { size: 2, sha256: "b".repeat(64) },
   "tier2.bin": { size: 3, sha256: "c".repeat(64) },
   "pir_root.json": { size: 4, sha256: "d".repeat(64) },
+};
+
+const twoTierFiles = {
+  "tier0.bin": legacyFiles["tier0.bin"],
+  "tier1.bin": legacyFiles["tier1.bin"],
+  "pir_root.json": legacyFiles["pir_root.json"],
 };
 
 function manifest(patch: Partial<PublishedSnapshotManifest> = {}): PublishedSnapshotManifest {
@@ -28,7 +34,7 @@ function manifest(patch: Partial<PublishedSnapshotManifest> = {}): PublishedSnap
     dataset_version: 1,
     height: 2_800_000,
     created_at: "2026-05-14T00:00:00Z",
-    files,
+    files: legacyFiles,
     ...patch,
   };
 }
@@ -109,8 +115,15 @@ describe("published snapshot validation", () => {
     )).toBe("https://staging.example.com/snapshots/test/2800000/manifest.json");
   });
 
-  it("accepts a valid manifest for the requested height", () => {
+  it("accepts a legacy three-tier manifest for the requested height", () => {
     expect(validatePublishedSnapshotManifestShape(manifest(), 2_800_000)).toEqual([]);
+  });
+
+  it("accepts a dataset-v2 two-tier manifest", () => {
+    expect(validatePublishedSnapshotManifestShape(
+      manifest({ dataset_version: 2, files: twoTierFiles }),
+      2_800_000
+    )).toEqual([]);
   });
 
   it("rejects non-object manifest payloads", () => {
@@ -131,19 +144,19 @@ describe("published snapshot validation", () => {
 
   it("requires the Ironwood dataset", () => {
     expect(validatePublishedSnapshotManifestShape(
-      manifest({ nullifier_pool: "orchard", dataset_version: 2 }),
+      manifest({ nullifier_pool: "orchard", dataset_version: 3 }),
       2_800_000
     )).toEqual([
       "nullifier_pool must be ironwood, got orchard",
-      "dataset_version must be 1, got 2",
+      "dataset_version must be 1 or 2, got 3",
     ]);
   });
 
-  it("requires all files that nf-server bootstrap consumes", () => {
+  it("requires all files consumed by legacy nf-server bootstrap", () => {
     const broken = manifest({
       files: {
         "tier0.bin": { size: 0, sha256: "not-a-sha" },
-        "tier1.bin": files["tier1.bin"],
+        "tier1.bin": legacyFiles["tier1.bin"],
       },
     });
 
@@ -151,6 +164,20 @@ describe("published snapshot validation", () => {
       "tier0.bin has invalid size",
       "tier0.bin has invalid sha256",
       "missing required file tier2.bin",
+      "missing required file pir_root.json",
+    ]);
+  });
+
+  it("does not require tier2.bin from dataset-v2 snapshots", () => {
+    const broken = manifest({
+      dataset_version: 2,
+      files: {
+        "tier0.bin": twoTierFiles["tier0.bin"],
+        "tier1.bin": twoTierFiles["tier1.bin"],
+      },
+    });
+
+    expect(validatePublishedSnapshotManifestShape(broken, 2_800_000)).toEqual([
       "missing required file pir_root.json",
     ]);
   });

@@ -8,6 +8,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Let the admin UI validate both legacy three-tier and runtime two-tier PIR
+  snapshots, and compare PIR fleet roots using the semantic root names.
 - Accept compact, versioned Ironwood transaction effects in delegation messages
   and derive the RedPallas signing digest directly instead of receiving it as a
   separate message field.
