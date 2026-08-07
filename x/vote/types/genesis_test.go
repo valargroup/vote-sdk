@@ -282,6 +282,65 @@ func TestValidateGenesisState_TallyResultBadRoundID(t *testing.T) {
 	require.Contains(t, err.Error(), "tally_results[0].vote_round_id")
 }
 
+func TestValidateGenesisState_DuplicateAccountingRecords(t *testing.T) {
+	roundID := bytes.Repeat([]byte{0xAA}, types.RoundIDLen)
+	tests := []struct {
+		name    string
+		mutate  func(*types.GenesisState)
+		wantErr string
+	}{
+		{
+			name: "tally result",
+			mutate: func(gs *types.GenesisState) {
+				gs.TallyResults = append(gs.TallyResults, &types.TallyResult{
+					VoteRoundId: roundID, ProposalId: 1, VoteDecision: 0, TotalValue: 200,
+				})
+			},
+			wantErr: "tally_results[1]: duplicate round/proposal/decision tuple",
+		},
+		{
+			name: "tally accumulator",
+			mutate: func(gs *types.GenesisState) {
+				gs.TallyAccumulators = append(gs.TallyAccumulators, &types.GenesisTallyAccumulator{
+					RoundId: roundID, ProposalId: 1, VoteDecision: 0, Ciphertext: bytes.Repeat([]byte{0xEE}, 64),
+				})
+			},
+			wantErr: "tally_accumulators[1]: duplicate round/proposal/decision tuple",
+		},
+		{
+			name: "share count",
+			mutate: func(gs *types.GenesisState) {
+				gs.ShareCounts = append(gs.ShareCounts, &types.GenesisShareCount{
+					RoundId: roundID, ProposalId: 1, VoteDecision: 0, Count: 6,
+				})
+			},
+			wantErr: "share_counts[1]: duplicate round/proposal/decision tuple",
+		},
+		{
+			name: "partial decryption",
+			mutate: func(gs *types.GenesisState) {
+				partial := &types.GenesisPartialDecryption{
+					RoundId: roundID, ValidatorIndex: 1, ProposalId: 1, VoteDecision: 0,
+					PartialDecrypt: bytes.Repeat([]byte{0x11}, 32),
+				}
+				gs.PartialDecryptions = []*types.GenesisPartialDecryption{partial, {
+					RoundId: roundID, ValidatorIndex: 1, ProposalId: 1, VoteDecision: 0,
+					PartialDecrypt: bytes.Repeat([]byte{0x22}, 32),
+				}}
+			},
+			wantErr: "partial_decryptions[1]: duplicate round/validator/proposal/decision tuple",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gs := validGenesis()
+			tc.mutate(gs)
+			require.ErrorContains(t, types.ValidateGenesisState(gs), tc.wantErr)
+		})
+	}
+}
+
 func TestValidateGenesisState_PallasKeyEmptyAddress(t *testing.T) {
 	gs := validGenesis()
 	gs.PallasKeys[0].ValidatorAddress = ""

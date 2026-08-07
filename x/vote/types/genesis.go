@@ -122,11 +122,23 @@ func ValidateGenesisState(gs *GenesisState) error {
 	// are explicitly invalid once we enforce a minimum.
 	// (No explicit validation needed: 0 is treated as default 1 in InitGenesis.)
 
+	type tallyRecordKey struct {
+		roundID      string
+		proposalID   uint32
+		voteDecision uint32
+	}
+
 	// Validate tally results.
+	seenTallyResults := make(map[tallyRecordKey]struct{}, len(gs.TallyResults))
 	for i, result := range gs.TallyResults {
 		if len(result.VoteRoundId) != RoundIDLen {
 			return fmt.Errorf("tally_results[%d].vote_round_id is %d bytes, expected %d", i, len(result.VoteRoundId), RoundIDLen)
 		}
+		key := tallyRecordKey{string(result.VoteRoundId), result.ProposalId, result.VoteDecision}
+		if _, dup := seenTallyResults[key]; dup {
+			return fmt.Errorf("tally_results[%d]: duplicate round/proposal/decision tuple", i)
+		}
+		seenTallyResults[key] = struct{}{}
 	}
 
 	// Validate Pallas keys.
@@ -140,6 +152,7 @@ func ValidateGenesisState(gs *GenesisState) error {
 	}
 
 	// Validate tally accumulators.
+	seenTallyAccumulators := make(map[tallyRecordKey]struct{}, len(gs.TallyAccumulators))
 	for i, acc := range gs.TallyAccumulators {
 		if len(acc.RoundId) != RoundIDLen {
 			return fmt.Errorf("tally_accumulators[%d].round_id is %d bytes, expected %d", i, len(acc.RoundId), RoundIDLen)
@@ -147,16 +160,32 @@ func ValidateGenesisState(gs *GenesisState) error {
 		if len(acc.Ciphertext) != 64 {
 			return fmt.Errorf("tally_accumulators[%d].ciphertext is %d bytes, expected 64", i, len(acc.Ciphertext))
 		}
+		key := tallyRecordKey{string(acc.RoundId), acc.ProposalId, acc.VoteDecision}
+		if _, dup := seenTallyAccumulators[key]; dup {
+			return fmt.Errorf("tally_accumulators[%d]: duplicate round/proposal/decision tuple", i)
+		}
+		seenTallyAccumulators[key] = struct{}{}
 	}
 
 	// Validate share counts.
+	seenShareCounts := make(map[tallyRecordKey]struct{}, len(gs.ShareCounts))
 	for i, sc := range gs.ShareCounts {
 		if len(sc.RoundId) != RoundIDLen {
 			return fmt.Errorf("share_counts[%d].round_id is %d bytes, expected %d", i, len(sc.RoundId), RoundIDLen)
 		}
+		key := tallyRecordKey{string(sc.RoundId), sc.ProposalId, sc.VoteDecision}
+		if _, dup := seenShareCounts[key]; dup {
+			return fmt.Errorf("share_counts[%d]: duplicate round/proposal/decision tuple", i)
+		}
+		seenShareCounts[key] = struct{}{}
 	}
 
 	// Validate partial decryptions.
+	type partialDecryptionKey struct {
+		tallyRecordKey
+		validatorIndex uint32
+	}
+	seenPartialDecryptions := make(map[partialDecryptionKey]struct{}, len(gs.PartialDecryptions))
 	for i, pd := range gs.PartialDecryptions {
 		if len(pd.RoundId) != RoundIDLen {
 			return fmt.Errorf("partial_decryptions[%d].round_id is %d bytes, expected %d", i, len(pd.RoundId), RoundIDLen)
@@ -167,6 +196,14 @@ func ValidateGenesisState(gs *GenesisState) error {
 		if len(pd.PartialDecrypt) != 32 {
 			return fmt.Errorf("partial_decryptions[%d].partial_decrypt is %d bytes, expected 32", i, len(pd.PartialDecrypt))
 		}
+		key := partialDecryptionKey{
+			tallyRecordKey: tallyRecordKey{string(pd.RoundId), pd.ProposalId, pd.VoteDecision},
+			validatorIndex: pd.ValidatorIndex,
+		}
+		if _, dup := seenPartialDecryptions[key]; dup {
+			return fmt.Errorf("partial_decryptions[%d]: duplicate round/validator/proposal/decision tuple", i)
+		}
+		seenPartialDecryptions[key] = struct{}{}
 	}
 
 	// Validate endorser mappings.
