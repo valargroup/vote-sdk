@@ -3,6 +3,7 @@ package keeper_test
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -128,9 +129,22 @@ func (s *KeeperTestSuite) TestEndorsers_KeeperMappingMethods_TableDriven() {
 			wantAddress: testAddr(0x11),
 		},
 		{
+			name:        "canonicalizes address",
+			endorserID:  "zodl",
+			address:     strings.ToUpper(testAddr(0x12)),
+			wantFound:   true,
+			wantAddress: testAddr(0x12),
+		},
+		{
 			name:       "empty address rejected",
 			endorserID: "zodl",
 			address:    "",
+			wantSetErr: types.ErrInvalidField,
+		},
+		{
+			name:       "invalid address rejected",
+			endorserID: "zodl",
+			address:    "not-an-address",
 			wantSetErr: types.ErrInvalidField,
 		},
 		{

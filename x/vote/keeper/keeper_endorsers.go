@@ -33,7 +33,11 @@ func (k *Keeper) SetEndorser(kvStore store.KVStore, endorserID, address string) 
 	if address == "" {
 		return fmt.Errorf("%w: address cannot be empty", types.ErrInvalidField)
 	}
-	return kvStore.Set(key, []byte(address))
+	canonical, err := normalizeBech32Addr(address)
+	if err != nil {
+		return fmt.Errorf("%w: address %q is not a valid bech32 address: %v", types.ErrInvalidField, address, err)
+	}
+	return kvStore.Set(key, []byte(canonical))
 }
 
 // DeleteEndorser clears the current mapping. Stored endorsements remain intact.
