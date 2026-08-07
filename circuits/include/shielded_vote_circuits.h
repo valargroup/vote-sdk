@@ -4,7 +4,7 @@
  * This header declares the C-compatible functions exported by the
  * shielded-vote-circuits Rust static library (libshielded_vote_circuits.a).
  *
- * Used by Go CGo bindings in ffi/zkp/halo2/ and ffi/redpallas/.
+ * Used by Go CGo bindings in ffi/zkp/halo2/, ffi/redpallas/, and ffi/tx1/.
  */
 
 #ifndef SHIELDED_VOTE_CIRCUITS_H
@@ -100,6 +100,33 @@ int32_t sv_verify_redpallas_sig(
     size_t sighash_len,
     const uint8_t* sig_ptr,
     size_t sig_len
+);
+
+/* -----------------------------------------------------------------------
+ * Delegation TX1 signature digest
+ * ----------------------------------------------------------------------- */
+
+/*
+ * Compute the canonical V6 shielded signature digest from the fixed,
+ * versioned delegation TX1 effects payload.
+ *
+ * Parameters:
+ *   effects_ptr - Pointer to the 1641-byte TX1 effects payload.
+ *   effects_len - Length of the payload (must be 1641).
+ *   out_ptr     - Pointer to a caller-owned 32-byte output buffer.
+ *   out_len     - Length of the output buffer (must be 32).
+ *
+ * Returns:
+ *    0  on success.
+ *   -1  for null pointers, wrong lengths, or an unsupported version.
+ *   -3  if an encoded Ironwood action or bundle field is invalid.
+ *   -6  if an internal panic is caught at the FFI boundary.
+ */
+int32_t sv_compute_delegation_sighash(
+    const uint8_t* effects_ptr,
+    size_t effects_len,
+    uint8_t* out_ptr,
+    size_t out_len
 );
 
 /* -----------------------------------------------------------------------

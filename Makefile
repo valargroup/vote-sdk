@@ -165,7 +165,7 @@ test-halo2-ante: circuits
 
 ## test-redpallas: Run Go tests with real RedPallas signature verification via CGo (requires circuits)
 test-redpallas: circuits
-	go test -tags redpallas -count=1 -v ./ffi/redpallas/... ./x/vote/ante/...
+	go test -tags redpallas -count=1 -v ./ffi/redpallas/... ./ffi/tx1/... ./x/vote/ante/...
 
 ## test-redpallas-ante: Run ante handler tests with real RedPallas verification
 test-redpallas-ante: circuits
@@ -173,7 +173,7 @@ test-redpallas-ante: circuits
 
 ## test-all-ffi: Run all FFI-backed tests (Halo2 + RedPallas) (requires circuits)
 test-all-ffi: circuits
-	go test -tags "halo2 redpallas" -count=1 -v ./ffi/zkp/halo2/... ./ffi/redpallas/... ./x/vote/ante/...
+	go test -tags "halo2 redpallas" -count=1 -v ./ffi/zkp/halo2/... ./ffi/redpallas/... ./ffi/tx1/... ./x/vote/ante/...
 
 # ---------------------------------------------------------------------------
 # Deployment targets

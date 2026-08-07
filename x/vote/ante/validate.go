@@ -20,6 +20,7 @@ import (
 
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/ffi/redpallas"
+	"github.com/valargroup/vote-sdk/ffi/tx1"
 	"github.com/valargroup/vote-sdk/ffi/zkp"
 	"github.com/valargroup/vote-sdk/x/vote/keeper"
 	"github.com/valargroup/vote-sdk/x/vote/types"
@@ -126,21 +127,21 @@ func verifyProofs(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper, 
 // a MsgDelegateVote. It looks up the session to pass nc_root and
 // nullifier_imt_root as ZKP public inputs.
 func verifyDelegation(ctx context.Context, msg *types.MsgDelegateVote, k *keeper.Keeper, opts ValidateOpts) error {
-	// Verify the sighash is 32 bytes. All clients send the ZIP-244 sighash
-	// extracted from the governance PCZT. The ZKP verification below provides
-	// the governance data binding — it proves rk = ak.randomize(alpha), note
-	// ownership, and correct VAN encoding.
-	if len(msg.Sighash) != 32 {
-		return types.ErrSighashMismatch
-	}
 	// Validate rk is a valid on-curve non-identity Pallas point before
 	// passing to the FFI. This makes the Go layer self-sufficient against
 	// the identity-point signature bypass regardless of Rust-side checks.
 	if _, err := elgamal.UnmarshalPublicKey(msg.Rk); err != nil {
 		return fmt.Errorf("%w: rk: %v", types.ErrInvalidSignature, err)
 	}
-	// RedPallas signature verification over the client-provided sighash.
-	if err := opts.SigVerifier.Verify(msg.Rk, msg.Sighash, msg.SpendAuthSig); err != nil {
+
+	canonicalSighash, err := tx1.ComputeDelegationSighash(msg.Tx1Effects)
+	if err != nil {
+		return fmt.Errorf("%w: tx1_effects: %v", types.ErrInvalidField, err)
+	}
+
+	// Verify the RedPallas signature over the digest reconstructed from the
+	// supplied Ironwood transaction effects.
+	if err := opts.SigVerifier.Verify(msg.Rk, canonicalSighash, msg.SpendAuthSig); err != nil {
 		return fmt.Errorf("%w: %v", types.ErrInvalidSignature, err)
 	}
 

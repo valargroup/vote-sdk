@@ -6,7 +6,7 @@
 //! constant value makes fixtures reusable indefinitely.
 
 use crate::payloads::{DelegationBundlePayload, SetupRoundFields};
-use blake2b_simd::Params as Blake2bParams;
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use ff::{Field, PrimeField};
 use group::GroupEncoding;
 use incrementalmerkletree::{Hashable, Level};
@@ -20,6 +20,7 @@ use orchard::{
 use pasta_curves::arithmetic::CurveAffine;
 use pasta_curves::pallas;
 use rand::rngs::OsRng;
+use serde::Deserialize;
 use voting_circuits::delegation::{
     build_delegation_bundle, create_delegation_proof, verify_delegation_proof, ImtProofData,
     ImtProvider, RealNoteInput, SpacedLeafImtProvider,
@@ -30,6 +31,33 @@ use zcash_voting::VotingHotkey;
 /// into round_id (which is a ZKP public input), fixtures bind to it permanently.
 /// Using a fixed far-future value makes fixtures reusable indefinitely.
 const FAR_FUTURE_VOTE_END_TIME: u64 = 4102444800;
+
+#[derive(Deserialize)]
+struct DelegationTX1Fixture {
+    tx1_effects: String,
+}
+
+fn delegation_tx1_effects(
+    rk: &[u8; 32],
+    signed_note_nullifier: &[u8; 32],
+    cmx_new: &[u8; 32],
+) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+    let fixture: DelegationTX1Fixture = serde_json::from_str(include_str!(
+        "../../testutil/testdata/delegation_tx1_effects_v1.json"
+    ))?;
+    let mut effects = BASE64_STANDARD.decode(fixture.tx1_effects)?;
+    if effects.len() != shielded_vote_circuits::tx1::EFFECTS_LEN
+        || effects[0] != shielded_vote_circuits::tx1::EFFECTS_VERSION
+    {
+        return Err("invalid delegation TX1 fixture framing".into());
+    }
+
+    const ACTION_START: usize = 1;
+    effects[ACTION_START + 32..ACTION_START + 64].copy_from_slice(signed_note_nullifier);
+    effects[ACTION_START + 64..ACTION_START + 96].copy_from_slice(rk);
+    effects[ACTION_START + 96..ACTION_START + 128].copy_from_slice(cmx_new);
+    Ok(effects)
+}
 
 /// Data from delegation that the vote proof builder needs.
 pub struct VoteProofDelegationData {
@@ -142,19 +170,9 @@ fn build_delegation_payload(
         .iter()
         .map(|g| g.to_repr())
         .collect();
-    // Sighash: in production this is the ZIP-244 sighash extracted from the
-    // governance PCZT. The e2e test builds the bundle directly (no PCZT), so
-    // we use a deterministic 32-byte value. The chain only checks
-    // len(sighash)==32 and verifies the RedPallas sig over it.
-    let sighash = {
-        let h = Blake2bParams::new()
-            .hash_length(32)
-            .personal(b"e2e-test-sighash")
-            .hash(&rk_bytes);
-        let mut buf = [0u8; 32];
-        buf.copy_from_slice(h.as_bytes());
-        buf
-    };
+    let tx1_effects = delegation_tx1_effects(&rk_bytes, &nf_signed_bytes, &cmx_new_bytes)?;
+    let sighash = shielded_vote_circuits::tx1::sighash(&tx1_effects)
+        .map_err(|e| format!("delegation TX1 sighash: {e}"))?;
     let sig = rsk.sign(&mut rng, &sighash);
 
     let sig_bytes: [u8; 64] = (&sig).into();
@@ -162,7 +180,7 @@ fn build_delegation_payload(
     let payload = DelegationBundlePayload {
         rk: rk_bytes.to_vec(),
         spend_auth_sig: sig_bytes.to_vec(),
-        sighash: sighash.to_vec(),
+        tx1_effects,
         signed_note_nullifier: nf_signed_bytes.to_vec(),
         cmx_new: cmx_new_bytes[..].to_vec(),
         van_cmx: van_cmx_bytes[..].to_vec(),
@@ -183,11 +201,9 @@ fn build_delegation_payload(
 }
 
 fn rk_bytes_from_instance(instance: &voting_circuits::delegation::Instance) -> [u8; 32] {
-    let rk_affine = Option::<pallas::Affine>::from(pallas::Affine::from_xy(
-        instance.rk_x,
-        instance.rk_y,
-    ))
-    .expect("delegation instance rk coordinates must be on-curve");
+    let rk_affine =
+        Option::<pallas::Affine>::from(pallas::Affine::from_xy(instance.rk_x, instance.rk_y))
+            .expect("delegation instance rk coordinates must be on-curve");
     rk_affine.to_bytes().into()
 }
 
@@ -695,20 +711,15 @@ fn build_multi_delegation_payloads(
                 let ask = SpendAuthorizingKey::from(&input.sk);
                 let rsk = ask.randomize(&alpha);
                 let rk_bytes = rk_bytes_from_instance(&bundle.instance);
-                let sighash = {
-                    let h = Blake2bParams::new()
-                        .hash_length(32)
-                        .personal(b"e2e-test-sighash")
-                        .hash(&rk_bytes);
-                    let mut buf = [0u8; 32];
-                    buf.copy_from_slice(h.as_bytes());
-                    buf
-                };
+                let nf_signed_bytes = bundle.instance.nf_signed.to_bytes();
+                let cmx_new_bytes = bundle.instance.cmx_new.to_repr();
+                let tx1_effects =
+                    delegation_tx1_effects(&rk_bytes, &nf_signed_bytes, &cmx_new_bytes)?;
+                let sighash = shielded_vote_circuits::tx1::sighash(&tx1_effects)
+                    .map_err(|e| format!("delegation {} TX1 sighash: {e}", i))?;
                 let sig = rsk.sign(&mut rng, &sighash);
                 let sig_bytes: [u8; 64] = (&sig).into();
 
-                let nf_signed_bytes = bundle.instance.nf_signed.to_bytes();
-                let cmx_new_bytes = bundle.instance.cmx_new.to_repr();
                 let van_cmx_bytes = bundle.instance.van_comm.to_repr();
                 let gov_null_bytes: Vec<[u8; 32]> =
                     bundle.instance.gov_null.iter().map(|g| g.to_repr()).collect();
@@ -716,7 +727,7 @@ fn build_multi_delegation_payloads(
                 let payload = DelegationBundlePayload {
                     rk: rk_bytes.to_vec(),
                     spend_auth_sig: sig_bytes.to_vec(),
-                    sighash: sighash.to_vec(),
+                    tx1_effects,
                     signed_note_nullifier: nf_signed_bytes.to_vec(),
                     cmx_new: cmx_new_bytes[..].to_vec(),
                     van_cmx: van_cmx_bytes[..].to_vec(),

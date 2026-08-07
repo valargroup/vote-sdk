@@ -3,6 +3,8 @@
 package ante_test
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -37,31 +39,47 @@ func rpMustReadFixture(t *testing.T, name string) []byte {
 	return data
 }
 
+type delegationTX1Fixture struct {
+	RK                   string `json:"rk"`
+	SpendAuthSig         string `json:"spend_auth_sig"`
+	SignedNoteNullifier  string `json:"signed_note_nullifier"`
+	CmxNew               string `json:"cmx_new"`
+	TransactionEffectsV1 string `json:"tx1_effects"`
+}
+
+func rpDecodeBase64(t *testing.T, value string) []byte {
+	t.Helper()
+	decoded, err := base64.StdEncoding.DecodeString(value)
+	require.NoError(t, err)
+	return decoded
+}
+
+func rpDelegationTX1Message(t *testing.T) *types.MsgDelegateVote {
+	t.Helper()
+	path := filepath.Join(rpRepoRoot(t), "testutil", "testdata", "delegation_tx1_effects_v1.json")
+	data, err := os.ReadFile(path)
+	require.NoError(t, err, "failed to read fixture %s", path)
+
+	var fixture delegationTX1Fixture
+	require.NoError(t, json.Unmarshal(data, &fixture))
+	return &types.MsgDelegateVote{
+		Rk:                  rpDecodeBase64(t, fixture.RK),
+		SpendAuthSig:        rpDecodeBase64(t, fixture.SpendAuthSig),
+		SignedNoteNullifier: rpDecodeBase64(t, fixture.SignedNoteNullifier),
+		CmxNew:              rpDecodeBase64(t, fixture.CmxNew),
+		VanCmx:              make([]byte, 32),
+		GovNullifiers:       [][]byte{make([]byte, 32)},
+		Proof:               make([]byte, 192),
+		VoteRoundId:         testRoundID,
+		Tx1Effects:          rpDecodeBase64(t, fixture.TransactionEffectsV1),
+	}
+}
+
 // TestRedPallasDelegationValidSig runs the full ante validation pipeline with a
 // real RedPallas SpendAuth signature. The ZKP verifier is mocked since only the
 // signature verification is under test here.
-//
-// The sighash is loaded from fixture (arbitrary 32 bytes); the chain only checks
-// len(sighash)==32 and verifies the RedPallas sig over it.
 func TestRedPallasDelegationValidSig(t *testing.T) {
-	rk := rpMustReadFixture(t, "valid_rk.bin")
-	sighash := rpMustReadFixture(t, "valid_sighash.bin")
-	sig := rpMustReadFixture(t, "valid_sig.bin")
-
-	// Build a MsgDelegateVote that matches the canonical payload used in generate_fixtures.
-	msg := &types.MsgDelegateVote{
-		Rk:                  rk,      // 32-byte real verification key
-		SpendAuthSig:        sig,     // 64-byte real signature
-		Sighash:             sighash, // 32-byte sighash the signature covers
-		SignedNoteNullifier: make([]byte, 32),
-		CmxNew:              make([]byte, 32),
-		VanCmx:              make([]byte, 32),
-		GovNullifiers: [][]byte{
-			make([]byte, 32),
-		},
-		Proof:       make([]byte, 192), // dummy proof (ZKP is mocked)
-		VoteRoundId: testRoundID,
-	}
+	msg := rpDelegationTX1Message(t)
 
 	// Use the real RedPallas verifier but mock the ZKP verifier
 	// (ZKP is not under test here).
@@ -84,25 +102,9 @@ func TestRedPallasDelegationValidSig(t *testing.T) {
 // TestRedPallasDelegationWrongSig verifies that a real RedPallas signature
 // over the wrong message fails verification when run through the full ante
 // pipeline (i.e. returns ErrInvalidSignature).
-// Same sighash fixture, but wrong signature — should fail verification.
 func TestRedPallasDelegationWrongSig(t *testing.T) {
-	rk := rpMustReadFixture(t, "valid_rk.bin")
-	sighash := rpMustReadFixture(t, "valid_sighash.bin")
-	wrongSig := rpMustReadFixture(t, "wrong_sig.bin")
-
-	msg := &types.MsgDelegateVote{
-		Rk:                  rk,       // correct verification key
-		SpendAuthSig:        wrongSig, // signature over a different message
-		Sighash:             sighash,  // same sighash — wrong sig should still fail
-		SignedNoteNullifier: make([]byte, 32),
-		CmxNew:              make([]byte, 32),
-		VanCmx:              make([]byte, 32),
-		GovNullifiers: [][]byte{
-			make([]byte, 32),
-		},
-		Proof:       make([]byte, 192),
-		VoteRoundId: testRoundID,
-	}
+	msg := rpDelegationTX1Message(t)
+	msg.SpendAuthSig = rpMustReadFixture(t, "wrong_sig.bin")
 
 	opts := ante.ValidateOpts{
 		SigVerifier: redpallas.NewVerifier(),
@@ -117,6 +119,29 @@ func TestRedPallasDelegationWrongSig(t *testing.T) {
 	err := ante.ValidateVoteTx(s.ctx, msg, s.keeper, opts)
 	require.Error(t, err, "wrong signature should fail verification")
 	require.ErrorIs(t, err, types.ErrInvalidSignature, "should wrap ErrInvalidSignature")
+}
+
+func TestRedPallasDelegationEffectsAreAuthenticated(t *testing.T) {
+	newSuite := func() *ValidateTestSuite {
+		s := new(ValidateTestSuite)
+		s.SetT(t)
+		s.SetupTest()
+		s.setupActiveRound()
+		return s
+	}
+	opts := ante.ValidateOpts{
+		SigVerifier: redpallas.NewVerifier(),
+		ZKPVerifier: zkp.NewMockVerifier(),
+	}
+
+	t.Run("signature cannot be reused for changed effects", func(t *testing.T) {
+		msg := rpDelegationTX1Message(t)
+		msg.Tx1Effects[1+160] ^= 1
+
+		s := newSuite()
+		err := ante.ValidateVoteTx(s.ctx, msg, s.keeper, opts)
+		require.ErrorIs(t, err, types.ErrInvalidSignature)
+	})
 }
 
 // TestRedPallasCastVoteValidSig runs the full ante validation pipeline with a

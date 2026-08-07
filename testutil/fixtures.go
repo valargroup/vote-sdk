@@ -5,7 +5,10 @@ package testutil
 
 import (
 	"bytes"
+	_ "embed"
+	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"math/rand/v2"
 	"time"
 
@@ -13,6 +16,7 @@ import (
 	"github.com/mikelodder7/curvey"
 
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
+	"github.com/valargroup/vote-sdk/ffi/tx1"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
@@ -23,6 +27,47 @@ const TestAuthority = "sv1authority"
 // for use as a dummy rk / RVpk in test messages. Must be on-curve and
 // non-identity to pass UnmarshalPublicKey validation in the ante handler.
 var DummyPallasPoint = elgamal.PallasGenerator().ToAffineCompressed()
+
+//go:embed testdata/delegation_tx1_effects_v1.json
+var delegationTX1FixtureJSON []byte
+
+var delegationTX1EffectsTemplate = func() []byte {
+	var fixture struct {
+		TX1Effects string `json:"tx1_effects"`
+	}
+	if err := json.Unmarshal(delegationTX1FixtureJSON, &fixture); err != nil {
+		panic("testutil: invalid delegation TX1 fixture: " + err.Error())
+	}
+	effects, err := base64.StdEncoding.DecodeString(fixture.TX1Effects)
+	if err != nil {
+		panic("testutil: invalid delegation TX1 effects encoding: " + err.Error())
+	}
+	if err := tx1.ValidateEffectsFraming(effects); err != nil {
+		panic("testutil: invalid delegation TX1 effects framing: " + err.Error())
+	}
+	return effects
+}()
+
+// DelegationTX1Effects returns valid transaction effects whose first action is
+// bound to the supplied delegation fields.
+func DelegationTX1Effects(rk, signedNoteNullifier, cmxNew []byte) []byte {
+	if len(rk) != 32 || len(signedNoteNullifier) != 32 || len(cmxNew) != 32 {
+		panic("testutil: delegation TX1 binding fields must be 32 bytes")
+	}
+
+	effects := append([]byte(nil), delegationTX1EffectsTemplate...)
+	const actionStart = 1
+	copy(effects[actionStart+32:actionStart+64], signedNoteNullifier)
+	copy(effects[actionStart+64:actionStart+96], rk)
+	copy(effects[actionStart+96:actionStart+128], cmxNew)
+	return effects
+}
+
+// SetDelegationTX1 binds a test delegation message to valid transaction
+// effects.
+func SetDelegationTX1(msg *types.MsgDelegateVote) {
+	msg.Tx1Effects = DelegationTX1Effects(msg.Rk, msg.SignedNoteNullifier, msg.CmxNew)
+}
 
 // TestValAddr generates a deterministic valid bech32 validator operator address from a seed byte.
 func TestValAddr(seed byte) string {
@@ -147,7 +192,6 @@ func ExpiredCreateVotingSessionAt(refTime time.Time) *types.MsgCreateVotingSessi
 // ValidDelegation returns a MsgDelegateVote with mock proof data.
 // Each call returns unique gov nullifiers derived from the provided seed.
 // CmxNew and VanCmx use canonical Fp encodings so the commitment tree FFI accepts them.
-// Sighash is set to a dummy 32-byte value; chain only checks length + signature.
 func ValidDelegation(roundID []byte, nullifierSeed byte) *types.MsgDelegateVote {
 	msg := &types.MsgDelegateVote{
 		Rk:                  append([]byte(nil), DummyPallasPoint...),
@@ -161,8 +205,8 @@ func ValidDelegation(roundID []byte, nullifierSeed byte) *types.MsgDelegateVote 
 		},
 		Proof:       []byte("mock-delegation-proof"),
 		VoteRoundId: roundID,
-		Sighash:     bytes.Repeat([]byte{0x99}, 32), // any 32 bytes; chain checks length + sig only
 	}
+	SetDelegationTX1(msg)
 	return msg
 }
 
@@ -299,8 +343,8 @@ func ValidDelegationN(roundID []byte, n int, seed uint64) []*types.MsgDelegateVo
 			},
 			Proof:       []byte("mock-delegation-proof"),
 			VoteRoundId: ensureBytes32(roundID),
-			Sighash:     bytes.Repeat([]byte{0x99}, 32),
 		}
+		SetDelegationTX1(msg)
 		out = append(out, msg)
 	}
 	return out

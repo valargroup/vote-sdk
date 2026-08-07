@@ -14,6 +14,7 @@ pub mod nc_root;
 mod proof;
 pub mod redpallas;
 pub mod toy;
+pub mod tx1;
 pub mod votetree;
 
 /// Re-export the delegation circuit's prove/verify API from the `voting-circuits` crate.
