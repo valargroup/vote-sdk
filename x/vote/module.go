@@ -508,8 +508,7 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 	var contribTimeoutIDs [][]byte
 	if err := am.keeper.IteratePendingRounds(kvStore, func(round *types.VoteRound) bool {
 		if round.CeremonyStatus == types.CeremonyStatus_CEREMONY_STATUS_REGISTERING &&
-			round.CeremonyPhaseTimeout > 0 &&
-			blockTime >= round.CeremonyPhaseStart+round.CeremonyPhaseTimeout {
+			types.DeadlineReached(round.CeremonyPhaseStart, round.CeremonyPhaseTimeout, blockTime) {
 			id := make([]byte, len(round.VoteRoundId))
 			copy(id, round.VoteRoundId)
 			contribTimeoutIDs = append(contribTimeoutIDs, id)
@@ -566,8 +565,7 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 	var ceremonyTimeoutIDs [][]byte
 	if err := am.keeper.IteratePendingRounds(kvStore, func(round *types.VoteRound) bool {
 		if round.CeremonyStatus == types.CeremonyStatus_CEREMONY_STATUS_DEALT &&
-			round.CeremonyPhaseTimeout > 0 &&
-			blockTime >= round.CeremonyPhaseStart+round.CeremonyPhaseTimeout {
+			types.DeadlineReached(round.CeremonyPhaseStart, round.CeremonyPhaseTimeout, blockTime) {
 			id := make([]byte, len(round.VoteRoundId))
 			copy(id, round.VoteRoundId)
 			ceremonyTimeoutIDs = append(ceremonyTimeoutIDs, id)
@@ -665,8 +663,7 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 	// liveness loss when the decryption threshold cannot be reached.
 	var tallyTimeoutIDs [][]byte
 	if err := am.keeper.IterateTallyingRounds(kvStore, func(round *types.VoteRound) bool {
-		if round.TallyPhaseTimeout > 0 &&
-			blockTime >= round.TallyPhaseStart+round.TallyPhaseTimeout {
+		if types.DeadlineReached(round.TallyPhaseStart, round.TallyPhaseTimeout, blockTime) {
 			id := make([]byte, len(round.VoteRoundId))
 			copy(id, round.VoteRoundId)
 			tallyTimeoutIDs = append(tallyTimeoutIDs, id)

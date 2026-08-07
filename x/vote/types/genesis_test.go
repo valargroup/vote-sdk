@@ -126,6 +126,31 @@ func TestValidateGenesisState_DuplicateRoundID(t *testing.T) {
 	require.Contains(t, err.Error(), "duplicate vote_round_id")
 }
 
+func TestValidateGenesisState_RoundDeadlineOverflow(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*types.VoteRound)
+		wantErr string
+	}{
+		{"ceremony", func(round *types.VoteRound) {
+			round.CeremonyPhaseStart = math.MaxUint64 - 5
+			round.CeremonyPhaseTimeout = 10
+		}, "ceremony phase deadline overflows uint64"},
+		{"tally", func(round *types.VoteRound) {
+			round.TallyPhaseStart = math.MaxUint64 - 5
+			round.TallyPhaseTimeout = 10
+		}, "tally phase deadline overflows uint64"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gs := validGenesis()
+			tc.mutate(gs.Rounds[0])
+			require.ErrorContains(t, types.ValidateGenesisState(gs), tc.wantErr)
+		})
+	}
+}
+
 func TestValidateGenesisState_RoundTrees(t *testing.T) {
 	roundID := bytes.Repeat([]byte{0xAA}, types.RoundIDLen)
 	root := canonicalPallasFieldElement(3)

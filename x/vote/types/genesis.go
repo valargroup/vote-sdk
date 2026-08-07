@@ -91,6 +91,12 @@ func ValidateGenesisState(gs *GenesisState) error {
 		if round.VoteEndTime == 0 {
 			return fmt.Errorf("rounds[%d].vote_end_time cannot be zero", i)
 		}
+		if round.CeremonyPhaseTimeout > 0 && round.CeremonyPhaseStart > math.MaxUint64-round.CeremonyPhaseTimeout {
+			return fmt.Errorf("rounds[%d] ceremony phase deadline overflows uint64", i)
+		}
+		if round.TallyPhaseTimeout > 0 && round.TallyPhaseStart > math.MaxUint64-round.TallyPhaseTimeout {
+			return fmt.Errorf("rounds[%d] tally phase deadline overflows uint64", i)
+		}
 		key := string(round.VoteRoundId)
 		if _, dup := seenRounds[key]; dup {
 			return fmt.Errorf("rounds[%d]: duplicate vote_round_id %x", i, round.VoteRoundId)

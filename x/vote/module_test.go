@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
 	"testing"
 	"time"
 
@@ -981,6 +982,23 @@ func (s *EndBlockerTestSuite) TestEndBlock_TallyTimeout() {
 					Proposals:         svtest.SampleProposals(),
 					TallyPhaseStart:   999_400,
 					TallyPhaseTimeout: 0,
+				}
+				s.Require().NoError(s.keeper.SetVoteRound(kv, round))
+			},
+			wantStatus:   types.SessionStatus_SESSION_STATUS_TALLYING,
+			wantTimedOut: false,
+		},
+		{
+			name: "TALLYING with overflowing deadline -> stays TALLYING",
+			setup: func() {
+				kv := s.keeper.OpenKVStore(s.ctx)
+				round := &types.VoteRound{
+					VoteRoundId:       roundID,
+					Status:            types.SessionStatus_SESSION_STATUS_TALLYING,
+					EaPk:              make([]byte, 32),
+					Proposals:         svtest.SampleProposals(),
+					TallyPhaseStart:   math.MaxUint64 - 5,
+					TallyPhaseTimeout: 10,
 				}
 				s.Require().NoError(s.keeper.SetVoteRound(kv, round))
 			},
