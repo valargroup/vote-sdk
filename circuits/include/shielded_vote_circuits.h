@@ -111,8 +111,8 @@ int32_t sv_verify_redpallas_sig(
  * versioned delegation TX1 effects payload.
  *
  * Parameters:
- *   effects_ptr - Pointer to the 1641-byte TX1 effects payload.
- *   effects_len - Length of the payload (must be 1641).
+ *   effects_ptr - Pointer to the 821-byte TX1 effects payload.
+ *   effects_len - Length of the payload (must be 821).
  *   out_ptr     - Pointer to a caller-owned 32-byte output buffer.
  *   out_len     - Length of the output buffer (must be 32).
  *

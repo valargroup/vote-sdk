@@ -63,7 +63,7 @@ message MsgDelegateVote {
   repeated bytes gov_nullifiers = 7; // Up to 5 governance nullifiers
   bytes proof                  = 8;  // Halo2 ZKP #1
   bytes vote_round_id          = 9;
-  bytes tx1_effects            = 11; // Versioned Ironwood transaction effecting data (1641 bytes)
+  bytes tx1_effects            = 11; // Versioned Ironwood transaction effecting data (821 bytes)
 }
 
 message MsgDelegateVoteResponse {}
