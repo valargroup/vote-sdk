@@ -1,7 +1,7 @@
 package app
 
 const (
-	// IronwoodUpgradeName matches the production release for the verifier cutover.
+	// IronwoodUpgradeName is retained for the released but unapplied mainnet plan.
 	IronwoodUpgradeName = "v1.1.0"
 
 	// StagingIronwoodUpgradeName is retained for the plan already applied on svote-1.

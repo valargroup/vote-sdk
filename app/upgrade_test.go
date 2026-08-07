@@ -198,6 +198,18 @@ func TestStagingIronwoodUpgradeRemainsRegistered(t *testing.T) {
 	testNoopUpgradeAppliesAcrossSupportedChains(t, svoteapp.StagingIronwoodUpgradeName)
 }
 
+func TestV120RC1UpgradeAppliesAcrossSupportedChains(t *testing.T) {
+	require.NotEqual(t, svoteapp.StagingIronwoodUpgradeName, svoteapp.V120RC1UpgradeName)
+	require.NotEqual(t, svoteapp.IronwoodUpgradeName, svoteapp.V120RC1UpgradeName)
+	testNoopUpgradeAppliesAcrossSupportedChains(t, svoteapp.V120RC1UpgradeName)
+}
+
+func TestV120UpgradeAppliesAcrossSupportedChains(t *testing.T) {
+	require.NotEqual(t, svoteapp.V120RC1UpgradeName, svoteapp.V120UpgradeName)
+	require.NotEqual(t, svoteapp.IronwoodUpgradeName, svoteapp.V120UpgradeName)
+	testNoopUpgradeAppliesAcrossSupportedChains(t, svoteapp.V120UpgradeName)
+}
+
 func testNoopUpgradeAppliesAcrossSupportedChains(t *testing.T, upgradeName string) {
 	t.Helper()
 	testChains := []string{"svote-1", "zvote-1", "upgrade-test-1"}

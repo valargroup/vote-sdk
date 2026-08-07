@@ -16,6 +16,7 @@ func (app *SvoteApp) RegisterUpgradeHandlers() {
 	// handlers should live in their own files with clear chain ID guards.
 	app.registerV1Upgrade()
 	app.registerIronwoodUpgrade()
+	app.registerV120Upgrade()
 	app.registerStageVoteFundingMigrationUpgrade()
 	app.registerIsolatedRehearsalUpgrade()
 }

@@ -11,6 +11,11 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 - Accept compact, versioned Ironwood transaction effects in delegation messages
   and derive the RedPallas signing digest directly instead of receiving it as a
   separate message field.
+- Add `v1.2.0-rc.1` and `v1.2.0` coordinated upgrade handlers. Testnet can
+  rehearse the release candidate after its historical `ironwood-v1` upgrade,
+  while testnet and mainnet use `v1.2.0` for the final cutover. Mainnet can
+  skip the unapplied `v1.1.0` plan and pick up its Ironwood changes in the same
+  upgrade.
 - Publish checksum-pinned Cosmovisor archives for both Linux architectures,
   require the upgrade scheduler to load them, and show the exact upgrade info
   before signing. New and migrated validators enable checksum-required
