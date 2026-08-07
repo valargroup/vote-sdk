@@ -56,27 +56,43 @@ curl -fsSL https://shielded-vote.nyc3.digitaloceanspaces.com/update_chain.sh | s
   --mode configure-autodownload --plan-name <plan-name> --tag <tag> --chain-api <chain-rest-url>
 ```
 
-## Ironwood verifier cutover
+## v1.2.0 coordinated cutover
 
-Use the `v1.1.0` plan for the production Ironwood verifier binary so the plan
-matches the release tag. Staging already applied `ironwood-v1`; that handler
-remains registered for staging history, while production uses `v1.1.0`.
-The earlier `v1` plan has also been applied and must not be reused. The Ironwood
-handlers do not migrate stores; they coordinate the consensus-sensitive verifier
-switch.
+Staging already applied `ironwood-v1`, while production did not apply the
+`v1.1.0` plan. Production skips that plan and picks up the Ironwood verifier
+changes together with the delegation-validation changes in `v1.2.0`. The
+historical `v1`, `ironwood-v1`, and `v1.1.0` handlers remain registered but
+must not be reused.
 
-The running pre-Ironwood binary schedules the plan and reaches the halt height.
-Before then, stage the target release whose `svoted` binary registers the
-`v1.1.0` handler. Cosmovisor starts that binary at the halt and the target
-binary applies the handler.
+The delegation message and signing-digest changes alter which transactions a
+validator accepts, so this is not a routine rolling deployment. Both networks
+must switch binaries through a coordinated halt. The handlers do not migrate
+stores.
 
-Use the tag-scoped updater to pre-stage the final release:
+Use a distinct plan for the testnet release-candidate rehearsal, then use the
+final plan on both networks:
+
+| Network | Release tag | Plan name |
+|---------|-------------|-----------|
+| Testnet rehearsal | `v1.2.0-rc.1` | `v1.2.0-rc.1` |
+| Testnet final | `v1.2.0` | `v1.2.0` |
+| Mainnet final | `v1.2.0` | `v1.2.0` |
+
+Before scheduling the final mainnet plan, cancel any pending `v1.1.0` plan.
+Do not leave both operations until the old halt height is near.
+
+Use the tag-scoped updater to pre-stage the matching release on every validator.
+`--allow-no-plan` is required while no plan is scheduled:
 
 ```bash
-TAG=v1.1.0
+TAG=v1.2.0-rc.1
+PLAN_NAME="${TAG}"
 curl -fsSL "https://shielded-vote.nyc3.digitaloceanspaces.com/scripts/upgrade/${TAG}/update_chain.sh" | sudo bash -s -- \
-  --mode prepare --plan-name v1.1.0 --tag "${TAG}"
+  --mode prepare --plan-name "${PLAN_NAME}" --tag "${TAG}" --allow-no-plan
 ```
+
+After scheduling, rerun `verify-prestage` without `--allow-no-plan` so the
+staged layout is checked against the on-chain name and height.
 
 ## Held release and promotion
 
