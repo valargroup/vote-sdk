@@ -206,7 +206,6 @@ type MsgDelegateVote struct {
 	GovNullifiers       [][]byte               `protobuf:"bytes,7,rep,name=gov_nullifiers,json=govNullifiers,proto3" json:"gov_nullifiers,omitempty"`                     // Up to 5 governance nullifiers
 	Proof               []byte                 `protobuf:"bytes,8,opt,name=proof,proto3" json:"proof,omitempty"`                                                          // Halo2 ZKP #1
 	VoteRoundId         []byte                 `protobuf:"bytes,9,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`
-	Sighash             []byte                 `protobuf:"bytes,10,opt,name=sighash,proto3" json:"sighash,omitempty"`                         // Client-provided sighash, checked against tx1_effects (32 bytes)
 	Tx1Effects          []byte                 `protobuf:"bytes,11,opt,name=tx1_effects,json=tx1Effects,proto3" json:"tx1_effects,omitempty"` // Versioned Ironwood transaction effecting data (1641 bytes)
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
@@ -294,13 +293,6 @@ func (x *MsgDelegateVote) GetProof() []byte {
 func (x *MsgDelegateVote) GetVoteRoundId() []byte {
 	if x != nil {
 		return x.VoteRoundId
-	}
-	return nil
-}
-
-func (x *MsgDelegateVote) GetSighash() []byte {
-	if x != nil {
-		return x.Sighash
 	}
 	return nil
 }
@@ -2396,7 +2388,7 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	" \x01(\tR\x05title\x12%\n" +
 	"\x0ediscussion_url\x18\v \x01(\tR\rdiscussionUrl\"D\n" +
 	"\x1eMsgCreateVotingSessionResponse\x12\"\n" +
-	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\"\xc9\x02\n" +
+	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\"\xb5\x02\n" +
 	"\x0fMsgDelegateVote\x12\x0e\n" +
 	"\x02rk\x18\x01 \x01(\fR\x02rk\x12$\n" +
 	"\x0espend_auth_sig\x18\x02 \x01(\fR\fspendAuthSig\x122\n" +
@@ -2405,11 +2397,10 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"\avan_cmx\x18\x06 \x01(\fR\x06vanCmx\x12%\n" +
 	"\x0egov_nullifiers\x18\a \x03(\fR\rgovNullifiers\x12\x14\n" +
 	"\x05proof\x18\b \x01(\fR\x05proof\x12\"\n" +
-	"\rvote_round_id\x18\t \x01(\fR\vvoteRoundId\x12\x18\n" +
-	"\asighash\x18\n" +
-	" \x01(\fR\asighash\x12\x1f\n" +
+	"\rvote_round_id\x18\t \x01(\fR\vvoteRoundId\x12\x1f\n" +
 	"\vtx1_effects\x18\v \x01(\fR\n" +
-	"tx1Effects\"\x19\n" +
+	"tx1EffectsJ\x04\b\n" +
+	"\x10\v\"\x19\n" +
 	"\x17MsgDelegateVoteResponse\"\xe6\x02\n" +
 	"\vMsgCastVote\x12#\n" +
 	"\rvan_nullifier\x18\x01 \x01(\fR\fvanNullifier\x125\n" +

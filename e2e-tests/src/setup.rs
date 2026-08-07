@@ -180,7 +180,6 @@ fn build_delegation_payload(
     let payload = DelegationBundlePayload {
         rk: rk_bytes.to_vec(),
         spend_auth_sig: sig_bytes.to_vec(),
-        sighash: sighash.to_vec(),
         tx1_effects,
         signed_note_nullifier: nf_signed_bytes.to_vec(),
         cmx_new: cmx_new_bytes[..].to_vec(),
@@ -728,7 +727,6 @@ fn build_multi_delegation_payloads(
                 let payload = DelegationBundlePayload {
                     rk: rk_bytes.to_vec(),
                     spend_auth_sig: sig_bytes.to_vec(),
-                    sighash: sighash.to_vec(),
                     tx1_effects,
                     signed_note_nullifier: nf_signed_bytes.to_vec(),
                     cmx_new: cmx_new_bytes[..].to_vec(),

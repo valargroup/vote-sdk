@@ -432,18 +432,6 @@ func (s *ValidateTestSuite) TestValidateVoteTx_DelegateVote() {
 			opts:  mockOpts(),
 			setup: func() { s.setupActiveRound() },
 		},
-		{
-			name: "invalid: supplied sighash does not match transaction effects",
-			msg: func() types.VoteMessage {
-				m := newValidMsgDelegateVote()
-				m.Sighash = bytes.Repeat([]byte{0x99}, 32)
-				return m
-			},
-			opts:        mockOpts(),
-			setup:       func() { s.setupActiveRound() },
-			expectErr:   true,
-			errContains: "sighash does not match message",
-		},
 		// --- ValidateBasic failures ---
 		{
 			name: "invalid: rk wrong length (not 32 bytes)",
@@ -548,18 +536,6 @@ func (s *ValidateTestSuite) TestValidateVoteTx_DelegateVote() {
 			setup:       func() { s.setupActiveRound() },
 			expectErr:   true,
 			errContains: "proof must be 1..",
-		},
-		{
-			name: "invalid: sighash wrong length",
-			msg: func() types.VoteMessage {
-				m := newValidMsgDelegateVote()
-				m.Sighash = bytes.Repeat([]byte{0x99}, 31) // 31 bytes, must be 32
-				return m
-			},
-			opts:        mockOpts(),
-			setup:       func() { s.setupActiveRound() },
-			expectErr:   true,
-			errContains: "sighash must be 32 bytes",
 		},
 		// --- Round state failures ---
 		{

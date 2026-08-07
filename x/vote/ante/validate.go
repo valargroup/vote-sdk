@@ -14,7 +14,6 @@
 package ante
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -137,10 +136,7 @@ func verifyDelegation(ctx context.Context, msg *types.MsgDelegateVote, k *keeper
 
 	canonicalSighash, err := tx1.ComputeDelegationSighash(msg.Tx1Effects)
 	if err != nil {
-		return fmt.Errorf("%w: %v", types.ErrSighashMismatch, err)
-	}
-	if !bytes.Equal(msg.Sighash, canonicalSighash) {
-		return types.ErrSighashMismatch
+		return fmt.Errorf("%w: tx1_effects: %v", types.ErrInvalidField, err)
 	}
 
 	// Verify the RedPallas signature over the digest reconstructed from the

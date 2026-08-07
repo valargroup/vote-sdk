@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/valargroup/vote-sdk/ffi/redpallas"
-	"github.com/valargroup/vote-sdk/ffi/tx1"
 	"github.com/valargroup/vote-sdk/ffi/zkp"
 	"github.com/valargroup/vote-sdk/x/vote/ante"
 	"github.com/valargroup/vote-sdk/x/vote/types"
@@ -43,7 +42,6 @@ func rpMustReadFixture(t *testing.T, name string) []byte {
 type delegationTX1Fixture struct {
 	RK                   string `json:"rk"`
 	SpendAuthSig         string `json:"spend_auth_sig"`
-	Sighash              string `json:"sighash"`
 	SignedNoteNullifier  string `json:"signed_note_nullifier"`
 	CmxNew               string `json:"cmx_new"`
 	TransactionEffectsV1 string `json:"tx1_effects"`
@@ -67,7 +65,6 @@ func rpDelegationTX1Message(t *testing.T) *types.MsgDelegateVote {
 	return &types.MsgDelegateVote{
 		Rk:                  rpDecodeBase64(t, fixture.RK),
 		SpendAuthSig:        rpDecodeBase64(t, fixture.SpendAuthSig),
-		Sighash:             rpDecodeBase64(t, fixture.Sighash),
 		SignedNoteNullifier: rpDecodeBase64(t, fixture.SignedNoteNullifier),
 		CmxNew:              rpDecodeBase64(t, fixture.CmxNew),
 		VanCmx:              make([]byte, 32),
@@ -105,7 +102,6 @@ func TestRedPallasDelegationValidSig(t *testing.T) {
 // TestRedPallasDelegationWrongSig verifies that a real RedPallas signature
 // over the wrong message fails verification when run through the full ante
 // pipeline (i.e. returns ErrInvalidSignature).
-// Same sighash fixture, but wrong signature — should fail verification.
 func TestRedPallasDelegationWrongSig(t *testing.T) {
 	msg := rpDelegationTX1Message(t)
 	msg.SpendAuthSig = rpMustReadFixture(t, "wrong_sig.bin")
@@ -138,24 +134,12 @@ func TestRedPallasDelegationEffectsAreAuthenticated(t *testing.T) {
 		ZKPVerifier: zkp.NewMockVerifier(),
 	}
 
-	t.Run("supplied digest must match effects", func(t *testing.T) {
+	t.Run("signature cannot be reused for changed effects", func(t *testing.T) {
 		msg := rpDelegationTX1Message(t)
 		msg.Tx1Effects[1+160] ^= 1
 
 		s := newSuite()
 		err := ante.ValidateVoteTx(s.ctx, msg, s.keeper, opts)
-		require.ErrorIs(t, err, types.ErrSighashMismatch)
-	})
-
-	t.Run("signature cannot be reused for changed effects", func(t *testing.T) {
-		msg := rpDelegationTX1Message(t)
-		msg.Tx1Effects[1+160] ^= 1
-		computed, err := tx1.ComputeDelegationSighash(msg.Tx1Effects)
-		require.NoError(t, err)
-		msg.Sighash = computed
-
-		s := newSuite()
-		err = ante.ValidateVoteTx(s.ctx, msg, s.keeper, opts)
 		require.ErrorIs(t, err, types.ErrInvalidSignature)
 	})
 }

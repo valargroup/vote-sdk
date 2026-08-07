@@ -107,9 +107,6 @@ func (msg *MsgDelegateVote) ValidateBasic() error {
 	if len(msg.VoteRoundId) != RoundIDLen {
 		return fmt.Errorf("%w: vote_round_id must be exactly %d bytes, got %d", ErrInvalidField, RoundIDLen, len(msg.VoteRoundId))
 	}
-	if len(msg.Sighash) != 32 {
-		return fmt.Errorf("%w: sighash must be 32 bytes, got %d", ErrInvalidField, len(msg.Sighash))
-	}
 	if err := validateDelegationTX1Effects(msg); err != nil {
 		return err
 	}

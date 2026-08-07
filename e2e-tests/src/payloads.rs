@@ -338,7 +338,6 @@ mod tests {
 pub struct DelegationBundlePayload {
     pub rk: Vec<u8>,
     pub spend_auth_sig: Vec<u8>,
-    pub sighash: Vec<u8>,
     pub tx1_effects: Vec<u8>,
     pub signed_note_nullifier: Vec<u8>,
     pub cmx_new: Vec<u8>,
@@ -353,7 +352,6 @@ pub fn delegate_vote_payload(round_id: &[u8], bundle: &DelegationBundlePayload) 
     json!({
         "rk": to_base64(&bundle.rk),
         "spend_auth_sig": to_base64(&bundle.spend_auth_sig),
-        "sighash": to_base64(&bundle.sighash),
         "tx1_effects": to_base64(&bundle.tx1_effects),
         "signed_note_nullifier": to_base64(&bundle.signed_note_nullifier),
         "cmx_new": to_base64(&bundle.cmx_new),

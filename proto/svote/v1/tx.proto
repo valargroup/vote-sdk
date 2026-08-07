@@ -53,6 +53,8 @@ message MsgCreateVotingSessionResponse {
 
 // MsgDelegateVote corresponds to ZKP #1: delegation registration from keystone-signed action.
 message MsgDelegateVote {
+  reserved 10;
+
   bytes rk                     = 1;  // Randomized spend auth key (32 bytes)
   bytes spend_auth_sig         = 2;  // RedPallas signature
   bytes signed_note_nullifier  = 3;  // Nullifier of the dummy signed note
@@ -61,7 +63,6 @@ message MsgDelegateVote {
   repeated bytes gov_nullifiers = 7; // Up to 5 governance nullifiers
   bytes proof                  = 8;  // Halo2 ZKP #1
   bytes vote_round_id          = 9;
-  bytes sighash                = 10; // Client-provided sighash, checked against tx1_effects (32 bytes)
   bytes tx1_effects            = 11; // Versioned Ironwood transaction effecting data (1641 bytes)
 }
 

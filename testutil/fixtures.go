@@ -63,19 +63,10 @@ func DelegationTX1Effects(rk, signedNoteNullifier, cmxNew []byte) []byte {
 	return effects
 }
 
-func delegationTX1Sighash(effects []byte) []byte {
-	sighash, err := tx1.ComputeDelegationSighash(effects)
-	if err != nil {
-		panic("testutil: failed to compute delegation TX1 sighash: " + err.Error())
-	}
-	return sighash
-}
-
 // SetDelegationTX1 binds a test delegation message to valid transaction
-// effects and sets the corresponding build-specific digest.
+// effects.
 func SetDelegationTX1(msg *types.MsgDelegateVote) {
 	msg.Tx1Effects = DelegationTX1Effects(msg.Rk, msg.SignedNoteNullifier, msg.CmxNew)
-	msg.Sighash = delegationTX1Sighash(msg.Tx1Effects)
 }
 
 // TestValAddr generates a deterministic valid bech32 validator operator address from a seed byte.

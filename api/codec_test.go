@@ -32,7 +32,6 @@ func TestEncodeDecodeDelegateVote(t *testing.T) {
 		GovNullifiers:       [][]byte{[]byte("nf1"), []byte("nf2")},
 		Proof:               []byte("proof"),
 		VoteRoundId:         []byte("roundid"),
-		Sighash:             make([]byte, 32),
 		Tx1Effects:          []byte("effects"),
 	}
 
@@ -47,7 +46,6 @@ func TestEncodeDecodeDelegateVote(t *testing.T) {
 	decodedMsg, ok := decoded.(*types.MsgDelegateVote)
 	require.True(t, ok)
 	require.Equal(t, msg.Rk, decodedMsg.Rk)
-	require.Equal(t, msg.Sighash, decodedMsg.Sighash)
 	require.Equal(t, msg.Tx1Effects, decodedMsg.Tx1Effects)
 	require.Equal(t, len(msg.GovNullifiers), len(decodedMsg.GovNullifiers))
 }
