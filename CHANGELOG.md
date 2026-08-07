@@ -8,6 +8,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Improve vote module state snapshot validation and error reporting during
+  genesis import and export.
 - Accept compact, versioned Ironwood transaction effects in delegation messages
   and derive the RedPallas signing digest directly instead of receiving it as a
   separate message field.
