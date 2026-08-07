@@ -6,7 +6,6 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/valargroup/vote-sdk/ffi/tx1"
 	svtest "github.com/valargroup/vote-sdk/testutil"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
@@ -542,7 +541,7 @@ func (s *ValidateBasicTestSuite) TestDelegateVote_ValidateBasic() {
 				m.Tx1Effects = nil
 			},
 			expectErr:   true,
-			errContains: "tx1 effects must be 1641 bytes",
+			errContains: "tx1 effects must be 821 bytes",
 		},
 		{
 			name: "invalid: unsupported tx1 effects version",
@@ -558,16 +557,7 @@ func (s *ValidateBasicTestSuite) TestDelegateVote_ValidateBasic() {
 				m.CmxNew = svtest.FpLE(0x9999)
 			},
 			expectErr:   true,
-			errContains: "tx1 action with delegation rk must match signed_note_nullifier and cmx_new",
-		},
-		{
-			name: "invalid: duplicate delegation rk across tx1 actions",
-			modify: func(m *types.MsgDelegateVote) {
-				const secondActionRkOffset = 1 + tx1.ActionEffectsLen + 64
-				copy(m.Tx1Effects[secondActionRkOffset:secondActionRkOffset+32], m.Rk)
-			},
-			expectErr:   true,
-			errContains: "exactly one action with delegation rk, got 2",
+			errContains: "tx1 action must match delegation rk, signed_note_nullifier, and cmx_new",
 		},
 	}
 

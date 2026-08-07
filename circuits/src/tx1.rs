@@ -3,7 +3,7 @@
 //! The chain receives only versioned transaction effecting data. It does not
 //! receive or reconstruct a PCZT. Version 1 fixes the rest of the transaction
 //! profile to V6/NU6.3 with no transparent, Sapling, or Orchard bundles and one
-//! two-action Ironwood bundle.
+//! single-action Ironwood bundle.
 
 use std::{fmt, io::Cursor};
 
@@ -26,7 +26,7 @@ use zcash_protocol::{
 /// Version byte for the current delegation TX1 effects encoding.
 pub const EFFECTS_VERSION: u8 = 1;
 /// Number of Ironwood actions in the fixed delegation transaction.
-pub const ACTION_COUNT: usize = 2;
+pub const ACTION_COUNT: usize = 1;
 /// Length of one Ironwood action's effecting data.
 pub const ACTION_EFFECTS_LEN: usize = 820;
 /// Length of the complete versioned delegation TX1 effects payload.

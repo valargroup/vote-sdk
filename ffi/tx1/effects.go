@@ -11,7 +11,7 @@ const (
 	// EffectsVersion identifies the fixed V6/NU6.3 delegation transaction profile.
 	EffectsVersion byte = 1
 	// ActionCount is the number of Ironwood actions in the delegation transaction.
-	ActionCount = 2
+	ActionCount = 1
 	// ActionEffectsLen is the serialized length of one Ironwood action's effecting data.
 	ActionEffectsLen = 820
 	// EffectsLen is the serialized length of the versioned delegation effects payload.
@@ -35,8 +35,8 @@ func ValidateEffectsFraming(effects []byte) error {
 	return nil
 }
 
-// ValidateDelegationBinding requires the delegation message's randomized key
-// to identify exactly one action whose nullifier and commitment also match.
+// ValidateDelegationBinding requires the action's randomized key, nullifier,
+// and commitment to match the delegation message.
 func ValidateDelegationBinding(effects, rk, signedNoteNullifier, cmxNew []byte) error {
 	if err := ValidateEffectsFraming(effects); err != nil {
 		return err
@@ -55,24 +55,11 @@ func ValidateDelegationBinding(effects, rk, signedNoteNullifier, cmxNew []byte) 
 		}
 	}
 
-	matchingAction := -1
-	rkMatches := 0
-	for index := range ActionCount {
-		start := 1 + index*ActionEffectsLen
-		if bytes.Equal(effects[start+rkOffset:start+rkOffset+fieldLen], rk) {
-			rkMatches++
-			matchingAction = index
-		}
-	}
-
-	if rkMatches != 1 {
-		return fmt.Errorf("tx1 effects must contain exactly one action with delegation rk, got %d", rkMatches)
-	}
-
-	start := 1 + matchingAction*ActionEffectsLen
-	if !bytes.Equal(effects[start+nullifierOffset:start+nullifierOffset+fieldLen], signedNoteNullifier) ||
+	start := 1
+	if !bytes.Equal(effects[start+rkOffset:start+rkOffset+fieldLen], rk) ||
+		!bytes.Equal(effects[start+nullifierOffset:start+nullifierOffset+fieldLen], signedNoteNullifier) ||
 		!bytes.Equal(effects[start+cmxOffset:start+cmxOffset+fieldLen], cmxNew) {
-		return fmt.Errorf("tx1 action with delegation rk must match signed_note_nullifier and cmx_new")
+		return fmt.Errorf("tx1 action must match delegation rk, signed_note_nullifier, and cmx_new")
 	}
 	return nil
 }

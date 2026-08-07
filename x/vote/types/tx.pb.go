@@ -206,7 +206,7 @@ type MsgDelegateVote struct {
 	GovNullifiers       [][]byte               `protobuf:"bytes,7,rep,name=gov_nullifiers,json=govNullifiers,proto3" json:"gov_nullifiers,omitempty"`                     // Up to 5 governance nullifiers
 	Proof               []byte                 `protobuf:"bytes,8,opt,name=proof,proto3" json:"proof,omitempty"`                                                          // Halo2 ZKP #1
 	VoteRoundId         []byte                 `protobuf:"bytes,9,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`
-	Tx1Effects          []byte                 `protobuf:"bytes,11,opt,name=tx1_effects,json=tx1Effects,proto3" json:"tx1_effects,omitempty"` // Versioned Ironwood transaction effecting data (1641 bytes)
+	Tx1Effects          []byte                 `protobuf:"bytes,11,opt,name=tx1_effects,json=tx1Effects,proto3" json:"tx1_effects,omitempty"` // Versioned Ironwood transaction effecting data (821 bytes)
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
