@@ -21,7 +21,11 @@ import {
   Loader2,
 } from "lucide-react";
 import type { ServiceEntry } from "../api/chain";
-import { normalizePirRoot, type PirRootResponse } from "../utils/pirRoot";
+import {
+  normalizePirRoot,
+  pirLayoutsDiverge,
+  type PirRootResponse,
+} from "../utils/pirRoot";
 
 type PirEndpointStatus =
   | { state: "loading" }
@@ -167,11 +171,11 @@ export function PirFleetStatus({
   const heights = new Set(okRows.map((r) => r.status.data.height));
   const pirRoots = new Set(okRows.map((r) => r.root.pirRoot ?? ""));
   const circuitRoots = new Set(okRows.map((r) => r.root.circuitRoot ?? ""));
-  const layouts = new Set(okRows.map((r) => r.root.layoutKey));
   const heightDiverges = okRows.length > 1 && heights.size > 1;
   const pirRootDiverges = okRows.length > 1 && pirRoots.size > 1;
   const circuitRootDiverges = okRows.length > 1 && circuitRoots.size > 1;
-  const layoutDiverges = okRows.length > 1 && layouts.size > 1;
+  const layoutDiverges =
+    okRows.length > 1 && pirLayoutsDiverge(okRows.map((r) => r.root));
   const anyDivergence =
     heightDiverges || pirRootDiverges || circuitRootDiverges || layoutDiverges;
 

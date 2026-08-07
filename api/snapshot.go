@@ -22,8 +22,9 @@ import (
 )
 
 const (
-	ironwoodNullifierPool     = "ironwood"
-	ironwoodPIRDatasetVersion = uint32(1)
+	ironwoodNullifierPool                   = "ironwood"
+	ironwoodLegacyPIRDatasetVersion         = uint32(1)
+	ironwoodRuntimeTwoTierPIRDatasetVersion = uint32(2)
 )
 
 // DefaultLightwalletdURLs is the fallback list of public lightwalletd servers.
@@ -126,7 +127,7 @@ func fetchSnapshotData(ctx context.Context, cfg SnapshotConfig, height uint64) (
 		return nil, fmt.Errorf("compute nc_root from Ironwood frontier: %w", err)
 	}
 
-	log.Printf("[shielded-vote-api] snapshot data fetched: height=%d blockhash=%s pir_root=%x nc_root=%x",
+	log.Printf("[shielded-vote-api] snapshot data fetched: height=%d blockhash=%s circuit_root=%x nc_root=%x",
 		ts.Height, ts.Hash[:min(16, len(ts.Hash))]+"...", pirRes.root.value[:8], ncRoot[:8])
 
 	return &SnapshotData{
@@ -221,6 +222,7 @@ func fetchNullifierRoot(
 	}
 
 	var result struct {
+		CircuitRoot    string  `json:"circuit_root"`
 		Root29         string  `json:"root29"`
 		Height         *uint64 `json:"height"`
 		NullifierPool  string  `json:"nullifier_pool"`
@@ -236,11 +238,11 @@ func fetchNullifierRoot(
 	if result.DatasetVersion == nil {
 		return nil, fmt.Errorf("PIR service response is missing dataset_version")
 	}
-	if *result.DatasetVersion != ironwoodPIRDatasetVersion {
+	if *result.DatasetVersion != ironwoodLegacyPIRDatasetVersion &&
+		*result.DatasetVersion != ironwoodRuntimeTwoTierPIRDatasetVersion {
 		return nil, fmt.Errorf(
-			"PIR service dataset version %d is not supported; expected %d",
+			"PIR service dataset version %d is not supported; expected 1 or 2",
 			*result.DatasetVersion,
-			ironwoodPIRDatasetVersion,
 		)
 	}
 	// Validate that the PIR tree height matches the requested snapshot height.
@@ -252,9 +254,18 @@ func fetchNullifierRoot(
 	}
 
 	// The PIR service returns raw hex (no 0x prefix) of a Pallas Fp element (32 bytes LE).
-	rootBytes, err := hex.DecodeString(result.Root29)
+	rootHex := result.CircuitRoot
+	rootField := "circuit_root"
+	if rootHex == "" {
+		rootHex = result.Root29
+		rootField = "root29"
+	}
+	if rootHex == "" {
+		return nil, errors.New("PIR service response is missing circuit_root/root29")
+	}
+	rootBytes, err := hex.DecodeString(rootHex)
 	if err != nil {
-		return nil, fmt.Errorf("decode PIR root hex: %w", err)
+		return nil, fmt.Errorf("decode PIR %s hex: %w", rootField, err)
 	}
 	if len(rootBytes) != 32 {
 		return nil, fmt.Errorf("PIR root is %d bytes, expected 32", len(rootBytes))
