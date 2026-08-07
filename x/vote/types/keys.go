@@ -68,9 +68,9 @@ const MaxVoteOptions = 8
 const MaxProofSize = 8192
 
 // MaxTreePosition is the largest valid commitment tree leaf index.
-// The tree uses zero-based uint32 leaf addressing (depth-24 Poseidon Merkle tree),
-// so valid positions are 0..2^32-1.
-const MaxTreePosition = (1 << 32) - 1
+// The depth-24 Poseidon Merkle tree has 2^24 leaves, addressed from
+// 0 through 2^24-1.
+const MaxTreePosition = (1 << 24) - 1
 
 // MaxCommitmentLeavesPerResponse caps paginated CommitmentLeaves responses.
 // A single block with more leaves than this cap is still returned atomically.

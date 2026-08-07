@@ -136,7 +136,6 @@ type TreeHandle struct {
 	ctxPtr      unsafe.Pointer // C-malloc'd uintptr_t holding proxyHandle; freed in Close
 }
 
-
 // AppendBatch appends leaves to the tree in a single CGO call. Each leaf must
 // be exactly LeafBytes (32) bytes in canonical Pallas Fp little-endian
 // encoding.
@@ -152,8 +151,8 @@ func (h *TreeHandle) AppendBatch(leaves [][]byte) error {
 		return nil
 	}
 	for i, leaf := range leaves {
-		if len(leaf) != LeafBytes {
-			return fmt.Errorf("votetree: leaf %d must be %d bytes, got %d", i, LeafBytes, len(leaf))
+		if err := ValidateLeaf(leaf); err != nil {
+			return fmt.Errorf("votetree: leaf %d %w", i, err)
 		}
 	}
 
@@ -304,4 +303,3 @@ func (h *TreeHandle) Close() {
 		}
 	}
 }
-

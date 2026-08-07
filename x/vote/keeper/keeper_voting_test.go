@@ -220,6 +220,75 @@ func (s *KeeperTestSuite) TestAppendCommitment_ContinuesFromExistingState() {
 	s.Require().Equal(uint64(101), state.NextIndex)
 }
 
+func (s *KeeperTestSuite) TestAppendCommitment_RejectsMalformedLeavesWithoutMutation() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
+	// The Pallas base-field modulus in little-endian form is not a canonical
+	// field encoding because valid values must be strictly smaller.
+	nonCanonical := []byte{
+		0x01, 0x00, 0x00, 0x00, 0xed, 0x30, 0x2d, 0x99,
+		0x1b, 0xf9, 0x4c, 0x09, 0xfc, 0x98, 0x46, 0x22,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40,
+	}
+
+	tests := []struct {
+		name       string
+		commitment []byte
+	}{
+		{name: "short", commitment: make([]byte, 31)},
+		{name: "long", commitment: make([]byte, 33)},
+		{name: "non-canonical", commitment: nonCanonical},
+	}
+
+	for _, tc := range tests {
+		s.Run(tc.name, func() {
+			s.SetupTest()
+			kv := s.keeper.OpenKVStore(s.ctx)
+
+			_, err := s.keeper.AppendCommitment(kv, roundID, tc.commitment)
+			s.Require().ErrorIs(err, types.ErrInvalidField)
+
+			state, stateErr := s.keeper.GetCommitmentTreeState(kv, roundID)
+			s.Require().NoError(stateErr)
+			s.Require().Zero(state.NextIndex)
+
+			leaf, leafErr := kv.Get(types.CommitmentLeafKey(roundID, 0))
+			s.Require().NoError(leafErr)
+			s.Require().Nil(leaf)
+		})
+	}
+}
+
+func (s *KeeperTestSuite) TestAppendCommitment_EnforcesTreeCapacity() {
+	roundID := bytes.Repeat([]byte{0xAA}, 32)
+	s.SetupTest()
+	kv := s.keeper.OpenKVStore(s.ctx)
+
+	// The largest valid position remains appendable.
+	s.Require().NoError(s.keeper.SetCommitmentTreeState(kv, roundID, &types.CommitmentTreeState{
+		NextIndex: types.MaxTreePosition,
+	}))
+	index, err := s.keeper.AppendCommitment(kv, roundID, fpLE(1))
+	s.Require().NoError(err)
+	s.Require().Equal(uint64(types.MaxTreePosition), index)
+
+	fullIndex := uint64(types.MaxTreePosition) + 1
+	state, err := s.keeper.GetCommitmentTreeState(kv, roundID)
+	s.Require().NoError(err)
+	s.Require().Equal(fullIndex, state.NextIndex)
+
+	_, err = s.keeper.AppendCommitment(kv, roundID, fpLE(2))
+	s.Require().ErrorIs(err, types.ErrCommitmentTreeFull)
+
+	state, stateErr := s.keeper.GetCommitmentTreeState(kv, roundID)
+	s.Require().NoError(stateErr)
+	s.Require().Equal(fullIndex, state.NextIndex)
+
+	leaf, leafErr := kv.Get(types.CommitmentLeafKey(roundID, fullIndex))
+	s.Require().NoError(leafErr)
+	s.Require().Nil(leaf)
+}
+
 // ---------------------------------------------------------------------------
 // Commitment tree roots
 // ---------------------------------------------------------------------------

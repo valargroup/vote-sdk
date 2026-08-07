@@ -7,6 +7,7 @@ import (
 	"cosmossdk.io/core/store"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
+	"github.com/valargroup/vote-sdk/ffi/votetree"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
@@ -97,12 +98,19 @@ func (k *Keeper) SetCommitmentTreeState(kvStore store.KVStore, roundID []byte, s
 
 // AppendCommitment appends a commitment to a round's tree and returns its index.
 func (k *Keeper) AppendCommitment(kvStore store.KVStore, roundID, commitment []byte) (uint64, error) {
+	if err := votetree.ValidateLeaf(commitment); err != nil {
+		return 0, fmt.Errorf("%w: commitment %v", types.ErrInvalidField, err)
+	}
+
 	state, err := k.GetCommitmentTreeState(kvStore, roundID)
 	if err != nil {
 		return 0, err
 	}
 
 	index := state.NextIndex
+	if index > types.MaxTreePosition {
+		return 0, fmt.Errorf("%w: maximum leaf count is %d", types.ErrCommitmentTreeFull, uint64(types.MaxTreePosition)+1)
+	}
 
 	if err := kvStore.Set(types.CommitmentLeafKey(roundID, index), commitment); err != nil {
 		return 0, err
