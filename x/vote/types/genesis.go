@@ -6,6 +6,7 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
+	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/crypto/pallas"
 )
 
@@ -142,13 +143,29 @@ func ValidateGenesisState(gs *GenesisState) error {
 	}
 
 	// Validate Pallas keys.
+	seenPallasValidators := make(map[string]struct{}, len(gs.PallasKeys))
+	seenPallasKeys := make(map[string]struct{}, len(gs.PallasKeys))
 	for i, vpk := range gs.PallasKeys {
 		if vpk.ValidatorAddress == "" {
 			return fmt.Errorf("pallas_keys[%d].validator_address is empty", i)
 		}
-		if len(vpk.PallasPk) != 32 {
-			return fmt.Errorf("pallas_keys[%d].pallas_pk is %d bytes, expected 32", i, len(vpk.PallasPk))
+		valAddr, err := sdk.ValAddressFromBech32(vpk.ValidatorAddress)
+		if err != nil {
+			return fmt.Errorf("pallas_keys[%d].validator_address %q is not a valid bech32 validator address: %w", i, vpk.ValidatorAddress, err)
 		}
+		canonicalAddress := valAddr.String()
+		if _, dup := seenPallasValidators[canonicalAddress]; dup {
+			return fmt.Errorf("pallas_keys[%d]: duplicate validator_address %s", i, canonicalAddress)
+		}
+		seenPallasValidators[canonicalAddress] = struct{}{}
+		if _, err := elgamal.UnmarshalPublicKey(vpk.PallasPk); err != nil {
+			return fmt.Errorf("pallas_keys[%d].pallas_pk is invalid: %w", i, err)
+		}
+		key := string(vpk.PallasPk)
+		if _, dup := seenPallasKeys[key]; dup {
+			return fmt.Errorf("pallas_keys[%d]: duplicate pallas_pk", i)
+		}
+		seenPallasKeys[key] = struct{}{}
 	}
 
 	// Validate tally accumulators.

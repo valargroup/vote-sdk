@@ -2,6 +2,7 @@ package keeper_test
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,6 +32,8 @@ func TestExportImportGenesis(t *testing.T) {
 
 	roundID := bytes.Repeat([]byte{0xAA}, 32)
 	roundID2 := bytes.Repeat([]byte{0xBB}, 32)
+	pallasValidator := svtest.TestValAddr(0xA1)
+	pallasPK := testPallasPK()
 
 	// --- Populate state ---
 
@@ -109,8 +112,8 @@ func TestExportImportGenesis(t *testing.T) {
 
 	// Pallas keys.
 	require.NoError(t, k.SetPallasKey(kvStore, &types.ValidatorPallasKey{
-		ValidatorAddress: "svvaloper1abc",
-		PallasPk:         bytes.Repeat([]byte{0xCC}, 32),
+		ValidatorAddress: pallasValidator,
+		PallasPk:         pallasPK,
 	}))
 
 	// Commitment roots (scoped to roundID).
@@ -277,15 +280,15 @@ func TestExportImportGenesis(t *testing.T) {
 	require.Equal(t, uint64(100), tr.TotalValue)
 
 	// Verify Pallas keys.
-	vpk, err := k2.GetPallasKey(kvStore2, "svvaloper1abc")
+	vpk, err := k2.GetPallasKey(kvStore2, pallasValidator)
 	require.NoError(t, err)
 	require.NotNil(t, vpk)
-	require.Equal(t, bytes.Repeat([]byte{0xCC}, 32), vpk.PallasPk)
+	require.Equal(t, pallasPK, vpk.PallasPk)
 
 	// Verify Pallas key reverse-lookup index is populated after genesis import.
-	owner, err := k2.GetPallasKeyOwner(kvStore2, bytes.Repeat([]byte{0xCC}, 32))
+	owner, err := k2.GetPallasKeyOwner(kvStore2, pallasPK)
 	require.NoError(t, err)
-	require.Equal(t, "svvaloper1abc", owner)
+	require.Equal(t, pallasValidator, owner)
 
 	// Verify vote-manager set.
 	vms, err := k2.GetVoteManagers(kvStore2)
@@ -423,19 +426,21 @@ func TestInitGenesisPopulatesPallasKeyReverseIndex(t *testing.T) {
 	k := keeper.NewKeeper(storeService, svtest.TestAuthority, log.NewNopLogger(), nil, nil)
 	kvStore := k.OpenKVStore(ctx)
 
-	pk := bytes.Repeat([]byte{0xDD}, 32)
+	pk := testPallasPK()
+	firstValidator := svtest.TestValAddr(0xB1)
+	secondValidator := svtest.TestValAddr(0xB2)
 	gs := &types.GenesisState{
 		VoteManagerAddresses:  []string{genesisVoteManager},
 		MinCeremonyValidators: 1,
 		PallasKeys: []*types.ValidatorPallasKey{
-			{ValidatorAddress: "svvaloper1first", PallasPk: pk},
+			{ValidatorAddress: strings.ToUpper(firstValidator), PallasPk: pk},
 		},
 	}
 
 	require.NoError(t, k.InitGenesis(kvStore, gs))
 
 	// Forward lookup works.
-	vpk, err := k.GetPallasKey(kvStore, "svvaloper1first")
+	vpk, err := k.GetPallasKey(kvStore, firstValidator)
 	require.NoError(t, err)
 	require.NotNil(t, vpk)
 	require.Equal(t, pk, vpk.PallasPk)
@@ -443,10 +448,10 @@ func TestInitGenesisPopulatesPallasKeyReverseIndex(t *testing.T) {
 	// Reverse lookup works.
 	owner, err := k.GetPallasKeyOwner(kvStore, pk)
 	require.NoError(t, err)
-	require.Equal(t, "svvaloper1first", owner)
+	require.Equal(t, firstValidator, owner)
 
 	// A second validator trying to register the same PK must be rejected.
-	err = k.RegisterPallasKeyCore(kvStore, "svvaloper1second", pk)
+	err = k.RegisterPallasKeyCore(kvStore, secondValidator, pk)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "pallas key already registered by another validator")
 }

@@ -2,18 +2,33 @@ package types_test
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	sdk "github.com/cosmos/cosmos-sdk/types"
+
+	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
+
+func validPallasPublicKey() []byte {
+	return elgamal.PallasGenerator().ToAffineCompressed()
+}
 
 func canonicalPallasFieldElement(value byte) []byte {
 	encoded := make([]byte, 32)
 	encoded[0] = value
 	return encoded
 }
+
+func validValidatorAddress(seed byte) string {
+	address := make([]byte, 20)
+	address[0] = seed
+	return sdk.ValAddress(address).String()
+}
+
 func validGenesis() *types.GenesisState {
 	roundID := bytes.Repeat([]byte{0xAA}, 32)
 	return &types.GenesisState{
@@ -34,7 +49,7 @@ func validGenesis() *types.GenesisState {
 			{VoteRoundId: roundID, ProposalId: 1, VoteDecision: 0, TotalValue: 100},
 		},
 		PallasKeys: []*types.ValidatorPallasKey{
-			{ValidatorAddress: "svvaloper1xyz", PallasPk: bytes.Repeat([]byte{0xCC}, 32)},
+			{ValidatorAddress: validValidatorAddress(1), PallasPk: validPallasPublicKey()},
 		},
 		TallyAccumulators: []*types.GenesisTallyAccumulator{
 			{RoundId: roundID, ProposalId: 1, VoteDecision: 0, Ciphertext: bytes.Repeat([]byte{0xDD}, 64)},
@@ -354,7 +369,45 @@ func TestValidateGenesisState_PallasKeyBadPK(t *testing.T) {
 	gs.PallasKeys[0].PallasPk = []byte{0x01}
 	err := types.ValidateGenesisState(gs)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "pallas_keys[0].pallas_pk is 1 bytes")
+	require.Contains(t, err.Error(), "expected 32 bytes, got 1")
+}
+
+func TestValidateGenesisState_PallasKeyInvariants(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*types.GenesisState)
+		wantErr string
+	}{
+		{"invalid validator address", func(gs *types.GenesisState) {
+			gs.PallasKeys[0].ValidatorAddress = "not-a-validator-address"
+		}, "not a valid bech32 validator address"},
+		{"identity key", func(gs *types.GenesisState) {
+			gs.PallasKeys[0].PallasPk = make([]byte, 32)
+		}, "public key must not be the identity point"},
+		{"off-curve key", func(gs *types.GenesisState) {
+			gs.PallasKeys[0].PallasPk = bytes.Repeat([]byte{0xFF}, 32)
+		}, "failed to decompress point"},
+		{"duplicate validator", func(gs *types.GenesisState) {
+			gs.PallasKeys = append(gs.PallasKeys, &types.ValidatorPallasKey{
+				ValidatorAddress: strings.ToUpper(gs.PallasKeys[0].ValidatorAddress),
+				PallasPk:         validPallasPublicKey(),
+			})
+		}, "duplicate validator_address"},
+		{"duplicate key", func(gs *types.GenesisState) {
+			gs.PallasKeys = append(gs.PallasKeys, &types.ValidatorPallasKey{
+				ValidatorAddress: validValidatorAddress(2),
+				PallasPk:         gs.PallasKeys[0].PallasPk,
+			})
+		}, "duplicate pallas_pk"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gs := validGenesis()
+			tc.mutate(gs)
+			require.ErrorContains(t, types.ValidateGenesisState(gs), tc.wantErr)
+		})
+	}
 }
 
 func TestValidateGenesisState_TallyAccumulatorBadRoundID(t *testing.T) {

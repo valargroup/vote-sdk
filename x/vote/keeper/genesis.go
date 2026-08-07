@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"cosmossdk.io/core/store"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
@@ -120,7 +121,16 @@ func (k *Keeper) InitGenesis(kvStore store.KVStore, genesis *types.GenesisState)
 
 	// Restore Pallas key registry.
 	for _, vpk := range genesis.PallasKeys {
-		if err := k.SetPallasKey(kvStore, vpk); err != nil {
+		valAddr, err := sdk.ValAddressFromBech32(vpk.ValidatorAddress)
+		if err != nil {
+			return fmt.Errorf("restore Pallas key: %w", err)
+		}
+		normalized := &types.ValidatorPallasKey{
+			ValidatorAddress: valAddr.String(),
+			PallasPk:         vpk.PallasPk,
+			ShamirIndex:      vpk.ShamirIndex,
+		}
+		if err := k.SetPallasKey(kvStore, normalized); err != nil {
 			return err
 		}
 	}
