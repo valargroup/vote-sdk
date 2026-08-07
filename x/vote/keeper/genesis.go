@@ -239,10 +239,12 @@ func (k *Keeper) ExportGenesis(kvStore store.KVStore) (*types.GenesisState, erro
 
 	// Per-round commitment trees: iterate all rounds and export tree state,
 	// leaves, and roots for each round that has tree data.
+	var roundTreeErr error
 	if err := k.IterateAllRounds(kvStore, func(round *types.VoteRound) bool {
 		rt, err := exportRoundTree(k, kvStore, round.VoteRoundId)
 		if err != nil {
-			return false
+			roundTreeErr = fmt.Errorf("round %x: %w", round.VoteRoundId, err)
+			return true
 		}
 		if rt != nil {
 			gs.RoundTrees = append(gs.RoundTrees, rt)
@@ -250,6 +252,9 @@ func (k *Keeper) ExportGenesis(kvStore store.KVStore) (*types.GenesisState, erro
 		return false
 	}); err != nil {
 		return nil, fmt.Errorf("export round trees: %w", err)
+	}
+	if roundTreeErr != nil {
+		return nil, fmt.Errorf("export round trees: %w", roundTreeErr)
 	}
 
 	// Nullifiers (0x01 prefix).

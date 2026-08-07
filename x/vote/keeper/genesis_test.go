@@ -2,6 +2,7 @@ package keeper_test
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -412,6 +413,26 @@ func TestExportGenesisEmpty(t *testing.T) {
 	require.Empty(t, gs.ShareCounts)
 	require.Empty(t, gs.PartialDecryptions)
 	require.Empty(t, gs.VoteManagerAddresses)
+}
+
+func TestExportGenesisPropagatesRoundTreeError(t *testing.T) {
+	key := storetypes.NewKVStoreKey(types.StoreKey)
+	tkey := storetypes.NewTransientStoreKey("transient_test")
+	testCtx := testutil.DefaultContextWithDB(t, key, tkey)
+	storeService := runtime.NewKVStoreService(key)
+	k := keeper.NewKeeper(storeService, svtest.TestAuthority, log.NewNopLogger(), nil, nil)
+	kvStore := k.OpenKVStore(testCtx.Ctx)
+	roundID := bytes.Repeat([]byte{0xEF}, types.RoundIDLen)
+
+	require.NoError(t, k.SetVoteRound(kvStore, &types.VoteRound{
+		VoteRoundId: roundID,
+		VoteEndTime: 2_000_000,
+	}))
+	require.NoError(t, kvStore.Set(types.RoundTreeStateKey(roundID), []byte{0xFF}))
+
+	_, err := k.ExportGenesis(kvStore)
+	require.ErrorContains(t, err, "export round trees")
+	require.ErrorContains(t, err, fmt.Sprintf("round %x", roundID))
 }
 
 // TestInitGenesisPopulatesPallasKeyReverseIndex verifies that InitGenesis
