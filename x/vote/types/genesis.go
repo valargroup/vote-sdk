@@ -1,9 +1,12 @@
 package types
 
 import (
+	"bytes"
 	"fmt"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+
+	"github.com/valargroup/vote-sdk/crypto/pallas"
 )
 
 // ValidateAndNormalizeVoteManagerSet parses each address through bech32, rejects
@@ -91,6 +94,9 @@ func ValidateGenesisState(gs *GenesisState) error {
 			return fmt.Errorf("rounds[%d]: duplicate vote_round_id %x", i, round.VoteRoundId)
 		}
 		seenRounds[key] = struct{}{}
+	}
+	if err := validateGenesisRoundTrees(gs.RoundTrees, seenRounds); err != nil {
+		return err
 	}
 
 	// Validate nullifiers: type in {0,1,2}, round_id is 32 bytes, nullifier is non-empty.
@@ -240,6 +246,135 @@ func ValidateGenesisState(gs *GenesisState) error {
 		}
 	}
 
+	return nil
+}
+
+// validateGenesisRoundTrees checks the replay data that InitGenesis writes
+// directly into the commitment-tree namespace.
+func validateGenesisRoundTrees(trees []*GenesisRoundTree, rounds map[string]struct{}) error {
+	seenTrees := make(map[string]struct{}, len(trees))
+	for i, tree := range trees {
+		if err := ValidateRoundID(tree.VoteRoundId); err != nil {
+			return fmt.Errorf("round_trees[%d].vote_round_id: %w", i, err)
+		}
+		roundKey := string(tree.VoteRoundId)
+		if _, ok := rounds[roundKey]; !ok {
+			return fmt.Errorf("round_trees[%d] references unknown round %x", i, tree.VoteRoundId)
+		}
+		if _, dup := seenTrees[roundKey]; dup {
+			return fmt.Errorf("round_trees[%d]: duplicate vote_round_id %x", i, tree.VoteRoundId)
+		}
+		seenTrees[roundKey] = struct{}{}
+
+		state := tree.TreeState
+		if state == nil {
+			return fmt.Errorf("round_trees[%d].tree_state cannot be nil", i)
+		}
+		maxNextIndex := uint64(MaxTreePosition) + 1
+		if state.NextIndex > maxNextIndex {
+			return fmt.Errorf("round_trees[%d].tree_state.next_index %d exceeds tree capacity %d", i, state.NextIndex, maxNextIndex)
+		}
+		if state.NextIndexAtRoot > state.NextIndex {
+			return fmt.Errorf("round_trees[%d].tree_state.next_index_at_root %d exceeds next_index %d", i, state.NextIndexAtRoot, state.NextIndex)
+		}
+		if len(state.Root) != 0 && len(state.Root) != 32 {
+			return fmt.Errorf("round_trees[%d].tree_state.root is %d bytes, expected 32", i, len(state.Root))
+		}
+		if len(state.Root) != 0 && !pallas.IsCanonicalBaseFieldElement(state.Root) {
+			return fmt.Errorf("round_trees[%d].tree_state.root is not a canonical Pallas field element", i)
+		}
+		if state.Height == 0 {
+			if state.NextIndexAtRoot != 0 {
+				return fmt.Errorf("round_trees[%d].tree_state.next_index_at_root must be zero when height is zero", i)
+			}
+			if len(state.Root) != 0 {
+				return fmt.Errorf("round_trees[%d].tree_state.root must be empty when height is zero", i)
+			}
+		}
+		if uint64(len(tree.CommitmentLeaves)) != state.NextIndex {
+			return fmt.Errorf("round_trees[%d] has %d leaves, expected %d", i, len(tree.CommitmentLeaves), state.NextIndex)
+		}
+
+		seenLeaves := make(map[uint64]struct{}, len(tree.CommitmentLeaves))
+		for j, leaf := range tree.CommitmentLeaves {
+			if leaf.Index >= state.NextIndex {
+				return fmt.Errorf("round_trees[%d].commitment_leaves[%d].index %d is outside next_index %d", i, j, leaf.Index, state.NextIndex)
+			}
+			if _, dup := seenLeaves[leaf.Index]; dup {
+				return fmt.Errorf("round_trees[%d].commitment_leaves[%d]: duplicate index %d", i, j, leaf.Index)
+			}
+			seenLeaves[leaf.Index] = struct{}{}
+			if len(leaf.Value) != 32 {
+				return fmt.Errorf("round_trees[%d].commitment_leaves[%d].value is %d bytes, expected 32", i, j, len(leaf.Value))
+			}
+			if !pallas.IsCanonicalBaseFieldElement(leaf.Value) {
+				return fmt.Errorf("round_trees[%d].commitment_leaves[%d].value is not a canonical Pallas field element", i, j)
+			}
+		}
+
+		roots := make(map[uint64][]byte, len(tree.CommitmentRoots))
+		for j, root := range tree.CommitmentRoots {
+			if _, dup := roots[root.Height]; dup {
+				return fmt.Errorf("round_trees[%d].commitment_roots[%d]: duplicate height %d", i, j, root.Height)
+			}
+			if len(root.Root) != 32 {
+				return fmt.Errorf("round_trees[%d].commitment_roots[%d].root is %d bytes, expected 32", i, j, len(root.Root))
+			}
+			if !pallas.IsCanonicalBaseFieldElement(root.Root) {
+				return fmt.Errorf("round_trees[%d].commitment_roots[%d].root is not a canonical Pallas field element", i, j)
+			}
+			roots[root.Height] = root.Root
+		}
+
+		rangesByStart := make(map[uint64]uint64, len(tree.BlockLeafIndices))
+		seenRangeHeights := make(map[uint64]struct{}, len(tree.BlockLeafIndices))
+		for j, blockRange := range tree.BlockLeafIndices {
+			if _, dup := seenRangeHeights[blockRange.Height]; dup {
+				return fmt.Errorf("round_trees[%d].block_leaf_indices[%d]: duplicate height %d", i, j, blockRange.Height)
+			}
+			seenRangeHeights[blockRange.Height] = struct{}{}
+			if blockRange.Count == 0 {
+				return fmt.Errorf("round_trees[%d].block_leaf_indices[%d].count cannot be zero", i, j)
+			}
+			end := blockRange.StartIndex + blockRange.Count
+			if end < blockRange.StartIndex || end > state.NextIndex {
+				return fmt.Errorf("round_trees[%d].block_leaf_indices[%d] range [%d,%d) exceeds next_index %d", i, j, blockRange.StartIndex, end, state.NextIndex)
+			}
+			if _, dup := rangesByStart[blockRange.StartIndex]; dup {
+				return fmt.Errorf("round_trees[%d].block_leaf_indices[%d]: duplicate start_index %d", i, j, blockRange.StartIndex)
+			}
+			rangesByStart[blockRange.StartIndex] = blockRange.Count
+			if _, ok := roots[blockRange.Height]; !ok {
+				return fmt.Errorf("round_trees[%d].block_leaf_indices[%d] has no root at height %d", i, j, blockRange.Height)
+			}
+		}
+		if len(roots) != len(seenRangeHeights) {
+			return fmt.Errorf("round_trees[%d] has %d roots but %d block leaf ranges", i, len(roots), len(seenRangeHeights))
+		}
+
+		covered := uint64(0)
+		coveredRanges := 0
+		for covered < state.NextIndexAtRoot {
+			count, ok := rangesByStart[covered]
+			if !ok {
+				return fmt.Errorf("round_trees[%d].block_leaf_indices do not cover rooted leaf index %d", i, covered)
+			}
+			covered += count
+			coveredRanges++
+		}
+		if covered != state.NextIndexAtRoot || coveredRanges != len(rangesByStart) {
+			return fmt.Errorf("round_trees[%d].block_leaf_indices are inconsistent with next_index_at_root %d", i, state.NextIndexAtRoot)
+		}
+		if state.Height > 0 {
+			root, ok := roots[state.Height]
+			if !ok {
+				return fmt.Errorf("round_trees[%d].tree_state.height %d has no stored root", i, state.Height)
+			}
+			if !bytes.Equal(root, state.Root) {
+				return fmt.Errorf("round_trees[%d].tree_state.root does not match stored root at height %d", i, state.Height)
+			}
+		}
+	}
 	return nil
 }
 

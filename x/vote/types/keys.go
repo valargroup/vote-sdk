@@ -122,6 +122,10 @@ var (
 	// TreeStateKey stores the current commitment tree state (next_index, etc.): single key
 	TreeStateKey = []byte{0x06}
 
+	// TreeReplayPendingKey marks a genesis-imported commitment tree whose
+	// shard data still needs to be rebuilt from the imported leaves.
+	TreeReplayPendingKey = []byte{0x1A}
+
 	// TallyResultPrefix stores finalized tally results: 0x07 || round_id || big-endian uint32 proposal_id || big-endian uint32 decision -> TallyResult (protobuf)
 	TallyResultPrefix = []byte{0x07}
 
@@ -180,8 +184,8 @@ var (
 	// voting round. Per-round keys have the form:
 	//   0x14 || round_id (32 bytes) || <inner key>
 	// where <inner key> is one of the tree-internal prefixes (0x02, 0x03,
-	// 0x06, 0x08). Shard/cap/checkpoint keys (0x0F, 0x10, 0x11) are scoped
-	// transparently by the KvStoreProxy prefix on the Rust side.
+	// 0x06, 0x08, 0x1A). Shard/cap/checkpoint keys (0x0F, 0x10, 0x11) are
+	// scoped transparently by the KvStoreProxy prefix on the Rust side.
 	RoundTreePrefix = []byte{0x14}
 
 	// EndorserAddressPrefix stores the current endorser mapping:
@@ -295,6 +299,16 @@ func RoundTreeStateKey(roundID []byte) []byte {
 	key := make([]byte, len(rk)+len(TreeStateKey))
 	copy(key, rk)
 	copy(key[len(rk):], TreeStateKey)
+	return key
+}
+
+// RoundTreeReplayPendingKey returns the per-round genesis replay marker key.
+// Format: 0x14 || round_id || 0x1A
+func RoundTreeReplayPendingKey(roundID []byte) []byte {
+	rk := RoundTreeKey(roundID)
+	key := make([]byte, len(rk)+len(TreeReplayPendingKey))
+	copy(key, rk)
+	copy(key[len(rk):], TreeReplayPendingKey)
 	return key
 }
 

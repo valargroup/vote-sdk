@@ -158,6 +158,9 @@ func (k *Keeper) getOrCreateRoundTree(roundID []byte) *roundTree {
 // nextIndex leaves from KV.
 //
 // Cases:
+//   - handle == nil, replay pending (genesis import): shard data was not
+//     included in genesis. Create the handle at position 0 and replay all
+//     imported leaves.
 //   - handle == nil, Height > 0 (restart): shard/cap/checkpoint blobs
 //     exist in KV from the previous process. Create handle at the last
 //     checkpointed leaf count (NextIndexAtRoot), then fall through to append any
@@ -170,38 +173,50 @@ func (k *Keeper) getOrCreateRoundTree(roundID []byte) *roundTree {
 //   - Size() < nextIndex (delta): append leaves [Size(), nextIndex) from KV.
 //   - Size() > nextIndex: invariant violation — returns an error.
 //
-// Returns (needsCheckpoint, error). Caller should call Checkpoint(blockHeight)
-// when needsCheckpoint is true.
+// Returns (needsCheckpoint, replayPending, error). Caller should call
+// Checkpoint(blockHeight) when needsCheckpoint is true and clear the replay
+// marker only after the rebuilt tree has been verified.
 //
 // Not safe for concurrent use. Must only be called from the single-threaded
 // EndBlocker path (via ComputeTreeRoot).
-func (k *Keeper) ensureRoundTreeLoaded(kvStore store.KVStore, roundID []byte, nextIndex uint64) (needsCheckpoint bool, err error) {
+func (k *Keeper) ensureRoundTreeLoaded(kvStore store.KVStore, roundID []byte, nextIndex uint64) (needsCheckpoint, replayPending bool, err error) {
 	rt := k.getOrCreateRoundTree(roundID)
 	rt.proxy.SetStore(kvStore)
+
+	replayPending, err = kvStore.Has(types.RoundTreeReplayPendingKey(roundID))
+	if err != nil {
+		return false, false, fmt.Errorf("ensureRoundTreeLoaded: read replay marker: %w", err)
+	}
 
 	if rt.handle == nil {
 		state, err := k.GetCommitmentTreeState(kvStore, roundID)
 		if err != nil {
-			return false, fmt.Errorf("ensureRoundTreeLoaded: read tree state: %w", err)
+			return false, false, fmt.Errorf("ensureRoundTreeLoaded: read tree state: %w", err)
 		}
 
-		if state.Height > 0 {
+		if replayPending {
+			h, err := votetree.NewTreeHandleWithKV(rt.proxy, 0)
+			if err != nil {
+				return false, false, fmt.Errorf("ensureRoundTreeLoaded: genesis replay: %w", err)
+			}
+			rt.handle = h
+		} else if state.Height > 0 {
 			if state.NextIndexAtRoot > nextIndex {
-				return false, fmt.Errorf("ensureRoundTreeLoaded: checkpoint index %d > nextIndex %d: invariant violated", state.NextIndexAtRoot, nextIndex)
+				return false, false, fmt.Errorf("ensureRoundTreeLoaded: checkpoint index %d > nextIndex %d: invariant violated", state.NextIndexAtRoot, nextIndex)
 			}
 			if state.NextIndex > 0 && state.NextIndexAtRoot == 0 {
-				return false, fmt.Errorf("ensureRoundTreeLoaded: missing checkpoint index for non-empty tree at height %d: invariant violated", state.Height)
+				return false, false, fmt.Errorf("ensureRoundTreeLoaded: missing checkpoint index for non-empty tree at height %d: invariant violated", state.Height)
 			}
 
 			h, err := votetree.NewTreeHandleWithKV(rt.proxy, state.NextIndexAtRoot)
 			if err != nil {
-				return false, fmt.Errorf("ensureRoundTreeLoaded: restart: %w", err)
+				return false, false, fmt.Errorf("ensureRoundTreeLoaded: restart: %w", err)
 			}
 			rt.handle = h
 		} else {
 			h, err := votetree.NewTreeHandleWithKV(rt.proxy, 0)
 			if err != nil {
-				return false, fmt.Errorf("ensureRoundTreeLoaded: first boot: %w", err)
+				return false, false, fmt.Errorf("ensureRoundTreeLoaded: first boot: %w", err)
 			}
 			rt.handle = h
 		}
@@ -210,17 +225,17 @@ func (k *Keeper) ensureRoundTreeLoaded(kvStore store.KVStore, roundID []byte, ne
 	size := rt.handle.Size()
 
 	if size > nextIndex {
-		return false, fmt.Errorf("ensureRoundTreeLoaded: tree size %d > nextIndex %d: invariant violated", size, nextIndex)
+		return false, replayPending, fmt.Errorf("ensureRoundTreeLoaded: tree size %d > nextIndex %d: invariant violated", size, nextIndex)
 	}
 
 	if size == nextIndex {
-		return false, nil
+		return false, replayPending, nil
 	}
 
 	if err := rt.handle.AppendFromKV(size, nextIndex-size); err != nil {
-		return false, err
+		return false, replayPending, err
 	}
-	return true, nil
+	return true, replayPending, nil
 }
 
 // OpenKVStore opens the module's KV store from a context.

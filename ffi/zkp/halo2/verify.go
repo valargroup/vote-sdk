@@ -30,6 +30,7 @@ import (
 	"unsafe"
 
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
+	"github.com/valargroup/vote-sdk/crypto/pallas"
 	"github.com/valargroup/vote-sdk/ffi/zkp"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
@@ -54,32 +55,6 @@ func WarmVerifierCaches() error {
 	return fmt.Errorf("halo2: warm verifier caches failed with code %d: %s", rc, rustLastError())
 }
 
-// pallasFpModulus is the Pallas base field modulus in big-endian byte order:
-// p = 0x40000000000000000000000000000000224698fc094cf91b992d30ed00000001
-var pallasFpModulus = [32]byte{
-	0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x22, 0x46, 0x98, 0xfc, 0x09, 0x4c, 0xf9, 0x1b,
-	0x99, 0x2d, 0x30, 0xed, 0x00, 0x00, 0x00, 0x01,
-}
-
-// isCanonicalPallasFp checks whether a 32-byte little-endian value is
-// strictly less than the Pallas base field modulus p.
-func isCanonicalPallasFp(b []byte) bool {
-	// Compare in big-endian order (byte 31 is the most significant).
-	for i := 31; i >= 0; i-- {
-		be := 31 - i // index into big-endian modulus
-		if b[i] < pallasFpModulus[be] {
-			return true
-		}
-		if b[i] > pallasFpModulus[be] {
-			return false
-		}
-	}
-	// Equal to p — not canonical.
-	return false
-}
-
 // validatePallasFp returns an error if b is not a canonical 32-byte
 // little-endian Pallas Fp element. The name is included in the error
 // message to identify which field is invalid.
@@ -87,7 +62,7 @@ func validatePallasFp(name string, b []byte) error {
 	if len(b) != 32 {
 		return fmt.Errorf("%s: expected 32 bytes, got %d", name, len(b))
 	}
-	if !isCanonicalPallasFp(b) {
+	if !pallas.IsCanonicalBaseFieldElement(b) {
 		return fmt.Errorf("%s is not a canonical Pallas field element (got 0x%s)", name, hex.EncodeToString(b))
 	}
 	return nil

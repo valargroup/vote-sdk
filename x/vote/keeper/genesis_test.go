@@ -114,14 +114,20 @@ func TestExportImportGenesis(t *testing.T) {
 	}))
 
 	// Commitment roots (scoped to roundID).
-	root10 := bytes.Repeat([]byte{0xDD}, 32)
+	root10 := svtest.FpLE(10)
 	require.NoError(t, k.SetCommitmentRootAtHeight(kvStore, roundID, 10, root10))
-	root20 := bytes.Repeat([]byte{0xEE}, 32)
+	root20 := svtest.FpLE(20)
 	require.NoError(t, k.SetCommitmentRootAtHeight(kvStore, roundID, 20, root20))
 
 	// Block leaf indices (scoped to roundID).
 	require.NoError(t, k.SetBlockLeafIndex(kvStore, roundID, 10, 0, 2))
 	require.NoError(t, k.SetBlockLeafIndex(kvStore, roundID, 20, 2, 1))
+	treeState, err := k.GetCommitmentTreeState(kvStore, roundID)
+	require.NoError(t, err)
+	treeState.Root = root20
+	treeState.Height = 20
+	treeState.NextIndexAtRoot = treeState.NextIndex
+	require.NoError(t, k.SetCommitmentTreeState(kvStore, roundID, treeState))
 
 	// Partial decryptions (scoped to roundID).
 	pdEntry1 := &types.PartialDecryptionEntry{
@@ -226,9 +232,10 @@ func TestExportImportGenesis(t *testing.T) {
 	ts, err := k2.GetCommitmentTreeState(kvStore2, roundID)
 	require.NoError(t, err)
 	require.Equal(t, uint64(3), ts.NextIndex)
-	// Height must be zero after genesis import so ensureRoundTreeLoaded takes
-	// the first-boot replay path (shard blobs are not carried in genesis).
-	require.Equal(t, uint64(0), ts.Height, "Height must be 0 after genesis import to force tree rebuild from leaves")
+	require.Equal(t, uint64(20), ts.Height)
+	replayPending, err := kvStore2.Has(types.RoundTreeReplayPendingKey(roundID))
+	require.NoError(t, err)
+	require.True(t, replayPending)
 
 	// Verify commitment leaves (per-round).
 	bz, err := kvStore2.Get(types.CommitmentLeafKey(roundID, 0))
@@ -328,11 +335,9 @@ func TestExportImportGenesis(t *testing.T) {
 	require.Nil(t, pd)
 }
 
-// TestInitGenesisClearsTreeHeight verifies that InitGenesis forces Height = 0
-// when NextIndex > 0. This prevents ensureRoundTreeLoaded from taking the
-// restart branch (which expects shard/cap/checkpoint blobs that genesis does
-// not carry), avoiding silent root corruption after chain migration.
-func TestInitGenesisClearsTreeHeight(t *testing.T) {
+// TestInitGenesisMarksTreeForReplay verifies that InitGenesis preserves the
+// logical tree state while requesting reconstruction of omitted shard data.
+func TestInitGenesisMarksTreeForReplay(t *testing.T) {
 	key := storetypes.NewKVStoreKey(types.StoreKey)
 	tkey := storetypes.NewTransientStoreKey("transient_test")
 	testCtx := testutil.DefaultContextWithDB(t, key, tkey)
@@ -342,7 +347,11 @@ func TestInitGenesisClearsTreeHeight(t *testing.T) {
 	kvStore := k.OpenKVStore(ctx)
 
 	roundID := bytes.Repeat([]byte{0xDD}, 32)
-	leaf := bytes.Repeat([]byte{0x01}, 32)
+	root := svtest.FpLE(999)
+	leaves := make([]*types.CommitmentLeaf, 5)
+	for i := range leaves {
+		leaves[i] = &types.CommitmentLeaf{Index: uint64(i), Value: bytes.Repeat([]byte{byte(i + 1)}, 32)}
+	}
 
 	gs := &types.GenesisState{
 		VoteManagerAddresses:  []string{genesisVoteManager},
@@ -355,13 +364,14 @@ func TestInitGenesisClearsTreeHeight(t *testing.T) {
 		RoundTrees: []*types.GenesisRoundTree{{
 			VoteRoundId: roundID,
 			TreeState: &types.CommitmentTreeState{
-				NextIndex: 5,
-				Height:    999, // simulates exported state with Height > 0
-				Root:      bytes.Repeat([]byte{0xAA}, 32),
+				NextIndex:       5,
+				NextIndexAtRoot: 5,
+				Height:          999, // simulates exported state with Height > 0
+				Root:            root,
 			},
-			CommitmentLeaves: []*types.CommitmentLeaf{
-				{Index: 0, Value: leaf},
-			},
+			CommitmentLeaves: leaves,
+			CommitmentRoots:  []*types.GenesisCommitmentRoot{{Height: 999, Root: root}},
+			BlockLeafIndices: []*types.GenesisBlockLeafIndex{{Height: 999, StartIndex: 0, Count: 5}},
 		}},
 	}
 
@@ -370,8 +380,11 @@ func TestInitGenesisClearsTreeHeight(t *testing.T) {
 	ts, err := k.GetCommitmentTreeState(kvStore, roundID)
 	require.NoError(t, err)
 	require.Equal(t, uint64(5), ts.NextIndex, "NextIndex must be preserved")
-	require.Equal(t, uint64(0), ts.Height, "Height must be zeroed to force first-boot replay")
-	require.Equal(t, bytes.Repeat([]byte{0xAA}, 32), ts.Root, "Root must be preserved for reference")
+	require.Equal(t, uint64(999), ts.Height, "Height must be preserved")
+	require.Equal(t, root, ts.Root, "Root must be preserved")
+	replayPending, err := kvStore.Has(types.RoundTreeReplayPendingKey(roundID))
+	require.NoError(t, err)
+	require.True(t, replayPending)
 }
 
 func TestExportGenesisEmpty(t *testing.T) {

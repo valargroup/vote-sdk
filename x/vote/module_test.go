@@ -168,6 +168,82 @@ func (s *EndBlockerTestSuite) seedActiveRound(roundID []byte) {
 	s.Require().NoError(s.keeper.SetVoteRound(kv, svtest.ActiveRoundFixture(roundID)))
 }
 
+func (s *EndBlockerTestSuite) TestGenesisImportRejectsLeafThatEndBlockCannotReplay() {
+	roundID := bytes.Repeat([]byte{0xAA}, types.RoundIDLen)
+	genesis := &types.GenesisState{
+		VoteManagerAddresses: []string{svtest.DefaultVoteManagerAddress},
+		Rounds:               []*types.VoteRound{svtest.ActiveRoundFixture(roundID)},
+		RoundTrees: []*types.GenesisRoundTree{{
+			VoteRoundId: roundID,
+			TreeState:   &types.CommitmentTreeState{NextIndex: 1},
+			CommitmentLeaves: []*types.CommitmentLeaf{{
+				Index: 0,
+				Value: bytes.Repeat([]byte{0xff}, 32),
+			}},
+		}},
+	}
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	err := s.keeper.InitGenesis(kv, genesis)
+	s.Require().ErrorContains(err, "commitment_leaves[0].value is not a canonical Pallas field element")
+
+	state, err := s.keeper.GetCommitmentTreeState(kv, roundID)
+	s.Require().NoError(err)
+	s.Require().Zero(state.NextIndex)
+	s.Require().NoError(s.module.EndBlock(s.ctx))
+}
+
+func (s *EndBlockerTestSuite) TestEndBlockCompletesImportedTreeReplay() {
+	roundID := bytes.Repeat([]byte{0xAB}, types.RoundIDLen)
+	s.seedActiveRound(roundID)
+
+	sourceKV := s.keeper.OpenKVStore(s.ctx)
+	s.Require().NoError(s.keeper.SetVoteManagers(sourceKV, &types.VoteManagerSet{
+		Addresses: []string{svtest.DefaultVoteManagerAddress},
+	}))
+	_, err := s.keeper.AppendCommitment(sourceKV, roundID, fpLE(1))
+	s.Require().NoError(err)
+	s.Require().NoError(s.module.EndBlock(s.ctx))
+
+	genesis, err := s.keeper.ExportGenesis(sourceKV)
+	s.Require().NoError(err)
+
+	destKey := storetypes.NewKVStoreKey(types.StoreKey + "_import")
+	destTKey := storetypes.NewTransientStoreKey("transient_import")
+	destTestCtx := testutil.DefaultContextWithDB(s.T(), destKey, destTKey)
+	destCtx := destTestCtx.Ctx.
+		WithBlockTime(s.ctx.BlockTime()).
+		WithBlockHeight(20)
+	destStoreService := runtime.NewKVStoreService(destKey)
+	destKeeper := keeper.NewKeeper(destStoreService, svtest.TestAuthority, log.NewNopLogger(), nil, nil)
+	destKV := destKeeper.OpenKVStore(destCtx)
+
+	s.Require().NoError(destKeeper.InitGenesis(destKV, genesis))
+	replayPending, err := destKV.Has(types.RoundTreeReplayPendingKey(roundID))
+	s.Require().NoError(err)
+	s.Require().True(replayPending)
+
+	replayKeeper := keeper.NewKeeper(destStoreService, svtest.TestAuthority, log.NewNopLogger(), nil, nil)
+	replayModule := vote.NewAppModule(replayKeeper, nil)
+	s.Require().NoError(replayModule.EndBlock(destCtx))
+	replayPending, err = destKV.Has(types.RoundTreeReplayPendingKey(roundID))
+	s.Require().NoError(err)
+	s.Require().False(replayPending)
+
+	state, err := replayKeeper.GetCommitmentTreeState(destKV, roundID)
+	s.Require().NoError(err)
+	s.Require().Equal(uint64(10), state.Height)
+	s.Require().Equal(state.NextIndex, state.NextIndexAtRoot)
+
+	freshKeeper := keeper.NewKeeper(destStoreService, svtest.TestAuthority, log.NewNopLogger(), nil, nil)
+	freshModule := vote.NewAppModule(freshKeeper, nil)
+	s.Require().NoError(freshModule.EndBlock(destCtx.WithBlockHeight(21)))
+
+	freshState, err := freshKeeper.GetCommitmentTreeState(destKV, roundID)
+	s.Require().NoError(err)
+	s.Require().Equal(state, freshState)
+}
+
 func (s *EndBlockerTestSuite) TestEndBlock() {
 	roundID := bytes.Repeat([]byte{0xAA}, 32)
 
