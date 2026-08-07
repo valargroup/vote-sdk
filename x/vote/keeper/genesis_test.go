@@ -18,6 +18,8 @@ import (
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
+const genesisVoteManager = "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"
+
 func TestExportImportGenesis(t *testing.T) {
 	key := storetypes.NewKVStoreKey(types.StoreKey)
 	tkey := storetypes.NewTransientStoreKey("transient_test")
@@ -33,7 +35,7 @@ func TestExportImportGenesis(t *testing.T) {
 	// --- Populate state ---
 
 	// Vote-manager set.
-	require.NoError(t, k.SetVoteManagers(kvStore, &types.VoteManagerSet{Addresses: []string{"sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"}}))
+	require.NoError(t, k.SetVoteManagers(kvStore, &types.VoteManagerSet{Addresses: []string{genesisVoteManager}}))
 
 	// Vote rounds.
 	round := &types.VoteRound{
@@ -44,7 +46,7 @@ func TestExportImportGenesis(t *testing.T) {
 		VoteEndTime:       2_000_000,
 		NullifierImtRoot:  bytes.Repeat([]byte{0x33}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x44}, 32),
-		Creator:           "sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3",
+		Creator:           genesisVoteManager,
 		Status:            types.SessionStatus_SESSION_STATUS_ACTIVE,
 		Proposals: []*types.Proposal{
 			{Id: 1, Title: "Prop 1", Options: []*types.VoteOption{
@@ -145,7 +147,7 @@ func TestExportImportGenesis(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify export contents.
-	require.Equal(t, []string{"sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"}, gs.VoteManagerAddresses)
+	require.Equal(t, []string{genesisVoteManager}, gs.VoteManagerAddresses)
 	require.Len(t, gs.Rounds, 2)
 	require.Len(t, gs.Nullifiers, 3)
 	require.Len(t, gs.TallyResults, 1)
@@ -281,7 +283,7 @@ func TestExportImportGenesis(t *testing.T) {
 	// Verify vote-manager set.
 	vms, err := k2.GetVoteManagers(kvStore2)
 	require.NoError(t, err)
-	require.Equal(t, []string{"sv1mqts0klc9768rns9h2ykeaka5tve6ts39c2zu3"}, vms.Addresses)
+	require.Equal(t, []string{genesisVoteManager}, vms.Addresses)
 
 	// Verify commitment roots (per-round).
 	rootVal, err := k2.GetCommitmentRootAtHeight(kvStore2, roundID, 10)
@@ -343,10 +345,12 @@ func TestInitGenesisClearsTreeHeight(t *testing.T) {
 	leaf := bytes.Repeat([]byte{0x01}, 32)
 
 	gs := &types.GenesisState{
+		VoteManagerAddresses:  []string{genesisVoteManager},
 		MinCeremonyValidators: 1,
 		Rounds: []*types.VoteRound{{
 			VoteRoundId: roundID,
 			Status:      types.SessionStatus_SESSION_STATUS_ACTIVE,
+			VoteEndTime: 1,
 		}},
 		RoundTrees: []*types.GenesisRoundTree{{
 			VoteRoundId: roundID,
@@ -408,6 +412,7 @@ func TestInitGenesisPopulatesPallasKeyReverseIndex(t *testing.T) {
 
 	pk := bytes.Repeat([]byte{0xDD}, 32)
 	gs := &types.GenesisState{
+		VoteManagerAddresses:  []string{genesisVoteManager},
 		MinCeremonyValidators: 1,
 		PallasKeys: []*types.ValidatorPallasKey{
 			{ValidatorAddress: "svvaloper1first", PallasPk: pk},
@@ -431,6 +436,26 @@ func TestInitGenesisPopulatesPallasKeyReverseIndex(t *testing.T) {
 	err = k.RegisterPallasKeyCore(kvStore, "svvaloper1second", pk)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "pallas key already registered by another validator")
+}
+
+func TestInitGenesisValidatesBeforeRestoring(t *testing.T) {
+	key := storetypes.NewKVStoreKey(types.StoreKey)
+	tkey := storetypes.NewTransientStoreKey("transient_test")
+	testCtx := testutil.DefaultContextWithDB(t, key, tkey)
+	storeService := runtime.NewKVStoreService(key)
+	k := keeper.NewKeeper(storeService, svtest.TestAuthority, log.NewNopLogger(), nil, nil)
+	kvStore := k.OpenKVStore(testCtx.Ctx)
+
+	gs := &types.GenesisState{
+		VoteManagerAddresses: []string{genesisVoteManager},
+		Rounds:               []*types.VoteRound{nil},
+	}
+	err := k.InitGenesis(kvStore, gs)
+	require.EqualError(t, err, "validate genesis: rounds[0] cannot be nil")
+
+	vms, getErr := k.GetVoteManagers(kvStore)
+	require.NoError(t, getErr)
+	require.Nil(t, vms)
 }
 
 func TestInitGenesisNil(t *testing.T) {

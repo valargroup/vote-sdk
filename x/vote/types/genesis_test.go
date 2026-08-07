@@ -48,6 +48,44 @@ func TestValidateGenesisState_Nil(t *testing.T) {
 	require.NoError(t, types.ValidateGenesisState(nil))
 }
 
+func TestValidateGenesisState_NilRecords(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*types.GenesisState)
+		wantErr string
+	}{
+		{"round", func(gs *types.GenesisState) { gs.Rounds = []*types.VoteRound{nil} }, "rounds[0] cannot be nil"},
+		{"round tree", func(gs *types.GenesisState) { gs.RoundTrees = []*types.GenesisRoundTree{nil} }, "round_trees[0] cannot be nil"},
+		{"round tree leaf", func(gs *types.GenesisState) {
+			gs.RoundTrees = []*types.GenesisRoundTree{{CommitmentLeaves: []*types.CommitmentLeaf{nil}}}
+		}, "round_trees[0].commitment_leaves[0] cannot be nil"},
+		{"round tree root", func(gs *types.GenesisState) {
+			gs.RoundTrees = []*types.GenesisRoundTree{{CommitmentRoots: []*types.GenesisCommitmentRoot{nil}}}
+		}, "round_trees[0].commitment_roots[0] cannot be nil"},
+		{"round tree block range", func(gs *types.GenesisState) {
+			gs.RoundTrees = []*types.GenesisRoundTree{{BlockLeafIndices: []*types.GenesisBlockLeafIndex{nil}}}
+		}, "round_trees[0].block_leaf_indices[0] cannot be nil"},
+		{"nullifier", func(gs *types.GenesisState) { gs.Nullifiers = []*types.NullifierEntry{nil} }, "nullifiers[0] cannot be nil"},
+		{"tally result", func(gs *types.GenesisState) { gs.TallyResults = []*types.TallyResult{nil} }, "tally_results[0] cannot be nil"},
+		{"Pallas key", func(gs *types.GenesisState) { gs.PallasKeys = []*types.ValidatorPallasKey{nil} }, "pallas_keys[0] cannot be nil"},
+		{"tally accumulator", func(gs *types.GenesisState) { gs.TallyAccumulators = []*types.GenesisTallyAccumulator{nil} }, "tally_accumulators[0] cannot be nil"},
+		{"share count", func(gs *types.GenesisState) { gs.ShareCounts = []*types.GenesisShareCount{nil} }, "share_counts[0] cannot be nil"},
+		{"partial decryption", func(gs *types.GenesisState) { gs.PartialDecryptions = []*types.GenesisPartialDecryption{nil} }, "partial_decryptions[0] cannot be nil"},
+		{"endorser", func(gs *types.GenesisState) { gs.Endorsers = []*types.Endorser{nil} }, "endorsers[0] cannot be nil"},
+		{"endorsed round", func(gs *types.GenesisState) { gs.EndorsedRounds = []*types.EndorsedRound{nil} }, "endorsed_rounds[0] cannot be nil"},
+		{"coordinator action", func(gs *types.GenesisState) { gs.CoordinatorActions = []*types.CoordinatorAction{nil} }, "coordinator_actions[0] cannot be nil"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gs := validGenesis()
+			tc.mutate(gs)
+			err := types.ValidateGenesisState(gs)
+			require.EqualError(t, err, tc.wantErr)
+		})
+	}
+}
+
 func TestValidateGenesisState_RoundIDBadLength(t *testing.T) {
 	gs := validGenesis()
 	gs.Rounds[0].VoteRoundId = []byte{0x01, 0x02}

@@ -73,6 +73,9 @@ func ValidateGenesisState(gs *GenesisState) error {
 	if gs == nil {
 		return nil
 	}
+	if err := validateGenesisRecordPresence(gs); err != nil {
+		return err
+	}
 
 	// Validate rounds: IDs must be 32 bytes, no duplicates.
 	seenRounds := make(map[string]struct{}, len(gs.Rounds))
@@ -237,5 +240,81 @@ func ValidateGenesisState(gs *GenesisState) error {
 		}
 	}
 
+	return nil
+}
+
+// validateGenesisRecordPresence rejects null protobuf records before field
+// validation or restoration can dereference them.
+func validateGenesisRecordPresence(gs *GenesisState) error {
+	for i, round := range gs.Rounds {
+		if round == nil {
+			return fmt.Errorf("rounds[%d] cannot be nil", i)
+		}
+	}
+	for i, tree := range gs.RoundTrees {
+		if tree == nil {
+			return fmt.Errorf("round_trees[%d] cannot be nil", i)
+		}
+		for j, leaf := range tree.CommitmentLeaves {
+			if leaf == nil {
+				return fmt.Errorf("round_trees[%d].commitment_leaves[%d] cannot be nil", i, j)
+			}
+		}
+		for j, root := range tree.CommitmentRoots {
+			if root == nil {
+				return fmt.Errorf("round_trees[%d].commitment_roots[%d] cannot be nil", i, j)
+			}
+		}
+		for j, blockRange := range tree.BlockLeafIndices {
+			if blockRange == nil {
+				return fmt.Errorf("round_trees[%d].block_leaf_indices[%d] cannot be nil", i, j)
+			}
+		}
+	}
+	for i, entry := range gs.Nullifiers {
+		if entry == nil {
+			return fmt.Errorf("nullifiers[%d] cannot be nil", i)
+		}
+	}
+	for i, result := range gs.TallyResults {
+		if result == nil {
+			return fmt.Errorf("tally_results[%d] cannot be nil", i)
+		}
+	}
+	for i, key := range gs.PallasKeys {
+		if key == nil {
+			return fmt.Errorf("pallas_keys[%d] cannot be nil", i)
+		}
+	}
+	for i, accumulator := range gs.TallyAccumulators {
+		if accumulator == nil {
+			return fmt.Errorf("tally_accumulators[%d] cannot be nil", i)
+		}
+	}
+	for i, count := range gs.ShareCounts {
+		if count == nil {
+			return fmt.Errorf("share_counts[%d] cannot be nil", i)
+		}
+	}
+	for i, partial := range gs.PartialDecryptions {
+		if partial == nil {
+			return fmt.Errorf("partial_decryptions[%d] cannot be nil", i)
+		}
+	}
+	for i, endorser := range gs.Endorsers {
+		if endorser == nil {
+			return fmt.Errorf("endorsers[%d] cannot be nil", i)
+		}
+	}
+	for i, endorsed := range gs.EndorsedRounds {
+		if endorsed == nil {
+			return fmt.Errorf("endorsed_rounds[%d] cannot be nil", i)
+		}
+	}
+	for i, action := range gs.CoordinatorActions {
+		if action == nil {
+			return fmt.Errorf("coordinator_actions[%d] cannot be nil", i)
+		}
+	}
 	return nil
 }
