@@ -484,21 +484,9 @@ pub fn helper_share_payload(
     enc_share_c2: &[u8],
     share_index: u32,
     tree_position: u64,
-    all_enc_shares: &[(&[u8], &[u8], u32)], // (c1, c2, share_index) for each of 16 shares
-    share_comms: &[Vec<u8>],                // 16 x 32-byte Poseidon commitments
-    primary_blind: &[u8],                   // 32-byte blind for this share
+    share_comms: &[Vec<u8>], // 16 x 32-byte Poseidon commitments
+    primary_blind: &[u8],    // 32-byte blind for this share
 ) -> Value {
-    let all_shares_json: Vec<Value> = all_enc_shares
-        .iter()
-        .map(|(c1, c2, idx)| {
-            json!({
-                "c1": to_base64(c1),
-                "c2": to_base64(c2),
-                "share_index": idx,
-            })
-        })
-        .collect();
-
     let comms_json: Vec<Value> = share_comms
         .iter()
         .map(|c| Value::String(to_base64(c)))
@@ -515,7 +503,6 @@ pub fn helper_share_payload(
         },
         "tree_position": tree_position,
         "vote_round_id": hex::encode(round_id),
-        "all_enc_shares": all_shares_json,
         "share_comms": comms_json,
         "primary_blind": to_base64(primary_blind),
     })
