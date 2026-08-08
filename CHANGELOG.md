@@ -12,7 +12,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
   status retries cannot determine whether the transaction was accepted.
 - Let the admin UI and snapshot-data API accept both legacy three-tier and
   runtime two-tier PIR snapshots, and compare PIR fleet roots using semantic
-  root names.
+  root names. Preserve and validate the negotiated PIR layout when automated
+  config PRs add signed rounds.
 - Accept compact, versioned Ironwood transaction effects in delegation messages
   and derive the RedPallas signing digest directly instead of receiving it as a
   separate message field.

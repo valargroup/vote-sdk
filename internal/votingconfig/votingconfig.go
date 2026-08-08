@@ -21,8 +21,16 @@ type SignedConfig struct {
 	ConfigVersion     int                   `json:"config_version"`
 	VoteServers       []Endpoint            `json:"vote_servers"`
 	PIREndpoints      []Endpoint            `json:"pir_endpoints"`
+	PIRLayout         PIRLayout             `json:"pir_layout"`
 	SupportedVersions SupportedVersions     `json:"supported_versions"`
 	Rounds            map[string]RoundEntry `json:"rounds"`
+}
+
+// PIRLayout describes how the PIR circuit depth is split across the two data tiers.
+type PIRLayout struct {
+	PIRDepth    uint32 `json:"pir_depth"`
+	Tier0Layers uint32 `json:"tier0_layers"`
+	Tier1Layers uint32 `json:"tier1_layers"`
 }
 
 type Endpoint struct {
@@ -131,6 +139,9 @@ func ValidateWrapper(cfg *SignedConfig) error {
 	if len(cfg.PIREndpoints) == 0 {
 		return errors.New("pir_endpoints must contain at least one entry")
 	}
+	if err := validatePIRLayout(cfg.PIRLayout); err != nil {
+		return err
+	}
 	if cfg.Rounds == nil {
 		return errors.New("rounds must be an object")
 	}
@@ -138,6 +149,23 @@ func ValidateWrapper(cfg *SignedConfig) error {
 		if err := ValidateRoundID(roundID); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// validatePIRLayout requires the two tiers to cover the configured circuit depth.
+func validatePIRLayout(layout PIRLayout) error {
+	if layout.PIRDepth == 0 {
+		return errors.New("pir_layout.pir_depth must be greater than zero")
+	}
+	layers := uint64(layout.Tier0Layers) + uint64(layout.Tier1Layers)
+	if layers != uint64(layout.PIRDepth) {
+		return fmt.Errorf(
+			"pir_layout.pir_depth %d must equal tier0_layers %d + tier1_layers %d",
+			layout.PIRDepth,
+			layout.Tier0Layers,
+			layout.Tier1Layers,
+		)
 	}
 	return nil
 }
