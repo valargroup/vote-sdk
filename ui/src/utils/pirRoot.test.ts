@@ -9,6 +9,7 @@ function response(patch: Partial<PirRootResponse> = {}): PirRootResponse {
   return {
     height: 4_200_000,
     num_ranges: 3_682,
+    dataset_version: 2,
     ...patch,
   };
 }
@@ -37,6 +38,7 @@ describe("PIR root normalization", () => {
   it("falls back to legacy root aliases and depth metadata", () => {
     expect(
       normalizePirRoot(response({
+        dataset_version: 1,
         root25: "legacy-pir",
         root29: "legacy-circuit",
         pir_depth: 25,
@@ -50,15 +52,19 @@ describe("PIR root normalization", () => {
     });
   });
 
-  it("prefers semantic roots when both formats are present", () => {
-    expect(
-      normalizePirRoot(response({
-        pir_root: "pir",
-        circuit_root: "circuit",
-        root25: "legacy-pir",
-        root29: "legacy-circuit",
-      }))
-    ).toMatchObject({
+  it("selects roots according to the dataset version", () => {
+    const roots = {
+      pir_root: "pir",
+      circuit_root: "circuit",
+      root25: "legacy-pir",
+      root29: "legacy-circuit",
+    };
+
+    expect(normalizePirRoot(response({ dataset_version: 1, ...roots }))).toMatchObject({
+      pirRoot: "legacy-pir",
+      circuitRoot: "legacy-circuit",
+    });
+    expect(normalizePirRoot(response({ dataset_version: 2, ...roots }))).toMatchObject({
       pirRoot: "pir",
       circuitRoot: "circuit",
     });

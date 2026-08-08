@@ -7,6 +7,8 @@ export interface PirLayout {
 export interface PirRootResponse {
   height: number | null;
   num_ranges: number;
+  /** Selects the authoritative root field names for this dataset contract. */
+  dataset_version: number;
   pir_root?: string;
   circuit_root?: string;
   root25?: string;
@@ -32,10 +34,19 @@ export function normalizePirRoot(root: PirRootResponse): NormalizedPirRoot {
   const layoutLabel = layout
     ? `${layout.pir_depth} (${layout.tier0_layers}+${layout.tier1_layers})`
     : root.pir_depth?.toString();
+  let pirRoot: string | undefined;
+  let circuitRoot: string | undefined;
+  if (root.dataset_version === 1) {
+    pirRoot = root.root25;
+    circuitRoot = root.root29;
+  } else if (root.dataset_version === 2) {
+    pirRoot = root.pir_root;
+    circuitRoot = root.circuit_root;
+  }
 
   return {
-    pirRoot: root.pir_root ?? root.root25,
-    circuitRoot: root.circuit_root ?? root.root29,
+    pirRoot,
+    circuitRoot,
     layoutDepth,
     layoutKey,
     layoutLabel,
