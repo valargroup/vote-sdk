@@ -834,12 +834,24 @@ export interface PublishedSnapshotManifest {
   files: Record<string, PublishedSnapshotFile>;
 }
 
-export const REQUIRED_PUBLISHED_SNAPSHOT_FILES = [
+const REQUIRED_DATASET_V1_SNAPSHOT_FILES = [
   "tier0.bin",
   "tier1.bin",
   "tier2.bin",
   "pir_root.json",
 ] as const;
+
+const REQUIRED_DATASET_V2_SNAPSHOT_FILES = [
+  "tier0.bin",
+  "tier1.bin",
+  "pir_root.json",
+] as const;
+
+function requiredPublishedSnapshotFiles(datasetVersion: unknown): readonly string[] {
+  if (datasetVersion === 1) return REQUIRED_DATASET_V1_SNAPSHOT_FILES;
+  if (datasetVersion === 2) return REQUIRED_DATASET_V2_SNAPSHOT_FILES;
+  return [];
+}
 
 export type PublishedSnapshotValidationStatus =
   | "valid"
@@ -905,8 +917,8 @@ export function validatePublishedSnapshotManifestShape(
   if (manifest.nullifier_pool !== "ironwood") {
     issues.push(`nullifier_pool must be ironwood, got ${String(manifest.nullifier_pool)}`);
   }
-  if (manifest.dataset_version !== 1) {
-    issues.push(`dataset_version must be 1, got ${String(manifest.dataset_version)}`);
+  if (manifest.dataset_version !== 1 && manifest.dataset_version !== 2) {
+    issues.push(`dataset_version must be 1 or 2, got ${String(manifest.dataset_version)}`);
   }
   if (manifest.height !== expectedHeight) {
     issues.push(`manifest height ${manifest.height} does not match requested height ${expectedHeight}`);
@@ -915,7 +927,7 @@ export function validatePublishedSnapshotManifestShape(
     issues.push("manifest files must be an object");
     return issues;
   }
-  for (const name of REQUIRED_PUBLISHED_SNAPSHOT_FILES) {
+  for (const name of requiredPublishedSnapshotFiles(manifest.dataset_version)) {
     const file = (manifest.files as Record<string, unknown>)[name];
     if (!isRecord(file)) {
       issues.push(`missing required file ${name}`);

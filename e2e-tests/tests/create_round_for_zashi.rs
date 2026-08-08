@@ -49,6 +49,9 @@ fn vote_window_secs() -> u64 {
         .unwrap_or(604800) // 7 days
 }
 
+const LEGACY_PIR_DATASET_VERSION: u64 = 1;
+const RUNTIME_TWO_TIER_PIR_DATASET_VERSION: u64 = 2;
+
 /// Fetch the Ironwood note commitment tree root at a given height.
 fn fetch_ironwood_nc_root(height: u64) -> [u8; 32] {
     let host = lightwalletd_host();
@@ -108,20 +111,13 @@ fn fetch_ironwood_nullifier_root(height: u64) -> [u8; 32] {
         Some("ironwood"),
         "PIR server is not serving Ironwood nullifiers"
     );
-    assert_eq!(
-        json["dataset_version"].as_u64(),
-        Some(1),
-        "PIR server is not serving the supported Ironwood dataset version"
-    );
     let served_height = json["height"]
         .as_u64()
         .or_else(|| json["height"].as_str().and_then(|value| value.parse().ok()))
         .expect("PIR /root response missing height");
     assert_eq!(served_height, height, "PIR snapshot height mismatch");
 
-    let root_hex = json["root29"]
-        .as_str()
-        .expect("PIR /root response missing root29");
+    let root_hex = select_ironwood_nullifier_root(&json).unwrap_or_else(|err| panic!("{err}"));
 
     // Strip 0x prefix if present
     let hex_str = root_hex.strip_prefix("0x").unwrap_or(root_hex);
@@ -132,6 +128,58 @@ fn fetch_ironwood_nullifier_root(height: u64) -> [u8; 32] {
     arr.copy_from_slice(&bytes);
     log(&format!("PIR root: {}", hex::encode(arr)));
     arr
+}
+
+fn select_ironwood_nullifier_root(json: &serde_json::Value) -> Result<&str, String> {
+    let dataset_version = json["dataset_version"]
+        .as_u64()
+        .ok_or_else(|| "PIR /root response missing dataset_version".to_string())?;
+    let root_field = match dataset_version {
+        LEGACY_PIR_DATASET_VERSION => "root29",
+        RUNTIME_TWO_TIER_PIR_DATASET_VERSION => "circuit_root",
+        unsupported => {
+            return Err(format!(
+                "PIR server dataset version {unsupported} is not supported; expected 1 or 2"
+            ));
+        }
+    };
+
+    json[root_field]
+        .as_str()
+        .filter(|root| !root.is_empty())
+        .ok_or_else(|| {
+            format!("PIR dataset version {dataset_version} response missing {root_field}")
+        })
+}
+
+#[test]
+fn selects_version_specific_ironwood_nullifier_root() {
+    let legacy = json!({
+        "dataset_version": 1,
+        "root29": "legacy",
+        "circuit_root": "semantic",
+    });
+    assert_eq!(select_ironwood_nullifier_root(&legacy).unwrap(), "legacy");
+
+    let two_tier = json!({
+        "dataset_version": 2,
+        "root29": "legacy",
+        "circuit_root": "semantic",
+    });
+    assert_eq!(
+        select_ironwood_nullifier_root(&two_tier).unwrap(),
+        "semantic"
+    );
+}
+
+#[test]
+fn rejects_dataset_v2_without_circuit_root() {
+    let response = json!({
+        "dataset_version": 2,
+        "root29": "legacy",
+    });
+    let err = select_ironwood_nullifier_root(&response).unwrap_err();
+    assert!(err.contains("dataset version 2 response missing circuit_root"));
 }
 
 /// Get the latest block height from lightwalletd (Zcash mainnet).

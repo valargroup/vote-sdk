@@ -1,6 +1,6 @@
 // Side-by-side status card for every PIR endpoint declared in the
 // published voting-config. Intended to stand in for the
-// `curl /root | jq '.height, .root25, .root29'` loop that
+// `curl /root | jq '.height, .pir_root, .circuit_root'` loop that
 // `shielded-vote-book/operations/snapshot-bumps.md` step 5 used to
 // run by hand — the table renders one row per endpoint, fetches
 // /root in parallel, and visibly marks divergence across the
@@ -21,18 +21,11 @@ import {
   Loader2,
 } from "lucide-react";
 import type { ServiceEntry } from "../api/chain";
-
-// The shape nf-server's /root handler actually returns. `height` can
-// be null if the replica has no snapshot loaded yet (fresh bootstrap
-// fell through, or it's still warming up). All hex fields are hex
-// strings without the 0x prefix.
-interface PirRootResponse {
-  height: number | null;
-  num_ranges: number;
-  root25?: string;
-  root29?: string;
-  pir_depth?: number;
-}
+import {
+  normalizePirRoot,
+  pirLayoutsDiverge,
+  type PirRootResponse,
+} from "../utils/pirRoot";
 
 type PirEndpointStatus =
   | { state: "loading" }
@@ -169,15 +162,22 @@ export function PirFleetStatus({
         ep: ServiceEntry;
         status: { state: "ok"; data: PirRootResponse };
       } => r.status?.state === "ok"
-    );
+    )
+    .map((row) => ({
+      ...row,
+      root: normalizePirRoot(row.status.data),
+    }));
 
   const heights = new Set(okRows.map((r) => r.status.data.height));
-  const root25s = new Set(okRows.map((r) => r.status.data.root25 ?? ""));
-  const root29s = new Set(okRows.map((r) => r.status.data.root29 ?? ""));
+  const pirRoots = new Set(okRows.map((r) => r.root.pirRoot ?? ""));
+  const circuitRoots = new Set(okRows.map((r) => r.root.circuitRoot ?? ""));
   const heightDiverges = okRows.length > 1 && heights.size > 1;
-  const root25Diverges = okRows.length > 1 && root25s.size > 1;
-  const root29Diverges = okRows.length > 1 && root29s.size > 1;
-  const anyDivergence = heightDiverges || root25Diverges || root29Diverges;
+  const pirRootDiverges = okRows.length > 1 && pirRoots.size > 1;
+  const circuitRootDiverges = okRows.length > 1 && circuitRoots.size > 1;
+  const layoutDiverges =
+    okRows.length > 1 && pirLayoutsDiverge(okRows.map((r) => r.root));
+  const anyDivergence =
+    heightDiverges || pirRootDiverges || circuitRootDiverges || layoutDiverges;
 
   const expectedHeightValues = expectedHeights?.length
     ? expectedHeights
@@ -190,8 +190,9 @@ export function PirFleetStatus({
 
   const divergingFields = [
     heightDiverges && "height",
-    root25Diverges && "root25",
-    root29Diverges && "root29",
+    pirRootDiverges && "PIR root",
+    circuitRootDiverges && "circuit root",
+    layoutDiverges && "layout",
   ]
     .filter(Boolean)
     .join(" / ");
@@ -256,8 +257,11 @@ export function PirFleetStatus({
             <tr className="text-text-muted text-[10px] uppercase tracking-wider border-b border-border-subtle">
               <th className="text-left font-medium py-1.5 px-2">Endpoint</th>
               <th className="text-right font-medium py-1.5 px-2">Height</th>
-              <th className="text-left font-medium py-1.5 px-2">root25</th>
-              <th className="text-left font-medium py-1.5 px-2">root29</th>
+              <th className="text-left font-medium py-1.5 px-2">PIR root</th>
+              <th className="text-left font-medium py-1.5 px-2">
+                Circuit root
+              </th>
+              <th className="text-left font-medium py-1.5 px-2">Layout</th>
               <th className="text-right font-medium py-1.5 px-2">
                 Nullifiers
               </th>
@@ -268,6 +272,9 @@ export function PirFleetStatus({
             {endpoints.map((ep) => {
               const status = statuses[ep.url];
               const isSelected = selectedUrl && ep.url === selectedUrl;
+              const root = status?.state === "ok"
+                ? normalizePirRoot(status.data)
+                : undefined;
               return (
                 <tr
                   key={ep.url}
@@ -303,17 +310,24 @@ export function PirFleetStatus({
                       </td>
                       <td
                         className={`py-1.5 px-2 ${
-                          root25Diverges ? "text-danger" : ""
+                          pirRootDiverges ? "text-danger" : ""
                         }`}
                       >
-                        <CopyHex value={status.data.root25} />
+                        <CopyHex value={root?.pirRoot} />
                       </td>
                       <td
                         className={`py-1.5 px-2 ${
-                          root29Diverges ? "text-danger" : ""
+                          circuitRootDiverges ? "text-danger" : ""
                         }`}
                       >
-                        <CopyHex value={status.data.root29} />
+                        <CopyHex value={root?.circuitRoot} />
+                      </td>
+                      <td
+                        className={`font-mono py-1.5 px-2 ${
+                          layoutDiverges ? "text-danger" : "text-text-primary"
+                        }`}
+                      >
+                        {root?.layoutLabel ?? "—"}
                       </td>
                       <td className="text-right font-mono text-text-primary py-1.5 px-2">
                         {status.data.num_ranges.toLocaleString()}
@@ -327,7 +341,7 @@ export function PirFleetStatus({
                     </>
                   ) : status?.state === "error" ? (
                     <>
-                      <td className="py-1.5 px-2" colSpan={4}>
+                      <td className="py-1.5 px-2" colSpan={5}>
                         <span
                           className="text-danger text-[10px] font-mono"
                           title={status.error}
@@ -346,7 +360,7 @@ export function PirFleetStatus({
                     <>
                       <td
                         className="py-1.5 px-2 text-text-muted text-[10px]"
-                        colSpan={4}
+                        colSpan={5}
                       >
                         <Loader2 size={10} className="animate-spin inline" />
                       </td>

@@ -169,7 +169,7 @@ func TestFetchNullifierRootRequiresIronwoodDataset(t *testing.T) {
 		{name: "mainnet", pool: "ironwood", datasetVersion: 1, network: "main", wantNetwork: "main"},
 		{name: "orchard", pool: "orchard", datasetVersion: 1, network: "test", wantErr: `nullifier pool "orchard" is not Ironwood`},
 		{name: "missing pool", omitPool: true, datasetVersion: 1, network: "test", wantErr: `nullifier pool "" is not Ironwood`},
-		{name: "wrong version", pool: "ironwood", datasetVersion: 2, network: "test", wantErr: "dataset version 2 is not supported; expected 1"},
+		{name: "wrong version", pool: "ironwood", datasetVersion: 3, network: "test", wantErr: "dataset version 3 is not supported"},
 		{name: "missing version", pool: "ironwood", omitDatasetVersion: true, network: "test", wantErr: "missing dataset_version"},
 	}
 
@@ -212,6 +212,70 @@ func TestFetchNullifierRootRequiresIronwoodDataset(t *testing.T) {
 			}
 			if root.network != test.wantNetwork {
 				t.Fatalf("PIR network = %q, want %q", root.network, test.wantNetwork)
+			}
+		})
+	}
+}
+
+func TestFetchNullifierRootAcceptsDatasetV2SemanticCircuitRoot(t *testing.T) {
+	const height = uint64(3_500_000)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		response := map[string]any{
+			"circuit_root":    strings.Repeat("11", 32),
+			"root29":          strings.Repeat("00", 32),
+			"height":          height,
+			"nullifier_pool":  "ironwood",
+			"dataset_version": 2,
+			"zcash_network":   "test",
+		}
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	root, err := fetchNullifierRoot(context.Background(), server.URL, height)
+	if err != nil {
+		t.Fatalf("fetchNullifierRoot returned error: %v", err)
+	}
+	if len(root.value) != 32 || root.value[0] != 0x11 {
+		t.Fatalf("root = %x, want semantic circuit_root", root.value)
+	}
+}
+
+func TestFetchNullifierRootRejectsInvalidDatasetV2CircuitRoot(t *testing.T) {
+	const height = uint64(3_500_000)
+	tests := []struct {
+		name        string
+		circuitRoot string
+		wantErr     string
+	}{
+		{name: "missing", wantErr: "dataset version 2 response is missing circuit_root"},
+		{name: "malformed", circuitRoot: "not-hex", wantErr: "decode PIR circuit_root hex"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				response := map[string]any{
+					"root29":          strings.Repeat("00", 32),
+					"height":          height,
+					"nullifier_pool":  "ironwood",
+					"dataset_version": 2,
+					"zcash_network":   "test",
+				}
+				if test.circuitRoot != "" {
+					response["circuit_root"] = test.circuitRoot
+				}
+				if err := json.NewEncoder(w).Encode(response); err != nil {
+					t.Errorf("encode response: %v", err)
+				}
+			}))
+			defer server.Close()
+
+			_, err := fetchNullifierRoot(context.Background(), server.URL, height)
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("fetchNullifierRoot error = %v, want %q", err, test.wantErr)
 			}
 		})
 	}
