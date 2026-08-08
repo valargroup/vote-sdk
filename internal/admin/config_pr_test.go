@@ -90,6 +90,70 @@ func TestNewAdminFollowsStaticConfigDynamicURL(t *testing.T) {
 	}
 }
 
+func TestRefreshRejectsCrossOriginDynamicConfig(t *testing.T) {
+	t.Parallel()
+
+	var crossOriginRequested bool
+	crossOrigin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		crossOriginRequested = true
+		writeJSON(t, w, VotingConfig{Version: 1})
+	}))
+	defer crossOrigin.Close()
+
+	static := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, map[string]any{"dynamic_config_url": crossOrigin.URL})
+	}))
+	defer static.Close()
+
+	a := &Admin{
+		configURL: static.URL + "/static-voting-config.json",
+		logger:    log.NewNopLogger(),
+	}
+	err := a.refresh()
+	if err == nil || !strings.Contains(err.Error(), "dynamic config URL crosses origin") {
+		t.Fatalf("expected cross-origin error, got %v", err)
+	}
+	if crossOriginRequested {
+		t.Fatal("cross-origin dynamic config was requested")
+	}
+}
+
+func TestRefreshRejectsCrossOriginRedirect(t *testing.T) {
+	t.Parallel()
+
+	var crossOriginRequested bool
+	crossOrigin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		crossOriginRequested = true
+		writeJSON(t, w, VotingConfig{Version: 1})
+	}))
+	defer crossOrigin.Close()
+
+	var origin *httptest.Server
+	origin = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/static-voting-config.json":
+			writeJSON(t, w, map[string]any{"dynamic_config_url": origin.URL + "/dynamic-voting-config.json"})
+		case "/dynamic-voting-config.json":
+			http.Redirect(w, r, crossOrigin.URL+"/config.json", http.StatusFound)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer origin.Close()
+
+	a := &Admin{
+		configURL: origin.URL + "/static-voting-config.json",
+		logger:    log.NewNopLogger(),
+	}
+	err := a.refresh()
+	if err == nil || !strings.Contains(err.Error(), "config redirect crosses origin") {
+		t.Fatalf("expected cross-origin redirect error, got %v", err)
+	}
+	if crossOriginRequested {
+		t.Fatal("cross-origin redirect target was requested")
+	}
+}
+
 func TestHandleCreateConfigPRRejectsBadSignature(t *testing.T) {
 	t.Parallel()
 

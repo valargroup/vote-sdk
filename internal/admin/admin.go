@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -174,7 +175,19 @@ func RunConfigRefresher(ctx context.Context, a *Admin, interval time.Duration, l
 }
 
 func (a *Admin) refresh() error {
-	client := &http.Client{Timeout: 10 * time.Second}
+	staticURL, err := parseConfigURL(a.configURL)
+	if err != nil {
+		return fmt.Errorf("invalid static config URL: %w", err)
+	}
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		CheckRedirect: func(req *http.Request, _ []*http.Request) error {
+			if !sameOrigin(staticURL, req.URL) {
+				return fmt.Errorf("config redirect crosses origin: %s", req.URL.Redacted())
+			}
+			return nil
+		},
+	}
 	body, err := fetchConfigBody(client, a.configURL)
 	if err != nil {
 		return err
@@ -187,6 +200,13 @@ func (a *Admin) refresh() error {
 		return fmt.Errorf("decode config: %w", err)
 	}
 	if dynamicURL := strings.TrimSpace(static.DynamicConfigURL); dynamicURL != "" {
+		parsedDynamicURL, err := parseConfigURL(dynamicURL)
+		if err != nil {
+			return fmt.Errorf("invalid dynamic config URL: %w", err)
+		}
+		if !sameOrigin(staticURL, parsedDynamicURL) {
+			return fmt.Errorf("dynamic config URL crosses origin: %s", parsedDynamicURL.Redacted())
+		}
 		body, err = fetchConfigBody(client, dynamicURL)
 		if err != nil {
 			return fmt.Errorf("fetch dynamic config: %w", err)
@@ -204,6 +224,36 @@ func (a *Admin) refresh() error {
 
 	a.logger.Info("voting config loaded", "vote_servers", len(cfg.VoteServers), "pir_endpoints", len(cfg.PIRServers))
 	return nil
+}
+
+func parseConfigURL(rawURL string) (*url.URL, error) {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return nil, err
+	}
+	if (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" {
+		return nil, fmt.Errorf("must be an absolute HTTP(S) URL")
+	}
+	return parsed, nil
+}
+
+func sameOrigin(a, b *url.URL) bool {
+	return strings.EqualFold(a.Scheme, b.Scheme) &&
+		strings.EqualFold(a.Hostname(), b.Hostname()) &&
+		effectivePort(a) == effectivePort(b)
+}
+
+func effectivePort(u *url.URL) string {
+	if port := u.Port(); port != "" {
+		return port
+	}
+	if u.Scheme == "https" {
+		return "443"
+	}
+	if u.Scheme == "http" {
+		return "80"
+	}
+	return ""
 }
 
 func fetchConfigBody(client *http.Client, url string) ([]byte, error) {
