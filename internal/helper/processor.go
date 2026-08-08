@@ -16,6 +16,8 @@ import (
 
 const maintenanceInterval = 30 * time.Second
 
+var errAwaitingCommit = errors.New("broadcast accepted; awaiting committed transaction")
+
 const (
 	failureStagePanic            = "panic"
 	failureStageRoundStatusCheck = "round_status_check"
@@ -353,6 +355,10 @@ func (p *Processor) processBatch(ctx context.Context) {
 
 			if err := p.processShare(shareCtx, share); err != nil {
 				spanErr = err
+				if errors.Is(err, errAwaitingCommit) {
+					p.store.MarkRetry(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+					return nil
+				}
 				if isCanceledShareError(err) {
 					p.logger.Warn("share processing canceled",
 						"round_id", share.Payload.VoteRoundID,
@@ -571,8 +577,20 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 		return failedShareAttemptError(failureStageSubmitChain, fmt.Errorf("chain rejected tx (code %d): %s", result.Code, result.Log))
 	}
 
-	p.logger.Debug("MsgRevealShare broadcast ok", "tx_hash", result.TxHash)
-	return nil
+	if result.TxHash == "" {
+		return retryableShareError(failureStageSubmitChain, fmt.Errorf("chain accepted broadcast without a transaction hash"))
+	}
+
+	// CheckTx acceptance only places the transaction in the mempool. Preserve
+	// the witness until a later pass observes its nullifier in committed state.
+	// That pass returns nil from the pre-proof dedupe above and only then allows
+	// processBatch to call MarkSubmitted and scrub the witness.
+	p.logger.Debug("MsgRevealShare broadcast accepted; awaiting committed nullifier",
+		"tx_hash", result.TxHash)
+	return retryableShareError(
+		failureStageSubmitChain,
+		fmt.Errorf("%w %s", errAwaitingCommit, result.TxHash),
+	)
 }
 
 // shareAlreadyRevealed computes the queued share's nullifier and checks whether
