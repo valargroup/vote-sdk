@@ -501,11 +501,7 @@ func (h *Handler) cometBroadcastTxSyncWithRetry(ctx context.Context, txBytes []b
 		captureStatusLookupError(statusErr, msgType, txHash)
 	}
 
-	return &BroadcastResult{
-		TxHash: txHash,
-		Code:   0,
-		Log:    fmt.Sprintf("broadcast outcome unknown after retries; poll tx status: %v", lastErr),
-	}, nil
+	return nil, fmt.Errorf("broadcast outcome unknown after retries; tx_hash=%s: %w", txHash, lastErr)
 }
 
 // cometBroadcastTxSyncAttempt wraps one broadcast_tx_sync call with its per-RPC

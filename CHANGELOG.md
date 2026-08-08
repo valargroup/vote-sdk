@@ -8,6 +8,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Keep reveal-share witness data queued when CometBFT broadcast and transaction
+  status retries cannot determine whether the transaction was accepted.
 - Let the admin UI and snapshot-data API accept both legacy three-tier and
   runtime two-tier PIR snapshots, and compare PIR fleet roots using semantic
   root names.
