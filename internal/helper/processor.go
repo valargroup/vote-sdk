@@ -512,9 +512,8 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 		"round_id":    share.Payload.VoteRoundID,
 		"share_index": strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
 	}, map[string]interface{}{
-		"share_index":   share.Payload.EncShare.ShareIndex,
-		"proposal_id":   share.Payload.ProposalID,
-		"vote_decision": share.Payload.VoteDecision,
+		"share_index": share.Payload.EncShare.ShareIndex,
+		"proposal_id": share.Payload.ProposalID,
 	})
 	proof, nullifier, _, err := p.prover.GenerateShareRevealProof(
 		merklePath,
@@ -582,8 +581,7 @@ func (d *preProofShareDeduper) shareAlreadyRevealed(ctx context.Context, share Q
 		"round_id":    share.Payload.VoteRoundID,
 		"share_index": strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
 	}, map[string]interface{}{
-		"proposal_id":   share.Payload.ProposalID,
-		"vote_decision": share.Payload.VoteDecision,
+		"proposal_id": share.Payload.ProposalID,
 	})
 
 	var spanErr error
