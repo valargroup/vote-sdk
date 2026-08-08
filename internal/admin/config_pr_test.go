@@ -251,6 +251,26 @@ func TestMergeConfigPREntryPreservesOtherSignatures(t *testing.T) {
 	}
 }
 
+func TestMergeConfigPREntryPreservesPIRLayout(t *testing.T) {
+	t.Parallel()
+
+	body := validCreateConfigPRRequest(t)
+	dynamicConfig, staticConfig := configDocuments(t, nil)
+	merged, _, _, err := mergeConfigPREntry(dynamicConfig, staticConfig, body.RoundID, body.Entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var cfg votingconfig.SignedConfig
+	if err := json.Unmarshal(merged, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	want := testConfigPIRLayout()
+	if cfg.PIRLayout != want {
+		t.Fatalf("pir_layout = %+v, want %+v", cfg.PIRLayout, want)
+	}
+}
+
 func TestMergeConfigPREntryResolvesTrustedKeyID(t *testing.T) {
 	t.Parallel()
 
@@ -503,6 +523,7 @@ func configDocuments(t *testing.T, rounds map[string]votingconfig.RoundEntry) ([
 		ConfigVersion: votingconfig.ConfigVersionV1,
 		VoteServers:   []votingconfig.Endpoint{{URL: "https://vote.example", Label: "vote"}},
 		PIREndpoints:  []votingconfig.Endpoint{{URL: "https://pir.example", Label: "pir"}},
+		PIRLayout:     testConfigPIRLayout(),
 		SupportedVersions: votingconfig.SupportedVersions{
 			PIR:          []string{"v0"},
 			VoteProtocol: "v0",
@@ -531,6 +552,10 @@ func configDocuments(t *testing.T, rounds map[string]votingconfig.RoundEntry) ([
 		t.Fatal(err)
 	}
 	return append(dynamic, '\n'), append(static, '\n')
+}
+
+func testConfigPIRLayout() votingconfig.PIRLayout {
+	return votingconfig.PIRLayout{PIRDepth: 19, Tier0Layers: 12, Tier1Layers: 7}
 }
 
 func testEd25519PrivateKey() ed25519.PrivateKey {

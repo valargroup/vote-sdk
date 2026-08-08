@@ -135,6 +135,7 @@ func TestValidateWrapper(t *testing.T) {
 		ConfigVersion: ConfigVersionV1,
 		VoteServers:   []Endpoint{{URL: "https://vote.example", Label: "vote"}},
 		PIREndpoints:  []Endpoint{{URL: "https://pir.example", Label: "pir"}},
+		PIRLayout:     testPIRLayout(),
 		Rounds:        map[string]RoundEntry{roundID: {AuthVersion: AuthVersionV1}},
 	}
 	if err := ValidateWrapper(cfg); err != nil {
@@ -144,6 +145,17 @@ func TestValidateWrapper(t *testing.T) {
 	cfg.ConfigVersion = 99
 	if err := ValidateWrapper(cfg); err == nil {
 		t.Fatalf("expected unsupported config_version error")
+	}
+	cfg.ConfigVersion = ConfigVersionV1
+
+	cfg.PIRLayout = PIRLayout{}
+	if err := ValidateWrapper(cfg); err == nil {
+		t.Fatalf("expected missing pir_layout error")
+	}
+
+	cfg.PIRLayout = PIRLayout{PIRDepth: 19, Tier0Layers: 12, Tier1Layers: 8}
+	if err := ValidateWrapper(cfg); err == nil {
+		t.Fatalf("expected inconsistent pir_layout error")
 	}
 
 	var malformed SignedConfig
@@ -190,6 +202,7 @@ func baseConfig(roundID string, eaPK [32]byte, sig []byte) *SignedConfig {
 		ConfigVersion: ConfigVersionV1,
 		VoteServers:   []Endpoint{{URL: "https://vote.example", Label: "vote"}},
 		PIREndpoints:  []Endpoint{{URL: "https://pir.example", Label: "pir"}},
+		PIRLayout:     testPIRLayout(),
 		Rounds: map[string]RoundEntry{
 			roundID: {
 				AuthVersion: AuthVersionV1,
@@ -202,6 +215,10 @@ func baseConfig(roundID string, eaPK [32]byte, sig []byte) *SignedConfig {
 			},
 		},
 	}
+}
+
+func testPIRLayout() PIRLayout {
+	return PIRLayout{PIRDepth: 19, Tier0Layers: 12, Tier1Layers: 7}
 }
 
 func withEntry(cfg *SignedConfig, roundID string, update func(RoundEntry) RoundEntry) *SignedConfig {
