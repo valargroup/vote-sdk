@@ -266,6 +266,8 @@ fn voting_flow_zcash_voting_path() {
     // Create a single bundle (bundle_index = 0) and store ZKP #2 fields.
     // Other store_delegation_data fields (rho_signed, alpha, etc.) are only needed
     // for delegation proof reconstruction, not ZKP #2.
+    let tx1_sighash = shielded_vote_circuits::tx1::sighash(&delegation_bundle.tx1_effects)
+        .expect("delegation TX1 effects should be canonical");
     {
         let conn = db.conn();
         zcash_voting::storage::queries::insert_bundle(&conn, &round_id_hex, "test", 0, &[])
@@ -287,8 +289,9 @@ fn voting_flow_zcash_voting_path() {
             &delegation_bundle.van_cmx,
             vote_proof_data.total_note_value,
             hotkey.address_index(),
-            &[],        // padded_note_secrets (not needed for ZKP #2 test)
-            &[0u8; 32], // pczt_sighash
+            &[], // padded_note_secrets (not needed for ZKP #2 test)
+            &tx1_sighash,
+            &delegation_bundle.tx1_effects,
         )
         .expect("store_delegation_data");
     }
