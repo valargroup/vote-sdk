@@ -95,6 +95,27 @@ curl -fsSL "https://shielded-vote.nyc3.digitaloceanspaces.com/scripts/upgrade/${
 After scheduling, rerun `verify-prestage` without `--allow-no-plan` so the
 staged layout is checked against the on-chain name and height.
 
+### Recover a validator after the plan is applied
+
+Use the script-only `v1.2.0-r1` revision when a Cosmovisor validator reaches
+the applied `v1.2.0` plan without the target binary. This mode is not a general
+upgrade or migration path. It requires the local `upgrade-info.json` marker and
+the chain's applied-plan response to match exactly before it stops the service.
+
+```bash
+SCRIPT_VERSION=v1.2.0-r1
+curl -fsSL "https://shielded-vote.nyc3.digitaloceanspaces.com/scripts/upgrade/${SCRIPT_VERSION}/update_chain.sh" | sudo bash -s -- \
+  --mode recover-active-upgrade \
+  --plan-name v1.2.0 \
+  --tag v1.2.0 \
+  --chain-api https://vote-chain-primary.valargroup.org
+```
+
+Recovery stages and verifies the release before stopping the validator. With
+the signer stopped, it selects the target upgrade, enables checksum-required
+auto-download, restarts once, and verifies RPC plus the single managed signer.
+Any restart verification failure leaves the service stopped.
+
 ## Held release and promotion
 
 Set the repository variable `RELEASE_HOLD_TAG` to a stable tag before pushing
@@ -337,6 +358,10 @@ join and upgrade time.
 - **Stale-plan recovery**: an old `data/upgrade-info.json` is archived only when
   its name and height exactly match the chain's applied-plan response. Current,
   malformed, unknown, or mismatched markers fail closed.
+- **Active-plan recovery**: `recover-active-upgrade` requires a matching local
+  marker and applied-plan height, accepts only genesis or a previously applied
+  upgrade as the old `current` target, and stops activating units before
+  changing the target.
 - **Checksum-required auto-download**: migrated services set both
   `DAEMON_ALLOW_DOWNLOAD_BINARIES=true` and
   `DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM=true`.
@@ -348,6 +373,7 @@ Modes:
 | `prepare` | Stage genesis + upgrade binaries only |
 | `migrate` | Migrate a previously staged direct systemd service to Cosmovisor |
 | `configure-autodownload` | Guard the current signer, enable checksum-required downloads, and restart |
+| `recover-active-upgrade` | Recover a Cosmovisor validator after the chain applied a missing target binary |
 | `verify-prestage` | Read-only PASS/FAIL checklist (staging + service sections) |
 
 Use `--skip-cosmovisor-service` with `verify-prestage` to validate staged
@@ -363,7 +389,7 @@ Post-release artifact smoke checks: `scripts/verify_upgrade_release_artifacts.sh
 
 | Symptom | Likely cause | Action |
 |---------|--------------|--------|
-| `UPGRADE "<name>" NEEDED at height ...` persists | Missing/incorrect staged binary | Re-run `--mode prepare` with exact plan name |
+| `UPGRADE "<name>" NEEDED at height ...` persists after the chain applied the plan | Missing target binary on a Cosmovisor validator | Run the matching script revision with `--mode recover-active-upgrade`; do not edit `current` manually |
 | `Scheduled plan name mismatch` | Wrong `--plan-name` | Match `svoted query upgrade plan` exactly |
 | `priv_validator_state.json is missing` | Data dir incomplete | Restore from backup or snapshot reset script; do not proceed |
 | Service restart loop after migrate | Bad unit env or cosmovisor path | Check `journalctl -u svoted`; restore unit backup under `/etc/systemd/system/svoted.service.bak.*` |

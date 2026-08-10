@@ -11,6 +11,9 @@
 #                  Can infer --serve-ui style args from the current direct ExecStart when not supplied.
 #   configure-autodownload
 #                  Enable checksum-required Cosmovisor downloads and safely restart the service.
+#   recover-active-upgrade
+#                  Recover a Cosmovisor validator that reached an already-applied plan without its
+#                  target binary. Stages the release, selects it, enables auto-download, and restarts.
 #   verify-prestage Read-only PASS/FAIL checklist for operator runbooks.
 #
 # Example:
@@ -65,8 +68,8 @@ usage() {
 usage: update_chain.sh [options]
 
 Options:
-  --mode MODE             prepare | migrate | configure-autodownload | verify-prestage (default: prepare)
-  --plan-name NAME        x/upgrade plan name (required for prepare/verify-prestage)
+  --mode MODE             prepare | migrate | configure-autodownload | recover-active-upgrade | verify-prestage (default: prepare)
+  --plan-name NAME        x/upgrade plan name (required except for configure-autodownload)
   --tag TAG               Release tag to stage (default: ${UPDATE_DEFAULT_RELEASE_TAG})
   --home PATH             Validator home (default: \$SVOTE_HOME or \$HOME/.svoted)
   --install-dir PATH      Binary install dir (default: \$SVOTE_INSTALL_DIR or \$HOME/.local/bin)
@@ -74,7 +77,7 @@ Options:
   --chain-api URL         HTTPS chain REST API fallback when the local RPC is offline
   --allow-no-plan         Allow staging before a plan is scheduled on-chain
   --skip-cosmovisor-service  verify-prestage: skip systemd Cosmovisor service checks
-  --timeout-secs N        RPC readiness timeout after migrate restart (default: 120)
+  --timeout-secs N        RPC readiness timeout after a service restart (default: 120)
   --wrapper-svoted-start-args ARGS  Extra svoted start args passed to cosmovisor run start (e.g. "--serve-ui --ui-dist /opt/shielded-vote/current/ui/dist")
   --repo OWNER/REPO       GitHub repo for release fallback (default: ${UPDATE_DEFAULT_GITHUB_REPO})
   --do-base URL           DigitalOcean Spaces base URL (default: ${UPDATE_DEFAULT_DO_BASE})
@@ -92,6 +95,12 @@ Migrate notes:
   *.bak.pre-migrate.<timestamp>). Direct-mode ExecStart flags (e.g. --serve-ui) are copied
   into the migrated cosmovisor run start command unless --wrapper-svoted-start-args is provided.
   Migrate validates effective runtime mode, effective ExecStart, and a live cosmovisor process.
+
+Recovery notes:
+  recover-active-upgrade is only for a Cosmovisor service after the chain has applied the exact
+  plan recorded in data/upgrade-info.json. It requires --chain-api, stages the verified release,
+  stops all signer processes, selects the target upgrade, enables checksum-required downloads,
+  and restarts once. Any restart verification failure leaves the validator stopped.
 
 Verify notes:
   Primary pre-migrate in direct mode: verify-prestage without --skip-cosmovisor-service is expected
@@ -225,7 +234,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$MODE" in
-  prepare|migrate|configure-autodownload|verify-prestage) ;;
+  prepare|migrate|configure-autodownload|recover-active-upgrade|verify-prestage) ;;
   *) svote_upgrade_die "Unsupported --mode: ${MODE}" ;;
 esac
 
@@ -274,7 +283,7 @@ run_stage_first() {
 
   svote_upgrade_verify_validator_identity_files
 
-  if [ "$MODE" != "verify-prestage" ]; then
+  if [ "$MODE" != "verify-prestage" ] && [ "$MODE" != "recover-active-upgrade" ]; then
     if [ "$ALLOW_NO_PLAN" = "0" ]; then
       svote_upgrade_validate_scheduled_plan "$PLAN_NAME" 0
     else
@@ -357,10 +366,7 @@ run_migrate() {
   ); then
     svote_upgrade_warn "Migration verification failed; stopping ${SERVICE_NAME} to prevent parallel signer processes."
     systemctl stop "$SERVICE_NAME" 2>/dev/null || true
-    if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
-      svote_upgrade_die "CRITICAL: ${SERVICE_NAME} remained active after failed migration."
-    fi
-    svote_upgrade_assert_no_signer_processes
+    svote_upgrade_assert_validator_service_stopped
     svote_upgrade_die "Migration failed closed. ${SERVICE_NAME} is stopped; correct the reported error and rerun migrate. Previous unit: ${backup_unit}."
   fi
   svote_upgrade_log "Migration to Cosmovisor service completed."
@@ -386,13 +392,46 @@ run_configure_autodownload() {
   ); then
     svote_upgrade_warn "Auto-download restart verification failed; stopping ${SERVICE_NAME} to prevent parallel signer processes."
     systemctl stop "$SERVICE_NAME" 2>/dev/null || true
-    if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
-      svote_upgrade_die "CRITICAL: ${SERVICE_NAME} remained active after failed restart."
-    fi
-    svote_upgrade_assert_no_signer_processes
+    svote_upgrade_assert_validator_service_stopped
     svote_upgrade_die "Auto-download configuration failed closed. ${SERVICE_NAME} is stopped; correct the reported error and rerun."
   fi
   svote_upgrade_log "Checksum-required Cosmovisor auto-download is active."
+}
+
+# run_recover_active_upgrade
+# Recover a Cosmovisor validator after the chain applied a plan whose binary was not available.
+run_recover_active_upgrade() {
+  [ -n "$CHAIN_API" ] \
+    || svote_upgrade_die "--chain-api is required for active-upgrade recovery."
+  svote_upgrade_verify_validator_identity_files
+  svote_upgrade_assert_cosmovisor_service_config
+  svote_upgrade_validate_active_plan_recovery "$PLAN_NAME"
+
+  ALLOW_NO_PLAN=1
+  run_stage_first
+
+  # Recheck external and local state after the network download, before stopping the signer.
+  svote_upgrade_validate_active_plan_recovery "$PLAN_NAME"
+  svote_upgrade_validate_recovery_current_link "$PLAN_NAME"
+
+  if ! (
+    svote_upgrade_stop_validator_service
+    svote_upgrade_activate_recovery_plan "$PLAN_NAME" "$RELEASE_TAG"
+    svote_upgrade_configure_autodownload_dropin
+    svote_upgrade_fixup_cosmovisor_ownership
+    svote_upgrade_restart_service ""
+    svote_upgrade_wait_for_rpc "$TIMEOUT_SECS"
+    svote_upgrade_assert_cosmovisor_runtime
+    svote_upgrade_assert_current_upgrade "$PLAN_NAME" "$RELEASE_TAG"
+    svote_upgrade_assert_autodownload_enabled
+    svote_upgrade_assert_single_managed_signer
+  ); then
+    svote_upgrade_warn "Active-upgrade recovery verification failed; stopping ${SERVICE_NAME} to prevent parallel signer processes."
+    systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+    svote_upgrade_assert_validator_service_stopped
+    svote_upgrade_die "Active-upgrade recovery failed closed. ${SERVICE_NAME} is stopped; correct the reported error and rerun."
+  fi
+  svote_upgrade_log "Recovered ${SERVICE_NAME} on ${PLAN_NAME} with checksum-required auto-download active."
 }
 
 case "$MODE" in
@@ -412,11 +451,14 @@ case "$MODE" in
   configure-autodownload)
     run_configure_autodownload
     ;;
+  recover-active-upgrade)
+    run_recover_active_upgrade
+    ;;
 esac
 
 echo
 echo "==========================================="
-echo "  Chain upgrade preparation completed"
+echo "  Chain upgrade operation completed"
 echo "==========================================="
 echo
 echo "  Mode:              ${MODE}"
@@ -432,6 +474,11 @@ if [ "$VERIFY_UPDATER_URL" = '__UPDATER_''URL__' ]; then
   VERIFY_UPDATER_URL="${VERIFY_DO_BASE%/}/update_chain.sh"
 fi
 echo "How to verify:"
-echo "  curl -fsSL ${VERIFY_UPDATER_URL} | sudo bash -s -- --mode verify-prestage --plan-name ${PLAN_NAME} --tag ${RELEASE_TAG}"
-echo "  svoted query upgrade plan --home ${DAEMON_HOME}"
+if [ "$MODE" = "recover-active-upgrade" ]; then
+  echo "  curl -fsSL ${VERIFY_UPDATER_URL} | sudo bash -s -- --mode verify-prestage --plan-name ${PLAN_NAME} --tag ${RELEASE_TAG} --chain-api ${CHAIN_API} --allow-no-plan"
+  echo "  svoted query upgrade applied ${PLAN_NAME} --home ${DAEMON_HOME}"
+else
+  echo "  curl -fsSL ${VERIFY_UPDATER_URL} | sudo bash -s -- --mode verify-prestage --plan-name ${PLAN_NAME} --tag ${RELEASE_TAG}"
+  echo "  svoted query upgrade plan --home ${DAEMON_HOME}"
+fi
 echo "  journalctl -u ${SERVICE_NAME} -f"

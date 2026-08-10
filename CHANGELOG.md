@@ -6,6 +6,13 @@ Historical changes before commit `704b202e2088b91caeaf2290cef85e4a9a759542` are 
 
 Instructions on coordinated upgrades can be found [here](https://setup.valargroup.org/#coordinated-upgrade).
 
+## Unreleased
+
+- Add a guarded recovery mode for Cosmovisor validators that reach an applied
+  upgrade without the target binary. It verifies the local marker against the
+  chain, stages the release, selects it with the signer stopped, enables
+  checksum-required downloads, and verifies the restarted signer.
+
 ## v1.2.0
 
 - Keep reveal-share witness data queued when CometBFT broadcast and transaction

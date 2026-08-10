@@ -755,17 +755,24 @@ svote_upgrade_assert_no_signer_processes() {
   fi
 }
 
-# svote_upgrade_stop_validator_service
-# systemctl stop SERVICE_NAME and die if the unit or signer processes remain active.
-svote_upgrade_stop_validator_service() {
-  if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
-    svote_upgrade_log "Stopping ${SERVICE_NAME}"
-    systemctl stop "$SERVICE_NAME"
-  fi
-  if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
-    svote_upgrade_die "${SERVICE_NAME} is still active after stop request."
-  fi
+# svote_upgrade_assert_validator_service_stopped
+# Die unless systemd reports an inactive/failed unit and no signer process remains for DAEMON_HOME.
+svote_upgrade_assert_validator_service_stopped() {
+  local active_state
+  active_state=$(systemctl show "$SERVICE_NAME" -p ActiveState --value 2>/dev/null || true)
+  case "$active_state" in
+    inactive|failed) ;;
+    *) svote_upgrade_die "${SERVICE_NAME} is not stopped after stop request (state=${active_state:-<unknown>})." ;;
+  esac
   svote_upgrade_assert_no_signer_processes
+}
+
+# svote_upgrade_stop_validator_service
+# Unconditionally stop SERVICE_NAME, including an activating unit, then enforce the signer-stop gate.
+svote_upgrade_stop_validator_service() {
+  svote_upgrade_log "Stopping ${SERVICE_NAME}"
+  systemctl stop "$SERVICE_NAME"
+  svote_upgrade_assert_validator_service_stopped
 }
 
 # svote_upgrade_pid_in_control_group pid control_group
@@ -1051,6 +1058,35 @@ svote_upgrade_query_applied_plan_height() {
   svote_upgrade_die "Could not confirm applied plan ${plan_name}${local_error:+: ${local_error}}. Re-run with --chain-api when the local RPC is offline."
 }
 
+# svote_upgrade_validate_active_plan_recovery expected_name
+# Require the local upgrade marker to match a plan that the chain reports applied at the same height.
+svote_upgrade_validate_active_plan_recovery() {
+  local expected_name="$1"
+  local upgrade_info="${DAEMON_HOME}/data/upgrade-info.json"
+  local parsed marker_name marker_height applied_height
+
+  case "$expected_name" in
+    ''|*[!A-Za-z0-9._-]*) svote_upgrade_die "Unsafe upgrade plan name: ${expected_name:-<empty>}." ;;
+  esac
+  parsed=$(svote_upgrade_read_upgrade_info) \
+    || svote_upgrade_die "Active-upgrade recovery requires a valid ${upgrade_info}."
+  marker_name="${parsed%%$'\t'*}"
+  marker_height="${parsed#*$'\t'}"
+  if [ "$marker_name" != "$expected_name" ]; then
+    svote_upgrade_die "Upgrade marker mismatch: expected ${expected_name}, local marker is ${marker_name}."
+  fi
+
+  applied_height=$(svote_upgrade_query_applied_plan_height "$marker_name")
+  if [ "$applied_height" != "$marker_height" ]; then
+    svote_upgrade_die "Refusing active-upgrade recovery: ${marker_name} marker height ${marker_height} does not match applied height ${applied_height}."
+  fi
+
+  SVOTE_RECOVERY_PLAN_NAME="$marker_name"
+  SVOTE_RECOVERY_PLAN_HEIGHT="$marker_height"
+  export SVOTE_RECOVERY_PLAN_NAME SVOTE_RECOVERY_PLAN_HEIGHT
+  svote_upgrade_log "Confirmed active applied-plan marker ${marker_name} at height ${marker_height}."
+}
+
 # svote_upgrade_validate_scheduled_plan expected_name allow_no_plan
 # Die unless chain plan name matches and halt height is still in the future; honor allow_no_plan.
 svote_upgrade_validate_scheduled_plan() {
@@ -1204,6 +1240,120 @@ svote_upgrade_archive_stale_plan_marker() {
   SVOTE_STALE_UPGRADE_INFO_ARCHIVE="$archive_path"
   export SVOTE_STALE_UPGRADE_INFO_ARCHIVE
   svote_upgrade_log "Archived stale applied-plan marker at ${archive_path}."
+}
+
+# svote_upgrade_validate_recovery_current_link target_plan
+# Accept only genesis, the target plan, or an earlier plan whose applied height the chain confirms.
+svote_upgrade_validate_recovery_current_link() {
+  local target_plan="$1"
+  local current_link="${COSMVISOR_ROOT}/current"
+  local current_target current_plan current_bin applied_height
+
+  case "$target_plan" in
+    ''|*[!A-Za-z0-9._-]*) svote_upgrade_die "Unsafe upgrade plan name: ${target_plan:-<empty>}." ;;
+  esac
+  [ -L "$current_link" ] \
+    || svote_upgrade_die "Active-upgrade recovery requires ${current_link} to be a symlink."
+  current_target=$(readlink "$current_link" 2>/dev/null || true)
+  case "$current_target" in
+    "$COSMVISOR_ROOT/genesis"|genesis)
+      [ -x "$GENESIS_BIN" ] \
+        || svote_upgrade_die "Cosmovisor current points to genesis, but ${GENESIS_BIN} is missing."
+      SVOTE_RECOVERY_CURRENT_TARGET="$current_target"
+      export SVOTE_RECOVERY_CURRENT_TARGET
+      svote_upgrade_log "Cosmovisor current points to genesis."
+      return 0
+      ;;
+    "$COSMVISOR_ROOT/upgrades/"*)
+      current_plan="${current_target#"$COSMVISOR_ROOT/upgrades/"}"
+      ;;
+    upgrades/*)
+      current_plan="${current_target#upgrades/}"
+      ;;
+    *)
+      svote_upgrade_die "Cosmovisor current points outside the supported layout: ${current_target:-<unreadable>}."
+      ;;
+  esac
+
+  case "$current_plan" in
+    ''|*[!A-Za-z0-9._-]*) svote_upgrade_die "Unsafe current upgrade target: ${current_target}." ;;
+  esac
+  current_bin="$(svote_upgrade_upgrade_bin_path "$current_plan")"
+  [ -x "$current_bin" ] \
+    || svote_upgrade_die "Cosmovisor current upgrade binary is missing: ${current_bin}."
+  if [ "$current_plan" = "$target_plan" ]; then
+    SVOTE_RECOVERY_CURRENT_TARGET="$current_target"
+    export SVOTE_RECOVERY_CURRENT_TARGET
+    svote_upgrade_log "Cosmovisor current already points to target plan ${target_plan}."
+    return 0
+  fi
+
+  applied_height=$(svote_upgrade_query_applied_plan_height "$current_plan")
+  SVOTE_RECOVERY_CURRENT_TARGET="$current_target"
+  export SVOTE_RECOVERY_CURRENT_TARGET
+  svote_upgrade_log "Confirmed current plan ${current_plan} was previously applied at height ${applied_height}."
+}
+
+# svote_upgrade_activate_recovery_plan target_plan expected_tag
+# With the validator stopped, atomically select the verified target upgrade directory.
+svote_upgrade_activate_recovery_plan() {
+  local target_plan="$1"
+  local expected_tag="$2"
+  local current_link="${COSMVISOR_ROOT}/current"
+  local target_dir target_bin active_state selected_current parsed expected_marker
+
+  case "$target_plan" in
+    ''|*[!A-Za-z0-9._-]*) svote_upgrade_die "Unsafe upgrade plan name: ${target_plan:-<empty>}." ;;
+  esac
+  target_dir="${COSMVISOR_ROOT}/upgrades/${target_plan}"
+  target_bin="$(svote_upgrade_upgrade_bin_path "$target_plan")"
+  active_state=$(systemctl show "$SERVICE_NAME" -p ActiveState --value 2>/dev/null || true)
+  case "$active_state" in
+    inactive|failed) ;;
+    *) svote_upgrade_die "Refusing to change Cosmovisor current while ${SERVICE_NAME} is ${active_state:-<unknown>}." ;;
+  esac
+  svote_upgrade_assert_no_signer_processes
+  [ -n "${SVOTE_RECOVERY_CURRENT_TARGET:-}" ] \
+    || svote_upgrade_die "Recovery current target was not validated before stopping ${SERVICE_NAME}."
+  selected_current=$(readlink "$current_link" 2>/dev/null || true)
+  if [ "$selected_current" != "$SVOTE_RECOVERY_CURRENT_TARGET" ]; then
+    svote_upgrade_die "Cosmovisor current changed during recovery: expected ${SVOTE_RECOVERY_CURRENT_TARGET}, found ${selected_current:-<unreadable>}."
+  fi
+  parsed=$(svote_upgrade_read_upgrade_info) \
+    || svote_upgrade_die "Upgrade marker changed or became invalid during recovery."
+  expected_marker="${SVOTE_RECOVERY_PLAN_NAME:-}"$'\t'"${SVOTE_RECOVERY_PLAN_HEIGHT:-}"
+  if [ "$parsed" != "$expected_marker" ]; then
+    svote_upgrade_die "Upgrade marker changed during recovery: expected ${SVOTE_RECOVERY_PLAN_NAME:-<unset>}/${SVOTE_RECOVERY_PLAN_HEIGHT:-<unset>}."
+  fi
+  svote_upgrade_verify_binary_tag "$target_bin" "$expected_tag"
+
+  ln -sfn "$target_dir" "$current_link"
+  selected_current=$(readlink "$current_link" 2>/dev/null || true)
+  if [ "$selected_current" != "$target_dir" ]; then
+    svote_upgrade_die "Failed to point Cosmovisor current at ${target_dir}."
+  fi
+  svote_upgrade_log "Selected Cosmovisor upgrade plan ${target_plan}."
+}
+
+# svote_upgrade_assert_current_upgrade target_plan expected_tag
+# Require Cosmovisor current to resolve to the target directory with the expected binary version.
+svote_upgrade_assert_current_upgrade() {
+  local target_plan="$1"
+  local expected_tag="$2"
+  local current_link="${COSMVISOR_ROOT}/current"
+  local target_dir target_bin selected_current
+
+  case "$target_plan" in
+    ''|*[!A-Za-z0-9._-]*) svote_upgrade_die "Unsafe upgrade plan name: ${target_plan:-<empty>}." ;;
+  esac
+  target_dir="${COSMVISOR_ROOT}/upgrades/${target_plan}"
+  target_bin="$(svote_upgrade_upgrade_bin_path "$target_plan")"
+  selected_current=$(readlink "$current_link" 2>/dev/null || true)
+  case "$selected_current" in
+    "$target_dir"|"upgrades/${target_plan}") ;;
+    *) svote_upgrade_die "Cosmovisor current points to ${selected_current:-<unreadable>}, expected ${target_dir}." ;;
+  esac
+  svote_upgrade_verify_binary_tag "$target_bin" "$expected_tag"
 }
 
 # svote_upgrade_assert_layout_ready plan_name
@@ -1538,10 +1688,10 @@ svote_upgrade_systemd_effective_execstart_is_cosmovisor_run_start() {
   printf '%s\n' "$exec_blob" | grep -Eq 'argv\[\]=[^;]*cosmovisor([^;]*) run start([ ;]|$)'
 }
 
-# svote_upgrade_assert_cosmovisor_runtime
-# Die unless effective systemd mode is cosmovisor, ExecStart is cosmovisor run start, and runtime is live.
-svote_upgrade_assert_cosmovisor_runtime() {
-  local mode effective_exec main_pid main_cmd
+# svote_upgrade_assert_cosmovisor_service_config
+# Die unless systemd is configured to run Cosmovisor directly for this validator.
+svote_upgrade_assert_cosmovisor_service_config() {
+  local mode effective_exec
 
   mode=$(svote_upgrade_systemd_effective_env_value "SVOTE_UPGRADE_MODE" || true)
   if [ "$mode" != "cosmovisor" ]; then
@@ -1555,6 +1705,14 @@ svote_upgrade_assert_cosmovisor_runtime() {
   if ! svote_upgrade_systemd_effective_execstart_is_cosmovisor_run_start; then
     svote_upgrade_die "Effective ExecStart is not a cosmovisor run start command."
   fi
+}
+
+# svote_upgrade_assert_cosmovisor_runtime
+# Die unless the service is configured for Cosmovisor and its runtime process is live.
+svote_upgrade_assert_cosmovisor_runtime() {
+  local main_pid main_cmd
+
+  svote_upgrade_assert_cosmovisor_service_config
 
   if ! svote_upgrade_has_cosmovisor_runtime_for_home; then
     main_pid=$(systemctl show "$SERVICE_NAME" -p MainPID --value 2>/dev/null || true)

@@ -14,6 +14,9 @@ fail() {
 # shellcheck source=scripts/_chain_upgrade_common.sh
 source "$COMMON"
 
+"${REPO_ROOT}/scripts/update_chain.sh" --help | grep -q 'recover-active-upgrade' \
+  || fail "update_chain.sh help does not list recover-active-upgrade"
+
 TMP_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
@@ -26,8 +29,21 @@ printf '#!/usr/bin/env bash\n' > "$GENESIS_BIN"
 chmod +x "$GENESIS_BIN"
 
 svote_upgrade_query_applied_plan_height() {
-  [ "$1" = "v1" ] || fail "unexpected applied-plan query: $1"
-  printf '802461\n'
+  case "$1" in
+    v1) printf '802461\n' ;;
+    v1.2.0) printf '4883196\n' ;;
+    *) fail "unexpected applied-plan query: $1" ;;
+  esac
+}
+
+make_versioned_binary() {
+  local path="$1"
+  local version="$2"
+  mkdir -p "$(dirname "$path")"
+  # The generated fixture needs a literal positional parameter.
+  # shellcheck disable=SC2016
+  printf '#!/usr/bin/env bash\n[ "${1:-}" = version ] && printf "%%s\\n" %q\n' "$version" > "$path"
+  chmod +x "$path"
 }
 
 echo "=== stale recovery: archive an exactly matched applied marker ==="
@@ -43,6 +59,80 @@ svote_upgrade_archive_stale_plan_marker
   || fail "current did not point to genesis after recovery"
 [ -f "$SVOTE_STALE_UPGRADE_INFO_ARCHIVE" ] || fail "stale marker audit archive is missing"
 grep -q '"name":"v1"' "$SVOTE_STALE_UPGRADE_INFO_ARCHIVE" || fail "archive contents changed"
+
+echo "=== active recovery: exact applied marker and prior applied current are required ==="
+OLD_UPGRADE_BIN="${COSMVISOR_ROOT}/upgrades/v1/bin/svoted"
+TARGET_UPGRADE_BIN="${COSMVISOR_ROOT}/upgrades/v1.2.0/bin/svoted"
+make_versioned_binary "$OLD_UPGRADE_BIN" "v1.0.0"
+make_versioned_binary "$TARGET_UPGRADE_BIN" "v1.2.0"
+printf '{"name":"v1.2.0","height":4883196}\n' > "${DAEMON_HOME}/data/upgrade-info.json"
+ln -sfn "${COSMVISOR_ROOT}/upgrades/v1" "${COSMVISOR_ROOT}/current"
+
+svote_upgrade_validate_active_plan_recovery "v1.2.0"
+[ "$SVOTE_RECOVERY_PLAN_NAME" = "v1.2.0" ] || fail "active recovery plan name was not captured"
+[ "$SVOTE_RECOVERY_PLAN_HEIGHT" = "4883196" ] || fail "active recovery plan height was not captured"
+svote_upgrade_validate_recovery_current_link "v1.2.0"
+
+printf '{"name":"v1.2.0","height":4883195}\n' > "${DAEMON_HOME}/data/upgrade-info.json"
+if (svote_upgrade_validate_active_plan_recovery "v1.2.0") >/dev/null 2>&1; then
+  fail "mismatched active recovery height was accepted"
+fi
+printf '{"name":"v1.2.0","height":4883196}\n' > "${DAEMON_HOME}/data/upgrade-info.json"
+
+ln -sfn "${TMP_ROOT}/unexpected" "${COSMVISOR_ROOT}/current"
+if (svote_upgrade_validate_recovery_current_link "v1.2.0") >/dev/null 2>&1; then
+  fail "unexpected Cosmovisor current target was accepted"
+fi
+ln -sfn "${COSMVISOR_ROOT}/upgrades/v1" "${COSMVISOR_ROOT}/current"
+
+echo "=== active recovery: Cosmovisor config is accepted without a live MainPID ==="
+systemctl() {
+  case "$*" in
+    "show svoted -p Environment --value")
+      printf 'SVOTE_UPGRADE_MODE=cosmovisor DAEMON_HOME=%s\n' "$DAEMON_HOME"
+      ;;
+    "show svoted -p ExecStart --value")
+      printf '{ path=/root/.local/bin/cosmovisor ; argv[]=/root/.local/bin/cosmovisor run start --home %s ; }\n' "$DAEMON_HOME"
+      ;;
+    *) return 1 ;;
+  esac
+}
+svote_upgrade_assert_cosmovisor_service_config
+unset -f systemctl
+
+systemctl() {
+  case "$*" in
+    "show svoted -p ActiveState --value") printf 'inactive\n' ;;
+    *) return 1 ;;
+  esac
+}
+ln -sfn "${COSMVISOR_ROOT}/genesis" "${COSMVISOR_ROOT}/current"
+if (svote_upgrade_activate_recovery_plan "v1.2.0" "v1.2.0") >/dev/null 2>&1; then
+  fail "Cosmovisor current change after validation was accepted"
+fi
+ln -sfn "${COSMVISOR_ROOT}/upgrades/v1" "${COSMVISOR_ROOT}/current"
+svote_upgrade_activate_recovery_plan "v1.2.0" "v1.2.0"
+[ "$(readlink "${COSMVISOR_ROOT}/current")" = "${COSMVISOR_ROOT}/upgrades/v1.2.0" ] \
+  || fail "active recovery did not select the target plan"
+svote_upgrade_assert_current_upgrade "v1.2.0" "v1.2.0"
+unset -f systemctl
+
+echo "=== signer stop: activating systemd units are stopped unconditionally ==="
+STOP_LOG="${TMP_ROOT}/systemctl-stop.log"
+SYSTEMD_ACTIVE_STATE="activating"
+systemctl() {
+  case "$*" in
+    "stop svoted")
+      printf 'stop\n' >> "$STOP_LOG"
+      SYSTEMD_ACTIVE_STATE="inactive"
+      ;;
+    "show svoted -p ActiveState --value") printf '%s\n' "$SYSTEMD_ACTIVE_STATE" ;;
+    *) return 1 ;;
+  esac
+}
+svote_upgrade_stop_validator_service
+grep -qx 'stop' "$STOP_LOG" || fail "activating service was not stopped"
+unset -f systemctl
 
 echo "=== auto-download: common helper writes checksum-required drop-in ==="
 SERVICE_PATH="${TMP_ROOT}/systemd/svoted.service"

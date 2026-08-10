@@ -68,8 +68,10 @@ grep -A2 'SVOTE_UPGRADE_MODE' join.sh | head -20
 
 | Check | PASS | FAIL |
 |-------|------|------|
-| [software-upgrades.md](software-upgrades.md) documents `prepare`, `migrate`, `verify-prestage` | | |
+| [software-upgrades.md](software-upgrades.md) documents `prepare`, `migrate`, `recover-active-upgrade`, `verify-prestage` | | |
 | Documents `--skip-cosmovisor-service` for direct-mode staging-only verify | | |
+| Recovery requires matching local/applied plan heights and rejects unexpected `current` targets | | |
+| Recovery stops an activating service before selecting the target binary | | |
 | Documents GitHub egress for Cosmovisor | | |
 | Documents systemd autodetect when `update_chain.sh` run as root | | |
 
