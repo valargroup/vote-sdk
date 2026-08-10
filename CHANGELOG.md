@@ -6,6 +6,11 @@ Historical changes before commit `704b202e2088b91caeaf2290cef85e4a9a759542` are 
 
 Instructions on coordinated upgrades can be found [here](https://setup.valargroup.org/#coordinated-upgrade).
 
+## Unreleased
+
+- Derive safe validator snapshot resets from the local genesis chain ID and
+  reject conflicting overrides before stopping the service.
+
 ## v1.2.0
 
 - Keep reveal-share witness data queued when CometBFT broadcast and transaction

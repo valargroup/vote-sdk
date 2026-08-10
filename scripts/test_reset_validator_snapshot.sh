@@ -151,15 +151,21 @@ PY
 
 create_home() {
   local home="$1"
+  local chain_id="${2:-zvote-1}"
   mkdir -p "${home}/config" "${home}/data/application.db" "${home}/keyring-test"
-  printf '{"genesis":"ok"}\n' > "${home}/config/genesis.json"
+  printf '{"chain_id":"%s"}\n' "${chain_id}" > "${home}/config/genesis.json"
   printf '{"priv_key":"do-not-touch"}\n' > "${home}/config/priv_validator_key.json"
   printf '{"node_key":"do-not-touch"}\n' > "${home}/config/node_key.json"
   printf '{"height":"100","round":0,"step":0}\n' > "${home}/data/priv_validator_state.json"
   printf 'old-app-state\n' > "${home}/data/application.db/CURRENT"
   printf 'account-key\n' > "${home}/keyring-test/key"
   printf 'pallas-secret\n' > "${home}/pallas.sk"
+  printf 'pallas-public\n' > "${home}/pallas.pk"
   printf 'ea-secret\n' > "${home}/ea.sk"
+  printf 'ea-public\n' > "${home}/ea.pk"
+  printf 'helper-queue\n' > "${home}/helper.db"
+  printf 'round-share\n' > "${home}/share.active-round"
+  printf 'round-coefficients\n' > "${home}/coeffs.active-round"
 }
 
 make_snapshot_archive() {
@@ -231,6 +237,7 @@ run_reset() {
   SVOTE_SNAPSHOT_BASE_URL="${BASE_URL}" \
   SVOTE_POST_RESTART_SYNC_TIMEOUT=3 \
   SVOTE_TMPDIR="${TMPROOT}/tmp" \
+  SVOTE_CHAIN_ID='' \
   "$@" \
     bash "${SCRIPT}"
 }
@@ -241,16 +248,22 @@ assert_untouched_identity() {
   [ "$(cat "${home}/config/node_key.json")" = '{"node_key":"do-not-touch"}' ] || fail "node key changed"
   [ "$(cat "${home}/keyring-test/key")" = "account-key" ] || fail "keyring changed"
   [ "$(cat "${home}/pallas.sk")" = "pallas-secret" ] || fail "pallas key changed"
+  [ "$(cat "${home}/pallas.pk")" = "pallas-public" ] || fail "pallas public key changed"
   [ "$(cat "${home}/ea.sk")" = "ea-secret" ] || fail "ea key changed"
+  [ "$(cat "${home}/ea.pk")" = "ea-public" ] || fail "ea public key changed"
+  [ "$(cat "${home}/helper.db")" = "helper-queue" ] || fail "helper queue changed"
+  [ "$(cat "${home}/share.active-round")" = "round-share" ] || fail "round share changed"
+  [ "$(cat "${home}/coeffs.active-round")" = "round-coefficients" ] || fail "round coefficients changed"
 }
 
 expect_stage_failure() {
   local name="$1"
   local home="$2"
   local state_dir="${TMPROOT}/state-${name}"
+  shift 2
 
   set +e
-  run_reset "${home}" "${state_dir}" Linux > "${TMPROOT}/${name}.log" 2>&1
+  run_reset "${home}" "${state_dir}" Linux "$@" > "${TMPROOT}/${name}.log" 2>&1
   status=$?
   set -e
   [ "${status}" -ne 0 ] || {
@@ -281,7 +294,7 @@ BASE_URL="http://127.0.0.1:$(cat "${TMPROOT}/server.port")"
 
 echo "=== reset-validator-snapshot: linux success preserves validator state ==="
 GOOD_SUM="$(make_snapshot_archive good)"
-write_metadata "svote-1" "good" "${GOOD_SUM}"
+write_metadata "zvote-1" "good" "${GOOD_SUM}"
 HOME1="${TMPROOT}/home-success-linux"
 STATE1="${TMPROOT}/state-success-linux"
 create_home "${HOME1}"
@@ -296,7 +309,27 @@ run_reset "${HOME1}" "${STATE1}" Linux > "${TMPROOT}/success-linux.log" 2>&1 || 
 [ ! -e "${HOME1}/data/cs.wal" ] || fail "consensus WAL was not removed"
 assert_untouched_identity "${HOME1}"
 
+echo "=== reset-validator-snapshot: explicit testnet override matches local genesis ==="
+HOME_TESTNET="${TMPROOT}/home-success-testnet"
+STATE_TESTNET="${TMPROOT}/state-success-testnet"
+create_home "${HOME_TESTNET}" "svote-1"
+write_metadata "svote-1" "good" "${GOOD_SUM}"
+run_reset "${HOME_TESTNET}" "${STATE_TESTNET}" Linux env SVOTE_CHAIN_ID=svote-1 > "${TMPROOT}/success-testnet.log" 2>&1 || {
+  cat "${TMPROOT}/success-testnet.log" >&2
+  fail "testnet override success case failed"
+}
+[ -f "${STATE_TESTNET}/systemctl-stop" ] || fail "testnet override did not stop service"
+[ -f "${STATE_TESTNET}/systemctl-start" ] || fail "testnet override did not start service"
+assert_untouched_identity "${HOME_TESTNET}"
+
+echo "=== reset-validator-snapshot: rejects chain override that disagrees with genesis ==="
+HOME_OVERRIDE_MISMATCH="${TMPROOT}/home-override-mismatch"
+create_home "${HOME_OVERRIDE_MISMATCH}"
+write_metadata "zvote-1" "good" "${GOOD_SUM}"
+expect_stage_failure "override-mismatch" "${HOME_OVERRIDE_MISMATCH}" env SVOTE_CHAIN_ID=svote-1
+
 echo "=== reset-validator-snapshot: launchd success path ==="
+write_metadata "zvote-1" "good" "${GOOD_SUM}"
 HOME2="${TMPROOT}/home-success-darwin"
 STATE2="${TMPROOT}/state-success-darwin"
 create_home "${HOME2}"
@@ -317,21 +350,21 @@ expect_stage_failure "wrong-chain" "${HOME3}"
 echo "=== reset-validator-snapshot: rejects bad checksum ==="
 HOME4="${TMPROOT}/home-bad-checksum"
 create_home "${HOME4}"
-write_metadata "svote-1" "good" "0000000000000000000000000000000000000000000000000000000000000000"
+write_metadata "zvote-1" "good" "0000000000000000000000000000000000000000000000000000000000000000"
 expect_stage_failure "bad-checksum" "${HOME4}"
 
 echo "=== reset-validator-snapshot: rejects unsafe archive paths ==="
 HOME5="${TMPROOT}/home-unsafe-path"
 create_home "${HOME5}"
 UNSAFE_SUM="$(make_unsafe_archive unsafe)"
-write_metadata "svote-1" "unsafe" "${UNSAFE_SUM}"
+write_metadata "zvote-1" "unsafe" "${UNSAFE_SUM}"
 expect_stage_failure "unsafe-path" "${HOME5}"
 
 echo "=== reset-validator-snapshot: rejects missing local validator state ==="
 HOME6="${TMPROOT}/home-missing-state"
 create_home "${HOME6}"
 rm -f "${HOME6}/data/priv_validator_state.json"
-write_metadata "svote-1" "good" "${GOOD_SUM}"
+write_metadata "zvote-1" "good" "${GOOD_SUM}"
 expect_stage_failure "missing-state" "${HOME6}"
 
 echo "=== reset-validator-snapshot: rejects invalid metadata ==="
@@ -344,14 +377,14 @@ echo "=== reset-validator-snapshot: rejects broken archive ==="
 HOME8="${TMPROOT}/home-broken-archive"
 create_home "${HOME8}"
 BROKEN_SUM="$(make_broken_archive broken)"
-write_metadata "svote-1" "broken" "${BROKEN_SUM}"
+write_metadata "zvote-1" "broken" "${BROKEN_SUM}"
 expect_stage_failure "broken-archive" "${HOME8}"
 
 echo "=== reset-validator-snapshot: rejects missing service control ==="
 HOME9="${TMPROOT}/home-missing-service"
 STATE9="${TMPROOT}/state-missing-service"
 create_home "${HOME9}"
-write_metadata "svote-1" "good" "${GOOD_SUM}"
+write_metadata "zvote-1" "good" "${GOOD_SUM}"
 set +e
 run_reset "${HOME9}" "${STATE9}" Linux env FAKE_SYSTEMD_MISSING=1 > "${TMPROOT}/missing-service.log" 2>&1
 status=$?
