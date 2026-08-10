@@ -101,6 +101,12 @@ export function tokenHolderConfigUrl({
   return `${TOKEN_HOLDER_VOTING_CONFIG_REPO_URL}/${mode}/main/${folder}/${file}-voting-config.json`;
 }
 
+export interface PirLayout {
+  pir_depth: number;
+  tier0_layers: number;
+  tier1_layers: number;
+}
+
 const NULLIFIER_URL_KEY = "shielded-vote-nullifier-url";
 
 export const LOCAL_PIR_URL = "/nullifier";
@@ -635,7 +641,8 @@ export interface AttestRoundEntryResponse {
 export async function attestRoundEntry(input: {
   round_id: string;
   ea_pk: string;
-  auth_version: 1;
+  auth_version: 2;
+  pir_layout: PirLayout;
 }): Promise<AttestRoundEntryResponse> {
   return fetchJson<AttestRoundEntryResponse>("/api/sign-config-entry", {
     method: "POST",
@@ -651,7 +658,7 @@ export interface ConfigRoundSignature {
 }
 
 export interface ConfigRoundEntry {
-  auth_version: 1;
+  auth_version: 2;
   ea_pk: string;
   signatures: ConfigRoundSignature[];
 }
@@ -673,6 +680,7 @@ export interface CreateConfigPRResponse {
 export async function createConfigPr(input: {
   round_id: string;
   entry: ConfigRoundEntry;
+  pir_layout: PirLayout;
   signed_payload_hash: string;
   title?: string;
   auth: ConfigPRAuth;

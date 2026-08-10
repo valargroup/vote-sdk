@@ -10,9 +10,10 @@ import (
 )
 
 type signConfigEntryRequest struct {
-	RoundID     string `json:"round_id"`
-	EaPK        string `json:"ea_pk"`
-	AuthVersion int    `json:"auth_version"`
+	RoundID     string                 `json:"round_id"`
+	EaPK        string                 `json:"ea_pk"`
+	AuthVersion int                    `json:"auth_version"`
+	PIRLayout   votingconfig.PIRLayout `json:"pir_layout"`
 }
 
 type signConfigEntryResponse struct {
@@ -33,8 +34,10 @@ func (h *apiHandler) handleSignConfigEntry(w http.ResponseWriter, r *http.Reques
 		jsonError(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
-	if body.AuthVersion != votingconfig.AuthVersionV1 {
-		jsonError(w, "unsupported auth_version", http.StatusBadRequest)
+	// Only auth_version 2 payloads may be minted: v1 signatures do not bind
+	// the round id and are replayable across rounds.
+	if body.AuthVersion != votingconfig.AuthVersionV2 {
+		jsonError(w, "unsupported auth_version; sign auth_version 2 entries", http.StatusBadRequest)
 		return
 	}
 	if err := votingconfig.ValidateRoundID(body.RoundID); err != nil {
@@ -50,11 +53,20 @@ func (h *apiHandler) handleSignConfigEntry(w http.ResponseWriter, r *http.Reques
 	var eaPK [32]byte
 	copy(eaPK[:], eaPKBytes)
 
-	payload := votingconfig.CanonicalPayloadV1(eaPK)
+	if err := votingconfig.ValidatePIRLayout(body.PIRLayout); err != nil {
+		jsonError(w, "pir_layout must satisfy pir_depth = tier0_layers + tier1_layers", http.StatusBadRequest)
+		return
+	}
+
+	payload, err := votingconfig.CanonicalPayloadV2(body.RoundID, eaPK, body.PIRLayout)
+	if err != nil {
+		jsonError(w, "failed to build canonical payload", http.StatusBadRequest)
+		return
+	}
 	hash := votingconfig.SignedPayloadHash(payload)
 	jsonResponse(w, signConfigEntryResponse{
 		CanonicalPayloadB64: base64.StdEncoding.EncodeToString(payload),
 		SignedPayloadHash:   hex.EncodeToString(hash[:]),
-		AuthVersion:         votingconfig.AuthVersionV1,
+		AuthVersion:         votingconfig.AuthVersionV2,
 	}, http.StatusOK)
 }

@@ -56,6 +56,9 @@ func TestSignAndVerifyConfig(t *testing.T) {
 		"--round-id", roundID,
 		"--ea-pk", base64.StdEncoding.EncodeToString(eaPK[:]),
 		"--signer-id", "key-1",
+		"--pir-depth", "19",
+		"--tier0-layers", "12",
+		"--tier1-layers", "7",
 		"--merge", configPath,
 	})
 	if err := signCmd.Execute(); err != nil {

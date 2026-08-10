@@ -190,12 +190,15 @@ func newConfigAttestationKeygenCmd() *cobra.Command {
 
 func newSignCmd() *cobra.Command {
 	var (
-		roundID   string
-		eaPKB64   string
-		signerID  string
-		privFile  string
-		privStdin bool
-		mergePath string
+		roundID     string
+		eaPKB64     string
+		signerID    string
+		privFile    string
+		privStdin   bool
+		mergePath   string
+		pirDepth    uint32
+		tier0Layers uint32
+		tier1Layers uint32
 	)
 	cmd := &cobra.Command{
 		Use:   "sign",
@@ -216,9 +219,20 @@ func newSignCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			sig := votingconfig.SignV1(priv, eaPK)
+			layout := votingconfig.PIRLayout{
+				PIRDepth:    pirDepth,
+				Tier0Layers: tier0Layers,
+				Tier1Layers: tier1Layers,
+			}
+			if err := votingconfig.ValidatePIRLayout(layout); err != nil {
+				return err
+			}
+			sig, err := votingconfig.SignV2(priv, roundID, eaPK, layout)
+			if err != nil {
+				return err
+			}
 			entry := votingconfig.RoundEntry{
-				AuthVersion: votingconfig.AuthVersionV1,
+				AuthVersion: votingconfig.AuthVersionV2,
 				EaPK:        base64.StdEncoding.EncodeToString(eaPK[:]),
 				Signatures: []votingconfig.Signature{{
 					KeyID: signerID,
@@ -228,7 +242,7 @@ func newSignCmd() *cobra.Command {
 			}
 
 			if mergePath != "" {
-				if err := mergeEntry(mergePath, roundID, entry); err != nil {
+				if err := mergeEntry(mergePath, roundID, entry, layout); err != nil {
 					return err
 				}
 				fmt.Fprintf(cmd.ErrOrStderr(), "merged: %s\n", mergePath)
@@ -242,7 +256,11 @@ func newSignCmd() *cobra.Command {
 				}
 			}
 
-			hash := votingconfig.SignedPayloadHash(votingconfig.CanonicalPayloadV1(eaPK))
+			payload, err := votingconfig.CanonicalPayloadV2(roundID, eaPK, layout)
+			if err != nil {
+				return err
+			}
+			hash := votingconfig.SignedPayloadHash(payload)
 			fmt.Fprintf(cmd.ErrOrStderr(), "signed_payload_hash: %s\n", hex.EncodeToString(hash[:]))
 			return nil
 		},
@@ -253,6 +271,9 @@ func newSignCmd() *cobra.Command {
 	cmd.Flags().StringVar(&privFile, "privkey-file", "", "Read base64(seed) Ed25519 private key from this file")
 	cmd.Flags().BoolVar(&privStdin, "privkey-stdin", false, "Read base64(seed) Ed25519 private key from stdin")
 	cmd.Flags().StringVar(&mergePath, "merge", "", "Rewrite this dynamic-voting-config.json with the signed entry merged in")
+	cmd.Flags().Uint32Var(&pirDepth, "pir-depth", 0, "pir_layout.pir_depth bound into the signature (must match the dynamic config)")
+	cmd.Flags().Uint32Var(&tier0Layers, "tier0-layers", 0, "pir_layout.tier0_layers bound into the signature")
+	cmd.Flags().Uint32Var(&tier1Layers, "tier1-layers", 0, "pir_layout.tier1_layers bound into the signature")
 	return cmd
 }
 
@@ -285,10 +306,12 @@ func newVerifyCmd() *cobra.Command {
 				return err
 			}
 			for roundID, entry := range cfg.Rounds {
-				if entry.AuthVersion != votingconfig.AuthVersionV1 {
+				switch entry.AuthVersion {
+				case votingconfig.AuthVersionV1, votingconfig.AuthVersionV2:
+				default:
 					return fmt.Errorf("round %s: unsupported auth_version %d", roundID, entry.AuthVersion)
 				}
-				if !votingconfig.VerifyEntrySignatures(entry, staticConfig.TrustedKeys) {
+				if !votingconfig.VerifyEntrySignatures(roundID, entry, staticConfig.TrustedKeys, cfg.PIRLayout) {
 					return fmt.Errorf("round %s: no valid signature", roundID)
 				}
 			}
@@ -314,23 +337,35 @@ func newVerifyCmd() *cobra.Command {
 	return cmd
 }
 
-func mergeEntry(path, roundID string, entry votingconfig.RoundEntry) error {
+func mergeEntry(path, roundID string, entry votingconfig.RoundEntry, signedLayout votingconfig.PIRLayout) error {
 	cfg, err := readConfig(path)
 	if err != nil {
 		return err
+	}
+	if cfg.PIRLayout != signedLayout {
+		return fmt.Errorf(
+			"pir_layout mismatch: signed %d/%d/%d but %s advertises %d/%d/%d",
+			signedLayout.PIRDepth, signedLayout.Tier0Layers, signedLayout.Tier1Layers, path,
+			cfg.PIRLayout.PIRDepth, cfg.PIRLayout.Tier0Layers, cfg.PIRLayout.Tier1Layers,
+		)
 	}
 	if cfg.Rounds == nil {
 		cfg.Rounds = map[string]votingconfig.RoundEntry{}
 	}
 	existing, ok := cfg.Rounds[roundID]
 	if ok {
-		if existing.AuthVersion != votingconfig.AuthVersionV1 {
-			return fmt.Errorf("round %s: cannot merge into auth_version %d", roundID, existing.AuthVersion)
-		}
 		if existing.EaPK != entry.EaPK {
 			return fmt.Errorf("round %s: ea_pk mismatch in merge target", roundID)
 		}
-		entry.Signatures = mergeSignatures(existing.Signatures, entry.Signatures[0])
+		switch existing.AuthVersion {
+		case votingconfig.AuthVersionV1:
+			// Legacy v1 signatures cover a different preimage; replace the
+			// entry outright instead of merging incompatible signatures.
+		case entry.AuthVersion:
+			entry.Signatures = mergeSignatures(existing.Signatures, entry.Signatures[0])
+		default:
+			return fmt.Errorf("round %s: cannot merge into auth_version %d", roundID, existing.AuthVersion)
+		}
 	}
 	cfg.Rounds[roundID] = entry
 

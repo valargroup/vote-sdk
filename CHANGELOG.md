@@ -8,6 +8,12 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## v1.2.0
 
+- Bind dynamic round attestations to the round ID, election-authority key, and
+  PIR layout with domain-separated `auth_version: 2` signatures, preventing
+  cross-round and layout replay. The admin UI intentionally fixes the current
+  `19/12/7` PIR layout at the authorization point to avoid an additional
+  network dependency. This matches the wallet-side verification in
+  [zcash_voting#172](https://github.com/valargroup/zcash_voting/pull/172).
 - Keep reveal-share witness data queued when CometBFT broadcast and transaction
   status retries cannot determine whether the transaction was accepted.
 - Let the admin UI and snapshot-data API accept both legacy three-tier and
