@@ -8,6 +8,7 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Upgrade CometBFT to v0.38.21 for its patched consensus implementation.
 - Derive safe validator snapshot resets from the local genesis chain ID and
   reject conflicting overrides before stopping the service.
 
