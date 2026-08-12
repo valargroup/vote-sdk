@@ -62,10 +62,9 @@ const MaxVoteOptions = 8
 //	Vote Commit (ZKP #2, K=13): 5,216 bytes
 //	Share Reveal(ZKP #3, K=11): 4,000 bytes
 //
-// The proof generation FFI uses an 8192-byte output buffer. The constant
-// provides ~57% headroom above the largest circuit. Enforced in
+// The proof generation FFI uses a matching 15 KiB output buffer. Enforced in
 // ValidateBasic to reject oversized payloads before they reach the FFI.
-const MaxProofSize = 8192
+const MaxProofSize = 15 * 1024
 
 // MaxTreePosition is the largest valid commitment tree leaf index.
 // The tree uses zero-based uint32 leaf addressing (depth-24 Poseidon Merkle tree),

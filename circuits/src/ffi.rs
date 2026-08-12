@@ -2038,7 +2038,7 @@ mod tests {
             round_id,
         ) = build_share_reveal_test_data();
 
-        let mut proof_buf = [0u8; 8192];
+        let mut proof_buf = [0u8; 15 * 1024];
         let mut proof_len: usize = 0;
         let mut nullifier = [0u8; 32];
         let mut tree_root = [0u8; 32];
