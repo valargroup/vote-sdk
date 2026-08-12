@@ -914,7 +914,6 @@ func (s *ShareStore) ImportQueue(export QueueExport, opts QueueImportOptions) (Q
 		return QueueImportResult{}, errors.New("queue export missing round_id")
 	}
 
-	now := uint64(time.Now().Unix())
 	result := QueueImportResult{}
 	schedule := make(map[string]time.Time)
 
@@ -949,10 +948,8 @@ func (s *ShareStore) ImportQueue(export QueueExport, opts QueueImportOptions) (Q
 		if opts.ForceReady {
 			submitAt = 0
 		}
+		// Preserve zero as the unknown receipt-time sentinel for migrated rows.
 		receivedAt := row.ReceivedAt
-		if receivedAt == 0 {
-			receivedAt = now
-		}
 		voteEndTime := row.VoteEndTime
 		if voteEndTime == 0 {
 			voteEndTime = export.Round.VoteEndTime
@@ -1302,8 +1299,10 @@ func (s *ShareStore) QueueSummary(roundID string, now time.Time) (QueueSummary, 
 }
 
 // ExpiredRoundSummaries returns per-round queue counts for rounds whose voting
-// window has ended. Call this before PurgeExpiredRounds so unsubmitted share
-// alerts can be emitted without retaining witness data.
+// window has ended. It excludes shares first received at or after the round's
+// close time, since they were not pending before close and should not trigger
+// this alert. Call this before PurgeExpiredRounds so unsubmitted share alerts
+// can be emitted without retaining witness data.
 func (s *ShareStore) ExpiredRoundSummaries(now time.Time) ([]ExpiredRoundSummary, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1311,7 +1310,9 @@ func (s *ShareStore) ExpiredRoundSummaries(now time.Time) ([]ExpiredRoundSummary
 	rows, err := s.db.Query(
 		`SELECT round_id, state, COUNT(*)
 		   FROM shares
-		  WHERE vote_end_time > 0 AND vote_end_time < ?
+		  WHERE vote_end_time > 0
+		    AND vote_end_time < ?
+		    AND (received_at = 0 OR received_at < vote_end_time)
 		  GROUP BY round_id, state`,
 		now.Unix(),
 	)
