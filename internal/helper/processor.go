@@ -356,6 +356,8 @@ func (p *Processor) processBatch(ctx context.Context) {
 			if err := p.processShare(shareCtx, share); err != nil {
 				spanErr = err
 				if errors.Is(err, errAwaitingCommit) {
+					shareSpan.SetData("outcome", "awaiting_commit")
+					spanErr = nil
 					// Bound accepted-but-unconfirmed broadcasts so an unavailable
 					// committed-state check cannot trigger proof generation forever.
 					p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
