@@ -641,9 +641,9 @@ dependencies = [
 
 [[package]]
 name = "imt-tree"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d0a4887bb71d68b3d0c5db9d42bb76df38b0dff4d261b863dada6383b6c2012"
+checksum = "0aad3e3ab5a46f4a08d00f5525b86cd0d5204cba64ba68f46e20a590e1808aec"
 dependencies = [
  "anyhow",
  "ff",
@@ -1434,9 +1434,9 @@ dependencies = [
 
 [[package]]
 name = "vote-commitment-tree"
-version = "0.4.0-rc.1"
+version = "0.4.0-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45d09351e41a71fdad388bd51417e3acc6e7b530ba364dd38296e79bf6ab41f6"
+checksum = "df3e4675e494f06faa7a5e571c69ec9e74142a2d222384696ba3d313a938b11e"
 dependencies = [
  "anyhow",
  "ff",

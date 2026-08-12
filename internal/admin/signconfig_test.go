@@ -25,7 +25,8 @@ func TestHandleSignConfigEntry(t *testing.T) {
 	RegisterRoutes(r, func() *Admin { return nil }, log.NewNopLogger())
 
 	body := `{"round_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","ea_pk":"` +
-		base64.StdEncoding.EncodeToString(eaPK) + `","auth_version":1}`
+		base64.StdEncoding.EncodeToString(eaPK) +
+		`","auth_version":2,"pir_layout":{"pir_depth":19,"tier0_layers":12,"tier1_layers":7}}`
 	req := httptest.NewRequest(http.MethodPost, "/api/sign-config-entry", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -43,13 +44,18 @@ func TestHandleSignConfigEntry(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp.AuthVersion != 1 {
+	if resp.AuthVersion != 2 {
 		t.Fatalf("auth_version mismatch: got %d", resp.AuthVersion)
 	}
-	if resp.CanonicalPayloadB64 != base64.StdEncoding.EncodeToString(eaPK) {
+	// Golden vector for the v2 preimage:
+	// "zcash-shielded-vote:round-auth:v2" || 0xaa*32 || 0x00..0x1f
+	// || u32le(19) || u32le(12) || u32le(7).
+	// Shared with wallet-side (librustvoting) verification.
+	const wantPayload = "emNhc2gtc2hpZWxkZWQtdm90ZTpyb3VuZC1hdXRoOnYyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqoAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHxMAAAAMAAAABwAAAA=="
+	if resp.CanonicalPayloadB64 != wantPayload {
 		t.Fatalf("canonical payload mismatch: got %s", resp.CanonicalPayloadB64)
 	}
-	const wantHash = "630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd"
+	const wantHash = "136f842edf9e31eae5c01731d5ba2b9c0f86ed980c38bb426bef021bed8986ba"
 	if resp.SignedPayloadHash != wantHash {
 		t.Fatalf("hash mismatch: got %s want %s", resp.SignedPayloadHash, wantHash)
 	}
@@ -82,11 +88,14 @@ func TestHandleSignConfigEntryRejectsBadInputs(t *testing.T) {
 		body string
 	}{
 		{name: "bad json", body: "not-json"},
-		{name: "unknown version", body: `{"round_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","ea_pk":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","auth_version":2}`},
-		{name: "uppercase round id", body: `{"round_id":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","ea_pk":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","auth_version":1}`},
-		{name: "short round id", body: `{"round_id":"aa","ea_pk":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","auth_version":1}`},
-		{name: "bad ea pk base64", body: `{"round_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","ea_pk":"not-base64","auth_version":1}`},
-		{name: "short ea pk", body: `{"round_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","ea_pk":"AQID","auth_version":1}`},
+		{name: "legacy v1 version", body: `{"round_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","ea_pk":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","auth_version":1}`},
+		{name: "unknown version", body: `{"round_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","ea_pk":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","auth_version":3}`},
+		{name: "uppercase round id", body: `{"round_id":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","ea_pk":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","auth_version":2}`},
+		{name: "short round id", body: `{"round_id":"aa","ea_pk":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","auth_version":2}`},
+		{name: "bad ea pk base64", body: `{"round_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","ea_pk":"not-base64","auth_version":2}`},
+		{name: "short ea pk", body: `{"round_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","ea_pk":"AQID","auth_version":2}`},
+		{name: "missing pir layout", body: `{"round_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","ea_pk":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","auth_version":2}`},
+		{name: "inconsistent pir layout", body: `{"round_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","ea_pk":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","auth_version":2,"pir_layout":{"pir_depth":19,"tier0_layers":12,"tier1_layers":8}}`},
 	}
 
 	for _, tt := range tests {

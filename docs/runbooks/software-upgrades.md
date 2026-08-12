@@ -78,8 +78,9 @@ final plan on both networks:
 | Testnet final | `v1.2.0` | `v1.2.0` |
 | Mainnet final | `v1.2.0` | `v1.2.0` |
 
-Before scheduling the final mainnet plan, cancel any pending `v1.1.0` plan.
-Do not leave both operations until the old halt height is near.
+Replace any pending `v1.1.0` plan atomically when scheduling the final mainnet
+plan by enabling `replace_existing`. Do not cancel it in a separate action,
+which would leave the chain without a scheduled plan between transactions.
 
 Use the tag-scoped updater to pre-stage the matching release on every validator.
 `--allow-no-plan` is required while no plan is scheduled:

@@ -853,8 +853,8 @@ func TestPurgeExpiredRoundsTruncatesWALWithFailedWitnessMaterial(t *testing.T) {
 }
 
 func TestExpiredRoundSummaries(t *testing.T) {
+	end := uint64(time.Now().Add(-time.Hour).Unix())
 	fetcher := func(roundID string) (RoundInfo, error) {
-		end := uint64(time.Now().Add(-time.Hour).Unix())
 		return RoundInfo{CreatedAtTime: end - oneHourSecs, VoteEndTime: end}, nil
 	}
 
@@ -864,6 +864,8 @@ func TestExpiredRoundSummaries(t *testing.T) {
 
 	enqueueAndRequireInserted(t, s, testPayload("expired_round", 0))
 	enqueueAndRequireInserted(t, s, testPayload("expired_round", 1))
+	_, err = s.db.Exec("UPDATE shares SET received_at = ?", end-1)
+	require.NoError(t, err)
 
 	ready := s.TakeReady()
 	require.Len(t, ready, 2)
@@ -880,6 +882,38 @@ func TestExpiredRoundSummaries(t *testing.T) {
 	assert.Equal(t, 1, summaries[0].Submitted)
 	assert.Equal(t, 0, summaries[0].Failed)
 	assert.Equal(t, 1, summaries[0].Unsubmitted())
+}
+
+func TestExpiredRoundSummariesIgnoresSharesReceivedAtClose(t *testing.T) {
+	end := uint64(time.Now().Add(-time.Hour).Unix())
+	s, err := NewShareStore(":memory:", func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: end - oneHourSecs, VoteEndTime: end}, nil
+	})
+	require.NoError(t, err)
+	defer s.Close()
+
+	enqueueAndRequireInserted(t, s, testPayload("expired_round", 0))
+	_, err = s.db.Exec("UPDATE shares SET received_at = ?", end)
+	require.NoError(t, err)
+
+	summaries, err := s.ExpiredRoundSummaries(time.Now())
+	require.NoError(t, err)
+	assert.Empty(t, summaries)
+}
+
+func TestExpiredRoundSummariesIgnoresSharesReceivedAfterClose(t *testing.T) {
+	end := uint64(time.Now().Add(-time.Hour).Unix())
+	s, err := NewShareStore(":memory:", func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: end - oneHourSecs, VoteEndTime: end}, nil
+	})
+	require.NoError(t, err)
+	defer s.Close()
+
+	enqueueAndRequireInserted(t, s, testPayload("expired_round", 0))
+
+	summaries, err := s.ExpiredRoundSummaries(time.Now())
+	require.NoError(t, err)
+	assert.Empty(t, summaries)
 }
 
 func TestGetRoundEndTime_Cache(t *testing.T) {
@@ -1223,6 +1257,43 @@ func TestImportQueueSkipsTerminalAndRoundTripsProcessableRows(t *testing.T) {
 	assert.Equal(t, 0, result.Inserted)
 	assert.Equal(t, 1, result.Duplicates)
 	assert.Equal(t, 1, result.SkippedTerminal)
+}
+
+func TestImportQueuePreservesUnknownLegacyReceivedAt(t *testing.T) {
+	end := uint64(time.Now().Add(-time.Hour).Unix())
+	payload := testPayload("legacy_round", 0)
+	export := QueueExport{
+		Version: QueueExportVersion,
+		RoundID: payload.VoteRoundID,
+		Round: QueueExportRound{
+			CreatedAtTime: end - oneHourSecs,
+			VoteEndTime:   end,
+		},
+		Rows: []QueueExportRow{
+			queueExportRowFromPayload(payload, ShareStateReceived, end),
+		},
+	}
+
+	dest := newTestStore(t)
+	result, err := dest.ImportQueue(export, QueueImportOptions{})
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Inserted)
+
+	var receivedAt uint64
+	err = dest.db.QueryRow(
+		"SELECT received_at FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
+		payload.VoteRoundID,
+		payload.EncShare.ShareIndex,
+		payload.ProposalID,
+		payload.TreePosition,
+	).Scan(&receivedAt)
+	require.NoError(t, err)
+	assert.Zero(t, receivedAt)
+
+	summaries, err := dest.ExpiredRoundSummaries(time.Now())
+	require.NoError(t, err)
+	require.Len(t, summaries, 1)
+	assert.Equal(t, 1, summaries[0].Unsubmitted())
 }
 
 func TestImportQueueRejectsUnsupportedVersion(t *testing.T) {

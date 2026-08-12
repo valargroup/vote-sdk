@@ -2,7 +2,7 @@
 
 `voting-config` signs and verifies `token-holder-voting-config` dynamic round entries.
 
-For `auth_version: 1`, signatures cover only the raw 32-byte `ea_pk` decoded from base64. Wrapper fields such as vote servers and PIR endpoints are validated by CI, but are not signed by this version of the scheme.
+`sign` emits `auth_version: 2` entries. The Ed25519 signature covers the domain-separated preimage `"zcash-shielded-vote:round-auth:v2" || round_id (32 raw bytes decoded from the 64-char lowercase-hex rounds key) || ea_pk (32 raw bytes decoded from base64) || pir_depth (u32 LE) || tier0_layers (u32 LE) || tier1_layers (u32 LE)`, binding each attestation to its round and to the advertised PIR layout: a signed `ea_pk` cannot be replayed under a different round id, and the layout cannot be swapped under attested rounds. Pass the layout with `--pir-depth/--tier0-layers/--tier1-layers`; it must match the target config's `pir_layout` (checked on `--merge`). Changing `pir_layout` therefore invalidates every round signature — re-sign all active rounds in the same change. `verify` still accepts legacy `auth_version: 1` entries (signature over only the raw `ea_pk`) in mixed files during migration, but new signatures are always v2 and wallets authenticate v2 only. Other wrapper fields such as vote servers and PIR endpoints are validated by CI, but are not signed by this scheme.
 
 ## Generate a key
 
