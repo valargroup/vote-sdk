@@ -6,7 +6,7 @@ Historical changes before commit `704b202e2088b91caeaf2290cef85e4a9a759542` are 
 
 Instructions on coordinated upgrades can be found [here](https://setup.valargroup.org/#coordinated-upgrade).
 
-## v1.2.0
+## Unreleased
 
 - Bind dynamic round attestations to the round ID, election-authority key, and
   PIR layout with domain-separated `auth_version: 2` signatures, preventing
@@ -14,6 +14,16 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
   `19/12/7` PIR layout at the authorization point to avoid an additional
   network dependency. This matches the wallet-side verification in
   [zcash_voting#172](https://github.com/valargroup/zcash_voting/pull/172).
+- Upgrade CometBFT to v0.38.21 for its patched consensus implementation.
+- Derive safe validator snapshot resets from the local genesis chain ID and
+  reject conflicting overrides before stopping the service.
+- Raise the maximum accepted Halo2 proof size and matching proof-generation
+  buffer from 8 KiB to 15 KiB.
+- Exclude shares first received at or after a round's close time from close-time
+  unsubmitted-share alerts.
+
+## v1.2.0
+
 - Keep reveal-share witness data queued when CometBFT broadcast and transaction
   status retries cannot determine whether the transaction was accepted.
 - Let the admin UI and snapshot-data API accept both legacy three-tier and

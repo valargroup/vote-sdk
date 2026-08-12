@@ -237,22 +237,27 @@ curl -fsSL "${SVOTE_DO_SPACES_BASE%/}/reset-validator-snapshot.sh" | bash
 ```
 
 The script downloads and verifies `https://snapshots.valargroup.org/latest.json`
-and its snapshot archive before stopping the service. After the snapshot is
-staged, it stops `svoted`, preserves the local
+and its snapshot archive before stopping the service. It derives the expected
+chain ID from the validator's local `config/genesis.json`; an optional
+`SVOTE_CHAIN_ID` override must match that genesis. After the snapshot is staged,
+it stops `svoted`, preserves the local
 `data/priv_validator_state.json`, replaces only `data/`, restores the preserved
 validator state, removes the restored consensus WAL, restarts the service, and
 waits for `svoted status` to report `catching_up=false`.
 
 It never touches validator identity files such as `config/priv_validator_key.json`,
-`config/node_key.json`, `keyring-test/`, `pallas.*`, or `ea.*`. Missing snapshot
-metadata is fatal for this recovery path; the script does not fall back to
-genesis for an already-bonded validator.
+`config/node_key.json`, `keyring-test/`, `pallas.*`, or `ea.*`. Active-round
+`share.*` and `coeffs.*` ceremony material and the local `helper.db` queue also
+remain outside the replaced `data/` directory. Missing snapshot metadata is
+fatal for this recovery path; the script does not fall back to genesis for an
+already-bonded validator.
 
 Optional overrides:
 
 | Variable | Default | Role |
 |----------|---------|------|
 | `SVOTE_HOME` | `$HOME/.svoted` | Existing validator home to reset. |
+| `SVOTE_CHAIN_ID` | Local `config/genesis.json` | Optional assertion that must match the existing validator's chain ID. |
 | `SVOTE_SNAPSHOT_BASE_URL` | `https://snapshots.valargroup.org` | Snapshot service base URL; the script reads `/latest.json`. |
 | `SVOTE_SERVICE_NAME` | `svoted` | systemd service name on Linux. |
 | `SVOTE_POST_RESTART_SYNC_TIMEOUT` | `600` | Seconds to wait after restart for `catching_up=false`. |

@@ -12,6 +12,8 @@ import "C"
 import (
 	"fmt"
 	"unsafe"
+
+	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
 // GenerateShareRevealProof generates a ZKP #3 (share reveal) proof using the
@@ -52,8 +54,8 @@ func GenerateShareRevealProof(
 		copy(commsBuf[i*32:(i+1)*32], shareComms[i][:])
 	}
 
-	// Allocate proof output buffer (8 KiB is generous for Halo2 IPA proofs).
-	const proofCapacity = 8192
+	// Keep the proof output capacity aligned with the chain's validation limit.
+	const proofCapacity = types.MaxProofSize
 	var proofBuf [proofCapacity]byte
 	var proofLen C.size_t
 

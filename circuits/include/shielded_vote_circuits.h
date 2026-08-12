@@ -448,7 +448,7 @@ int32_t sv_verify_share_reveal_proof(
  *   round_id_ptr          - Pointer to 32-byte round ID (canonical Pallas Fp).
  *   round_id_len          - Length (must be 32).
  *   proof_out             - Output buffer for proof bytes.
- *   proof_out_capacity    - Size of proof_out buffer (recommend 8192).
+ *   proof_out_capacity    - Size of proof_out buffer (recommend 15360).
  *   proof_len_out         - On success, receives actual proof length.
  *   nullifier_out         - 32-byte output buffer for share nullifier.
  *   tree_root_out         - 32-byte output buffer for commitment tree root.

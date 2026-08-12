@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-CHAIN_ID="${SVOTE_CHAIN_ID:-svote-1}"
+CHAIN_ID="${SVOTE_CHAIN_ID:-}"
 HOME_DIR="${SVOTE_HOME:-$HOME/.svoted}"
 INSTALL_DIR="${SVOTE_INSTALL_DIR:-$HOME/.local/bin}"
 SNAPSHOT_BASE_URL="${SVOTE_SNAPSHOT_BASE_URL:-https://snapshots.valargroup.org}"
@@ -163,6 +163,20 @@ preflight_local_home() {
   [ -f "${HOME_DIR}/data/priv_validator_state.json" ] || die "${HOME_DIR}/data/priv_validator_state.json is missing."
 }
 
+resolve_chain_id() {
+  local genesis_file="${HOME_DIR}/config/genesis.json"
+  local genesis_chain_id
+
+  genesis_chain_id="$(jq -er '.chain_id | select(type == "string" and length > 0)' "${genesis_file}" 2>/dev/null || true)"
+  [ -n "${genesis_chain_id}" ] \
+    || die "Could not read chain_id from ${genesis_file}."
+
+  if [ -n "${CHAIN_ID}" ] && [ "${CHAIN_ID}" != "${genesis_chain_id}" ]; then
+    die "SVOTE_CHAIN_ID mismatch. Local genesis has ${genesis_chain_id}, override requested ${CHAIN_ID}."
+  fi
+  CHAIN_ID="${genesis_chain_id}"
+}
+
 validate_snapshot_listing() {
   local listing_file="$1"
 
@@ -295,7 +309,6 @@ wait_for_sync() {
 }
 
 main() {
-  print_config
   validate_timeout
   prepare_path
   require_tool curl
@@ -304,6 +317,8 @@ main() {
   require_tool tar
   require_tool "${SVOTED_BIN}"
   preflight_local_home
+  resolve_chain_id
+  print_config
   detect_service_manager
 
   mkdir -p "${TMP_PARENT}"
