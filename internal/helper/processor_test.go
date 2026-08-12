@@ -221,7 +221,7 @@ func (r *roundAwareTreeReader) LeafAt(position uint64) ([]byte, error) {
 	return make([]byte, 32), nil
 }
 
-func TestProcessor_ProcessBatch_Success(t *testing.T) {
+func TestProcessor_ProcessBatch_BroadcastAcceptedRetriesAreBounded(t *testing.T) {
 	store := newTestStore(t)
 	prover := &mockProver{}
 	tree := newMockTreeReader()
@@ -245,12 +245,72 @@ func TestProcessor_ProcessBatch_Success(t *testing.T) {
 	// Process the batch — processBatch calls TakeReady internally.
 	proc.processBatch(context.Background())
 
-	// Verify the prover was called.
-	assert.Equal(t, int32(1), prover.callCount.Load())
-
-	// Verify share is marked submitted.
+	// CheckTx acceptance is not commitment. The witness remains available for
+	// retry until the pre-proof nullifier check observes committed state.
 	status := store.Status()
-	assert.Equal(t, 1, status[roundID].Submitted)
+	assert.Equal(t, 0, status[roundID].Submitted)
+	assert.Equal(t, 1, status[roundID].Pending)
+	share, ok := store.loadShare(roundID, 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, 1, share.Attempts)
+	assert.NotEmpty(t, share.Payload.EncShare.C1)
+	assert.NotEmpty(t, share.Payload.EncShare.C2)
+	assert.NotEmpty(t, share.Payload.ShareComms)
+	assert.NotEmpty(t, share.Payload.PrimaryBlind)
+
+	key := schedKey(roundID, 0, 1, 0)
+	for attempt := 2; attempt <= 5; attempt++ {
+		store.mu.Lock()
+		store.schedule[key] = time.Now().Add(-time.Second)
+		store.mu.Unlock()
+		proc.processBatch(context.Background())
+		share, ok = store.loadShare(roundID, 0, 1, 0)
+		require.True(t, ok)
+		assert.Equal(t, attempt, share.Attempts)
+	}
+
+	assert.Equal(t, int32(5), prover.callCount.Load())
+	status = store.Status()
+	assert.Equal(t, 0, status[roundID].Pending)
+	assert.Equal(t, 1, status[roundID].Failed)
+	share, ok = store.loadShare(roundID, 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, ShareStateFailed, share.State)
+	assert.Equal(t, p.EncShare.C1, share.Payload.EncShare.C1)
+	assert.Equal(t, p.EncShare.C2, share.Payload.EncShare.C2)
+	assert.Equal(t, p.ShareComms, share.Payload.ShareComms)
+	assert.Equal(t, p.PrimaryBlind, share.Payload.PrimaryBlind)
+}
+
+func TestProcessor_ProcessShare_RejectsSuccessWithoutTxHash(t *testing.T) {
+	store := newTestStore(t)
+	prover := &mockProver{}
+	tree := newMockTreeReader()
+
+	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"code":0,"log":""}`))
+	}))
+	defer chainServer.Close()
+
+	proc := NewProcessor(
+		store,
+		tree,
+		prover,
+		NewChainSubmitter(chainServer.URL),
+		log.NewNopLogger(),
+		1,
+		nil,
+	)
+	roundID := hex.EncodeToString(make([]byte, 32))
+	payload := testPayload(roundID, 0)
+
+	err := proc.processShare(context.Background(), QueuedShare{Payload: payload})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "without a transaction hash")
+	action, stage := classifyShareFailure(err)
+	assert.Equal(t, shareFailureFail, action)
+	assert.Equal(t, failureStageSubmitChain, stage)
 }
 
 func TestProcessor_ProcessBatch_ProofFailureSpendsFailedAttempt(t *testing.T) {
@@ -812,8 +872,8 @@ func TestProcessor_PreProofNullifierNotRevealedFallsThroughToProof(t *testing.T)
 	assert.Equal(t, int32(1), checkerCalls.Load())
 	assert.Equal(t, int32(1), prover.callCount.Load())
 	status := store.Status()
-	assert.Equal(t, 1, status[roundID].Submitted)
-	assert.Equal(t, 0, status[roundID].Pending)
+	assert.Equal(t, 0, status[roundID].Submitted)
+	assert.Equal(t, 1, status[roundID].Pending)
 }
 
 func TestProcessor_PreProofNullifierCheckErrorFallsThroughToProof(t *testing.T) {
@@ -863,8 +923,8 @@ func TestProcessor_PreProofNullifierCheckErrorFallsThroughToProof(t *testing.T) 
 	assert.Equal(t, int32(1), shareHashCalls.Load())
 	assert.Equal(t, int32(1), prover.callCount.Load())
 	status := store.Status()
-	assert.Equal(t, 1, status[roundID].Submitted)
-	assert.Equal(t, 0, status[roundID].Pending)
+	assert.Equal(t, 0, status[roundID].Submitted)
+	assert.Equal(t, 1, status[roundID].Pending)
 }
 
 func TestProcessor_Run_CancelContext(t *testing.T) {
@@ -924,7 +984,7 @@ func TestProcessor_Run_ImmediateEnqueueWakesProcessor(t *testing.T) {
 
 	require.Eventually(t, func() bool {
 		status := store.Status()
-		return prover.callCount.Load() == 1 && status[roundID].Submitted == 1
+		return prover.callCount.Load() == 1 && status[roundID].Pending == 1
 	}, time.Second, 10*time.Millisecond)
 
 	cancel()
@@ -978,7 +1038,7 @@ func TestProcessor_MaxConcurrentFallback(t *testing.T) {
 	proc.processBatch(context.Background())
 
 	status := store.Status()
-	assert.Equal(t, 1, status[roundID].Submitted)
+	assert.Equal(t, 1, status[roundID].Pending)
 }
 
 // Verify that maxConcurrent=1 is honored.
@@ -1009,7 +1069,7 @@ func TestProcessor_ProcessBatch_Sequential(t *testing.T) {
 	assert.Equal(t, int32(1), maxSeen)
 
 	status := store.Status()
-	assert.Equal(t, 4, status[roundID].Submitted)
+	assert.Equal(t, 4, status[roundID].Pending)
 }
 
 func TestProcessor_ProcessBatch_ConcurrentRoundsUseScopedTreeReaders(t *testing.T) {
@@ -1050,8 +1110,8 @@ func TestProcessor_ProcessBatch_ConcurrentRoundsUseScopedTreeReaders(t *testing.
 	assert.Equal(t, int32(2), tree.state.maxInFlight.Load())
 
 	status := store.Status()
-	assert.Equal(t, 1, status[roundA].Submitted)
-	assert.Equal(t, 1, status[roundB].Submitted)
+	assert.Equal(t, 1, status[roundA].Pending)
+	assert.Equal(t, 1, status[roundB].Pending)
 }
 
 func TestValidatePayload(t *testing.T) {
