@@ -13,6 +13,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
   reject conflicting overrides before stopping the service.
 - Raise the maximum accepted Halo2 proof size and matching proof-generation
   buffer from 8 KiB to 15 KiB.
+- Exclude shares first received at or after a round's close time from close-time
+  unsubmitted-share alerts.
 
 ## v1.2.0
 
