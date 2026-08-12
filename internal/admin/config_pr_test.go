@@ -217,7 +217,7 @@ func TestMergeConfigPREntryRejectsEaPKMismatch(t *testing.T) {
 		body.RoundID: existing,
 	})
 
-	_, _, _, err := mergeConfigPREntry(dynamicConfig, staticConfig, body.RoundID, body.Entry)
+	_, _, _, err := mergeConfigPREntry(dynamicConfig, staticConfig, body.RoundID, body.Entry, body.PIRLayout)
 	if err == nil || !strings.Contains(err.Error(), "ea_pk mismatch") {
 		t.Fatalf("want ea_pk mismatch, got %v", err)
 	}
@@ -235,7 +235,7 @@ func TestMergeConfigPREntryPreservesOtherSignatures(t *testing.T) {
 		body.RoundID: existing,
 	})
 
-	merged, mergedExisting, _, err := mergeConfigPREntry(dynamicConfig, staticConfig, body.RoundID, body.Entry)
+	merged, mergedExisting, _, err := mergeConfigPREntry(dynamicConfig, staticConfig, body.RoundID, body.Entry, body.PIRLayout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +256,7 @@ func TestMergeConfigPREntryPreservesPIRLayout(t *testing.T) {
 
 	body := validCreateConfigPRRequest(t)
 	dynamicConfig, staticConfig := configDocuments(t, nil)
-	merged, _, _, err := mergeConfigPREntry(dynamicConfig, staticConfig, body.RoundID, body.Entry)
+	merged, _, _, err := mergeConfigPREntry(dynamicConfig, staticConfig, body.RoundID, body.Entry, body.PIRLayout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +278,7 @@ func TestMergeConfigPREntryResolvesTrustedKeyID(t *testing.T) {
 	body.Entry.Signatures[0].KeyID = "keplr:sv1example"
 	dynamicConfig, staticConfig := configDocuments(t, nil)
 
-	merged, _, resolvedKeyIDs, err := mergeConfigPREntry(dynamicConfig, staticConfig, body.RoundID, body.Entry)
+	merged, _, resolvedKeyIDs, err := mergeConfigPREntry(dynamicConfig, staticConfig, body.RoundID, body.Entry, body.PIRLayout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -448,13 +448,18 @@ func validCreateConfigPRRequest(t *testing.T) createConfigPRRequest {
 	t.Helper()
 	roundID := strings.Repeat("a", 64)
 	eaPK := bytes.Repeat([]byte{1}, 32)
-	entry := signedRoundEntry(t, eaPK, "valar-test")
+	entry := signedRoundEntry(t, roundID, eaPK, "valar-test")
 	var eaPKArray [32]byte
 	copy(eaPKArray[:], eaPK)
-	hash := votingconfig.SignedPayloadHash(votingconfig.CanonicalPayloadV1(eaPKArray))
+	payload, err := votingconfig.CanonicalPayloadV2(roundID, eaPKArray, testConfigPIRLayout())
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := votingconfig.SignedPayloadHash(payload)
 	body := createConfigPRRequest{
 		RoundID:           roundID,
 		Entry:             entry,
+		PIRLayout:         testConfigPIRLayout(),
 		SignedPayloadHash: hexString(hash[:]),
 		Title:             "Test round",
 	}
@@ -462,14 +467,17 @@ func validCreateConfigPRRequest(t *testing.T) createConfigPRRequest {
 	return body
 }
 
-func signedRoundEntry(t *testing.T, eaPK []byte, keyID string) votingconfig.RoundEntry {
+func signedRoundEntry(t *testing.T, roundID string, eaPK []byte, keyID string) votingconfig.RoundEntry {
 	t.Helper()
 	priv := testEd25519PrivateKey()
 	var eaPKArray [32]byte
 	copy(eaPKArray[:], eaPK)
-	sig := votingconfig.SignV1(priv, eaPKArray)
+	sig, err := votingconfig.SignV2(priv, roundID, eaPKArray, testConfigPIRLayout())
+	if err != nil {
+		t.Fatal(err)
+	}
 	return votingconfig.RoundEntry{
-		AuthVersion: votingconfig.AuthVersionV1,
+		AuthVersion: votingconfig.AuthVersionV2,
 		EaPK:        base64.StdEncoding.EncodeToString(eaPK),
 		Signatures: []votingconfig.Signature{{
 			KeyID: keyID,

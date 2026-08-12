@@ -147,11 +147,15 @@ type configPRAuth struct {
 }
 
 type createConfigPRRequest struct {
-	RoundID           string                  `json:"round_id"`
-	Entry             votingconfig.RoundEntry `json:"entry"`
-	SignedPayloadHash string                  `json:"signed_payload_hash"`
-	Title             string                  `json:"title,omitempty"`
-	Auth              configPRAuth            `json:"auth"`
+	RoundID string                  `json:"round_id"`
+	Entry   votingconfig.RoundEntry `json:"entry"`
+	// PIRLayout the signer bound into the v2 signature. Must match the
+	// pir_layout in the target dynamic config or the merged file would carry
+	// entries that can never verify.
+	PIRLayout         votingconfig.PIRLayout `json:"pir_layout"`
+	SignedPayloadHash string                 `json:"signed_payload_hash"`
+	Title             string                 `json:"title,omitempty"`
+	Auth              configPRAuth           `json:"auth"`
 }
 
 type createConfigPRResponse struct {
@@ -268,8 +272,10 @@ func validateCreateConfigPRRequest(body createConfigPRRequest) error {
 	if err := votingconfig.ValidateRoundID(body.RoundID); err != nil {
 		return fmt.Errorf("round_id must be 64 lowercase hex characters")
 	}
-	if body.Entry.AuthVersion != votingconfig.AuthVersionV1 {
-		return fmt.Errorf("unsupported auth_version")
+	// New entries must be auth_version 2: v1 signatures do not bind the round
+	// id and are replayable across rounds.
+	if body.Entry.AuthVersion != votingconfig.AuthVersionV2 {
+		return fmt.Errorf("unsupported auth_version; new entries must use auth_version 2")
 	}
 	if body.Entry.EaPK == "" {
 		return fmt.Errorf("entry.ea_pk is required")
@@ -292,11 +298,18 @@ func validateCreateConfigPRRequest(body createConfigPRRequest) error {
 			return fmt.Errorf("entry.signatures.sig must be base64-encoded 64 bytes")
 		}
 	}
+	if err := votingconfig.ValidatePIRLayout(body.PIRLayout); err != nil {
+		return fmt.Errorf("pir_layout must satisfy pir_depth = tier0_layers + tier1_layers")
+	}
 	var eaPK [32]byte
 	copy(eaPK[:], eaPKBytes)
-	hash := votingconfig.SignedPayloadHash(votingconfig.CanonicalPayloadV1(eaPK))
+	payload, err := votingconfig.CanonicalPayloadV2(body.RoundID, eaPK, body.PIRLayout)
+	if err != nil {
+		return fmt.Errorf("failed to build canonical payload")
+	}
+	hash := votingconfig.SignedPayloadHash(payload)
 	if body.SignedPayloadHash != hex.EncodeToString(hash[:]) {
-		return fmt.Errorf("signed_payload_hash does not match entry.ea_pk")
+		return fmt.Errorf("signed_payload_hash does not match round_id, entry.ea_pk, and pir_layout")
 	}
 	return nil
 }
@@ -338,7 +351,7 @@ func (a *Admin) createConfigPR(ctx context.Context, body createConfigPRRequest) 
 		return nil, err
 	}
 
-	mergedContent, mergedExisting, resolvedKeyIDs, err := mergeConfigPREntry(dynamicContent, staticContent, body.RoundID, body.Entry)
+	mergedContent, mergedExisting, resolvedKeyIDs, err := mergeConfigPREntry(dynamicContent, staticContent, body.RoundID, body.Entry, body.PIRLayout)
 	if err != nil {
 		return nil, err
 	}
@@ -380,13 +393,22 @@ func (a *Admin) createConfigPR(ctx context.Context, body createConfigPRRequest) 
 	}, nil
 }
 
-func mergeConfigPREntry(dynamicContent, staticContent []byte, roundID string, entry votingconfig.RoundEntry) ([]byte, bool, []string, error) {
+func mergeConfigPREntry(dynamicContent, staticContent []byte, roundID string, entry votingconfig.RoundEntry, signedLayout votingconfig.PIRLayout) ([]byte, bool, []string, error) {
 	var cfg votingconfig.SignedConfig
 	if err := json.Unmarshal(dynamicContent, &cfg); err != nil {
 		return nil, false, nil, fmt.Errorf("parse dynamic-voting-config.json: %w", err)
 	}
 	if err := votingconfig.ValidateWrapper(&cfg); err != nil {
 		return nil, false, nil, err
+	}
+	// The layout the signer attested must be the layout this file advertises;
+	// otherwise the merged entry could never verify against the file.
+	if cfg.PIRLayout != signedLayout {
+		return nil, false, nil, fmt.Errorf(
+			"pir_layout mismatch: signed %d/%d/%d but dynamic config advertises %d/%d/%d",
+			signedLayout.PIRDepth, signedLayout.Tier0Layers, signedLayout.Tier1Layers,
+			cfg.PIRLayout.PIRDepth, cfg.PIRLayout.Tier0Layers, cfg.PIRLayout.Tier1Layers,
+		)
 	}
 
 	var staticCfg votingconfig.StaticConfig
@@ -397,7 +419,7 @@ func mergeConfigPREntry(dynamicContent, staticContent []byte, roundID string, en
 		return nil, false, nil, err
 	}
 
-	entry, err := resolveConfigPREntrySignatureKeyIDs(entry, staticCfg.TrustedKeys)
+	entry, err := resolveConfigPREntrySignatureKeyIDs(roundID, entry, staticCfg.TrustedKeys, cfg.PIRLayout)
 	if err != nil {
 		return nil, false, nil, err
 	}
@@ -411,19 +433,27 @@ func mergeConfigPREntry(dynamicContent, staticContent []byte, roundID string, en
 		cfg.Rounds = map[string]votingconfig.RoundEntry{}
 	}
 	if existing, ok := cfg.Rounds[roundID]; ok {
-		if existing.AuthVersion != votingconfig.AuthVersionV1 {
-			return nil, false, nil, fmt.Errorf("round %s: cannot merge into auth_version %d", roundID, existing.AuthVersion)
-		}
 		if existing.EaPK != entry.EaPK {
 			return nil, false, nil, fmt.Errorf("round %s: ea_pk mismatch in merge target", roundID)
 		}
-		entry.Signatures = mergeConfigPRSignatures(existing.Signatures, entry.Signatures)
-		mergedExisting = true
+		switch existing.AuthVersion {
+		case votingconfig.AuthVersionV1:
+			// Legacy v1 signatures cover a different preimage; replace the
+			// entry outright instead of merging incompatible signatures.
+			mergedExisting = true
+		case entry.AuthVersion:
+			entry.Signatures = mergeConfigPRSignatures(existing.Signatures, entry.Signatures)
+			mergedExisting = true
+		default:
+			return nil, false, nil, fmt.Errorf("round %s: cannot merge into auth_version %d", roundID, existing.AuthVersion)
+		}
 	}
 	cfg.Rounds[roundID] = entry
 
+	// Mixed v1/v2 files remain valid during migration: VerifyEntrySignatures
+	// dispatches on each entry's auth_version.
 	for roundID, entry := range cfg.Rounds {
-		if !votingconfig.VerifyEntrySignatures(entry, staticCfg.TrustedKeys) {
+		if !votingconfig.VerifyEntrySignatures(roundID, entry, staticCfg.TrustedKeys, cfg.PIRLayout) {
 			return nil, false, nil, fmt.Errorf("round %s: no valid signature", roundID)
 		}
 	}
@@ -435,13 +465,17 @@ func mergeConfigPREntry(dynamicContent, staticContent []byte, roundID string, en
 	return append(data, '\n'), mergedExisting, resolvedKeyIDs, nil
 }
 
-func resolveConfigPREntrySignatureKeyIDs(entry votingconfig.RoundEntry, trusted []votingconfig.TrustedKey) (votingconfig.RoundEntry, error) {
+func resolveConfigPREntrySignatureKeyIDs(roundID string, entry votingconfig.RoundEntry, trusted []votingconfig.TrustedKey, layout votingconfig.PIRLayout) (votingconfig.RoundEntry, error) {
 	entryEaPK, err := votingconfig.DecodeBase64Fixed(entry.EaPK, 32, "entry.ea_pk")
 	if err != nil {
 		return entry, fmt.Errorf("entry.ea_pk must be base64-encoded 32 bytes")
 	}
 	var eaPK [32]byte
 	copy(eaPK[:], entryEaPK)
+	payload, err := votingconfig.CanonicalPayload(entry.AuthVersion, roundID, eaPK, layout)
+	if err != nil {
+		return entry, fmt.Errorf("failed to build canonical payload")
+	}
 
 	resolved := entry
 	resolved.Signatures = append([]votingconfig.Signature(nil), entry.Signatures...)
@@ -449,28 +483,28 @@ func resolveConfigPREntrySignatureKeyIDs(entry votingconfig.RoundEntry, trusted 
 		if sig.Alg != votingconfig.AlgEd25519 {
 			continue
 		}
-		if keyID, ok := resolveConfigPRSignatureKeyID(sig, trusted, eaPK); ok {
+		if keyID, ok := resolveConfigPRSignatureKeyID(sig, trusted, payload); ok {
 			resolved.Signatures[i].KeyID = keyID
 		}
 	}
 	return resolved, nil
 }
 
-func resolveConfigPRSignatureKeyID(sig votingconfig.Signature, trusted []votingconfig.TrustedKey, eaPK [32]byte) (string, bool) {
+func resolveConfigPRSignatureKeyID(sig votingconfig.Signature, trusted []votingconfig.TrustedKey, payload []byte) (string, bool) {
 	for _, key := range trusted {
-		if key.KeyID == sig.KeyID && configPRSignatureMatchesTrustedKey(sig, key, eaPK) {
+		if key.KeyID == sig.KeyID && configPRSignatureMatchesTrustedKey(sig, key, payload) {
 			return key.KeyID, true
 		}
 	}
 	for _, key := range trusted {
-		if configPRSignatureMatchesTrustedKey(sig, key, eaPK) {
+		if configPRSignatureMatchesTrustedKey(sig, key, payload) {
 			return key.KeyID, true
 		}
 	}
 	return "", false
 }
 
-func configPRSignatureMatchesTrustedKey(sig votingconfig.Signature, key votingconfig.TrustedKey, eaPK [32]byte) bool {
+func configPRSignatureMatchesTrustedKey(sig votingconfig.Signature, key votingconfig.TrustedKey, payload []byte) bool {
 	if sig.Alg != votingconfig.AlgEd25519 || key.Alg != votingconfig.AlgEd25519 {
 		return false
 	}
@@ -482,7 +516,7 @@ func configPRSignatureMatchesTrustedKey(sig votingconfig.Signature, key votingco
 	if err != nil {
 		return false
 	}
-	return votingconfig.VerifyV1(ed25519.PublicKey(pub), eaPK, sigBytes)
+	return ed25519.Verify(ed25519.PublicKey(pub), payload, sigBytes)
 }
 
 func mergeConfigPRSignatures(existing, incoming []votingconfig.Signature) []votingconfig.Signature {
