@@ -21,6 +21,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
   buffer from 8 KiB to 15 KiB.
 - Exclude shares first received at or after a round's close time from close-time
   unsubmitted-share alerts.
+- Preserve reveal-share witnesses after CheckTx acceptance while bounded retries
+  check for the committed nullifier.
 
 ## v1.2.0
 

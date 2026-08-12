@@ -356,7 +356,9 @@ func (p *Processor) processBatch(ctx context.Context) {
 			if err := p.processShare(shareCtx, share); err != nil {
 				spanErr = err
 				if errors.Is(err, errAwaitingCommit) {
-					p.store.MarkRetry(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+					// Bound accepted-but-unconfirmed broadcasts so an unavailable
+					// committed-state check cannot trigger proof generation forever.
+					p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
 					return nil
 				}
 				if isCanceledShareError(err) {
@@ -577,7 +579,7 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	}
 
 	if result.TxHash == "" {
-		return retryableShareError(failureStageSubmitChain, fmt.Errorf("chain accepted broadcast without a transaction hash"))
+		return failedShareAttemptError(failureStageSubmitChain, fmt.Errorf("chain accepted broadcast without a transaction hash"))
 	}
 
 	// CheckTx acceptance only places the transaction in the mempool. Preserve
