@@ -18,14 +18,19 @@ const (
 	AuthVersionV2         = 2
 	AlgEd25519            = "ed25519"
 
+	// Allowed YPIR polynomial degrees bound into auth_version 2 signatures.
+	PolyLen2048 uint32 = 2048
+	PolyLen4096 uint32 = 4096
+
 	// DomainTagV2 prefixes the auth_version 2 signed preimage:
 	// DomainTagV2 || round_id (32 raw bytes) || ea_pk (32 bytes)
-	//             || pir_depth (u32 LE) || tier0_layers (u32 LE) || tier1_layers (u32 LE).
+	//             || pir_depth (u32 LE) || tier0_layers (u32 LE) || tier1_layers (u32 LE)
+	//             || poly_len (u32 LE).
 	// Binding the round id stops a signed ea_pk from being replayed under a
-	// different rounds-map key; binding the PIR layout stops a config host
-	// from swapping the layout under already-attested rounds. Wallet
-	// verifiers (librustvoting) hardcode the same tag; bytes must match
-	// verbatim.
+	// different rounds-map key; binding the PIR layout and poly_len stops a
+	// config host from swapping those parameters under already-attested
+	// rounds. Wallet verifiers (librustvoting) hardcode the same tag; bytes
+	// must match verbatim.
 	DomainTagV2 = "zcash-shielded-vote:round-auth:v2"
 )
 
@@ -34,6 +39,7 @@ type SignedConfig struct {
 	VoteServers       []Endpoint            `json:"vote_servers"`
 	PIREndpoints      []Endpoint            `json:"pir_endpoints"`
 	PIRLayout         PIRLayout             `json:"pir_layout"`
+	PolyLen           uint32                `json:"poly_len"`
 	SupportedVersions SupportedVersions     `json:"supported_versions"`
 	Rounds            map[string]RoundEntry `json:"rounds"`
 }
@@ -112,38 +118,44 @@ func VerifyV1(pub ed25519.PublicKey, eaPK [32]byte, sig []byte) bool {
 
 // CanonicalPayloadV2 builds the auth_version 2 signed preimage:
 // DomainTagV2 || round_id (32 raw bytes) || ea_pk (32 bytes)
-//            || pir_depth (u32 LE) || tier0_layers (u32 LE) || tier1_layers (u32 LE).
-func CanonicalPayloadV2(roundID string, eaPK [32]byte, layout PIRLayout) ([]byte, error) {
+//
+//	|| pir_depth (u32 LE) || tier0_layers (u32 LE) || tier1_layers (u32 LE)
+//	|| poly_len (u32 LE).
+func CanonicalPayloadV2(roundID string, eaPK [32]byte, layout PIRLayout, polyLen uint32) ([]byte, error) {
 	if err := ValidateRoundID(roundID); err != nil {
 		return nil, err
 	}
 	if err := ValidatePIRLayout(layout); err != nil {
 		return nil, err
 	}
+	if err := ValidatePolyLen(polyLen); err != nil {
+		return nil, err
+	}
 	roundIDBytes, err := hex.DecodeString(roundID)
 	if err != nil {
 		return nil, fmt.Errorf("round id %q is invalid hex: %w", roundID, err)
 	}
-	out := make([]byte, 0, len(DomainTagV2)+len(roundIDBytes)+len(eaPK)+12)
+	out := make([]byte, 0, len(DomainTagV2)+len(roundIDBytes)+len(eaPK)+16)
 	out = append(out, DomainTagV2...)
 	out = append(out, roundIDBytes...)
 	out = append(out, eaPK[:]...)
 	out = binary.LittleEndian.AppendUint32(out, layout.PIRDepth)
 	out = binary.LittleEndian.AppendUint32(out, layout.Tier0Layers)
 	out = binary.LittleEndian.AppendUint32(out, layout.Tier1Layers)
+	out = binary.LittleEndian.AppendUint32(out, polyLen)
 	return out, nil
 }
 
-func SignV2(priv ed25519.PrivateKey, roundID string, eaPK [32]byte, layout PIRLayout) ([]byte, error) {
-	payload, err := CanonicalPayloadV2(roundID, eaPK, layout)
+func SignV2(priv ed25519.PrivateKey, roundID string, eaPK [32]byte, layout PIRLayout, polyLen uint32) ([]byte, error) {
+	payload, err := CanonicalPayloadV2(roundID, eaPK, layout, polyLen)
 	if err != nil {
 		return nil, err
 	}
 	return ed25519.Sign(priv, payload), nil
 }
 
-func VerifyV2(pub ed25519.PublicKey, roundID string, eaPK [32]byte, layout PIRLayout, sig []byte) bool {
-	payload, err := CanonicalPayloadV2(roundID, eaPK, layout)
+func VerifyV2(pub ed25519.PublicKey, roundID string, eaPK [32]byte, layout PIRLayout, polyLen uint32, sig []byte) bool {
+	payload, err := CanonicalPayloadV2(roundID, eaPK, layout, polyLen)
 	if err != nil {
 		return false
 	}
@@ -151,13 +163,13 @@ func VerifyV2(pub ed25519.PublicKey, roundID string, eaPK [32]byte, layout PIRLa
 }
 
 // CanonicalPayload builds the signed preimage for the given auth_version.
-// The layout is bound by v2 payloads and ignored by legacy v1 payloads.
-func CanonicalPayload(authVersion int, roundID string, eaPK [32]byte, layout PIRLayout) ([]byte, error) {
+// The layout and poly_len are bound by v2 payloads and ignored by legacy v1 payloads.
+func CanonicalPayload(authVersion int, roundID string, eaPK [32]byte, layout PIRLayout, polyLen uint32) ([]byte, error) {
 	switch authVersion {
 	case AuthVersionV1:
 		return CanonicalPayloadV1(eaPK), nil
 	case AuthVersionV2:
-		return CanonicalPayloadV2(roundID, eaPK, layout)
+		return CanonicalPayloadV2(roundID, eaPK, layout, polyLen)
 	default:
 		return nil, fmt.Errorf("unsupported auth_version %d", authVersion)
 	}
@@ -182,7 +194,7 @@ func Authenticate(cfg *SignedConfig, trusted []TrustedKey, roundID string, eaPKF
 	var entryEaPKArray [32]byte
 	copy(entryEaPKArray[:], entryEaPK)
 
-	if len(entry.Signatures) == 0 || !VerifyEntrySignatures(roundID, entry, trusted, cfg.PIRLayout) {
+	if len(entry.Signatures) == 0 || !VerifyEntrySignatures(roundID, entry, trusted, cfg.PIRLayout, cfg.PolyLen) {
 		return AuthInvalidSignatures
 	}
 	if entryEaPKArray != eaPKFromChain {
@@ -205,6 +217,9 @@ func ValidateWrapper(cfg *SignedConfig) error {
 		return errors.New("pir_endpoints must contain at least one entry")
 	}
 	if err := ValidatePIRLayout(cfg.PIRLayout); err != nil {
+		return err
+	}
+	if err := ValidatePolyLen(cfg.PolyLen); err != nil {
 		return err
 	}
 	if cfg.Rounds == nil {
@@ -235,6 +250,16 @@ func ValidatePIRLayout(layout PIRLayout) error {
 	return nil
 }
 
+// ValidatePolyLen requires an allowed YPIR polynomial degree.
+func ValidatePolyLen(polyLen uint32) error {
+	switch polyLen {
+	case PolyLen2048, PolyLen4096:
+		return nil
+	default:
+		return fmt.Errorf("poly_len must be %d or %d", PolyLen2048, PolyLen4096)
+	}
+}
+
 func ValidateStaticConfig(cfg *StaticConfig) error {
 	if cfg == nil {
 		return errors.New("static config is nil")
@@ -254,8 +279,8 @@ func ValidateStaticConfig(cfg *StaticConfig) error {
 // VerifyEntrySignatures reports whether at least one trusted key signed the
 // entry's canonical payload for its auth_version. v1 signatures cover only the
 // raw ea_pk (legacy, kept for mixed-version files during migration); v2
-// signatures cover DomainTagV2 || round_id || ea_pk || pir_layout.
-func VerifyEntrySignatures(roundID string, entry RoundEntry, trusted []TrustedKey, layout PIRLayout) bool {
+// signatures cover DomainTagV2 || round_id || ea_pk || pir_layout || poly_len.
+func VerifyEntrySignatures(roundID string, entry RoundEntry, trusted []TrustedKey, layout PIRLayout, polyLen uint32) bool {
 	if entry.AuthVersion != AuthVersionV1 && entry.AuthVersion != AuthVersionV2 {
 		return false
 	}
@@ -268,7 +293,7 @@ func VerifyEntrySignatures(roundID string, entry RoundEntry, trusted []TrustedKe
 	}
 	var eaPK [32]byte
 	copy(eaPK[:], entryEaPK)
-	return hasValidSignature(roundID, entry, trusted, eaPK, layout)
+	return hasValidSignature(roundID, entry, trusted, eaPK, layout, polyLen)
 }
 
 func ValidateRoundID(roundID string) error {
@@ -317,8 +342,8 @@ func DecodeHexFixed(s string, expectedLen int, field string) ([]byte, error) {
 	return out, nil
 }
 
-func hasValidSignature(roundID string, entry RoundEntry, trusted []TrustedKey, eaPK [32]byte, layout PIRLayout) bool {
-	payload, err := CanonicalPayload(entry.AuthVersion, roundID, eaPK, layout)
+func hasValidSignature(roundID string, entry RoundEntry, trusted []TrustedKey, eaPK [32]byte, layout PIRLayout, polyLen uint32) bool {
+	payload, err := CanonicalPayload(entry.AuthVersion, roundID, eaPK, layout, polyLen)
 	if err != nil {
 		return false
 	}

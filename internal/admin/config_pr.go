@@ -152,10 +152,13 @@ type createConfigPRRequest struct {
 	// PIRLayout the signer bound into the v2 signature. Must match the
 	// pir_layout in the target dynamic config or the merged file would carry
 	// entries that can never verify.
-	PIRLayout         votingconfig.PIRLayout `json:"pir_layout"`
-	SignedPayloadHash string                 `json:"signed_payload_hash"`
-	Title             string                 `json:"title,omitempty"`
-	Auth              configPRAuth           `json:"auth"`
+	PIRLayout votingconfig.PIRLayout `json:"pir_layout"`
+	// PolyLen the signer bound into the v2 signature. Must match poly_len in
+	// the target dynamic config for the same reason as PIRLayout.
+	PolyLen           uint32       `json:"poly_len"`
+	SignedPayloadHash string       `json:"signed_payload_hash"`
+	Title             string       `json:"title,omitempty"`
+	Auth              configPRAuth `json:"auth"`
 }
 
 type createConfigPRResponse struct {
@@ -301,15 +304,18 @@ func validateCreateConfigPRRequest(body createConfigPRRequest) error {
 	if err := votingconfig.ValidatePIRLayout(body.PIRLayout); err != nil {
 		return fmt.Errorf("pir_layout must satisfy pir_depth = tier0_layers + tier1_layers")
 	}
+	if err := votingconfig.ValidatePolyLen(body.PolyLen); err != nil {
+		return fmt.Errorf("poly_len must be 2048 or 4096")
+	}
 	var eaPK [32]byte
 	copy(eaPK[:], eaPKBytes)
-	payload, err := votingconfig.CanonicalPayloadV2(body.RoundID, eaPK, body.PIRLayout)
+	payload, err := votingconfig.CanonicalPayloadV2(body.RoundID, eaPK, body.PIRLayout, body.PolyLen)
 	if err != nil {
 		return fmt.Errorf("failed to build canonical payload")
 	}
 	hash := votingconfig.SignedPayloadHash(payload)
 	if body.SignedPayloadHash != hex.EncodeToString(hash[:]) {
-		return fmt.Errorf("signed_payload_hash does not match round_id, entry.ea_pk, and pir_layout")
+		return fmt.Errorf("signed_payload_hash does not match round_id, entry.ea_pk, pir_layout, and poly_len")
 	}
 	return nil
 }
@@ -351,7 +357,7 @@ func (a *Admin) createConfigPR(ctx context.Context, body createConfigPRRequest) 
 		return nil, err
 	}
 
-	mergedContent, mergedExisting, resolvedKeyIDs, err := mergeConfigPREntry(dynamicContent, staticContent, body.RoundID, body.Entry, body.PIRLayout)
+	mergedContent, mergedExisting, resolvedKeyIDs, err := mergeConfigPREntry(dynamicContent, staticContent, body.RoundID, body.Entry, body.PIRLayout, body.PolyLen)
 	if err != nil {
 		return nil, err
 	}
@@ -393,7 +399,7 @@ func (a *Admin) createConfigPR(ctx context.Context, body createConfigPRRequest) 
 	}, nil
 }
 
-func mergeConfigPREntry(dynamicContent, staticContent []byte, roundID string, entry votingconfig.RoundEntry, signedLayout votingconfig.PIRLayout) ([]byte, bool, []string, error) {
+func mergeConfigPREntry(dynamicContent, staticContent []byte, roundID string, entry votingconfig.RoundEntry, signedLayout votingconfig.PIRLayout, signedPolyLen uint32) ([]byte, bool, []string, error) {
 	var cfg votingconfig.SignedConfig
 	if err := json.Unmarshal(dynamicContent, &cfg); err != nil {
 		return nil, false, nil, fmt.Errorf("parse dynamic-voting-config.json: %w", err)
@@ -410,6 +416,12 @@ func mergeConfigPREntry(dynamicContent, staticContent []byte, roundID string, en
 			cfg.PIRLayout.PIRDepth, cfg.PIRLayout.Tier0Layers, cfg.PIRLayout.Tier1Layers,
 		)
 	}
+	if cfg.PolyLen != signedPolyLen {
+		return nil, false, nil, fmt.Errorf(
+			"poly_len mismatch: signed %d but dynamic config advertises %d",
+			signedPolyLen, cfg.PolyLen,
+		)
+	}
 
 	var staticCfg votingconfig.StaticConfig
 	if err := json.Unmarshal(staticContent, &staticCfg); err != nil {
@@ -419,7 +431,7 @@ func mergeConfigPREntry(dynamicContent, staticContent []byte, roundID string, en
 		return nil, false, nil, err
 	}
 
-	entry, err := resolveConfigPREntrySignatureKeyIDs(roundID, entry, staticCfg.TrustedKeys, cfg.PIRLayout)
+	entry, err := resolveConfigPREntrySignatureKeyIDs(roundID, entry, staticCfg.TrustedKeys, cfg.PIRLayout, cfg.PolyLen)
 	if err != nil {
 		return nil, false, nil, err
 	}
@@ -453,7 +465,7 @@ func mergeConfigPREntry(dynamicContent, staticContent []byte, roundID string, en
 	// Mixed v1/v2 files remain valid during migration: VerifyEntrySignatures
 	// dispatches on each entry's auth_version.
 	for roundID, entry := range cfg.Rounds {
-		if !votingconfig.VerifyEntrySignatures(roundID, entry, staticCfg.TrustedKeys, cfg.PIRLayout) {
+		if !votingconfig.VerifyEntrySignatures(roundID, entry, staticCfg.TrustedKeys, cfg.PIRLayout, cfg.PolyLen) {
 			return nil, false, nil, fmt.Errorf("round %s: no valid signature", roundID)
 		}
 	}
@@ -465,14 +477,14 @@ func mergeConfigPREntry(dynamicContent, staticContent []byte, roundID string, en
 	return append(data, '\n'), mergedExisting, resolvedKeyIDs, nil
 }
 
-func resolveConfigPREntrySignatureKeyIDs(roundID string, entry votingconfig.RoundEntry, trusted []votingconfig.TrustedKey, layout votingconfig.PIRLayout) (votingconfig.RoundEntry, error) {
+func resolveConfigPREntrySignatureKeyIDs(roundID string, entry votingconfig.RoundEntry, trusted []votingconfig.TrustedKey, layout votingconfig.PIRLayout, polyLen uint32) (votingconfig.RoundEntry, error) {
 	entryEaPK, err := votingconfig.DecodeBase64Fixed(entry.EaPK, 32, "entry.ea_pk")
 	if err != nil {
 		return entry, fmt.Errorf("entry.ea_pk must be base64-encoded 32 bytes")
 	}
 	var eaPK [32]byte
 	copy(eaPK[:], entryEaPK)
-	payload, err := votingconfig.CanonicalPayload(entry.AuthVersion, roundID, eaPK, layout)
+	payload, err := votingconfig.CanonicalPayload(entry.AuthVersion, roundID, eaPK, layout, polyLen)
 	if err != nil {
 		return entry, fmt.Errorf("failed to build canonical payload")
 	}

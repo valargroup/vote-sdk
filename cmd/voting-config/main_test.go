@@ -31,6 +31,7 @@ func TestSignAndVerifyConfig(t *testing.T) {
 		VoteServers:   []votingconfig.Endpoint{{URL: "https://vote.example", Label: "vote"}},
 		PIREndpoints:  []votingconfig.Endpoint{{URL: "https://pir.example", Label: "pir"}},
 		PIRLayout:     testVotingConfigPIRLayout(),
+		PolyLen:       testVotingConfigPolyLen(),
 		SupportedVersions: votingconfig.SupportedVersions{
 			PIR:          []string{"v0"},
 			VoteProtocol: "v0",
@@ -59,6 +60,7 @@ func TestSignAndVerifyConfig(t *testing.T) {
 		"--pir-depth", "19",
 		"--tier0-layers", "12",
 		"--tier1-layers", "7",
+		"--poly-len", "4096",
 		"--merge", configPath,
 	})
 	if err := signCmd.Execute(); err != nil {
@@ -86,6 +88,7 @@ func TestVerifyRejectsLegacyTrustedKeysArray(t *testing.T) {
 		VoteServers:   []votingconfig.Endpoint{{URL: "https://vote.example", Label: "vote"}},
 		PIREndpoints:  []votingconfig.Endpoint{{URL: "https://pir.example", Label: "pir"}},
 		PIRLayout:     testVotingConfigPIRLayout(),
+		PolyLen:       testVotingConfigPolyLen(),
 		Rounds:        map[string]votingconfig.RoundEntry{},
 	})
 	writeJSON(t, staticConfigPath, []votingconfig.TrustedKey{
@@ -105,6 +108,10 @@ func TestVerifyRejectsLegacyTrustedKeysArray(t *testing.T) {
 
 func testVotingConfigPIRLayout() votingconfig.PIRLayout {
 	return votingconfig.PIRLayout{PIRDepth: 19, Tier0Layers: 12, Tier1Layers: 7}
+}
+
+func testVotingConfigPolyLen() uint32 {
+	return votingconfig.PolyLen4096
 }
 
 func TestKeygenWritesSeedFile(t *testing.T) {

@@ -2,7 +2,7 @@
 
 `voting-config` signs and verifies `token-holder-voting-config` dynamic round entries.
 
-`sign` emits `auth_version: 2` entries. The Ed25519 signature covers the domain-separated preimage `"zcash-shielded-vote:round-auth:v2" || round_id (32 raw bytes decoded from the 64-char lowercase-hex rounds key) || ea_pk (32 raw bytes decoded from base64) || pir_depth (u32 LE) || tier0_layers (u32 LE) || tier1_layers (u32 LE)`, binding each attestation to its round and to the advertised PIR layout: a signed `ea_pk` cannot be replayed under a different round id, and the layout cannot be swapped under attested rounds. Pass the layout with `--pir-depth/--tier0-layers/--tier1-layers`; it must match the target config's `pir_layout` (checked on `--merge`). Changing `pir_layout` therefore invalidates every round signature — re-sign all active rounds in the same change. `verify` still accepts legacy `auth_version: 1` entries (signature over only the raw `ea_pk`) in mixed files during migration, but new signatures are always v2 and wallets authenticate v2 only. Other wrapper fields such as vote servers and PIR endpoints are validated by CI, but are not signed by this scheme.
+`sign` emits `auth_version: 2` entries. The Ed25519 signature covers the domain-separated preimage `"zcash-shielded-vote:round-auth:v2" || round_id (32 raw bytes decoded from the 64-char lowercase-hex rounds key) || ea_pk (32 raw bytes decoded from base64) || pir_depth (u32 LE) || tier0_layers (u32 LE) || tier1_layers (u32 LE) || poly_len (u32 LE)`, binding each attestation to its round, the advertised PIR layout, and the YPIR polynomial degree: a signed `ea_pk` cannot be replayed under a different round id, and neither `pir_layout` nor `poly_len` can be swapped under attested rounds. Pass the layout with `--pir-depth/--tier0-layers/--tier1-layers` and the degree with `--poly-len` (2048 or 4096); both must match the target config (checked on `--merge`). Changing `pir_layout` or `poly_len` therefore invalidates every round signature — re-sign all active rounds in the same change. `verify` still accepts legacy `auth_version: 1` entries (signature over only the raw `ea_pk`) in mixed files during migration, but new signatures are always v2 and wallets authenticate v2 only. Other wrapper fields such as vote servers and PIR endpoints are validated by CI, but are not signed by this scheme.
 
 ## Generate a key
 
@@ -21,7 +21,11 @@ voting-config sign \
   --round-id 2771bf7f23f05ffee61d65b9fbd039b550033899e78a0b343f8928850cf7a305 \
   --ea-pk '<base64 32-byte ea_pk>' \
   --signer-id valar-2026-q2 \
-  --privkey-file ./valar-2026-q2.seed
+  --privkey-file ./valar-2026-q2.seed \
+  --pir-depth 19 \
+  --tier0-layers 12 \
+  --tier1-layers 7 \
+  --poly-len 4096
 ```
 
 The command prints a `rounds[round_id]` entry. To update a config file in place:
@@ -32,6 +36,10 @@ voting-config sign \
   --ea-pk '<base64 32-byte ea_pk>' \
   --signer-id valar-2026-q2 \
   --privkey-file ./valar-2026-q2.seed \
+  --pir-depth 19 \
+  --tier0-layers 12 \
+  --tier1-layers 7 \
+  --poly-len 4096 \
   --merge ./dynamic-voting-config.json
 ```
 

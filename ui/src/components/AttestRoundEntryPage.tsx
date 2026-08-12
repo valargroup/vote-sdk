@@ -72,18 +72,20 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
 }
 
 // Round-auth v2 signed preimage: domain tag || round_id (32 raw bytes) ||
-// ea_pk (32 bytes). Must match internal/votingconfig.CanonicalPayloadV2 and
-// the wallet-side (librustvoting) verifier byte-for-byte.
+// ea_pk (32 bytes) || pir_layout (3×u32 LE) || poly_len (u32 LE). Must match
+// internal/votingconfig.CanonicalPayloadV2 and the wallet-side
+// (librustvoting) verifier byte-for-byte.
 const ROUND_AUTH_DOMAIN_TAG_V2 = "zcash-shielded-vote:round-auth:v2";
 
 // Intentionally fixed at the authorization point: signing must not depend on a
 // network fetch that could fail or change what the operator is authorizing.
-// Update this constant together with the published config when the layout changes.
+// Update these constants together with the published config when they change.
 const AUTHORIZATION_PIR_LAYOUT: chainApi.PirLayout = {
   pir_depth: 19,
   tier0_layers: 12,
   tier1_layers: 7,
 };
+const AUTHORIZATION_POLY_LEN = 4096;
 
 function hexToBytes(hex: string): Uint8Array {
   const bytes = new Uint8Array(hex.length / 2);
@@ -102,22 +104,24 @@ function u32le(value: number): Uint8Array {
 function canonicalPayloadV2(
   roundIdHex: string,
   eaPKB64: string,
-  layout: chainApi.PirLayout
+  layout: chainApi.PirLayout,
+  polyLen: number
 ): Uint8Array {
   const tag = new TextEncoder().encode(ROUND_AUTH_DOMAIN_TAG_V2);
   const roundIdBytes = hexToBytes(roundIdHex);
   const eaPKBytes = base64ToBytes(eaPKB64);
-  const layoutBytes = new Uint8Array(12);
-  layoutBytes.set(u32le(layout.pir_depth), 0);
-  layoutBytes.set(u32le(layout.tier0_layers), 4);
-  layoutBytes.set(u32le(layout.tier1_layers), 8);
+  const boundBytes = new Uint8Array(16);
+  boundBytes.set(u32le(layout.pir_depth), 0);
+  boundBytes.set(u32le(layout.tier0_layers), 4);
+  boundBytes.set(u32le(layout.tier1_layers), 8);
+  boundBytes.set(u32le(polyLen), 12);
   const payload = new Uint8Array(
-    tag.length + roundIdBytes.length + eaPKBytes.length + layoutBytes.length
+    tag.length + roundIdBytes.length + eaPKBytes.length + boundBytes.length
   );
   payload.set(tag, 0);
   payload.set(roundIdBytes, tag.length);
   payload.set(eaPKBytes, tag.length + roundIdBytes.length);
-  payload.set(layoutBytes, tag.length + roundIdBytes.length + eaPKBytes.length);
+  payload.set(boundBytes, tag.length + roundIdBytes.length + eaPKBytes.length);
   return payload;
 }
 
@@ -313,6 +317,7 @@ export function AttestRoundEntryPage() {
           ea_pk: eaPK,
           auth_version: 2,
           pir_layout: AUTHORIZATION_PIR_LAYOUT,
+          poly_len: AUTHORIZATION_POLY_LEN,
         });
         if (response.auth_version !== 2) {
           throw new Error(
@@ -320,16 +325,22 @@ export function AttestRoundEntryPage() {
           );
         }
       } catch {
-        // Local fallback builds the same round- and layout-bound v2 preimage;
-        // it must never downgrade to the legacy raw-ea_pk (v1) payload.
-        const payload = canonicalPayloadV2(roundId, eaPK, AUTHORIZATION_PIR_LAYOUT);
+        // Local fallback builds the same round-, layout-, and poly_len-bound
+        // v2 preimage; it must never downgrade to the legacy raw-ea_pk (v1)
+        // payload.
+        const payload = canonicalPayloadV2(
+          roundId,
+          eaPK,
+          AUTHORIZATION_PIR_LAYOUT,
+          AUTHORIZATION_POLY_LEN
+        );
         response = {
           canonical_payload_b64: bytesToBase64(payload),
           signed_payload_hash: await sha256Hex(payload),
           auth_version: 2,
         };
         setPayloadNotice(
-          "Remote /api/sign-config-entry was unavailable, so this used the auth_version 2 local payload fallback (domain tag + round id + ea_pk + pir_layout)."
+          "Remote /api/sign-config-entry was unavailable, so this used the auth_version 2 local payload fallback (domain tag + round id + ea_pk + pir_layout + poly_len)."
         );
       }
       const sigB64 = await votingKey.signCanonicalPayload(
@@ -442,6 +453,7 @@ export function AttestRoundEntryPage() {
         round_id: roundId,
         entry,
         pir_layout: AUTHORIZATION_PIR_LAYOUT,
+        poly_len: AUTHORIZATION_POLY_LEN,
         signed_payload_hash: hash,
         title: selectedRound?.title,
         auth: {
@@ -860,6 +872,22 @@ export function AttestRoundEntryPage() {
             <p className="mt-1.5 text-[10px] text-text-muted">
               This layout is intentionally fixed here so authorization does not
               depend on an additional network request.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-[11px] text-text-secondary mb-1">
+              poly_len <span className="text-text-muted">(bound into the signature)</span>
+            </label>
+            <input
+              value={String(AUTHORIZATION_POLY_LEN)}
+              readOnly
+              spellCheck={false}
+              className="w-full px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary placeholder:text-text-muted focus:outline-none font-mono cursor-default"
+            />
+            <p className="mt-1.5 text-[10px] text-text-muted">
+              YPIR polynomial degree (2048 or 4096), fixed with the published
+              dynamic config.
             </p>
           </div>
 

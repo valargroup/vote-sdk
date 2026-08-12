@@ -91,9 +91,9 @@ These remain outside the coordinator action flow:
 EA/DKG key attestations also remain outside this coordinator multisig. A trusted
 coordinator attestation key may attest an `ea_pk` individually for now. The
 attestation signature is round-bound (`auth_version: 2`): it covers
-`"zcash-shielded-vote:round-auth:v2" || round_id || ea_pk || pir_layout`, so
-one round's attestation cannot be reused for another round, and the published
-PIR layout cannot be swapped under attested rounds.
+`"zcash-shielded-vote:round-auth:v2" || round_id || ea_pk || pir_layout || poly_len`, so
+one round's attestation cannot be reused for another round, and neither the
+published PIR layout nor polynomial degree can be swapped under attested rounds.
 
 ## How Operators Use It
 
