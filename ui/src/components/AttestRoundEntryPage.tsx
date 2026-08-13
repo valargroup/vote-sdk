@@ -12,6 +12,10 @@ import { TOKEN_HOLDER_VOTING_CONFIG_REPO_URL, tokenHolderConfigUrl } from "../ap
 import * as votingKey from "../api/votingKey";
 import { useWallet } from "../hooks/useWallet";
 import { useDetectedChainId } from "../hooks/useDetectedChainId";
+import {
+  assertMatchingRoundAuthV2Response,
+  canonicalPayloadV2,
+} from "../utils/roundAuth";
 import { CopyButton } from "./CopyButton";
 
 interface RoundOption {
@@ -71,12 +75,6 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return bytesToHex(new Uint8Array(digest));
 }
 
-// Round-auth v2 signed preimage: domain tag || round_id (32 raw bytes) ||
-// ea_pk (32 bytes) || pir_depth || tier0_layers || tier1_layers || poly_len
-// (each u32 LE). Must match internal/votingconfig.CanonicalPayloadV2 and the
-// wallet-side (librustvoting) verifier byte-for-byte.
-const ROUND_AUTH_DOMAIN_TAG_V2 = "zcash-shielded-vote:round-auth:v2";
-
 // Intentionally fixed at the authorization point: signing must not depend on a
 // network fetch that could fail or change what the operator is authorizing.
 // Update this constant together with the published config when it changes.
@@ -86,43 +84,6 @@ const AUTHORIZATION_PIR_LAYOUT: chainApi.PirLayout = {
   tier1_layers: 7,
   poly_len: 4096,
 };
-
-function hexToBytes(hex: string): Uint8Array {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < bytes.length; i += 1) {
-    bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  }
-  return bytes;
-}
-
-function u32le(value: number): Uint8Array {
-  const bytes = new Uint8Array(4);
-  new DataView(bytes.buffer).setUint32(0, value, true);
-  return bytes;
-}
-
-function canonicalPayloadV2(
-  roundIdHex: string,
-  eaPKB64: string,
-  layout: chainApi.PirLayout
-): Uint8Array {
-  const tag = new TextEncoder().encode(ROUND_AUTH_DOMAIN_TAG_V2);
-  const roundIdBytes = hexToBytes(roundIdHex);
-  const eaPKBytes = base64ToBytes(eaPKB64);
-  const boundBytes = new Uint8Array(16);
-  boundBytes.set(u32le(layout.pir_depth), 0);
-  boundBytes.set(u32le(layout.tier0_layers), 4);
-  boundBytes.set(u32le(layout.tier1_layers), 8);
-  boundBytes.set(u32le(layout.poly_len), 12);
-  const payload = new Uint8Array(
-    tag.length + roundIdBytes.length + eaPKBytes.length + boundBytes.length
-  );
-  payload.set(tag, 0);
-  payload.set(roundIdBytes, tag.length);
-  payload.set(eaPKBytes, tag.length + roundIdBytes.length);
-  payload.set(boundBytes, tag.length + roundIdBytes.length + eaPKBytes.length);
-  return payload;
-}
 
 function normalizeRoundId(value: string | undefined): string | null {
   if (!value) return null;
@@ -309,7 +270,17 @@ export function AttestRoundEntryPage() {
     setError("");
     setPayloadNotice("");
     try {
-      let response: chainApi.AttestRoundEntryResponse;
+      const expectedPayload = canonicalPayloadV2(
+        roundId,
+        eaPK,
+        AUTHORIZATION_PIR_LAYOUT
+      );
+      const expectedResponse: chainApi.AttestRoundEntryResponse = {
+        canonical_payload_b64: bytesToBase64(expectedPayload),
+        signed_payload_hash: await sha256Hex(expectedPayload),
+        auth_version: 2,
+      };
+      let response = expectedResponse;
       try {
         response = await chainApi.attestRoundEntry({
           round_id: roundId,
@@ -317,26 +288,17 @@ export function AttestRoundEntryPage() {
           auth_version: 2,
           pir_layout: AUTHORIZATION_PIR_LAYOUT,
         });
-        if (response.auth_version !== 2) {
-          throw new Error(
-            `sign-config-entry returned auth_version ${response.auth_version}; expected 2`
-          );
-        }
+        assertMatchingRoundAuthV2Response(
+          response,
+          expectedResponse.canonical_payload_b64,
+          expectedResponse.signed_payload_hash
+        );
       } catch {
         // Local fallback builds the same round- and layout-bound v2 preimage;
         // it must never downgrade to the legacy raw-ea_pk (v1) payload.
-        const payload = canonicalPayloadV2(
-          roundId,
-          eaPK,
-          AUTHORIZATION_PIR_LAYOUT
-        );
-        response = {
-          canonical_payload_b64: bytesToBase64(payload),
-          signed_payload_hash: await sha256Hex(payload),
-          auth_version: 2,
-        };
+        response = expectedResponse;
         setPayloadNotice(
-          "Remote /api/sign-config-entry was unavailable, so this used the auth_version 2 local payload fallback (domain tag + round id + ea_pk + pir_layout including poly_len)."
+          "Remote /api/sign-config-entry was unavailable or returned an incompatible payload, so this used the auth_version 2 local payload fallback (domain tag + round id + ea_pk + pir_layout including poly_len)."
         );
       }
       const sigB64 = await votingKey.signCanonicalPayload(
