@@ -258,6 +258,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: create-release
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
       - name: Download voting-config artifact
         uses: actions/download-artifact@v4
         with:
@@ -274,21 +276,7 @@ jobs:
             voting-config-linux-amd64 \
             voting-config-linux-amd64.sha256 \
             --clobber
-
-          expected_digest="sha256:$(sha256sum voting-config-linux-amd64 | awk '{print $1}')"
-          for attempt in $(seq 1 6); do
-            actual_digest="$(
-              gh release view "${GITHUB_REF_NAME}" --json assets \
-                --jq '.assets[] | select(.name == "voting-config-linux-amd64") | .digest'
-            )"
-            if [ "${actual_digest}" = "${expected_digest}" ]; then
-              exit 0
-            fi
-            echo "Asset digest is not available yet (attempt ${attempt}/6); waiting..."
-            sleep 5
-          done
-          echo "Uploaded voting-config digest does not match ${expected_digest}." >&2
-          exit 1
+          scripts/verify-voting-config-release-asset.sh "${GITHUB_REF_NAME}"
 
   release:
     name: Package and release (${{ matrix.platform }})
@@ -524,7 +512,7 @@ jobs:
     name: Publish stable release channel
     if: needs.release-metadata.outputs.publish_mutable_pointers == 'true'
     runs-on: ubuntu-latest
-    needs: [release-metadata, distribute]
+    needs: [release-metadata, distribute, release-voting-config]
     concurrency:
       group: release-channel
       cancel-in-progress: false

@@ -61,6 +61,12 @@ grep -Fq 'name: Release voting-config (linux-amd64)' "$RELEASE_WORKFLOW" \
   || fail "release workflow does not publish the standalone voting-config verifier"
 grep -Fq 'sha256sum --check voting-config-linux-amd64.sha256' "$RELEASE_WORKFLOW" \
   || fail "release workflow does not verify the standalone voting-config checksum"
+grep -Fq 'scripts/verify-voting-config-release-asset.sh "${GITHUB_REF_NAME}"' "$RELEASE_WORKFLOW" \
+  || fail "release workflow does not verify the uploaded voting-config asset"
+grep -Fq 'needs: [release-metadata, distribute, release-voting-config]' "$RELEASE_WORKFLOW" \
+  || fail "stable release publication is not gated on the voting-config asset"
+grep -Fq 'scripts/verify-voting-config-release-asset.sh "$RELEASE_TAG"' "$PROMOTION_WORKFLOW" \
+  || fail "manual promotion does not verify the voting-config release asset"
 grep -Fq "shielded-vote-\${RELEASE_TAG}-cosmovisor-v1-\${platform}.tar.gz" \
   "$PROMOTION_WORKFLOW" \
   || fail "promotion does not verify Cosmovisor archives"
