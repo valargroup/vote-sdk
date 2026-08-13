@@ -182,7 +182,7 @@ export function AttestRoundEntryPage() {
     setLoadingRounds(true);
     setRoundError("");
     try {
-      const resp = await chainApi.listRounds();
+      const resp = await chainApi.getActiveRounds();
       const options = (resp.rounds ?? [])
         .map((round): RoundOption | null => {
           const roundIdHex = normalizeRoundId(round.vote_round_id);
@@ -200,11 +200,14 @@ export function AttestRoundEntryPage() {
         .filter((round): round is RoundOption => round !== null);
       setRounds(options);
       const currentSelectionStillExists = options.some((round) => round.roundIdHex === roundId);
-      if (options.length > 0 && (!roundId || !currentSelectionStillExists)) {
+      if (!roundId || !currentSelectionStillExists) {
         const defaultRound = getDefaultRound(options);
         if (defaultRound) {
           setRoundId(defaultRound.roundIdHex);
           setEaPK(defaultRound.eaPK);
+        } else {
+          setRoundId("");
+          setEaPK("");
         }
       }
     } catch (err) {
@@ -753,7 +756,7 @@ export function AttestRoundEntryPage() {
             >
               {loadingRounds && <option value="">Loading rounds...</option>}
               {!loadingRounds && rounds.length === 0 && (
-                <option value="">No rounds with EA keys found</option>
+                <option value="">No active rounds with EA keys found</option>
               )}
               {rounds.map((round) => (
                 <option key={round.roundIdHex} value={round.roundIdHex}>
