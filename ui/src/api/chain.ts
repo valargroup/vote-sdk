@@ -105,6 +105,7 @@ export interface PirLayout {
   pir_depth: number;
   tier0_layers: number;
   tier1_layers: number;
+  poly_len: number;
 }
 
 const NULLIFIER_URL_KEY = "shielded-vote-nullifier-url";
@@ -643,7 +644,6 @@ export async function attestRoundEntry(input: {
   ea_pk: string;
   auth_version: 2;
   pir_layout: PirLayout;
-  poly_len: number;
 }): Promise<AttestRoundEntryResponse> {
   return fetchJson<AttestRoundEntryResponse>("/api/sign-config-entry", {
     method: "POST",
@@ -682,7 +682,6 @@ export async function createConfigPr(input: {
   round_id: string;
   entry: ConfigRoundEntry;
   pir_layout: PirLayout;
-  poly_len: number;
   signed_payload_hash: string;
   title?: string;
   auth: ConfigPRAuth;

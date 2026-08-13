@@ -224,14 +224,12 @@ func newSignCmd() *cobra.Command {
 				PIRDepth:    pirDepth,
 				Tier0Layers: tier0Layers,
 				Tier1Layers: tier1Layers,
+				PolyLen:     polyLen,
 			}
 			if err := votingconfig.ValidatePIRLayout(layout); err != nil {
 				return err
 			}
-			if err := votingconfig.ValidatePolyLen(polyLen); err != nil {
-				return err
-			}
-			sig, err := votingconfig.SignV2(priv, roundID, eaPK, layout, polyLen)
+			sig, err := votingconfig.SignV2(priv, roundID, eaPK, layout)
 			if err != nil {
 				return err
 			}
@@ -246,7 +244,7 @@ func newSignCmd() *cobra.Command {
 			}
 
 			if mergePath != "" {
-				if err := mergeEntry(mergePath, roundID, entry, layout, polyLen); err != nil {
+				if err := mergeEntry(mergePath, roundID, entry, layout); err != nil {
 					return err
 				}
 				fmt.Fprintf(cmd.ErrOrStderr(), "merged: %s\n", mergePath)
@@ -260,7 +258,7 @@ func newSignCmd() *cobra.Command {
 				}
 			}
 
-			payload, err := votingconfig.CanonicalPayloadV2(roundID, eaPK, layout, polyLen)
+			payload, err := votingconfig.CanonicalPayloadV2(roundID, eaPK, layout)
 			if err != nil {
 				return err
 			}
@@ -278,7 +276,7 @@ func newSignCmd() *cobra.Command {
 	cmd.Flags().Uint32Var(&pirDepth, "pir-depth", 0, "pir_layout.pir_depth bound into the signature (must match the dynamic config)")
 	cmd.Flags().Uint32Var(&tier0Layers, "tier0-layers", 0, "pir_layout.tier0_layers bound into the signature")
 	cmd.Flags().Uint32Var(&tier1Layers, "tier1-layers", 0, "pir_layout.tier1_layers bound into the signature")
-	cmd.Flags().Uint32Var(&polyLen, "poly-len", 0, "poly_len bound into the signature (2048 or 4096; must match the dynamic config)")
+	cmd.Flags().Uint32Var(&polyLen, "poly-len", 0, "pir_layout.poly_len bound into the signature (2048 or 4096; must match the dynamic config)")
 	return cmd
 }
 
@@ -316,7 +314,7 @@ func newVerifyCmd() *cobra.Command {
 				default:
 					return fmt.Errorf("round %s: unsupported auth_version %d", roundID, entry.AuthVersion)
 				}
-				if !votingconfig.VerifyEntrySignatures(roundID, entry, staticConfig.TrustedKeys, cfg.PIRLayout, cfg.PolyLen) {
+				if !votingconfig.VerifyEntrySignatures(roundID, entry, staticConfig.TrustedKeys, cfg.PIRLayout) {
 					return fmt.Errorf("round %s: no valid signature", roundID)
 				}
 			}
@@ -342,22 +340,16 @@ func newVerifyCmd() *cobra.Command {
 	return cmd
 }
 
-func mergeEntry(path, roundID string, entry votingconfig.RoundEntry, signedLayout votingconfig.PIRLayout, signedPolyLen uint32) error {
+func mergeEntry(path, roundID string, entry votingconfig.RoundEntry, signedLayout votingconfig.PIRLayout) error {
 	cfg, err := readConfig(path)
 	if err != nil {
 		return err
 	}
 	if cfg.PIRLayout != signedLayout {
 		return fmt.Errorf(
-			"pir_layout mismatch: signed %d/%d/%d but %s advertises %d/%d/%d",
-			signedLayout.PIRDepth, signedLayout.Tier0Layers, signedLayout.Tier1Layers, path,
-			cfg.PIRLayout.PIRDepth, cfg.PIRLayout.Tier0Layers, cfg.PIRLayout.Tier1Layers,
-		)
-	}
-	if cfg.PolyLen != signedPolyLen {
-		return fmt.Errorf(
-			"poly_len mismatch: signed %d but %s advertises %d",
-			signedPolyLen, path, cfg.PolyLen,
+			"pir_layout mismatch: signed %d/%d/%d poly_len=%d but %s advertises %d/%d/%d poly_len=%d",
+			signedLayout.PIRDepth, signedLayout.Tier0Layers, signedLayout.Tier1Layers, signedLayout.PolyLen, path,
+			cfg.PIRLayout.PIRDepth, cfg.PIRLayout.Tier0Layers, cfg.PIRLayout.Tier1Layers, cfg.PIRLayout.PolyLen,
 		)
 	}
 	if cfg.Rounds == nil {
