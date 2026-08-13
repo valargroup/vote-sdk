@@ -24,14 +24,15 @@ describe("PIR root normalization", () => {
           pir_depth: 19,
           tier0_layers: 12,
           tier1_layers: 7,
+          poly_len: 4096,
         },
       }))
     ).toEqual({
       pirRoot: "pir",
       circuitRoot: "circuit",
       layoutDepth: 19,
-      layoutKey: "19:12:7",
-      layoutLabel: "19 (12+7)",
+      layoutKey: "19:12:7:4096",
+      layoutLabel: "19 (12+7) · poly_len 4096",
     });
   });
 
@@ -77,6 +78,7 @@ describe("PIR root normalization", () => {
         pir_depth: 19,
         tier0_layers: 12,
         tier1_layers: 7,
+        poly_len: 4096,
       },
     }));
 
@@ -91,6 +93,7 @@ describe("PIR root normalization", () => {
         pir_depth: 19,
         tier0_layers: 12,
         tier1_layers: 7,
+        poly_len: 4096,
       },
     }));
     const split13And6 = normalizePirRoot(response({
@@ -98,10 +101,32 @@ describe("PIR root normalization", () => {
         pir_depth: 19,
         tier0_layers: 13,
         tier1_layers: 6,
+        poly_len: 4096,
       },
     }));
 
     expect(pirLayoutsDiverge([depth19, depth25])).toBe(true);
     expect(pirLayoutsDiverge([split12And7, split13And6])).toBe(true);
+  });
+
+  it("detects different polynomial lengths for the same tier layout", () => {
+    const poly2048 = normalizePirRoot(response({
+      pir_layout: {
+        pir_depth: 19,
+        tier0_layers: 12,
+        tier1_layers: 7,
+        poly_len: 2048,
+      },
+    }));
+    const poly4096 = normalizePirRoot(response({
+      pir_layout: {
+        pir_depth: 19,
+        tier0_layers: 12,
+        tier1_layers: 7,
+        poly_len: 4096,
+      },
+    }));
+
+    expect(pirLayoutsDiverge([poly2048, poly4096])).toBe(true);
   });
 });
