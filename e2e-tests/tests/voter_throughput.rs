@@ -42,7 +42,10 @@ use e2e_tests::api::{
     wait_for_round_status, CosmosTxConfig, HelperQueueStatus, FIRST_VOTE_MANAGER_KEY_NAME,
     SESSION_STATUS_ACTIVE,
 };
-use e2e_tests::fixtures::{ensure_voter_fixture_files, resolve_voter_fixture_dir};
+use e2e_tests::fixtures::{
+    ensure_voter_fixture_files, resolve_voter_fixture_dir, VOTER_FIXTURE_FORMAT_VERSION,
+    VOTING_CIRCUITS_FIXTURE_VERSION,
+};
 use e2e_tests::metrics::{self, MetricsCollector, Sample};
 use e2e_tests::payloads::{
     self, coordinator_action_proposal_payload, create_voting_session_payload,
@@ -76,6 +79,8 @@ struct CastVoteInputFixture {
 
 #[derive(Deserialize)]
 struct FixtureManifest {
+    fixture_format_version: u32,
+    voting_circuits_version: String,
     count: usize,
     round_id_b64: String,
     round_fields: RoundFieldsSer,
@@ -119,6 +124,15 @@ fn load_fixtures(
         &std::fs::read_to_string(dir.join("manifest.json")).expect("read manifest.json"),
     )
     .expect("parse manifest.json");
+
+    assert_eq!(
+        manifest.fixture_format_version, VOTER_FIXTURE_FORMAT_VERSION,
+        "fixture format version mismatch"
+    );
+    assert_eq!(
+        manifest.voting_circuits_version, VOTING_CIRCUITS_FIXTURE_VERSION,
+        "fixture voting-circuits version mismatch"
+    );
 
     let mut delegations: Vec<DelegationFixture> = serde_json::from_str(
         &std::fs::read_to_string(dir.join("delegations.json")).expect("read delegations.json"),
@@ -1027,7 +1041,7 @@ fn voter_throughput_stress() {
         "  Tree leaves:         {} (n + 2n cast-vote leaves)",
         final_tree_size
     );
-    eprintln!("  ZKP mode:            REAL Halo2 (K=14 deleg, K=13 cast-vote, K=11 share-reveal)");
+    eprintln!("  ZKP mode:            REAL Halo2 (K=12 deleg, K=11 cast-vote, K=10 share-reveal)");
     eprintln!(
         "  Share arrival:       {} voters every {}ms",
         w_size,
@@ -1098,9 +1112,9 @@ fn voter_throughput_stress() {
 
     eprintln!("\n  Client-Side Prep (not server load)");
     eprintln!("  ─────────────────────────────────────────────────────────────");
-    eprintln!("  ZKP #1 proofs:       pre-generated offline (K=14, ~6s/proof)");
+    eprintln!("  ZKP #1 proofs:       pre-generated offline (K=12)");
     eprintln!(
-        "  ZKP #2 proofs:       {} generated at runtime in {} ({:.1}s/proof avg, K=13)",
+        "  ZKP #2 proofs:       {} generated at runtime in {} ({:.1}s/proof avg, K=11)",
         count,
         fmt_dur(phase2_proof_elapsed.as_secs_f64()),
         phase2_proof_elapsed.as_secs_f64() / count as f64
@@ -1116,7 +1130,7 @@ fn voter_throughput_stress() {
         "  {:15} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}  {}",
         "─────", "────────", "───", "───", "───", "───", "───", "───"
     );
-    let zkp_labels = ["#1 K=14", "#2 K=13", "—"];
+    let zkp_labels = ["#1 K=12", "#2 K=11", "—"];
     for (i, p) in agg.phases.iter().enumerate() {
         let zkp = zkp_labels.get(i).unwrap_or(&"—");
         eprintln!(
@@ -1144,7 +1158,7 @@ fn voter_throughput_stress() {
         );
     }
 
-    eprintln!("\n  Share Processing Detail (ZKP #3, K=11)");
+    eprintln!("\n  Share Processing Detail (ZKP #3, K=10)");
     eprintln!("  ─────────────────────────────────────────────────────────────");
     eprintln!("  Shares enqueued:     {}", total_shares_expected);
     eprintln!(

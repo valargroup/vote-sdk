@@ -7,8 +7,8 @@
 //!     cargo test --release --manifest-path e2e-tests/Cargo.toml \
 //!     --test generate_fixtures -- --ignored --nocapture
 //!
-//! Fixtures are reusable until the circuit changes. Proof generation is the
-//! bottleneck (~30-60s per proof at K=14); verification is ~13ms.
+//! Fixtures are namespaced by the circuit release and must be regenerated when
+//! the circuit changes. Delegation proof generation is the main bottleneck.
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -18,7 +18,9 @@ use ff::PrimeField;
 use pasta_curves::pallas;
 use serde::{Deserialize, Serialize};
 
-use e2e_tests::fixtures::resolve_voter_fixture_dir;
+use e2e_tests::fixtures::{
+    resolve_voter_fixture_dir, VOTER_FIXTURE_FORMAT_VERSION, VOTING_CIRCUITS_FIXTURE_VERSION,
+};
 use e2e_tests::payloads;
 use e2e_tests::setup::build_multi_delegation_bundles;
 
@@ -58,6 +60,8 @@ struct ExpectedTree {
 
 #[derive(Serialize, Deserialize)]
 struct FixtureManifest {
+    fixture_format_version: u32,
+    voting_circuits_version: String,
     count: usize,
     round_id_b64: String,
     round_fields: RoundFieldsSer,
@@ -219,6 +223,8 @@ fn generate_voter_fixtures() {
     );
 
     let manifest = FixtureManifest {
+        fixture_format_version: VOTER_FIXTURE_FORMAT_VERSION,
+        voting_circuits_version: VOTING_CIRCUITS_FIXTURE_VERSION.to_owned(),
         count,
         round_id_b64: b64(&round_id),
         round_fields: RoundFieldsSer {

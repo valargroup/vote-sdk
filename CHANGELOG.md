@@ -8,6 +8,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Add `v1.3.0-rc.1` and `v1.3.0` coordinated upgrade handlers and align the
+  verifier and end-to-end test stack on the new voting-crate release candidates.
 - Bind dynamic round attestations to the round ID, election-authority key, and
   `pir_layout` (including nested YPIR `poly_len`) with domain-separated
   `auth_version: 2` signatures, preventing cross-round and parameter replay.
@@ -19,7 +21,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 - Derive safe validator snapshot resets from the local genesis chain ID and
   reject conflicting overrides before stopping the service.
 - Raise the maximum accepted Halo2 proof size and matching proof-generation
-  buffer from 8 KiB to 15 KiB.
+  buffer from 8 KiB to 15 KiB for the new 11,328-byte delegation and
+  11,040-byte vote proofs.
 - Exclude shares first received at or after a round's close time from close-time
   unsubmitted-share alerts.
 - Preserve reveal-share witnesses after CheckTx acceptance while bounded retries

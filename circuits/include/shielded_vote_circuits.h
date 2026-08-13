@@ -308,7 +308,7 @@ SvTreeHandle* sv_vote_tree_create_with_kv(
  * ----------------------------------------------------------------------- */
 
 /*
- * Verify a real delegation circuit proof (ZKP #1, 15 conditions, K=14).
+ * Verify a real delegation circuit proof (ZKP #1, 15 conditions, K=12).
  *
  * The caller sends 12 x 32-byte chunks (384 bytes). The FFI decompresses
  * the compressed Pallas point and derives the nullifier domain to produce
@@ -350,7 +350,7 @@ int32_t sv_verify_delegation_proof(
  * ----------------------------------------------------------------------- */
 
 /*
- * Verify a real vote proof circuit proof (ZKP #2, 11 conditions, K=13).
+ * Verify a real vote proof circuit proof (ZKP #2, 11 conditions, K=11).
  *
  * The caller sends 9 x 32-byte chunks (288 bytes). The FFI decompresses
  * compressed Pallas points and converts integer slots to produce the
@@ -392,7 +392,7 @@ int32_t sv_verify_vote_proof(
  * ----------------------------------------------------------------------- */
 
 /*
- * Verify a real share reveal circuit proof (ZKP #3, 5 conditions, K=11).
+ * Verify a real share reveal circuit proof (ZKP #3, 5 conditions, K=10).
  *
  * The public inputs are passed as a flat byte array of 9 x 32-byte
  * chunks (288 bytes total), in order:

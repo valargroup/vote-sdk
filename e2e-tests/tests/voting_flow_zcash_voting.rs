@@ -109,7 +109,7 @@ fn voting_flow_zcash_voting_path() {
 
     log_step(
         "Step 1c",
-        "building delegation bundle for emitted round ID (K=14 proof, 30-60s)...",
+        "building delegation bundle for emitted round ID (K=12 proof)...",
     );
     let (delegation_bundle, vote_proof_data) = prepared_delegation
         .build_for_round_id(&round_id)
@@ -387,7 +387,7 @@ fn voting_flow_zcash_voting_path() {
     };
 
     // ---- Step 7: Build vote commitment through the public API ----
-    log_step("Step 7", "building vote commitment (K=14 proof, 30-60s)...");
+    log_step("Step 7", "building vote commitment (K=11 proof)...");
     let bundle = commit_vote(
         &db,
         &round_id_hex,
@@ -565,7 +565,7 @@ fn voting_flow_zcash_voting_path() {
     // proof is valid and the public API returns exactly 1 payload.
     log_step(
         "Step 9b",
-        "building vote commitment with single_share=true (K=14 proof, 30-60s)...",
+        "building vote commitment with single_share=true (K=11 proof)...",
     );
     let single_draft = DraftVote {
         proposal_id: 2,
