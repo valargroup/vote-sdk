@@ -9,8 +9,8 @@ const IsMock = false
 
 // Halo2Verifier implements zkp.Verifier using real Halo2 proof verification
 // via CGo bindings to the Rust verifier. VerifyDelegation uses the real
-// 15-condition delegation circuit (K=14, 14 public inputs). VerifyVoteCommitment
-// uses the real 11-condition vote proof circuit (K=14, 9 public inputs).
+// 15-condition delegation circuit (K=12, 14 public inputs). VerifyVoteCommitment
+// uses the real 11-condition vote proof circuit (K=11, 9 public inputs).
 type Halo2Verifier struct{}
 
 // NewVerifier returns a Halo2Verifier backed by the Rust FFI library.

@@ -58,9 +58,9 @@ const MaxVoteOptions = 8
 // MaxProofSize is the maximum allowed byte length for a Halo2 ZKP.
 // Measured proof sizes (CircuitCost / FFI round-trip):
 //
-//	Delegation  (ZKP #1, K=14): 5,216 bytes
-//	Vote Commit (ZKP #2, K=13): 5,216 bytes
-//	Share Reveal(ZKP #3, K=11): 4,000 bytes
+//	Delegation  (ZKP #1, K=12): 11,328 bytes
+//	Vote Commit (ZKP #2, K=11): 11,040 bytes
+//	Share Reveal(ZKP #3, K=10):  4,992 bytes
 //
 // The proof generation FFI uses a matching 15 KiB output buffer. Enforced in
 // ValidateBasic to reject oversized payloads before they reach the FFI.

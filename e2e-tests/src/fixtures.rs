@@ -6,8 +6,16 @@
 
 use std::path::{Component, Path, PathBuf};
 
-const DEFAULT_VOTER_FIXTURE_HOST: &str = "https://shielded-vote.nyc3.digitaloceanspaces.com";
-const VOTER_FIXTURE_FILES: [&str; 3] = ["manifest.json", "delegations.json", "cast_vote_inputs.json"];
+const DEFAULT_VOTER_FIXTURE_PREFIX: &str =
+    "https://shielded-vote.nyc3.digitaloceanspaces.com/e2e-fixtures/v1.3.0-rc.1";
+
+/// Serialization contract for hosted voter fixture manifests.
+pub const VOTER_FIXTURE_FORMAT_VERSION: u32 = 1;
+
+/// Circuit release whose delegation proofs are stored in the hosted fixtures.
+pub const VOTING_CIRCUITS_FIXTURE_VERSION: &str = "0.10.0-rc.1";
+const VOTER_FIXTURE_FILES: [&str; 3] =
+    ["manifest.json", "delegations.json", "cast_vote_inputs.json"];
 
 #[must_use]
 pub fn resolve_voter_fixture_dir(
@@ -23,10 +31,13 @@ pub fn resolve_voter_fixture_dir(
     // Cargo runs these tests from the `e2e-tests` crate directory. If the user
     // passes a repo-root-relative path like `e2e-tests/fixtures/10k`, anchor it
     // at the parent of the crate dir instead of nesting `e2e-tests/e2e-tests/...`.
-    let first_component = dir.components().next().and_then(|component| match component {
-        Component::Normal(name) => name.to_str(),
-        _ => None,
-    });
+    let first_component = dir
+        .components()
+        .next()
+        .and_then(|component| match component {
+            Component::Normal(name) => name.to_str(),
+            _ => None,
+        });
     let cwd_name = cwd.file_name().and_then(|name| name.to_str());
     if first_component == cwd_name {
         if let Some(parent) = cwd.parent() {
@@ -90,9 +101,14 @@ fn voter_fixture_base_url(dir: &Path) -> Result<String, Box<dyn std::error::Erro
     let dir_name = dir
         .file_name()
         .and_then(|name| name.to_str())
-        .ok_or_else(|| format!("fixture directory '{}' has no final path component", dir.display()))?;
+        .ok_or_else(|| {
+            format!(
+                "fixture directory '{}' has no final path component",
+                dir.display()
+            )
+        })?;
 
-    Ok(format!("{DEFAULT_VOTER_FIXTURE_HOST}/{dir_name}"))
+    Ok(format!("{DEFAULT_VOTER_FIXTURE_PREFIX}/{dir_name}"))
 }
 
 fn download_fixture_file(
@@ -105,7 +121,11 @@ fn download_fixture_file(
     let status = response.status();
 
     if !status.is_success() {
-        return Err(format!("failed to download {} from {}: HTTP {}", file_name, url, status).into());
+        return Err(format!(
+            "failed to download {} from {}: HTTP {}",
+            file_name, url, status
+        )
+        .into());
     }
 
     let bytes = response.bytes()?;
