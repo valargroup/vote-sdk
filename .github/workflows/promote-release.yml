@@ -75,6 +75,8 @@ jobs:
       - name: Verify tag-scoped release artifacts
         run: |
           set -euo pipefail
+          scripts/verify-voting-config-release-asset.sh "$RELEASE_TAG"
+
           DO_SPACES_BUCKET="${DO_SPACES_BUCKET:-shielded-vote}"
           DO_SPACES_REGION="${DO_SPACES_REGION:-nyc3}"
           DO_SPACES_BASE="${DO_SPACES_BASE:-https://${DO_SPACES_BUCKET}.${DO_SPACES_REGION}.digitaloceanspaces.com}"

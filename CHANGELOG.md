@@ -8,6 +8,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Publish the standalone Linux AMD64 `voting-config` verifier and checksum with
+  each release so config repositories can pin an immutable auth-v2-capable tool.
 - Add `v1.3.0-rc.1` and `v1.3.0` coordinated upgrade handlers and align the
   verifier and end-to-end test stack on the new voting-crate release candidates.
 - Bind dynamic round attestations to the round ID, election-authority key, and

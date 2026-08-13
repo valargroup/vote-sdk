@@ -10,6 +10,7 @@
 #     svoted-wrapper.sh, _vote_manager_keys_lib.sh, _join_common.sh
 #     config/Caddyfile
 # Linux releases also publish a Cosmovisor archive containing only bin/svoted.
+# Releases also publish the standalone Linux AMD64 voting-config verifier.
 
 name: Release
 
@@ -138,6 +139,40 @@ jobs:
             svoted
             create-val-tx
 
+  build-voting-config:
+    name: Build voting-config (linux-amd64)
+    runs-on: ubuntu-22.04
+    needs: release-metadata
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.3"
+          cache-dependency-path: go.sum
+      - name: Test and build voting-config
+        run: |
+          set -euo pipefail
+          go test -count=1 ./internal/votingconfig/... ./cmd/voting-config/...
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            make build-voting-config \
+              VERSION="${GITHUB_REF_NAME}" \
+              COMMIT="${GITHUB_SHA}"
+          mv voting-config voting-config-linux-amd64
+          ./voting-config-linux-amd64 --help >/dev/null
+          sha256sum voting-config-linux-amd64 > voting-config-linux-amd64.sha256
+          sha256sum --check voting-config-linux-amd64.sha256
+      - name: Upload voting-config artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: voting-config-linux-amd64
+          path: |
+            voting-config-linux-amd64
+            voting-config-linux-amd64.sha256
+
   build-explorer:
     name: Build explorer frontend
     runs-on: ubuntu-latest
@@ -198,7 +233,7 @@ jobs:
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [release-metadata, build-sdk, build-explorer]
+    needs: [release-metadata, build-sdk, build-voting-config, build-explorer]
     steps:
       - name: Create release
         env:
@@ -217,6 +252,31 @@ jobs:
             fi
             gh release create "$GITHUB_REF_NAME" "${release_args[@]}"
           fi
+
+  release-voting-config:
+    name: Release voting-config (linux-amd64)
+    runs-on: ubuntu-latest
+    needs: create-release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Download voting-config artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: voting-config-linux-amd64
+      - name: Verify and attach to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          sha256sum --check voting-config-linux-amd64.sha256
+          chmod +x voting-config-linux-amd64
+          gh release upload "${GITHUB_REF_NAME}" \
+            voting-config-linux-amd64 \
+            voting-config-linux-amd64.sha256 \
+            --clobber
+          scripts/verify-voting-config-release-asset.sh "${GITHUB_REF_NAME}"
 
   release:
     name: Package and release (${{ matrix.platform }})
@@ -452,7 +512,7 @@ jobs:
     name: Publish stable release channel
     if: needs.release-metadata.outputs.publish_mutable_pointers == 'true'
     runs-on: ubuntu-latest
-    needs: [release-metadata, distribute]
+    needs: [release-metadata, distribute, release-voting-config]
     concurrency:
       group: release-channel
       cancel-in-progress: false
