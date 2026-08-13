@@ -54,13 +54,13 @@ func (h *apiHandler) handleSignConfigEntry(w http.ResponseWriter, r *http.Reques
 	copy(eaPK[:], eaPKBytes)
 
 	if err := votingconfig.ValidatePIRLayout(body.PIRLayout); err != nil {
-		jsonError(w, "pir_layout must satisfy pir_depth = tier0_layers + tier1_layers", http.StatusBadRequest)
+		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	payload, err := votingconfig.CanonicalPayloadV2(body.RoundID, eaPK, body.PIRLayout)
 	if err != nil {
-		jsonError(w, "failed to build canonical payload", http.StatusBadRequest)
+		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	hash := votingconfig.SignedPayloadHash(payload)

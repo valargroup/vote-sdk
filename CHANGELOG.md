@@ -9,10 +9,11 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 ## Unreleased
 
 - Bind dynamic round attestations to the round ID, election-authority key, and
-  PIR layout with domain-separated `auth_version: 2` signatures, preventing
-  cross-round and layout replay. The admin UI intentionally fixes the current
-  `19/12/7` PIR layout at the authorization point to avoid an additional
-  network dependency. This matches the wallet-side verification in
+  `pir_layout` (including nested YPIR `poly_len`) with domain-separated
+  `auth_version: 2` signatures, preventing cross-round and parameter replay.
+  The admin UI intentionally fixes the current `19/12/7` layout and
+  `poly_len` 4096 at the authorization point to avoid an additional network
+  dependency. This matches the wallet-side verification in
   [zcash_voting#172](https://github.com/valargroup/zcash_voting/pull/172).
 - Upgrade CometBFT to v0.38.21 for its patched consensus implementation.
 - Derive safe validator snapshot resets from the local genesis chain ID and

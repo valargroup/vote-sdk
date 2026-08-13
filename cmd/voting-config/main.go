@@ -199,6 +199,7 @@ func newSignCmd() *cobra.Command {
 		pirDepth    uint32
 		tier0Layers uint32
 		tier1Layers uint32
+		polyLen     uint32
 	)
 	cmd := &cobra.Command{
 		Use:   "sign",
@@ -223,6 +224,7 @@ func newSignCmd() *cobra.Command {
 				PIRDepth:    pirDepth,
 				Tier0Layers: tier0Layers,
 				Tier1Layers: tier1Layers,
+				PolyLen:     polyLen,
 			}
 			if err := votingconfig.ValidatePIRLayout(layout); err != nil {
 				return err
@@ -274,6 +276,7 @@ func newSignCmd() *cobra.Command {
 	cmd.Flags().Uint32Var(&pirDepth, "pir-depth", 0, "pir_layout.pir_depth bound into the signature (must match the dynamic config)")
 	cmd.Flags().Uint32Var(&tier0Layers, "tier0-layers", 0, "pir_layout.tier0_layers bound into the signature")
 	cmd.Flags().Uint32Var(&tier1Layers, "tier1-layers", 0, "pir_layout.tier1_layers bound into the signature")
+	cmd.Flags().Uint32Var(&polyLen, "poly-len", 0, "pir_layout.poly_len bound into the signature (2048 or 4096; must match the dynamic config)")
 	return cmd
 }
 
@@ -344,9 +347,9 @@ func mergeEntry(path, roundID string, entry votingconfig.RoundEntry, signedLayou
 	}
 	if cfg.PIRLayout != signedLayout {
 		return fmt.Errorf(
-			"pir_layout mismatch: signed %d/%d/%d but %s advertises %d/%d/%d",
-			signedLayout.PIRDepth, signedLayout.Tier0Layers, signedLayout.Tier1Layers, path,
-			cfg.PIRLayout.PIRDepth, cfg.PIRLayout.Tier0Layers, cfg.PIRLayout.Tier1Layers,
+			"pir_layout mismatch: signed %d/%d/%d poly_len=%d but %s advertises %d/%d/%d poly_len=%d",
+			signedLayout.PIRDepth, signedLayout.Tier0Layers, signedLayout.Tier1Layers, signedLayout.PolyLen, path,
+			cfg.PIRLayout.PIRDepth, cfg.PIRLayout.Tier0Layers, cfg.PIRLayout.Tier1Layers, cfg.PIRLayout.PolyLen,
 		)
 	}
 	if cfg.Rounds == nil {

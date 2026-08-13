@@ -59,6 +59,7 @@ func TestSignAndVerifyConfig(t *testing.T) {
 		"--pir-depth", "19",
 		"--tier0-layers", "12",
 		"--tier1-layers", "7",
+		"--poly-len", "4096",
 		"--merge", configPath,
 	})
 	if err := signCmd.Execute(); err != nil {
@@ -104,7 +105,7 @@ func TestVerifyRejectsLegacyTrustedKeysArray(t *testing.T) {
 }
 
 func testVotingConfigPIRLayout() votingconfig.PIRLayout {
-	return votingconfig.PIRLayout{PIRDepth: 19, Tier0Layers: 12, Tier1Layers: 7}
+	return votingconfig.PIRLayout{PIRDepth: 19, Tier0Layers: 12, Tier1Layers: 7, PolyLen: votingconfig.PolyLen4096}
 }
 
 func TestKeygenWritesSeedFile(t *testing.T) {

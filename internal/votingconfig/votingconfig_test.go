@@ -63,12 +63,12 @@ func TestCanonicalPayloadV2Determinism(t *testing.T) {
 	roundIDBytes, _ := hex.DecodeString(roundID)
 	want := append([]byte(DomainTagV2), roundIDBytes...)
 	want = append(want, eaPK[:]...)
-	// 19/12/7 as u32 little-endian.
-	want = append(want, 19, 0, 0, 0, 12, 0, 0, 0, 7, 0, 0, 0)
+	// 19/12/7 and poly_len 4096 as u32 little-endian.
+	want = append(want, 19, 0, 0, 0, 12, 0, 0, 0, 7, 0, 0, 0, 0, 16, 0, 0)
 	if string(payload) != string(want) {
 		t.Fatalf("unexpected canonical payload: %s", hex.EncodeToString(payload))
 	}
-	if len(payload) != len(DomainTagV2)+32+32+12 {
+	if len(payload) != len(DomainTagV2)+32+32+16 {
 		t.Fatalf("unexpected payload length %d", len(payload))
 	}
 
@@ -78,8 +78,13 @@ func TestCanonicalPayloadV2Determinism(t *testing.T) {
 	if _, err := CanonicalPayloadV2("ABCDEF", eaPK, layout); err == nil {
 		t.Fatalf("expected error for non-lowercase/short round id")
 	}
-	if _, err := CanonicalPayloadV2(roundID, eaPK, PIRLayout{PIRDepth: 19, Tier0Layers: 12, Tier1Layers: 8}); err == nil {
+	if _, err := CanonicalPayloadV2(roundID, eaPK, PIRLayout{PIRDepth: 19, Tier0Layers: 12, Tier1Layers: 8, PolyLen: PolyLen4096}); err == nil {
 		t.Fatalf("expected error for inconsistent pir layout")
+	}
+	badPoly := layout
+	badPoly.PolyLen = 1024
+	if _, err := CanonicalPayloadV2(roundID, eaPK, badPoly); err == nil {
+		t.Fatalf("expected error for invalid poly_len")
 	}
 }
 
@@ -106,9 +111,14 @@ func TestSignVerifyV2RoundTripAndReplay(t *testing.T) {
 	if VerifyV2(pub, otherRoundID, eaPK, layout, sig) {
 		t.Fatalf("signature verified when replayed under a different round id")
 	}
-	otherLayout := PIRLayout{PIRDepth: 19, Tier0Layers: 11, Tier1Layers: 8}
+	otherLayout := PIRLayout{PIRDepth: 19, Tier0Layers: 11, Tier1Layers: 8, PolyLen: layout.PolyLen}
 	if VerifyV2(pub, roundID, eaPK, otherLayout, sig) {
 		t.Fatalf("signature verified against a swapped pir layout")
+	}
+	swappedPoly := layout
+	swappedPoly.PolyLen = PolyLen2048
+	if VerifyV2(pub, roundID, eaPK, swappedPoly, sig) {
+		t.Fatalf("signature verified against a swapped poly_len")
 	}
 	tampered := eaPK
 	tampered[31] ^= 1
@@ -160,9 +170,14 @@ func TestVerifyEntrySignaturesDispatchesOnAuthVersion(t *testing.T) {
 	if VerifyEntrySignatures(otherRoundID, entryFor(AuthVersionV2, sigV2), trusted, layout) {
 		t.Fatalf("v2 entry verified under a different round id")
 	}
-	swappedLayout := PIRLayout{PIRDepth: 19, Tier0Layers: 11, Tier1Layers: 8}
+	swappedLayout := PIRLayout{PIRDepth: 19, Tier0Layers: 11, Tier1Layers: 8, PolyLen: layout.PolyLen}
 	if VerifyEntrySignatures(roundID, entryFor(AuthVersionV2, sigV2), trusted, swappedLayout) {
 		t.Fatalf("v2 entry verified after pir layout swap")
+	}
+	swappedPoly := layout
+	swappedPoly.PolyLen = PolyLen2048
+	if VerifyEntrySignatures(roundID, entryFor(AuthVersionV2, sigV2), trusted, swappedPoly) {
+		t.Fatalf("v2 entry verified after poly_len swap")
 	}
 	if !VerifyEntrySignatures(roundID, entryFor(AuthVersionV1, SignV1(priv, eaPK)), trusted, layout) {
 		t.Fatalf("legacy v1 entry did not verify")
@@ -309,10 +324,20 @@ func TestValidateWrapper(t *testing.T) {
 		t.Fatalf("expected missing pir_layout error")
 	}
 
-	cfg.PIRLayout = PIRLayout{PIRDepth: 19, Tier0Layers: 12, Tier1Layers: 8}
+	cfg.PIRLayout = PIRLayout{PIRDepth: 19, Tier0Layers: 12, Tier1Layers: 8, PolyLen: PolyLen4096}
 	if err := ValidateWrapper(cfg); err == nil {
 		t.Fatalf("expected inconsistent pir_layout error")
 	}
+
+	cfg.PIRLayout = PIRLayout{PIRDepth: 19, Tier0Layers: 12, Tier1Layers: 7, PolyLen: 0}
+	if err := ValidateWrapper(cfg); err == nil {
+		t.Fatalf("expected missing poly_len error")
+	}
+	cfg.PIRLayout = PIRLayout{PIRDepth: 19, Tier0Layers: 12, Tier1Layers: 7, PolyLen: 1024}
+	if err := ValidateWrapper(cfg); err == nil {
+		t.Fatalf("expected invalid poly_len error")
+	}
+	cfg.PIRLayout = testPIRLayout()
 
 	var malformed SignedConfig
 	raw := []byte(`{"config_version":1,"vote_servers":[],"pir_endpoints":[],"rounds":[]}`)
@@ -374,7 +399,7 @@ func baseConfig(roundID string, eaPK [32]byte, sig []byte) *SignedConfig {
 }
 
 func testPIRLayout() PIRLayout {
-	return PIRLayout{PIRDepth: 19, Tier0Layers: 12, Tier1Layers: 7}
+	return PIRLayout{PIRDepth: 19, Tier0Layers: 12, Tier1Layers: 7, PolyLen: PolyLen4096}
 }
 
 func withEntry(cfg *SignedConfig, roundID string, update func(RoundEntry) RoundEntry) *SignedConfig {

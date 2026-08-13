@@ -105,6 +105,7 @@ export interface PirLayout {
   pir_depth: number;
   tier0_layers: number;
   tier1_layers: number;
+  poly_len: number;
 }
 
 const NULLIFIER_URL_KEY = "shielded-vote-nullifier-url";

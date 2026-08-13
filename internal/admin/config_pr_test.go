@@ -563,8 +563,9 @@ func configDocuments(t *testing.T, rounds map[string]votingconfig.RoundEntry) ([
 }
 
 func testConfigPIRLayout() votingconfig.PIRLayout {
-	return votingconfig.PIRLayout{PIRDepth: 19, Tier0Layers: 12, Tier1Layers: 7}
+	return votingconfig.PIRLayout{PIRDepth: 19, Tier0Layers: 12, Tier1Layers: 7, PolyLen: votingconfig.PolyLen4096}
 }
+
 
 func testEd25519PrivateKey() ed25519.PrivateKey {
 	return ed25519.NewKeyFromSeed(bytes.Repeat([]byte{7}, ed25519.SeedSize))

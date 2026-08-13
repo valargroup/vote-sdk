@@ -18,14 +18,19 @@ const (
 	AuthVersionV2         = 2
 	AlgEd25519            = "ed25519"
 
+	// Allowed YPIR polynomial degrees bound into auth_version 2 signatures.
+	PolyLen2048 uint32 = 2048
+	PolyLen4096 uint32 = 4096
+
 	// DomainTagV2 prefixes the auth_version 2 signed preimage:
 	// DomainTagV2 || round_id (32 raw bytes) || ea_pk (32 bytes)
-	//             || pir_depth (u32 LE) || tier0_layers (u32 LE) || tier1_layers (u32 LE).
+	//             || pir_depth (u32 LE) || tier0_layers (u32 LE) || tier1_layers (u32 LE)
+	//             || poly_len (u32 LE).
 	// Binding the round id stops a signed ea_pk from being replayed under a
-	// different rounds-map key; binding the PIR layout stops a config host
-	// from swapping the layout under already-attested rounds. Wallet
-	// verifiers (librustvoting) hardcode the same tag; bytes must match
-	// verbatim.
+	// different rounds-map key; binding the PIR layout (including poly_len)
+	// stops a config host from swapping those parameters under already-attested
+	// rounds. Wallet verifiers (librustvoting) hardcode the same tag; bytes
+	// must match verbatim.
 	DomainTagV2 = "zcash-shielded-vote:round-auth:v2"
 )
 
@@ -38,11 +43,13 @@ type SignedConfig struct {
 	Rounds            map[string]RoundEntry `json:"rounds"`
 }
 
-// PIRLayout describes how the PIR circuit depth is split across the two data tiers.
+// PIRLayout describes how the PIR circuit depth is split across the two data
+// tiers and the YPIR polynomial degree bound into auth_version 2 signatures.
 type PIRLayout struct {
 	PIRDepth    uint32 `json:"pir_depth"`
 	Tier0Layers uint32 `json:"tier0_layers"`
 	Tier1Layers uint32 `json:"tier1_layers"`
+	PolyLen     uint32 `json:"poly_len"`
 }
 
 type Endpoint struct {
@@ -112,7 +119,9 @@ func VerifyV1(pub ed25519.PublicKey, eaPK [32]byte, sig []byte) bool {
 
 // CanonicalPayloadV2 builds the auth_version 2 signed preimage:
 // DomainTagV2 || round_id (32 raw bytes) || ea_pk (32 bytes)
-//            || pir_depth (u32 LE) || tier0_layers (u32 LE) || tier1_layers (u32 LE).
+//
+//	|| pir_depth (u32 LE) || tier0_layers (u32 LE) || tier1_layers (u32 LE)
+//	|| poly_len (u32 LE).
 func CanonicalPayloadV2(roundID string, eaPK [32]byte, layout PIRLayout) ([]byte, error) {
 	if err := ValidateRoundID(roundID); err != nil {
 		return nil, err
@@ -124,13 +133,14 @@ func CanonicalPayloadV2(roundID string, eaPK [32]byte, layout PIRLayout) ([]byte
 	if err != nil {
 		return nil, fmt.Errorf("round id %q is invalid hex: %w", roundID, err)
 	}
-	out := make([]byte, 0, len(DomainTagV2)+len(roundIDBytes)+len(eaPK)+12)
+	out := make([]byte, 0, len(DomainTagV2)+len(roundIDBytes)+len(eaPK)+16)
 	out = append(out, DomainTagV2...)
 	out = append(out, roundIDBytes...)
 	out = append(out, eaPK[:]...)
 	out = binary.LittleEndian.AppendUint32(out, layout.PIRDepth)
 	out = binary.LittleEndian.AppendUint32(out, layout.Tier0Layers)
 	out = binary.LittleEndian.AppendUint32(out, layout.Tier1Layers)
+	out = binary.LittleEndian.AppendUint32(out, layout.PolyLen)
 	return out, nil
 }
 
@@ -151,7 +161,8 @@ func VerifyV2(pub ed25519.PublicKey, roundID string, eaPK [32]byte, layout PIRLa
 }
 
 // CanonicalPayload builds the signed preimage for the given auth_version.
-// The layout is bound by v2 payloads and ignored by legacy v1 payloads.
+// The layout (including poly_len) is bound by v2 payloads and ignored by
+// legacy v1 payloads.
 func CanonicalPayload(authVersion int, roundID string, eaPK [32]byte, layout PIRLayout) ([]byte, error) {
 	switch authVersion {
 	case AuthVersionV1:
@@ -218,7 +229,8 @@ func ValidateWrapper(cfg *SignedConfig) error {
 	return nil
 }
 
-// ValidatePIRLayout requires the two tiers to cover the configured circuit depth.
+// ValidatePIRLayout requires the two tiers to cover the configured circuit
+// depth and poly_len to be an allowed YPIR polynomial degree.
 func ValidatePIRLayout(layout PIRLayout) error {
 	if layout.PIRDepth == 0 {
 		return errors.New("pir_layout.pir_depth must be greater than zero")
@@ -232,7 +244,20 @@ func ValidatePIRLayout(layout PIRLayout) error {
 			layout.Tier1Layers,
 		)
 	}
+	if err := ValidatePolyLen(layout.PolyLen); err != nil {
+		return err
+	}
 	return nil
+}
+
+// ValidatePolyLen requires an allowed YPIR polynomial degree.
+func ValidatePolyLen(polyLen uint32) error {
+	switch polyLen {
+	case PolyLen2048, PolyLen4096:
+		return nil
+	default:
+		return fmt.Errorf("poly_len must be %d or %d", PolyLen2048, PolyLen4096)
+	}
 }
 
 func ValidateStaticConfig(cfg *StaticConfig) error {
@@ -254,7 +279,8 @@ func ValidateStaticConfig(cfg *StaticConfig) error {
 // VerifyEntrySignatures reports whether at least one trusted key signed the
 // entry's canonical payload for its auth_version. v1 signatures cover only the
 // raw ea_pk (legacy, kept for mixed-version files during migration); v2
-// signatures cover DomainTagV2 || round_id || ea_pk || pir_layout.
+// signatures cover DomainTagV2 || round_id || ea_pk || pir_layout fields
+// including poly_len.
 func VerifyEntrySignatures(roundID string, entry RoundEntry, trusted []TrustedKey, layout PIRLayout) bool {
 	if entry.AuthVersion != AuthVersionV1 && entry.AuthVersion != AuthVersionV2 {
 		return false

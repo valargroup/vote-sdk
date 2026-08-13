@@ -26,7 +26,7 @@ func TestHandleSignConfigEntry(t *testing.T) {
 
 	body := `{"round_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","ea_pk":"` +
 		base64.StdEncoding.EncodeToString(eaPK) +
-		`","auth_version":2,"pir_layout":{"pir_depth":19,"tier0_layers":12,"tier1_layers":7}}`
+		`","auth_version":2,"pir_layout":{"pir_depth":19,"tier0_layers":12,"tier1_layers":7,"poly_len":4096}}`
 	req := httptest.NewRequest(http.MethodPost, "/api/sign-config-entry", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -49,13 +49,13 @@ func TestHandleSignConfigEntry(t *testing.T) {
 	}
 	// Golden vector for the v2 preimage:
 	// "zcash-shielded-vote:round-auth:v2" || 0xaa*32 || 0x00..0x1f
-	// || u32le(19) || u32le(12) || u32le(7).
+	// || u32le(19) || u32le(12) || u32le(7) || u32le(4096).
 	// Shared with wallet-side (librustvoting) verification.
-	const wantPayload = "emNhc2gtc2hpZWxkZWQtdm90ZTpyb3VuZC1hdXRoOnYyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqoAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHxMAAAAMAAAABwAAAA=="
+	const wantPayload = "emNhc2gtc2hpZWxkZWQtdm90ZTpyb3VuZC1hdXRoOnYyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqoAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHxMAAAAMAAAABwAAAAAQAAA="
 	if resp.CanonicalPayloadB64 != wantPayload {
 		t.Fatalf("canonical payload mismatch: got %s", resp.CanonicalPayloadB64)
 	}
-	const wantHash = "136f842edf9e31eae5c01731d5ba2b9c0f86ed980c38bb426bef021bed8986ba"
+	const wantHash = "7f5f1cc0eee15cb12b729ef23c00423a08f76780a406b9b582196de0a83d8ade"
 	if resp.SignedPayloadHash != wantHash {
 		t.Fatalf("hash mismatch: got %s want %s", resp.SignedPayloadHash, wantHash)
 	}
@@ -95,7 +95,9 @@ func TestHandleSignConfigEntryRejectsBadInputs(t *testing.T) {
 		{name: "bad ea pk base64", body: `{"round_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","ea_pk":"not-base64","auth_version":2}`},
 		{name: "short ea pk", body: `{"round_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","ea_pk":"AQID","auth_version":2}`},
 		{name: "missing pir layout", body: `{"round_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","ea_pk":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","auth_version":2}`},
-		{name: "inconsistent pir layout", body: `{"round_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","ea_pk":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","auth_version":2,"pir_layout":{"pir_depth":19,"tier0_layers":12,"tier1_layers":8}}`},
+		{name: "inconsistent pir layout", body: `{"round_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","ea_pk":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","auth_version":2,"pir_layout":{"pir_depth":19,"tier0_layers":12,"tier1_layers":8,"poly_len":4096}}`},
+		{name: "missing poly_len", body: `{"round_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","ea_pk":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","auth_version":2,"pir_layout":{"pir_depth":19,"tier0_layers":12,"tier1_layers":7}}`},
+		{name: "invalid poly_len", body: `{"round_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","ea_pk":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","auth_version":2,"pir_layout":{"pir_depth":19,"tier0_layers":12,"tier1_layers":7,"poly_len":1024}}`},
 	}
 
 	for _, tt := range tests {

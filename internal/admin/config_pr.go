@@ -149,9 +149,9 @@ type configPRAuth struct {
 type createConfigPRRequest struct {
 	RoundID string                  `json:"round_id"`
 	Entry   votingconfig.RoundEntry `json:"entry"`
-	// PIRLayout the signer bound into the v2 signature. Must match the
-	// pir_layout in the target dynamic config or the merged file would carry
-	// entries that can never verify.
+	// PIRLayout the signer bound into the v2 signature (including poly_len).
+	// Must match the pir_layout in the target dynamic config or the merged
+	// file would carry entries that can never verify.
 	PIRLayout         votingconfig.PIRLayout `json:"pir_layout"`
 	SignedPayloadHash string                 `json:"signed_payload_hash"`
 	Title             string                 `json:"title,omitempty"`
@@ -299,7 +299,7 @@ func validateCreateConfigPRRequest(body createConfigPRRequest) error {
 		}
 	}
 	if err := votingconfig.ValidatePIRLayout(body.PIRLayout); err != nil {
-		return fmt.Errorf("pir_layout must satisfy pir_depth = tier0_layers + tier1_layers")
+		return err
 	}
 	var eaPK [32]byte
 	copy(eaPK[:], eaPKBytes)
@@ -405,9 +405,9 @@ func mergeConfigPREntry(dynamicContent, staticContent []byte, roundID string, en
 	// otherwise the merged entry could never verify against the file.
 	if cfg.PIRLayout != signedLayout {
 		return nil, false, nil, fmt.Errorf(
-			"pir_layout mismatch: signed %d/%d/%d but dynamic config advertises %d/%d/%d",
-			signedLayout.PIRDepth, signedLayout.Tier0Layers, signedLayout.Tier1Layers,
-			cfg.PIRLayout.PIRDepth, cfg.PIRLayout.Tier0Layers, cfg.PIRLayout.Tier1Layers,
+			"pir_layout mismatch: signed %d/%d/%d poly_len=%d but dynamic config advertises %d/%d/%d poly_len=%d",
+			signedLayout.PIRDepth, signedLayout.Tier0Layers, signedLayout.Tier1Layers, signedLayout.PolyLen,
+			cfg.PIRLayout.PIRDepth, cfg.PIRLayout.Tier0Layers, cfg.PIRLayout.Tier1Layers, cfg.PIRLayout.PolyLen,
 		)
 	}
 

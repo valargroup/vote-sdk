@@ -2,6 +2,7 @@ export interface PirLayout {
   pir_depth: number;
   tier0_layers: number;
   tier1_layers: number;
+  poly_len: number;
 }
 
 export interface PirRootResponse {
@@ -29,10 +30,10 @@ export function normalizePirRoot(root: PirRootResponse): NormalizedPirRoot {
   const layout = root.pir_layout;
   const layoutDepth = layout?.pir_depth ?? root.pir_depth;
   const layoutKey = layout
-    ? `${layout.pir_depth}:${layout.tier0_layers}:${layout.tier1_layers}`
+    ? `${layout.pir_depth}:${layout.tier0_layers}:${layout.tier1_layers}:${layout.poly_len}`
     : undefined;
   const layoutLabel = layout
-    ? `${layout.pir_depth} (${layout.tier0_layers}+${layout.tier1_layers})`
+    ? `${layout.pir_depth} (${layout.tier0_layers}+${layout.tier1_layers}) · poly_len ${layout.poly_len}`
     : root.pir_depth?.toString();
   let pirRoot: string | undefined;
   let circuitRoot: string | undefined;
@@ -53,7 +54,7 @@ export function normalizePirRoot(root: PirRootResponse): NormalizedPirRoot {
   };
 }
 
-/** Compare known depths and only compare tier splits reported by both replicas. */
+/** Compare known depths and detailed layouts only when replicas report them. */
 export function pirLayoutsDiverge(roots: NormalizedPirRoot[]): boolean {
   const depths = new Set(
     roots
