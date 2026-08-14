@@ -6,7 +6,7 @@ Historical changes before commit `704b202e2088b91caeaf2290cef85e4a9a759542` are 
 
 Instructions on coordinated upgrades can be found [here](https://setup.valargroup.org/#coordinated-upgrade).
 
-## Unreleased
+## v1.3.0
 
 - Publish the standalone Linux AMD64 `voting-config` verifier and checksum with
   each release so config repositories can pin an immutable auth-v2-capable tool.

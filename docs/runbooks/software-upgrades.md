@@ -95,6 +95,28 @@ curl -fsSL "https://shielded-vote.nyc3.digitaloceanspaces.com/scripts/upgrade/${
 After scheduling, rerun `verify-prestage` without `--allow-no-plan` so the
 staged layout is checked against the on-chain name and height.
 
+## v1.3.0 coordinated cutover
+
+The `v1.3.0` verifier accepts the new proof sizes and authenticated dynamic
+round configuration used by the matching wallet release. Validators must
+therefore switch binaries through a coordinated halt. The upgrade handler does
+not migrate stores.
+
+Use `v1.3.0` as both the release tag and plan name on testnet and mainnet. Testnet
+must complete the final-tag rehearsal before the mainnet plan is scheduled.
+
+Pre-stage the held release on every validator before scheduling either plan:
+
+```bash
+TAG=v1.3.0
+PLAN_NAME="${TAG}"
+curl -fsSL "https://shielded-vote.nyc3.digitaloceanspaces.com/scripts/upgrade/${TAG}/update_chain.sh" | sudo bash -s -- \
+  --mode prepare --plan-name "${PLAN_NAME}" --tag "${TAG}" --allow-no-plan
+```
+
+After scheduling, rerun `verify-prestage` without `--allow-no-plan` and verify
+that every validator resumes on `v1.3.0` before starting a new vote round.
+
 ## Held release and promotion
 
 Set the repository variable `RELEASE_HOLD_TAG` to a stable tag before pushing
