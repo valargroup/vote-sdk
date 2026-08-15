@@ -130,7 +130,8 @@ type Processor struct {
 	isRoundActive  RoundStatusChecker
 	preProofDedupe *preProofShareDeduper
 	submitHeightMu sync.Mutex
-	submitHeights  map[string]uint64
+	submitHeight   uint64
+	submitKeys     map[string]struct{}
 }
 
 type ProcessorOption func(*Processor)
@@ -193,7 +194,7 @@ func NewProcessor(
 		logger:        logger,
 		maxConcurrent: maxConcurrent,
 		isRoundActive: isRoundActive,
-		submitHeights: make(map[string]uint64),
+		submitKeys:    make(map[string]struct{}),
 	}
 	for _, option := range options {
 		option(p)
@@ -647,7 +648,12 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 func (p *Processor) submittedAtHeight(share QueuedShare, height uint64) bool {
 	p.submitHeightMu.Lock()
 	defer p.submitHeightMu.Unlock()
-	return p.submitHeights[shareScheduleKey(share)] == height
+
+	if !p.advanceSubmitHeightLocked(height) {
+		return true
+	}
+	_, submitted := p.submitKeys[shareScheduleKey(share)]
+	return submitted
 }
 
 // claimSubmitHeight records the outbound submission height unless the same
@@ -656,18 +662,34 @@ func (p *Processor) claimSubmitHeight(share QueuedShare, height uint64) bool {
 	p.submitHeightMu.Lock()
 	defer p.submitHeightMu.Unlock()
 
-	key := shareScheduleKey(share)
-	if p.submitHeights[key] == height {
+	if !p.advanceSubmitHeightLocked(height) {
 		return false
 	}
-	p.submitHeights[key] = height
+	key := shareScheduleKey(share)
+	if _, submitted := p.submitKeys[key]; submitted {
+		return false
+	}
+	p.submitKeys[key] = struct{}{}
 	return true
 }
 
 func (p *Processor) clearSubmitHeight(share QueuedShare) {
 	p.submitHeightMu.Lock()
 	defer p.submitHeightMu.Unlock()
-	delete(p.submitHeights, shareScheduleKey(share))
+	delete(p.submitKeys, shareScheduleKey(share))
+}
+
+// advanceSubmitHeightLocked rotates the cache when height increases and
+// rejects stale observations so concurrent work cannot rotate it backwards.
+func (p *Processor) advanceSubmitHeightLocked(height uint64) bool {
+	if height < p.submitHeight {
+		return false
+	}
+	if height > p.submitHeight {
+		clear(p.submitKeys)
+		p.submitHeight = height
+	}
+	return true
 }
 
 func shareScheduleKey(share QueuedShare) string {

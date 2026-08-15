@@ -281,6 +281,40 @@ func TestProcessor_ProcessBatch_WaitsForCheckTxBeforeProof(t *testing.T) {
 	assert.Equal(t, 1, status[roundID].Submitted)
 }
 
+func TestProcessor_SubmitHeightCacheEvictsOlderBlocks(t *testing.T) {
+	proc := &Processor{submitKeys: make(map[string]struct{})}
+	roundID := hex.EncodeToString(make([]byte, 32))
+	shareA := QueuedShare{Payload: SharePayload{
+		VoteRoundID:  roundID,
+		ProposalID:   1,
+		TreePosition: 1,
+		EncShare: EncryptedShareWire{
+			ShareIndex: 1,
+		},
+	}}
+	shareB := QueuedShare{Payload: SharePayload{
+		VoteRoundID:  roundID,
+		ProposalID:   1,
+		TreePosition: 2,
+		EncShare: EncryptedShareWire{
+			ShareIndex: 2,
+		},
+	}}
+
+	require.True(t, proc.claimSubmitHeight(shareA, 10))
+	require.True(t, proc.claimSubmitHeight(shareB, 10))
+	assert.Len(t, proc.submitKeys, 2)
+
+	assert.False(t, proc.submittedAtHeight(shareA, 11))
+	assert.Equal(t, uint64(11), proc.submitHeight)
+	assert.Empty(t, proc.submitKeys)
+
+	assert.False(t, proc.claimSubmitHeight(shareB, 10), "a stale observation must not rotate the cache backwards")
+	require.True(t, proc.claimSubmitHeight(shareA, 11))
+	assert.False(t, proc.claimSubmitHeight(shareA, 11))
+	assert.Len(t, proc.submitKeys, 1)
+}
+
 func TestProcessor_ProcessBatch_BroadcastAcceptedRetriesOncePerBlock(t *testing.T) {
 	store := newTestStore(t)
 	prover := &mockProver{}
