@@ -1,35 +1,32 @@
-//! Voter throughput stress test: loads pre-generated fixtures and submits them
-//! to a real chain, measuring server load throughput across all submission phases
+//! Voter throughput stress test: builds round-bound proofs and submits them to a
+//! real chain, measuring server load throughput across all submission phases,
 //! including share reveals (real ZKP #3 via helper server).
 //!
 //! Tally (partial decryption + BSGS solve) is benchmarked separately — this test
 //! focuses on how the server holds up under concurrent vote submissions.
-//! Fixtures use a far-future vote_end_time so they are reusable indefinitely.
+//! Delegation proofs are generated after round creation because the round ID
+//! includes the chain's actual creation height.
 //!
 //! Requires:
-//! - A freshly initialized benchmark chain, e.g. `mise run chain:init-benchmark`
-//! - Pre-generated fixtures (downloaded automatically if missing; see `generate_fixtures.rs`)
+//! - A freshly initialized benchmark chain, e.g. `make init-benchmark`
 //!
 //! Run:
 //!   HELPER_API_TOKEN=benchmark-helper-token \
-//!   VOTER_FIXTURE_DIR=fixtures/100 \
+//!   STRESS_VOTER_COUNT=100 \
 //!     cargo test --release --manifest-path e2e-tests/Cargo.toml \
 //!     --test voter_throughput -- --ignored --nocapture
 //!
 //! Environment variables:
 //!   HELPER_API_TOKEN     - helper API token (required for benchmark helper config)
-//!   VOTER_FIXTURE_DIR     - path to fixture directory (required)
-//!   VOTER_FIXTURE_BASE_URL - optional override for fixture download base URL
+//!   STRESS_VOTER_COUNT   - number of voters to generate (default: 10)
 //!   VOTER_CONCURRENCY     - number of concurrent submission workers (default: 50)
 //!   VOTER_PHASE_TIMEOUT   - per-phase timeout in seconds (default: 600)
 //!   WAVE_SIZE             - voters per share submission wave (default: 10)
 //!   WAVE_INTERVAL_MS      - milliseconds between share waves (default: 1000)
-//!   STRESS_VOTER_COUNT    - use only first N voters from fixtures (default: all)
 //!   SHARE_STALL_TIMEOUT_SECS - fail only if share processing makes no progress
 //!                             for this many seconds (default: 1800, 0 = disabled)
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -39,166 +36,92 @@ use e2e_tests::api::{
     broadcast_cosmos_msg, commitment_tree_latest, commitment_tree_next_index,
     default_cosmos_tx_config, get_all_validator_operator_addresses, get_helper_queue_status,
     get_round_ea_pk, import_first_vote_manager_key, post_helper_json, post_json,
-    wait_for_round_status, CosmosTxConfig, HelperQueueStatus, FIRST_VOTE_MANAGER_KEY_NAME,
-    SESSION_STATUS_ACTIVE,
-};
-use e2e_tests::fixtures::{
-    ensure_voter_fixture_files, resolve_voter_fixture_dir, VOTER_FIXTURE_FORMAT_VERSION,
-    VOTING_CIRCUITS_FIXTURE_VERSION,
+    wait_for_create_round_id, wait_for_round_status, CosmosTxConfig, HelperQueueStatus,
+    FIRST_VOTE_MANAGER_KEY_NAME, SESSION_STATUS_ACTIVE,
 };
 use e2e_tests::metrics::{self, MetricsCollector, Sample};
 use e2e_tests::payloads::{
     self, coordinator_action_proposal_payload, create_voting_session_payload,
+    DelegationBundlePayload,
 };
-use e2e_tests::setup::ensure_pallas_key_registered;
+use e2e_tests::setup::{
+    ensure_pallas_key_registered, prepare_multi_delegation_bundles, VoteProofDelegationData,
+};
 use ff::{Field, PrimeField};
 use group::GroupEncoding;
+use orchard::keys::SpendingKey;
 use pasta_curves::pallas;
 use rand::rngs::OsRng;
-use serde::Deserialize;
+use vote_commitment_tree::MemoryTreeServer;
 use voting_circuits::{vote_proof::build_vote_proof_from_delegation, VOTE_COMM_TREE_DEPTH};
 
 // ---------------------------------------------------------------------------
-// Fixture deserialization types (must match generate_fixtures.rs)
+// Round-bound voter inputs
 // ---------------------------------------------------------------------------
 
-#[derive(Deserialize)]
-struct DelegationFixture {
-    payload: serde_json::Value,
-    van_cmx_b64: String,
-}
-
-#[derive(Deserialize)]
-struct CastVoteInputFixture {
-    sk_b64: String,
-    van_comm_rand_b64: String,
+struct CastVoteInput {
+    sk: SpendingKey,
+    van_comm_rand: pallas::Base,
     total_note_value: u64,
     tree_position: u32,
-    tree_path_b64: Vec<String>,
+    tree_path: [pallas::Base; VOTE_COMM_TREE_DEPTH],
 }
 
-#[derive(Deserialize)]
-struct FixtureManifest {
-    fixture_format_version: u32,
-    voting_circuits_version: String,
-    count: usize,
-    round_id_b64: String,
-    round_fields: RoundFieldsSer,
-    expected_tree_after_delegations: ExpectedTree,
+struct RoundBoundVoterInputs {
+    delegation_payloads: Vec<serde_json::Value>,
+    cast_vote_inputs: Vec<CastVoteInput>,
+    expected_tree_root_b64: String,
 }
 
-#[derive(Deserialize)]
-struct RoundFieldsSer {
-    snapshot_height: u64,
-    snapshot_blockhash: String,
-    proposals_hash: String,
-    vote_end_time: u64,
-    nullifier_imt_root: String,
-    nc_root: String,
-}
-
-#[derive(Deserialize)]
-#[allow(dead_code)]
-struct ExpectedTree {
-    root_b64: String,
-    next_index: u64,
-    delegation_anchor_height: u32,
-}
-
-fn b64_decode(s: &str) -> Vec<u8> {
-    use base64::{engine::general_purpose::STANDARD, Engine};
-    STANDARD.decode(s).expect("valid base64")
-}
-
-fn load_fixtures(
-    dir: &PathBuf,
-    voter_cap: Option<usize>,
-) -> (
-    FixtureManifest,
-    Vec<DelegationFixture>,
-    Vec<CastVoteInputFixture>,
-) {
-    ensure_voter_fixture_files(dir).expect("download voter fixtures");
-
-    let mut manifest: FixtureManifest = serde_json::from_str(
-        &std::fs::read_to_string(dir.join("manifest.json")).expect("read manifest.json"),
-    )
-    .expect("parse manifest.json");
-
-    assert_eq!(
-        manifest.fixture_format_version, VOTER_FIXTURE_FORMAT_VERSION,
-        "fixture format version mismatch"
-    );
-    assert_eq!(
-        manifest.voting_circuits_version, VOTING_CIRCUITS_FIXTURE_VERSION,
-        "fixture voting-circuits version mismatch"
-    );
-
-    let mut delegations: Vec<DelegationFixture> = serde_json::from_str(
-        &std::fs::read_to_string(dir.join("delegations.json")).expect("read delegations.json"),
-    )
-    .expect("parse delegations.json");
-
-    let mut cv_inputs: Vec<CastVoteInputFixture> = serde_json::from_str(
-        &std::fs::read_to_string(dir.join("cast_vote_inputs.json"))
-            .expect("read cast_vote_inputs.json"),
-    )
-    .expect("parse cast_vote_inputs.json");
-
-    assert!(
-        delegations.len() >= manifest.count,
-        "delegation count mismatch"
-    );
-    assert!(
-        cv_inputs.len() >= manifest.count,
-        "cast_vote_input count mismatch"
-    );
-
-    let total_count = manifest.count;
-    let use_count = match voter_cap {
-        Some(cap) if cap < manifest.count => {
-            eprintln!(
-                "STRESS_VOTER_COUNT={} — using first {} of {} available fixtures",
-                cap, cap, manifest.count
-            );
-            cap
-        }
-        _ => manifest.count,
-    };
-
-    delegations.truncate(use_count);
-    cv_inputs.truncate(use_count);
-    manifest.count = use_count;
-
-    // When subsetting (use_count < total), the fixture Merkle paths are from
-    // the full N-leaf tree. Rebuild a local tree with only the first use_count
-    // leaves and recompute auth paths so they match the on-chain tree.
-    if use_count < total_count {
-        eprintln!(
-            "Recomputing Merkle paths for {} leaves (fixtures had {} leaves)...",
-            use_count, total_count
+fn build_round_bound_voter_inputs(
+    round_id: &[u8],
+    bundles: Vec<(DelegationBundlePayload, VoteProofDelegationData)>,
+) -> RoundBoundVoterInputs {
+    let round_id_bytes: [u8; 32] = round_id.try_into().expect("round_id must be 32 bytes");
+    let mut tree = MemoryTreeServer::empty();
+    for (_, vote_data) in &bundles {
+        assert_eq!(
+            vote_data.vote_round_id.to_repr(),
+            round_id_bytes,
+            "delegation proof data must use the emitted round_id"
         );
-        let mut local_tree = vote_commitment_tree::MemoryTreeServer::empty();
-        for d in &delegations {
-            let van_cmx_bytes: [u8; 32] = B64.decode(&d.van_cmx_b64).unwrap().try_into().unwrap();
-            let fp: pallas::Base = Option::from(pallas::Base::from_repr(van_cmx_bytes)).unwrap();
-            local_tree.append(fp).expect("tree append");
-        }
-        local_tree.checkpoint(1).expect("checkpoint");
+        tree.append(vote_data.van_comm).expect("tree append");
+    }
+    tree.checkpoint(1).expect("checkpoint");
 
-        for (i, cv) in cv_inputs.iter_mut().enumerate() {
-            let path = local_tree
-                .path(i as u64, 1)
-                .unwrap_or_else(|| panic!("no path for position {i}"));
-            cv.tree_path_b64 = path
-                .auth_path()
-                .map(|h| B64.encode(h.inner().to_repr()))
-                .to_vec();
-        }
-        eprintln!("Merkle paths recomputed for {} voters", use_count);
+    let expected_tree_root_b64 = B64.encode(tree.root().to_repr());
+    let mut delegation_payloads = Vec::with_capacity(bundles.len());
+    let mut cast_vote_inputs = Vec::with_capacity(bundles.len());
+
+    for (i, (payload, vote_data)) in bundles.into_iter().enumerate() {
+        let path = tree
+            .path(i as u64, 1)
+            .unwrap_or_else(|| panic!("no path for position {i}"));
+
+        delegation_payloads.push(payloads::delegate_vote_payload(&round_id_bytes, &payload));
+        cast_vote_inputs.push(CastVoteInput {
+            sk: vote_data.sk,
+            van_comm_rand: vote_data.van_comm_rand,
+            total_note_value: vote_data.total_note_value,
+            tree_position: i as u32,
+            tree_path: path.auth_path().map(|h| h.inner()),
+        });
     }
 
-    (manifest, delegations, cv_inputs)
+    RoundBoundVoterInputs {
+        delegation_payloads,
+        cast_vote_inputs,
+        expected_tree_root_b64,
+    }
+}
+
+fn voter_count() -> usize {
+    let count = std::env::var("STRESS_VOTER_COUNT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10);
+    assert!(count > 0, "STRESS_VOTER_COUNT must be greater than zero");
+    count
 }
 
 fn concurrency() -> usize {
@@ -395,41 +318,20 @@ struct CastVoteBundle {
 
 /// Generate a real cast-vote proof + share payloads for one voter at runtime.
 fn generate_cast_vote(
-    input: &CastVoteInputFixture,
+    input: &CastVoteInput,
     round_id: &pallas::Base,
     anchor_height: u32,
     ea_pk: pallas::Affine,
 ) -> CastVoteBundle {
-    let sk_bytes: [u8; 32] = B64.decode(&input.sk_b64).unwrap().try_into().unwrap();
-    let sk = orchard::keys::SpendingKey::from_bytes(sk_bytes).unwrap();
-    let van_comm_rand_bytes: [u8; 32] = B64
-        .decode(&input.van_comm_rand_b64)
-        .unwrap()
-        .try_into()
-        .unwrap();
-    let van_comm_rand: pallas::Base =
-        Option::from(pallas::Base::from_repr(van_comm_rand_bytes)).unwrap();
-
-    let tree_path: [pallas::Base; VOTE_COMM_TREE_DEPTH] = input
-        .tree_path_b64
-        .iter()
-        .map(|s| {
-            let bytes: [u8; 32] = B64.decode(s).unwrap().try_into().unwrap();
-            Option::from(pallas::Base::from_repr(bytes)).unwrap()
-        })
-        .collect::<Vec<_>>()
-        .try_into()
-        .unwrap();
-
     let alpha_v = pallas::Scalar::random(&mut OsRng);
 
     let bundle = build_vote_proof_from_delegation(
-        &sk,
+        &input.sk,
         1,
         input.total_note_value,
-        van_comm_rand,
+        input.van_comm_rand,
         *round_id,
-        tree_path,
+        input.tree_path,
         input.tree_position,
         anchor_height,
         1,
@@ -441,7 +343,7 @@ fn generate_cast_vote(
     )
     .expect("cast-vote proof generation failed");
 
-    let ask = orchard::keys::SpendAuthorizingKey::from(&sk);
+    let ask = orchard::keys::SpendAuthorizingKey::from(&input.sk);
     let rsk = ask.randomize(&alpha_v);
     let sighash = {
         let mut canonical = Vec::new();
@@ -518,32 +420,14 @@ fn generate_cast_vote(
 }
 
 #[test]
-#[ignore = "requires running chain + pre-generated fixtures"]
+#[ignore = "requires running chain + helper server"]
 fn voter_throughput_stress() {
-    let fixture_dir = resolve_voter_fixture_dir(
-        PathBuf::from(std::env::var("VOTER_FIXTURE_DIR").expect("VOTER_FIXTURE_DIR must be set"))
-            .as_path(),
-    )
-    .expect("resolve fixture dir");
+    let count = voter_count();
     let workers = concurrency();
     let timeout = phase_timeout();
     let w_interval = wave_interval();
     let share_stall = share_stall_timeout();
-
-    // -----------------------------------------------------------------------
-    // Load fixtures
-    // -----------------------------------------------------------------------
-    eprintln!("\n--- Loading fixtures ---");
-    let voter_cap: Option<usize> = std::env::var("STRESS_VOTER_COUNT")
-        .ok()
-        .and_then(|v| v.parse().ok());
-    let (manifest, delegations, cv_inputs) = load_fixtures(&fixture_dir, voter_cap);
-    let count = manifest.count;
     let w_size = wave_size();
-    eprintln!(
-        "Loaded {} delegations + {} cast-vote inputs from fixtures",
-        count, count
-    );
 
     eprintln!("\n=== Voter Throughput Stress Test (Full Pipeline) ===");
     eprintln!("  Voters:          {count}");
@@ -560,11 +444,21 @@ fn voter_throughput_stress() {
             .unwrap_or_else(|| "disabled".to_string())
     );
 
-    let round_id = b64_decode(&manifest.round_id_b64);
-    let round_id_hex = hex::encode(&round_id);
+    // -----------------------------------------------------------------------
+    // Prepare round-independent witnesses
+    // -----------------------------------------------------------------------
+    eprintln!("\n--- Setup: preparing {count} delegation witnesses ---");
+    let delegation_witness_prep_start = Instant::now();
+    let (prepared_bundles, round_fields) =
+        prepare_multi_delegation_bundles(count).expect("prepare delegation witnesses");
+    let delegation_witness_prep_elapsed = delegation_witness_prep_start.elapsed();
+    eprintln!(
+        "Prepared {count} delegation witnesses in {:.1}s",
+        delegation_witness_prep_elapsed.as_secs_f64()
+    );
 
     // -----------------------------------------------------------------------
-    // Setup: create round on-chain with matching round_fields
+    // Create the round and bind delegation proofs to its emitted ID
     // -----------------------------------------------------------------------
     eprintln!("\n--- Setup: creating voting round on-chain ---");
     ensure_pallas_key_registered();
@@ -572,18 +466,8 @@ fn voter_throughput_stress() {
     let config = default_cosmos_tx_config();
     let vote_manager_address = import_first_vote_manager_key(&config.home_dir);
 
-    let rf = &manifest.round_fields;
-    let setup_round_fields = e2e_tests::payloads::SetupRoundFields {
-        snapshot_height: rf.snapshot_height,
-        snapshot_blockhash: b64_decode(&rf.snapshot_blockhash).try_into().unwrap(),
-        proposals_hash: b64_decode(&rf.proposals_hash).try_into().unwrap(),
-        vote_end_time: rf.vote_end_time,
-        nullifier_imt_root: b64_decode(&rf.nullifier_imt_root).try_into().unwrap(),
-        nc_root: b64_decode(&rf.nc_root).try_into().unwrap(),
-    };
-
-    let (mut body, _, _derived_round_id) =
-        create_voting_session_payload(&vote_manager_address, 600, Some(setup_round_fields));
+    let (mut body, _, _) =
+        create_voting_session_payload(&vote_manager_address, 600, Some(round_fields));
     body = coordinator_action_proposal_payload(
         &vote_manager_address,
         body,
@@ -605,6 +489,33 @@ fn voter_throughput_stress() {
         json.get("log")
     );
 
+    let round_id_hex = wait_for_create_round_id(&json).expect("create tx should emit round_id");
+    let round_id = hex::decode(&round_id_hex).expect("round_id should be hex");
+    let round_id_fp: pallas::Base = {
+        let bytes: [u8; 32] = round_id
+            .as_slice()
+            .try_into()
+            .expect("round_id must be 32 bytes");
+        Option::from(pallas::Base::from_repr(bytes)).expect("round_id must be a Pallas base")
+    };
+
+    eprintln!("Building {count} delegation proofs for emitted round ID {round_id_hex}...");
+    let delegation_proof_start = Instant::now();
+    let bundles = prepared_bundles
+        .build_for_round_id(&round_id)
+        .expect("build delegation proofs for emitted round_id");
+    let delegation_proof_elapsed = delegation_proof_start.elapsed();
+    eprintln!(
+        "Built {count} round-bound delegation proofs in {:.1}s",
+        delegation_proof_elapsed.as_secs_f64()
+    );
+
+    let RoundBoundVoterInputs {
+        delegation_payloads,
+        cast_vote_inputs: cv_inputs,
+        expected_tree_root_b64,
+    } = build_round_bound_voter_inputs(&round_id, bundles);
+
     eprintln!("Waiting for round {} to become ACTIVE...", &round_id_hex);
     wait_for_round_status(&round_id_hex, SESSION_STATUS_ACTIVE, 90_000, 2_000)
         .expect("round should become ACTIVE");
@@ -620,7 +531,7 @@ fn voter_throughput_stress() {
     );
 
     // -----------------------------------------------------------------------
-    // Phase 1: Delegations (sequential to preserve fixture tree ordering)
+    // Phase 1: Delegations (sequential to preserve tree ordering)
     // -----------------------------------------------------------------------
     eprintln!(
         "\n--- Phase 1: Submitting {} delegations (sequential for tree ordering) ---",
@@ -628,18 +539,15 @@ fn voter_throughput_stress() {
     );
     let phase1_submit_start = Instant::now();
 
-    let deleg_payloads: Vec<(usize, serde_json::Value)> = delegations
-        .into_iter()
-        .enumerate()
-        .map(|(i, d)| (i, d.payload))
-        .collect();
+    let deleg_payloads: Vec<(usize, serde_json::Value)> =
+        delegation_payloads.into_iter().enumerate().collect();
 
     let deleg_result = submit_concurrent(
         deleg_payloads,
         "/shielded-vote/v1/delegate-vote",
         "delegation",
         &collector,
-        1, // sequential: preserve fixture tree leaf ordering
+        1, // sequential: preserve the generated tree leaf ordering
     );
     let deleg_ok = deleg_result.succeeded;
     let phase1_submit_elapsed = phase1_submit_start.elapsed();
@@ -670,17 +578,11 @@ fn voter_throughput_stress() {
         "tree size {} did not match expected {} on fresh chain",
         tree_size, expected_after_deleg
     );
-    if manifest.expected_tree_after_delegations.next_index == count as u64 {
-        assert_eq!(
-            on_chain_root, manifest.expected_tree_after_delegations.root_b64,
-            "on-chain tree root after delegations did not match fixture manifest"
-        );
-    }
+    assert_eq!(
+        on_chain_root, expected_tree_root_b64,
+        "on-chain tree root after delegations did not match generated inputs"
+    );
 
-    let round_id_fp: pallas::Base = {
-        let bytes: [u8; 32] = b64_decode(&manifest.round_id_b64).try_into().unwrap();
-        Option::from(pallas::Base::from_repr(bytes)).unwrap()
-    };
     let ea_pk_bytes =
         get_round_ea_pk(&round_id_hex).expect("ACTIVE round should have ea_pk from ceremony");
     let ea_pk_arr: [u8; 32] = ea_pk_bytes.try_into().expect("ea_pk must be 32 bytes");
@@ -702,12 +604,11 @@ fn voter_throughput_stress() {
     let completed = Arc::new(AtomicUsize::new(0));
     let total_proofs = count;
     let mut cv_bundles: Vec<(usize, CastVoteBundle)> = Vec::with_capacity(count);
-    let mut remaining: Vec<(usize, CastVoteInputFixture)> =
-        cv_inputs.into_iter().enumerate().collect();
+    let mut remaining: Vec<(usize, CastVoteInput)> = cv_inputs.into_iter().enumerate().collect();
 
     while !remaining.is_empty() {
         let chunk_size = proof_threads.min(remaining.len());
-        let chunk: Vec<(usize, CastVoteInputFixture)> = remaining.drain(..chunk_size).collect();
+        let chunk: Vec<(usize, CastVoteInput)> = remaining.drain(..chunk_size).collect();
         let handles: Vec<_> = chunk
             .into_iter()
             .map(|(idx, input)| {
@@ -1112,7 +1013,16 @@ fn voter_throughput_stress() {
 
     eprintln!("\n  Client-Side Prep (not server load)");
     eprintln!("  ─────────────────────────────────────────────────────────────");
-    eprintln!("  ZKP #1 proofs:       pre-generated offline (K=12)");
+    eprintln!(
+        "  ZKP #1 witnesses:    {} prepared in {}",
+        count,
+        fmt_dur(delegation_witness_prep_elapsed.as_secs_f64())
+    );
+    eprintln!(
+        "  ZKP #1 proofs:       {} generated for emitted round ID in {} (K=12)",
+        count,
+        fmt_dur(delegation_proof_elapsed.as_secs_f64())
+    );
     eprintln!(
         "  ZKP #2 proofs:       {} generated at runtime in {} ({:.1}s/proof avg, K=11)",
         count,
