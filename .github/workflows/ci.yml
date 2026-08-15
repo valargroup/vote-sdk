@@ -32,6 +32,8 @@ jobs:
         run: mise run lint
       - name: Test release channels
         run: scripts/test_release_channel.sh
+      - name: Test helper failed-share recovery
+        run: scripts/test_retry_failed_helper_shares.sh
       - name: Test coordinated upgrade scripts
         run: |
           bash -n join.sh scripts/_chain_upgrade_common.sh scripts/update_chain.sh scripts/update_chain.sh.template scripts/svoted-wrapper.sh scripts/ci/ensure_cosmovisor_runtime.sh scripts/disable-cosmovisor-backups.sh scripts/render-disable-cosmovisor-backups.sh scripts/test_disable_cosmovisor_backups.sh

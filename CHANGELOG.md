@@ -36,7 +36,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
   to receive a block time before generating another reveal proof, and prevent an
   unset time from being interpreted as an expired round. Limit each share to one
   outbound submission per locally committed height so a stalled chain cannot
-  exhaust its retry budget.
+  exhaust its retry budget. Add a dry-run-first validator recovery script that
+  requeues every retained failed share in an active round for reconciliation.
 
 ## v1.2.0
 
