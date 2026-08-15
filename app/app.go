@@ -87,6 +87,10 @@ type SvoteApp struct {
 	// Helper server (set externally by PostSetup, may be nil).
 	helperRef atomic.Pointer[helper.Helper]
 
+	// checkTxBlockTimeReady is published by Commit after BaseApp rebuilds its
+	// CheckTx state with the latest consensus header.
+	checkTxBlockTimeReady atomic.Bool
+
 	// Admin server (set externally by PostSetup, may be nil).
 	adminRef atomic.Pointer[admin.Admin]
 
@@ -146,6 +150,9 @@ func NewSvoteApp(
 	}
 
 	app.App = appBuilder.Build(db, traceStore, baseAppOptions...)
+	app.SetPrepareCheckStater(func(ctx sdk.Context) {
+		app.checkTxBlockTimeReady.Store(ctx.BlockTime().Unix() >= 0)
+	})
 
 	// Install custom TxDecoder that handles both vote wire format
 	// ([tag || protobuf_msg]) and standard Cosmos Tx encoding.
@@ -272,6 +279,12 @@ func (app *SvoteApp) InterfaceRegistry() codectypes.InterfaceRegistry {
 // TxConfig returns the app's TxConfig.
 func (app *SvoteApp) TxConfig() client.TxConfig {
 	return app.txConfig
+}
+
+// CheckTxBlockTimeReady reports whether Commit has initialized BaseApp's
+// CheckTx state with a non-negative consensus block time for this process.
+func (app *SvoteApp) CheckTxBlockTimeReady() bool {
+	return app.checkTxBlockTimeReady.Load()
 }
 
 // GetKey returns the KVStoreKey for the provided store key.

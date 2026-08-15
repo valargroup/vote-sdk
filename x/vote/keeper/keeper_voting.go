@@ -322,7 +322,16 @@ func (k *Keeper) ValidateRoundForVoting(ctx context.Context, roundID []byte) err
 	}
 
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	blockTime := uint64(sdkCtx.BlockTime().Unix())
+	blockTimeUnix := sdkCtx.BlockTime().Unix()
+	if blockTimeUnix < 0 {
+		// BaseApp starts CheckTx with an unset header after a process restart.
+		// FinalizeBlock always revalidates against the consensus block time.
+		if sdkCtx.IsCheckTx() || sdkCtx.IsReCheckTx() {
+			return nil
+		}
+		return fmt.Errorf("invalid block time %d", blockTimeUnix)
+	}
+	blockTime := uint64(blockTimeUnix)
 
 	if blockTime >= round.VoteEndTime {
 		return fmt.Errorf("%w: vote_end_time %d <= block_time %d", types.ErrRoundNotActive, round.VoteEndTime, blockTime)
