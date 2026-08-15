@@ -18,6 +18,10 @@ const maintenanceInterval = 30 * time.Second
 
 var errAwaitingCommit = errors.New("broadcast accepted; awaiting committed transaction")
 
+// ErrCheckTxNotReady means BaseApp has not received its first post-restart
+// block time yet. Processing should wait without generating a proof.
+var ErrCheckTxNotReady = errors.New("local CheckTx block time is not initialized")
+
 const (
 	failureStagePanic            = "panic"
 	failureStageRoundStatusCheck = "round_status_check"
@@ -325,6 +329,16 @@ func (p *Processor) processBatch(ctx context.Context) {
 			if p.isRoundActive != nil {
 				_, statusSpan := StartTrace(shareCtx, "helper.round_status_check", "helper.round_status_check", nil, nil)
 				active, err := p.isRoundActive(share.Payload.VoteRoundID)
+				if errors.Is(err, ErrCheckTxNotReady) {
+					statusSpan.Finish(nil)
+					shareSpan.SetData("outcome", "check_tx_not_ready")
+					p.logger.Debug("waiting for post-restart CheckTx block time",
+						"round_id", share.Payload.VoteRoundID,
+						"share_index", share.Payload.EncShare.ShareIndex,
+					)
+					p.store.MarkRetry(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+					return nil
+				}
 				statusSpan.Finish(err)
 				if err != nil {
 					err = retryableShareError(failureStageRoundStatusCheck, err)

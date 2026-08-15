@@ -361,6 +361,25 @@ func (s *ABCIIntegrationSuite) TestCheckTxVsRecheckTx() {
 	s.Require().Contains(recheckResp.Log, "nullifier already spent")
 }
 
+func (s *ABCIIntegrationSuite) TestCheckTxImmediatelyAfterRestart() {
+	setupMsg := testutil.ValidCreateVotingSessionAt(s.app.Time)
+	roundID := s.app.SeedVotingSession(setupMsg)
+	delegationTx := testutil.MustEncodeVoteTx(testutil.ValidDelegation(roundID, 0x21))
+
+	s.app.RestartBeforeNextBlock()
+
+	checkResp := s.app.CheckTxSync(delegationTx)
+	s.Require().Equal(
+		uint32(0),
+		checkResp.Code,
+		"CheckTx should use committed round status before the first post-restart block, got: %s",
+		checkResp.Log,
+	)
+
+	result := s.app.DeliverVoteTx(delegationTx)
+	s.Require().Equal(uint32(0), result.Code, "FinalizeBlock should still validate with its real block time: %s", result.Log)
+}
+
 // ---------------------------------------------------------------------------
 // 6.2.4: Commitment Tree Anchor Validation
 // ---------------------------------------------------------------------------

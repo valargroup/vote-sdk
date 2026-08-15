@@ -57,9 +57,11 @@ const testChainID = "svote-test-1"
 type TestApp struct {
 	*app.SvoteApp
 
-	t      *testing.T
-	Height int64
-	Time   time.Time
+	t       *testing.T
+	db      dbm.DB
+	appOpts servertypes.AppOptions
+	Height  int64
+	Time    time.Time
 	// ChainID is the chain identifier used for InitChain and tx signing.
 	ChainID string
 
@@ -303,12 +305,29 @@ func setupTestApp(t *testing.T, appOpts servertypes.AppOptions, chainID string) 
 	return &TestApp{
 		SvoteApp:        svoteApp,
 		t:               t,
+		db:              db,
+		appOpts:         appOpts,
 		Height:          1,
 		Time:            now,
 		ChainID:         chainID,
 		ProposerAddress: proposerAddr,
 		ValPrivKey:      privKey,
 	}
+}
+
+// RestartBeforeNextBlock rebuilds the application from committed state without
+// finalizing another block. This matches the CheckTx window immediately after
+// a validator process restart.
+func (ta *TestApp) RestartBeforeNextBlock() {
+	ta.t.Helper()
+	ta.SvoteApp = app.NewSvoteApp(
+		log.NewNopLogger(),
+		ta.db,
+		nil,
+		true,
+		ta.appOpts,
+		baseapp.SetChainID(ta.ChainID),
+	)
 }
 
 // SetupTestAppWithPallasKey creates a TestApp with both an EA keypair and a

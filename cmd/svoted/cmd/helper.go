@@ -263,8 +263,12 @@ func (r *keeperTreeReader) GetRoundInfo(roundID string) (helper.RoundInfo, error
 	}, nil
 }
 
-// GetRoundIsActive returns true if the round exists and has ACTIVE status.
+// GetRoundIsActive returns true if CheckTx is ready and the round has ACTIVE status.
 func (r *keeperTreeReader) GetRoundIsActive(roundID string) (bool, error) {
+	if r.app.GetContextForCheckTx(nil).BlockTime().Unix() < 0 {
+		return false, helper.ErrCheckTxNotReady
+	}
+
 	roundBytes, err := hex.DecodeString(roundID)
 	if err != nil {
 		return false, fmt.Errorf("invalid round_id hex: %v", err)

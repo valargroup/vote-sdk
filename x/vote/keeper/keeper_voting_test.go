@@ -2,6 +2,7 @@ package keeper_test
 
 import (
 	"bytes"
+	"time"
 
 	"cosmossdk.io/log"
 
@@ -452,6 +453,47 @@ func (s *KeeperTestSuite) TestValidateRoundForVoting() {
 			}
 		})
 	}
+}
+
+func (s *KeeperTestSuite) TestValidateRoundForVotingUnsetCheckTxTimeFallbackIsNarrow() {
+	kv := s.keeper.OpenKVStore(s.ctx)
+	s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+		VoteRoundId: testRoundID,
+		VoteEndTime: activeEndTime,
+		Status:      types.SessionStatus_SESSION_STATUS_ACTIVE,
+	}))
+
+	checkCtx := s.ctx.WithBlockTime(time.Time{}).WithIsCheckTx(true)
+	s.Require().NoError(s.keeper.ValidateRoundForVoting(checkCtx, testRoundID))
+
+	recheckCtx := s.ctx.WithBlockTime(time.Time{}).WithIsReCheckTx(true)
+	s.Require().NoError(s.keeper.ValidateRoundForVoting(recheckCtx, testRoundID))
+
+	expiredCheckCtx := s.ctx.WithBlockTime(time.Unix(int64(activeEndTime), 0)).WithIsCheckTx(true)
+	err := s.keeper.ValidateRoundForVoting(expiredCheckCtx, testRoundID)
+	s.Require().ErrorIs(err, types.ErrRoundNotActive)
+
+	s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+		VoteRoundId: testRoundID,
+		VoteEndTime: activeEndTime,
+		Status:      types.SessionStatus_SESSION_STATUS_TALLYING,
+	}))
+	err = s.keeper.ValidateRoundForVoting(checkCtx, testRoundID)
+	s.Require().ErrorIs(err, types.ErrRoundNotActive)
+}
+
+func (s *KeeperTestSuite) TestValidateRoundForVotingRejectsUnsetFinalizeBlockTime() {
+	kv := s.keeper.OpenKVStore(s.ctx)
+	s.Require().NoError(s.keeper.SetVoteRound(kv, &types.VoteRound{
+		VoteRoundId: testRoundID,
+		VoteEndTime: activeEndTime,
+		Status:      types.SessionStatus_SESSION_STATUS_ACTIVE,
+	}))
+
+	finalizeCtx := s.ctx.WithBlockTime(time.Time{})
+	err := s.keeper.ValidateRoundForVoting(finalizeCtx, testRoundID)
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "invalid block time")
 }
 
 // TestValidateRoundActive verifies the legacy wrapper delegates to ValidateRoundForVoting.
