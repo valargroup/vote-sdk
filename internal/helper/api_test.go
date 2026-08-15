@@ -532,6 +532,8 @@ func (m *vcMockTree) GetTreeStatus() (TreeStatus, error) {
 	return TreeStatus{LeafCount: 1, AnchorHeight: 1}, nil
 }
 
+func (m *vcMockTree) LatestBlockHeight() uint64 { return 1 }
+
 func (m *vcMockTree) MerklePath(_ uint64, _ uint32) ([]byte, error) {
 	return make([]byte, 772), nil
 }

@@ -10,9 +10,14 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 - Add a `v1.3.1` coordinated upgrade handler so testnet can rehearse the patch
   release and mainnet can skip the unapplied `v1.3.0` plan.
+- Add a checksum-pinned validator maintenance script that persists
+  `UNSAFE_SKIP_BACKUP=true`, verifies the restarted Cosmovisor service, and
+  removes only validated `data-backup-Y-M-D` directories.
 - After validator restarts, wait for CheckTx to receive a block time before
   generating another reveal proof, and prevent an unset time from being
-  interpreted as an expired round.
+  interpreted as an expired round. Limit each share to one outbound submission
+  per locally committed height so a stalled chain cannot exhaust its retry
+  budget.
 - Generate voter-throughput delegation proofs for the round ID emitted by the
   live chain and remove the incompatible shared proof fixtures.
 

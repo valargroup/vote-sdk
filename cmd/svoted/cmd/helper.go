@@ -169,6 +169,11 @@ func (r *keeperTreeReader) ForRound(id []byte) helper.TreeReader {
 	}
 }
 
+// LatestBlockHeight returns the latest locally committed chain height.
+func (r *keeperTreeReader) LatestBlockHeight() uint64 {
+	return r.app.CheckTxBlockHeight()
+}
+
 // GetTreeStatus returns lightweight tree statistics without reading leaf data.
 func (r *keeperTreeReader) GetTreeStatus() (helper.TreeStatus, error) {
 	ctx := r.app.NewUncachedContext(false, cmtproto.Header{})

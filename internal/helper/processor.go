@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"cosmossdk.io/log"
@@ -16,7 +17,10 @@ import (
 
 const maintenanceInterval = 30 * time.Second
 
-var errAwaitingCommit = errors.New("broadcast accepted; awaiting committed transaction")
+var (
+	errAwaitingCommit     = errors.New("broadcast accepted; awaiting committed transaction")
+	errWaitingForNewBlock = errors.New("share already submitted at the latest committed height")
+)
 
 // ErrCheckTxNotReady means BaseApp has not received its first post-restart
 // block time yet. Processing should wait without generating a proof.
@@ -125,6 +129,9 @@ type Processor struct {
 	maxConcurrent  int
 	isRoundActive  RoundStatusChecker
 	preProofDedupe *preProofShareDeduper
+	submitHeightMu sync.Mutex
+	submitHeight   uint64
+	submitKeys     map[string]struct{}
 }
 
 type ProcessorOption func(*Processor)
@@ -187,6 +194,7 @@ func NewProcessor(
 		logger:        logger,
 		maxConcurrent: maxConcurrent,
 		isRoundActive: isRoundActive,
+		submitKeys:    make(map[string]struct{}),
 	}
 	for _, option := range options {
 		option(p)
@@ -369,6 +377,12 @@ func (p *Processor) processBatch(ctx context.Context) {
 
 			if err := p.processShare(shareCtx, share); err != nil {
 				spanErr = err
+				if errors.Is(err, errWaitingForNewBlock) {
+					shareSpan.SetData("outcome", "waiting_for_new_block")
+					spanErr = nil
+					p.store.MarkRetry(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+					return nil
+				}
 				if errors.Is(err, errAwaitingCommit) {
 					shareSpan.SetData("outcome", "awaiting_commit")
 					spanErr = nil
@@ -403,6 +417,7 @@ func (p *Processor) processBatch(ctx context.Context) {
 
 			shareSpan.SetData("outcome", "submitted")
 			p.store.MarkSubmitted(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+			p.clearSubmitHeight(share)
 			p.logger.Info("share submitted",
 				"round_id", share.Payload.VoteRoundID,
 				"share_index", share.Payload.EncShare.ShareIndex,
@@ -476,6 +491,13 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 		)
 	}
 	anchorHeight := status.AnchorHeight
+	blockHeight := tree.LatestBlockHeight()
+	if blockHeight == 0 || p.submittedAtHeight(share, blockHeight) {
+		return retryableShareError(
+			failureStageSubmitChain,
+			fmt.Errorf("%w: %d", errWaitingForNewBlock, blockHeight),
+		)
+	}
 
 	// Compute Merkle authentication path via the persistent KV-backed tree.
 	// O(depth) shard reads — no leaf replay.
@@ -578,6 +600,16 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 		VoteCommTreeAnchorHeight: anchorHeight,
 	}
 
+	// Proof generation may cross a block boundary, so claim the height again
+	// immediately before the outbound request.
+	blockHeight = tree.LatestBlockHeight()
+	if blockHeight == 0 || !p.claimSubmitHeight(share, blockHeight) {
+		return retryableShareError(
+			failureStageSubmitChain,
+			fmt.Errorf("%w: %d", errWaitingForNewBlock, blockHeight),
+		)
+	}
+
 	// Submit to chain.
 	result, err := p.submitter.SubmitRevealShareContext(ctx, msg)
 	if err != nil {
@@ -607,6 +639,65 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	return retryableShareError(
 		failureStageSubmitChain,
 		fmt.Errorf("%w %s", errAwaitingCommit, result.TxHash),
+	)
+}
+
+// submittedAtHeight reports whether this process already sent the share at
+// height. Restarts clear this cache, but the post-restart CheckTx readiness gate
+// prevents processing until a newer block commits.
+func (p *Processor) submittedAtHeight(share QueuedShare, height uint64) bool {
+	p.submitHeightMu.Lock()
+	defer p.submitHeightMu.Unlock()
+
+	if !p.advanceSubmitHeightLocked(height) {
+		return true
+	}
+	_, submitted := p.submitKeys[shareScheduleKey(share)]
+	return submitted
+}
+
+// claimSubmitHeight records the outbound submission height unless the same
+// share was already submitted at that height.
+func (p *Processor) claimSubmitHeight(share QueuedShare, height uint64) bool {
+	p.submitHeightMu.Lock()
+	defer p.submitHeightMu.Unlock()
+
+	if !p.advanceSubmitHeightLocked(height) {
+		return false
+	}
+	key := shareScheduleKey(share)
+	if _, submitted := p.submitKeys[key]; submitted {
+		return false
+	}
+	p.submitKeys[key] = struct{}{}
+	return true
+}
+
+func (p *Processor) clearSubmitHeight(share QueuedShare) {
+	p.submitHeightMu.Lock()
+	defer p.submitHeightMu.Unlock()
+	delete(p.submitKeys, shareScheduleKey(share))
+}
+
+// advanceSubmitHeightLocked rotates the cache when height increases and
+// rejects stale observations so concurrent work cannot rotate it backwards.
+func (p *Processor) advanceSubmitHeightLocked(height uint64) bool {
+	if height < p.submitHeight {
+		return false
+	}
+	if height > p.submitHeight {
+		clear(p.submitKeys)
+		p.submitHeight = height
+	}
+	return true
+}
+
+func shareScheduleKey(share QueuedShare) string {
+	return schedKey(
+		share.Payload.VoteRoundID,
+		share.Payload.EncShare.ShareIndex,
+		share.Payload.ProposalID,
+		share.Payload.TreePosition,
 	)
 }
 
