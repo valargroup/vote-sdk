@@ -95,27 +95,31 @@ curl -fsSL "https://shielded-vote.nyc3.digitaloceanspaces.com/scripts/upgrade/${
 After scheduling, rerun `verify-prestage` without `--allow-no-plan` so the
 staged layout is checked against the on-chain name and height.
 
-## v1.3.0 coordinated cutover
+## v1.3.1 coordinated cutover
 
-The `v1.3.0` verifier accepts the new proof sizes and authenticated dynamic
-round configuration used by the matching wallet release. Validators must
-therefore switch binaries through a coordinated halt. The upgrade handler does
-not migrate stores.
+The `v1.3.1` release supersedes `v1.3.0` for new deployments. It retains the
+new proof sizes and authenticated dynamic round configuration used by the
+matching wallet release while fixing helper processing immediately after a
+validator restart. The `v1.3.0` tag remains immutable as the release applied on
+testnet, but it must not be scheduled on mainnet.
 
-Use `v1.3.0` as both the release tag and plan name on testnet and mainnet. Testnet
-must complete the final-tag rehearsal before the mainnet plan is scheduled.
+Use `v1.3.1` as both the release tag and plan name. Its upgrade handler does not
+migrate stores, so testnet can schedule it after its applied `v1.3.0` plan and
+mainnet can schedule it directly without first applying `v1.3.0`. Testnet must
+complete the patch-release rehearsal before the mainnet plan is scheduled.
 
-Pre-stage the held release on every validator before scheduling either plan:
+Pre-stage the held release on every validator before scheduling either
+network's plan:
 
 ```bash
-TAG=v1.3.0
+TAG=v1.3.1
 PLAN_NAME="${TAG}"
 curl -fsSL "https://shielded-vote.nyc3.digitaloceanspaces.com/scripts/upgrade/${TAG}/update_chain.sh" | sudo bash -s -- \
   --mode prepare --plan-name "${PLAN_NAME}" --tag "${TAG}" --allow-no-plan
 ```
 
 After scheduling, rerun `verify-prestage` without `--allow-no-plan` and verify
-that every validator resumes on `v1.3.0` before starting a new vote round.
+that every validator resumes on `v1.3.1` before starting a new vote round.
 
 ## Held release and promotion
 

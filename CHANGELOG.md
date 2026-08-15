@@ -6,6 +6,16 @@ Historical changes before commit `704b202e2088b91caeaf2290cef85e4a9a759542` are 
 
 Instructions on coordinated upgrades can be found [here](https://setup.valargroup.org/#coordinated-upgrade).
 
+## v1.3.1
+
+- Add a `v1.3.1` coordinated upgrade handler so testnet can rehearse the patch
+  release and mainnet can skip the unapplied `v1.3.0` plan.
+- After validator restarts, wait for CheckTx to receive a block time before
+  generating another reveal proof, and prevent an unset time from being
+  interpreted as an expired round.
+- Generate voter-throughput delegation proofs for the round ID emitted by the
+  live chain and remove the incompatible shared proof fixtures.
+
 ## v1.3.0
 
 - Publish the standalone Linux AMD64 `voting-config` verifier and checksum with
@@ -29,9 +39,7 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 - Exclude shares first received at or after a round's close time from close-time
   unsubmitted-share alerts.
 - Preserve reveal-share witnesses after CheckTx acceptance while bounded retries
-  check for the committed nullifier. After validator restarts, wait for CheckTx
-  to receive a block time before generating another reveal proof, and prevent an
-  unset time from being interpreted as an expired round.
+  check for the committed nullifier.
 
 ## v1.2.0
 
