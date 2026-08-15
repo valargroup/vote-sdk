@@ -1,9 +1,7 @@
 //! Build a real delegation bundle for E2E tests (ZKP #1 + RedPallas).
 //!
-//! Generates session params with a fixed far-future vote_end_time and a canonical
-//! vote_round_id, then builds the delegation bundle and RedPallas signature.
-//! Since vote_end_time is hashed into round_id (a ZKP public input), using a
-//! constant value makes fixtures reusable indefinitely.
+//! Prepares session parameters and delegation witnesses, then binds each proof
+//! and RedPallas signature to the round ID emitted by the chain.
 
 use crate::payloads::{DelegationBundlePayload, SetupRoundFields};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
@@ -27,9 +25,8 @@ use voting_circuits::delegation::{
 };
 use zcash_voting::VotingHotkey;
 
-/// Far-future vote_end_time (Jan 1 2100 UTC). Since vote_end_time is hashed
-/// into round_id (which is a ZKP public input), fixtures bind to it permanently.
-/// Using a fixed far-future value makes fixtures reusable indefinitely.
+/// Far-future vote_end_time (Jan 1 2100 UTC) for long-running E2E tests.
+/// The emitted round ID still includes the chain's actual creation height.
 const FAR_FUTURE_VOTE_END_TIME: u64 = 4102444800;
 
 #[derive(Deserialize)]
@@ -211,9 +208,9 @@ fn rk_bytes_from_instance(instance: &voting_circuits::delegation::Instance) -> [
 /// The returned witness data must be bound to the actual round ID emitted by
 /// MsgCreateVotingSession before submitting MsgDelegateVote.
 ///
-/// `vote_end_time_override`: if None, uses FAR_FUTURE_VOTE_END_TIME (fixtures
-/// reusable indefinitely). Pass `Some(now + secs)` when the test needs the round
-/// to transition to TALLYING within a specific window.
+/// `vote_end_time_override`: if None, uses FAR_FUTURE_VOTE_END_TIME. Pass
+/// `Some(now + secs)` when the test needs the round to transition to TALLYING
+/// within a specific window.
 ///
 /// If `sk_override` is Some, uses that SpendingKey (e.g. derived from a hotkey seed
 /// via ZIP-32, for testing the zcash_voting path). Otherwise generates a random key.
