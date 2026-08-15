@@ -8,6 +8,9 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Add a checksum-pinned validator maintenance script that persists
+  `UNSAFE_SKIP_BACKUP=true`, verifies the restarted Cosmovisor service, and
+  removes only validated `data-backup-Y-M-D` directories.
 - Publish the standalone Linux AMD64 `voting-config` verifier and checksum with
   each release so config repositories can pin an immutable auth-v2-capable tool.
 - Add `v1.3.0-rc.1` and `v1.3.0` coordinated upgrade handlers and align the

@@ -34,11 +34,12 @@ jobs:
         run: scripts/test_release_channel.sh
       - name: Test coordinated upgrade scripts
         run: |
-          bash -n join.sh scripts/_chain_upgrade_common.sh scripts/update_chain.sh scripts/update_chain.sh.template scripts/svoted-wrapper.sh scripts/ci/ensure_cosmovisor_runtime.sh
+          bash -n join.sh scripts/_chain_upgrade_common.sh scripts/update_chain.sh scripts/update_chain.sh.template scripts/svoted-wrapper.sh scripts/ci/ensure_cosmovisor_runtime.sh scripts/disable-cosmovisor-backups.sh scripts/render-disable-cosmovisor-backups.sh scripts/test_disable_cosmovisor_backups.sh
           scripts/test_chain_upgrade_signer_detect.sh
           scripts/test_chain_upgrade_runtime_mode.sh
           scripts/test_chain_upgrade_recovery.sh
           scripts/test_svoted_wrapper.sh
+          scripts/test_disable_cosmovisor_backups.sh
 
   admin-ui:
     name: Admin UI Lint and Build
