@@ -68,19 +68,15 @@ function isRoundIdHex(value: string): boolean {
 function roundLabel(round: chainApi.ChainRound): string {
   const roundId = base64ToHex(round.vote_round_id ?? "");
   const title = round.title || round.description || "Untitled round";
-  const status = String(round.status ?? "unknown").replace(/^SESSION_STATUS_/, "").toLowerCase();
+  const status = chainApi.isActiveRoundStatus(round.status)
+    ? "active"
+    : String(round.status ?? "unknown").replace(/^SESSION_STATUS_/, "").toLowerCase();
   return `${title} (${status}) - ${roundId.slice(0, 12)}`;
 }
 
 function defaultRoundId(rounds: chainApi.ChainRound[]): string {
   const active = chainApi.getPrimaryActiveRoundFromList(rounds);
-  const candidate = active ?? [...rounds].sort((a, b) => {
-    const ah = Number(a.created_at_height ?? 0);
-    const bh = Number(b.created_at_height ?? 0);
-    if (ah !== bh) return bh - ah;
-    return Number(b.vote_end_time ?? 0) - Number(a.vote_end_time ?? 0);
-  })[0];
-  return candidate?.vote_round_id ? base64ToHex(candidate.vote_round_id) : "";
+  return active?.vote_round_id ? base64ToHex(active.vote_round_id) : "";
 }
 
 function formatTime(seconds: number): string {
@@ -799,8 +795,7 @@ export function QueueMonitorPage() {
 
   const roundOptions = useMemo(
     () =>
-      [...rounds]
-        .sort((a, b) => Number(b.created_at_height ?? 0) - Number(a.created_at_height ?? 0))
+      chainApi.getActiveRoundsFromList(rounds)
         .map((round) => ({
           id: base64ToHex(round.vote_round_id ?? ""),
           label: roundLabel(round),
@@ -857,7 +852,7 @@ export function QueueMonitorPage() {
     }
     try {
       const [roundResp, config] = await Promise.all([
-        chainApi.listRounds(),
+        chainApi.getActiveRounds(),
         chainApi.getVotingConfig(),
       ]);
       if (refreshId !== metadataRefreshIdRef.current) return;
@@ -868,7 +863,11 @@ export function QueueMonitorPage() {
         sameServiceEntries(current, loadedServers) ? current : loadedServers
       );
       setSelectedRoundId((current) => {
-        if (isRoundIdHex(current)) return current;
+        const normalized = current.trim().toLowerCase();
+        const currentIsActive = loadedRounds.some(
+          (round) => base64ToHex(round.vote_round_id ?? "") === normalized
+        );
+        if (currentIsActive) return normalized;
         return defaultRoundId(loadedRounds);
       });
     } catch (err) {
@@ -951,6 +950,10 @@ export function QueueMonitorPage() {
       return next;
     });
   }, [invalidateSummaries, voteServers]);
+
+  useEffect(() => {
+    invalidateSummaries();
+  }, [invalidateSummaries, selectedRoundId]);
 
   useEffect(() => {
     void refreshSummaries();
@@ -1085,7 +1088,7 @@ export function QueueMonitorPage() {
               >
                 {metadataLoading && <option value="">Loading rounds...</option>}
                 {!metadataLoading && roundOptions.length === 0 && (
-                  <option value="">No chain rounds found</option>
+                  <option value="">No active rounds found</option>
                 )}
                 {!metadataLoading &&
                   roundOptions.map((round) => (
@@ -1102,12 +1105,9 @@ export function QueueMonitorPage() {
               </span>
               <input
                 value={selectedRoundId}
-                onChange={(event) => {
-                  invalidateSummaries();
-                  setSelectedRoundId(event.target.value.trim());
-                }}
+                readOnly
                 placeholder="64 character round id"
-                className="w-full rounded-lg border border-border-subtle bg-surface-2 px-3 py-2 font-mono text-xs text-text-primary outline-none placeholder:text-text-muted"
+                className="w-full cursor-default rounded-lg border border-border-subtle bg-surface-2 px-3 py-2 font-mono text-xs text-text-primary outline-none placeholder:text-text-muted"
               />
             </label>
           </div>
