@@ -1,6 +1,6 @@
 // Tailwind safelist for dynamically-constructed binary-vote classes:
 // bg-success bg-success/10 bg-success/60 bg-danger bg-danger/10 bg-danger/60 text-success text-danger
-import { useState, useCallback, useRef, useEffect } from "react";
+import { Fragment, useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
 import { ProposalEditor } from "./components/ProposalEditor";
@@ -35,6 +35,12 @@ import { describeCoordinatorActionPayload } from "./api/coordinatorActions";
 import { useWallet } from "./hooks/useWallet";
 import type { UseWallet } from "./hooks/useWallet";
 import { useUIConfig } from "./store/uiConfigContext";
+import {
+  COMPLETED_ROUNDS_PAGE_SIZE,
+  isTerminalVoteRoundStatus,
+  partitionVoteStatusRounds,
+  shouldEagerlyLoadVoteSummary,
+} from "./utils/voteStatus";
 
 // Matches the iOS voteOptionColor palette in VotingComponents.swift.
 // For 2-option proposals: green, red. For 3+: cycles through 8 colors.
@@ -3022,6 +3028,39 @@ interface VoteStatusViewProps {
   onBackToList: () => void;
 }
 
+interface VoteSummaryBatch {
+  summaries: Record<string, chainApi.VoteSummaryResponse>;
+  errors: Record<string, string>;
+}
+
+async function fetchVoteSummaryBatch(
+  rounds: chainApi.ChainRound[]
+): Promise<VoteSummaryBatch> {
+  const entries = await Promise.all(
+    rounds.map(async (round) => {
+      const id = round.vote_round_id ?? "";
+      if (!id) return null;
+      try {
+        const summary = await chainApi.getVoteSummary(base64ToHex(id));
+        return { id, summary, error: null };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn(`VoteSummary failed for ${id.slice(0, 12)}:`, message);
+        return { id, summary: null, error: message };
+      }
+    })
+  );
+
+  const summaries: Record<string, chainApi.VoteSummaryResponse> = {};
+  const errors: Record<string, string> = {};
+  for (const entry of entries) {
+    if (!entry) continue;
+    if (entry.summary) summaries[entry.id] = entry.summary;
+    if (entry.error) errors[entry.id] = entry.error;
+  }
+  return { summaries, errors };
+}
+
 function VoteStatusView({
   expectRoundCount,
   selectedRoundIdHex,
@@ -3036,10 +3075,14 @@ function VoteStatusView({
   const [endorsedByRound, setEndorsedByRound] = useState<Record<string, string[]>>({});
   const [endorsementError, setEndorsementError] = useState("");
   const [validatorMonikers, setValidatorMonikers] = useState<Record<string, string>>({});
+  const [completedRoundsOpen, setCompletedRoundsOpen] = useState(false);
+  const [completedRoundLimit, setCompletedRoundLimit] = useState(COMPLETED_ROUNDS_PAGE_SIZE);
+  const [completedSummariesLoading, setCompletedSummariesLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const zcashChain = useChainInfo();
   const pollingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const completedSummaryInFlightRef = useRef(new Set<string>());
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -3056,13 +3099,41 @@ function VoteStatusView({
       });
       setRounds(allRounds);
 
-      const activeSnapshotEntries = chainApi.getActiveRoundsFromList(allRounds)
-        .map((round) => ({
-          roundId: round.vote_round_id ?? "",
-          height: Number(round.snapshot_height ?? 0),
-        }))
-        .filter((entry) => entry.roundId && Number.isFinite(entry.height) && entry.height > 0);
-      if (activeSnapshotEntries.length > 0) {
+      const roundById = new Map(
+        allRounds.map((round) => [round.vote_round_id ?? "", round])
+      );
+      setSummaries((current) => Object.fromEntries(
+        Object.entries(current).filter(([id, summary]) => {
+          const round = roundById.get(id);
+          return (
+            round !== undefined &&
+            isTerminalVoteRoundStatus(round.status) &&
+            isTerminalVoteRoundStatus(summary.status)
+          );
+        })
+      ));
+
+      const { currentRounds } = partitionVoteStatusRounds(allRounds);
+      const eagerSummaryRounds = currentRounds.filter(
+        (round) => shouldEagerlyLoadVoteSummary(round.status)
+      );
+
+      // These data sources are independent. Let current results appear as soon
+      // as their small batch completes instead of gating them behind snapshot
+      // and endorsement checks.
+      const summaryPromise = fetchVoteSummaryBatch(eagerSummaryRounds).then((batch) => {
+        setSummaries((current) => ({ ...current, ...batch.summaries }));
+        setSummaryErrors((current) => ({ ...current, ...batch.errors }));
+      });
+
+      const snapshotPromise = (async () => {
+        const activeSnapshotEntries = chainApi.getActiveRoundsFromList(allRounds)
+          .map((round) => ({
+            roundId: round.vote_round_id ?? "",
+            height: Number(round.snapshot_height ?? 0),
+          }))
+          .filter((entry) => entry.roundId && Number.isFinite(entry.height) && entry.height > 0);
+        if (activeSnapshotEntries.length === 0) return;
         if (!precomputedBaseURL || !zcashNetwork) {
           setSnapshotWarnings(Object.fromEntries(
             activeSnapshotEntries.map((entry) => [
@@ -3070,93 +3141,72 @@ function VoteStatusView({
               "Cannot validate the published PIR snapshot because this svoted did not expose its snapshot base and Zcash network.",
             ])
           ));
-        } else {
-          const validations = await Promise.all(
-            activeSnapshotEntries.map(async (entry) => {
-              const validation = await chainApi.validatePublishedSnapshotManifest(
-                precomputedBaseURL,
-                zcashNetwork,
-                entry.height
-              );
-              if (validation.status === "valid") return null;
-              const message =
-                validation.status === "missing"
-                  ? `No published PIR snapshot exists for height ${entry.height.toLocaleString()}.`
-                  : validation.status === "invalid"
-                    ? `Published PIR snapshot manifest is invalid: ${(validation.issues ?? []).join("; ")}`
-                    : validation.message ?? "Could not validate published PIR snapshot.";
-              return [entry.roundId, message] as const;
-            })
-          );
-          setSnapshotWarnings(Object.fromEntries(validations.filter((entry) => entry !== null)));
+          return;
         }
-      }
 
-      try {
-        const endorsersResp = await chainApi.getEndorsers();
-        const endorsementEntries = await Promise.all(
-          endorsersResp.endorsers.map(async (endorser) => {
-            try {
-              const endorsed = await chainApi.getEndorsedRounds(endorser.endorser_id);
-              return {
-                endorserID: endorser.endorser_id,
-                roundIDs: endorsed.vote_round_ids.map(base64ToHex),
-                error: "",
-              };
-            } catch (err) {
-              return {
-                endorserID: endorser.endorser_id,
-                roundIDs: [],
-                error: err instanceof Error ? err.message : String(err),
-              };
-            }
+        const validations = await Promise.all(
+          activeSnapshotEntries.map(async (entry) => {
+            const validation = await chainApi.validatePublishedSnapshotManifest(
+              precomputedBaseURL,
+              zcashNetwork,
+              entry.height
+            );
+            if (validation.status === "valid") return null;
+            const message =
+              validation.status === "missing"
+                ? `No published PIR snapshot exists for height ${entry.height.toLocaleString()}.`
+                : validation.status === "invalid"
+                  ? `Published PIR snapshot manifest is invalid: ${(validation.issues ?? []).join("; ")}`
+                  : validation.message ?? "Could not validate published PIR snapshot.";
+            return [entry.roundId, message] as const;
           })
         );
-        const byRound: Record<string, string[]> = {};
-        const failedEndorsers: string[] = [];
-        for (const entry of endorsementEntries) {
-          if (entry.error) {
-            failedEndorsers.push(entry.endorserID);
-            continue;
-          }
-          for (const roundID of entry.roundIDs) {
-            byRound[roundID] = [...(byRound[roundID] ?? []), entry.endorserID];
-          }
-        }
-        setEndorsedByRound(byRound);
-        if (failedEndorsers.length > 0) {
-          setEndorsementError(`Endorsements unavailable for ${failedEndorsers.join(", ")}.`);
-        }
-      } catch (err) {
-        setEndorsedByRound({});
-        setEndorsementError(`Endorsements unavailable: ${err instanceof Error ? err.message : String(err)}`);
-      }
+        setSnapshotWarnings(Object.fromEntries(validations.filter((entry) => entry !== null)));
+      })();
 
-      // Fetch vote summary for each round in parallel.
-      const entries = await Promise.all(
-        allRounds.map(async (r) => {
-          const id = r.vote_round_id ?? "";
-          if (!id) return null;
-          try {
-            const hex = base64ToHex(id);
-            const summary = await chainApi.getVoteSummary(hex);
-            return { id, summary, error: null };
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            console.warn(`VoteSummary failed for ${id.slice(0, 12)}:`, msg);
-            return { id, summary: null, error: msg };
+      const endorsementPromise = (async () => {
+        try {
+          const endorsersResp = await chainApi.getEndorsers();
+          const endorsementEntries = await Promise.all(
+            endorsersResp.endorsers.map(async (endorser) => {
+              try {
+                const endorsed = await chainApi.getEndorsedRounds(endorser.endorser_id);
+                return {
+                  endorserID: endorser.endorser_id,
+                  roundIDs: endorsed.vote_round_ids.map(base64ToHex),
+                  error: "",
+                };
+              } catch (err) {
+                return {
+                  endorserID: endorser.endorser_id,
+                  roundIDs: [],
+                  error: err instanceof Error ? err.message : String(err),
+                };
+              }
+            })
+          );
+          const byRound: Record<string, string[]> = {};
+          const failedEndorsers: string[] = [];
+          for (const entry of endorsementEntries) {
+            if (entry.error) {
+              failedEndorsers.push(entry.endorserID);
+              continue;
+            }
+            for (const roundID of entry.roundIDs) {
+              byRound[roundID] = [...(byRound[roundID] ?? []), entry.endorserID];
+            }
           }
-        })
-      );
-      const map: Record<string, chainApi.VoteSummaryResponse> = {};
-      const errs: Record<string, string> = {};
-      for (const entry of entries) {
-        if (!entry) continue;
-        if (entry.summary) map[entry.id] = entry.summary;
-        if (entry.error) errs[entry.id] = entry.error;
-      }
-      setSummaries(map);
-      setSummaryErrors(errs);
+          setEndorsedByRound(byRound);
+          if (failedEndorsers.length > 0) {
+            setEndorsementError(`Endorsements unavailable for ${failedEndorsers.join(", ")}.`);
+          }
+        } catch (err) {
+          setEndorsedByRound({});
+          setEndorsementError(`Endorsements unavailable: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      })();
+
+      await Promise.all([summaryPromise, snapshotPromise, endorsementPromise]);
       return allRounds.length;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -3217,6 +3267,97 @@ function VoteStatusView({
       cancelled = true;
     };
   }, [selectedRoundIdHex]);
+
+  const { currentRounds, completedRounds } = useMemo(
+    () => partitionVoteStatusRounds(rounds),
+    [rounds]
+  );
+  const visibleCompletedRounds = useMemo(
+    () => completedRounds.slice(0, completedRoundLimit),
+    [completedRoundLimit, completedRounds]
+  );
+  const displayedRounds = useMemo(
+    () => [
+      ...currentRounds,
+      ...(completedRoundsOpen ? visibleCompletedRounds : []),
+    ],
+    [completedRoundsOpen, currentRounds, visibleCompletedRounds]
+  );
+  const roundIndexById = useMemo(
+    () => new Map(rounds.map((round, index) => [round.vote_round_id ?? "", index])),
+    [rounds]
+  );
+
+  useEffect(() => {
+    if (!completedRoundsOpen) return;
+    const missingRounds = visibleCompletedRounds.filter((round) => {
+      const id = round.vote_round_id ?? "";
+      return (
+        id !== "" &&
+        summaries[id] === undefined &&
+        summaryErrors[id] === undefined &&
+        !completedSummaryInFlightRef.current.has(id)
+      );
+    });
+    if (missingRounds.length === 0) return;
+
+    for (const round of missingRounds) {
+      const id = round.vote_round_id;
+      if (id) completedSummaryInFlightRef.current.add(id);
+    }
+    setCompletedSummariesLoading(true);
+    void fetchVoteSummaryBatch(missingRounds)
+      .then((batch) => {
+        setSummaries((current) => ({ ...current, ...batch.summaries }));
+        setSummaryErrors((current) => ({ ...current, ...batch.errors }));
+      })
+      .finally(() => {
+        for (const round of missingRounds) {
+          const id = round.vote_round_id;
+          if (id) completedSummaryInFlightRef.current.delete(id);
+        }
+        setCompletedSummariesLoading(completedSummaryInFlightRef.current.size > 0);
+      });
+  }, [
+    completedRoundsOpen,
+    summaries,
+    summaryErrors,
+    visibleCompletedRounds,
+  ]);
+
+  const completedRoundsControl = completedRounds.length > 0 ? (
+    <button
+      type="button"
+      onClick={() => setCompletedRoundsOpen((open) => !open)}
+      aria-expanded={completedRoundsOpen}
+      className="flex w-full items-center justify-between gap-3 rounded-xl border border-border-subtle bg-surface-1 px-5 py-4 text-left transition-colors hover:bg-surface-2"
+    >
+      <span className="flex min-w-0 items-center gap-3">
+        <ChevronDown
+          size={15}
+          className={`shrink-0 text-text-muted transition-transform ${completedRoundsOpen ? "rotate-180" : ""}`}
+        />
+        <span className="min-w-0">
+          <span className="block text-xs font-semibold text-text-primary">
+            Completed rounds
+          </span>
+          <span className="block truncate text-[10px] text-text-muted">
+            {completedRoundsOpen
+              ? `Showing ${visibleCompletedRounds.length} of ${completedRounds.length}`
+              : "Hidden until you need historical results"}
+          </span>
+        </span>
+      </span>
+      <span className="flex shrink-0 items-center gap-2">
+        {completedSummariesLoading && (
+          <Loader2 size={12} className="animate-spin text-text-muted" />
+        )}
+        <span className="rounded-full bg-surface-3 px-2 py-0.5 font-mono text-[10px] text-text-secondary">
+          {completedRounds.length.toLocaleString()}
+        </span>
+      </span>
+    </button>
+  ) : null;
 
   const normalizedSelectedRoundId = selectedRoundIdHex
     ? normalizeHex(selectedRoundIdHex)
@@ -3289,9 +3430,9 @@ function VoteStatusView({
         )}
 
         <div className="space-y-6">
-          {[...rounds].reverse().map((round, i) => {
-            const roundIdx = rounds.length - 1 - i;
+          {displayedRounds.map((round, i) => {
             const roundId = round.vote_round_id ?? "";
+            const roundIdx = roundIndexById.get(roundId) ?? i;
             const summary = summaries[roundId];
             const statusKey = summary?.status ?? round.status ?? "";
             const isFinalized =
@@ -3323,10 +3464,9 @@ function VoteStatusView({
                 : null;
 
             return (
-              <div
-                key={roundId}
-                className="bg-surface-1 border border-border-subtle rounded-xl overflow-hidden"
-              >
+              <Fragment key={roundId}>
+                {completedRoundsOpen && i === currentRounds.length && completedRoundsControl}
+                <div className="bg-surface-1 border border-border-subtle rounded-xl overflow-hidden">
                 {/* Round header */}
                 <div className="px-5 py-4">
                   <div className="flex items-center justify-between">
@@ -3457,7 +3597,7 @@ function VoteStatusView({
                 {/* Proposals */}
                 {summary?.proposals && summary.proposals.length > 0 && (
                   <div className="px-5 pb-4 space-y-3">
-                    {summary.proposals.map((prop) => {
+                    {summary.proposals.map((prop, proposalIndex) => {
                       const options = prop.options ?? [];
 
                       // Finalized: use total_value for bars & result.
@@ -3496,7 +3636,7 @@ function VoteStatusView({
 
                       return (
                         <div
-                          key={prop.id}
+                          key={prop.id ?? proposalIndex}
                           className="bg-surface-2 rounded-lg p-3"
                         >
                           <div className="flex items-center gap-2 mb-2">
@@ -3532,7 +3672,7 @@ function VoteStatusView({
 
                           {/* Option bars */}
                           <div className="space-y-3">
-                            {options.map((opt) => {
+                            {options.map((opt, optionIndex) => {
                               const shares = Number(opt.ballot_count ?? 0);
                               const value = Number(opt.total_value ?? 0);
                               const barValue = isFinalized ? value : shares;
@@ -3550,7 +3690,7 @@ function VoteStatusView({
                               const oColor = optionColor(opt.index ?? 0, options.length);
 
                               return (
-                                <div key={opt.index} className="space-y-0.5">
+                                <div key={opt.index ?? optionIndex} className="space-y-0.5">
                                   <div className="flex items-center justify-between">
                                     <span className="min-w-0 flex-1 pr-3">
                                       <span
@@ -3627,9 +3767,9 @@ function VoteStatusView({
                         Summary unavailable: {summaryErrors[roundId]}
                       </p>
                     )}
-                    {round.proposals.map((p) => (
+                    {round.proposals.map((p, proposalIndex) => (
                       <div
-                        key={p.id}
+                        key={p.id ?? proposalIndex}
                         className="bg-surface-2 rounded-lg p-3"
                       >
                         <div className="flex items-center gap-2">
@@ -3649,9 +3789,27 @@ function VoteStatusView({
                     ))}
                   </div>
                 )}
-              </div>
+                </div>
+              </Fragment>
             );
           })}
+          {!completedRoundsOpen && completedRoundsControl}
+          {completedRoundsOpen && visibleCompletedRounds.length < completedRounds.length && (
+            <button
+              type="button"
+              onClick={() =>
+                setCompletedRoundLimit((current) =>
+                  Math.min(current + COMPLETED_ROUNDS_PAGE_SIZE, completedRounds.length)
+                )
+              }
+              className="w-full rounded-lg border border-border-subtle bg-surface-1 px-4 py-3 text-[11px] font-semibold text-text-secondary transition-colors hover:bg-surface-2 hover:text-text-primary"
+            >
+              Load {Math.min(
+                COMPLETED_ROUNDS_PAGE_SIZE,
+                completedRounds.length - visibleCompletedRounds.length
+              )} more completed rounds
+            </button>
+          )}
         </div>
       </div>
     </div>

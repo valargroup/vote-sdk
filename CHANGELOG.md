@@ -6,6 +6,12 @@ Historical changes before commit `704b202e2088b91caeaf2290cef85e4a9a759542` are 
 
 Instructions on coordinated upgrades can be found [here](https://setup.valargroup.org/#coordinated-upgrade).
 
+## Unreleased
+
+- Limit helper share queue selection to active rounds, and keep Vote Status
+  responsive on long-running chains by loading current summaries first while
+  completed history stays collapsed and loads ten rounds at a time.
+
 ## v1.3.1
 
 - Add a `v1.3.1` coordinated upgrade handler so testnet can rehearse the patch
