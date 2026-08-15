@@ -109,12 +109,15 @@ func preloadFailedAttempts(t *testing.T, store *ShareStore, roundID string, atte
 type mockTreeReader struct {
 	leafCount    uint64
 	anchorHeight uint64
+	blockHeight  atomic.Uint64
 	leaves       map[uint64][]byte
 	err          error
 	pathErr      error
 }
 
 func (m *mockTreeReader) ForRound(_ []byte) TreeReader { return m }
+
+func (m *mockTreeReader) LatestBlockHeight() uint64 { return m.blockHeight.Load() }
 
 func (m *mockTreeReader) GetTreeStatus() (TreeStatus, error) {
 	if m.err != nil {
@@ -147,10 +150,12 @@ func (m *mockTreeReader) LeafAt(position uint64) ([]byte, error) {
 }
 
 func newMockTreeReader() *mockTreeReader {
-	return &mockTreeReader{
+	tree := &mockTreeReader{
 		leafCount:    1,
 		anchorHeight: 1,
 	}
+	tree.blockHeight.Store(1)
+	return tree
 }
 
 type roundAwareTreeState struct {
@@ -180,6 +185,8 @@ func (r *roundAwareTreeReader) ForRound(roundID []byte) TreeReader {
 		roundID: hex.EncodeToString(roundID),
 	}
 }
+
+func (r *roundAwareTreeReader) LatestBlockHeight() uint64 { return 1 }
 
 func (r *roundAwareTreeReader) GetTreeStatus() (TreeStatus, error) {
 	leafCount, ok := r.state.leafCounts[r.roundID]
@@ -274,13 +281,15 @@ func TestProcessor_ProcessBatch_WaitsForCheckTxBeforeProof(t *testing.T) {
 	assert.Equal(t, 1, status[roundID].Submitted)
 }
 
-func TestProcessor_ProcessBatch_BroadcastAcceptedRetriesAreBounded(t *testing.T) {
+func TestProcessor_ProcessBatch_BroadcastAcceptedRetriesOncePerBlock(t *testing.T) {
 	store := newTestStore(t)
 	prover := &mockProver{}
 	tree := newMockTreeReader()
+	var submitCalls atomic.Int32
 
 	// Fake chain server that accepts submissions.
 	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		submitCalls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"tx_hash":"AABB","code":0,"log":""}`))
 	}))
@@ -310,19 +319,37 @@ func TestProcessor_ProcessBatch_BroadcastAcceptedRetriesAreBounded(t *testing.T)
 	assert.NotEmpty(t, share.Payload.EncShare.C2)
 	assert.NotEmpty(t, share.Payload.ShareComms)
 	assert.NotEmpty(t, share.Payload.PrimaryBlind)
+	assert.Equal(t, int32(1), prover.callCount.Load())
+	assert.Equal(t, int32(1), submitCalls.Load())
 
 	key := schedKey(roundID, 0, 1, 0)
-	for attempt := 2; attempt <= 5; attempt++ {
+	for range 6 {
 		store.mu.Lock()
 		store.schedule[key] = time.Now().Add(-time.Second)
 		store.mu.Unlock()
 		proc.processBatch(context.Background())
 		share, ok = store.loadShare(roundID, 0, 1, 0)
 		require.True(t, ok)
-		assert.Equal(t, attempt, share.Attempts)
+		assert.Equal(t, 1, share.Attempts)
+	}
+	assert.Equal(t, int32(1), prover.callCount.Load())
+	assert.Equal(t, int32(1), submitCalls.Load())
+
+	// The retry budget still applies when the chain commits new blocks without
+	// ever committing the accepted transaction.
+	for height := uint64(2); height <= 5; height++ {
+		tree.blockHeight.Store(height)
+		store.mu.Lock()
+		store.schedule[key] = time.Now().Add(-time.Second)
+		store.mu.Unlock()
+		proc.processBatch(context.Background())
+		share, ok = store.loadShare(roundID, 0, 1, 0)
+		require.True(t, ok)
+		assert.Equal(t, int(height), share.Attempts)
 	}
 
 	assert.Equal(t, int32(5), prover.callCount.Load())
+	assert.Equal(t, int32(5), submitCalls.Load())
 	status = store.Status()
 	assert.Equal(t, 0, status[roundID].Pending)
 	assert.Equal(t, 1, status[roundID].Failed)
@@ -455,9 +482,11 @@ func TestProcessor_ProcessBatch_ChainRejects(t *testing.T) {
 	store := newTestStore(t)
 	prover := &mockProver{}
 	tree := newMockTreeReader()
+	var submitCalls atomic.Int32
 
 	// Chain returns non-zero code with a non-nullifier error.
 	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		submitCalls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"tx_hash":"","code":5,"log":"vote round is not active"}`))
 	}))
@@ -478,6 +507,30 @@ func TestProcessor_ProcessBatch_ChainRejects(t *testing.T) {
 	share, ok := store.loadShare(roundID, 0, 1, 0)
 	require.True(t, ok)
 	assert.Equal(t, 1, share.Attempts)
+
+	key := schedKey(roundID, 0, 1, 0)
+	store.mu.Lock()
+	store.schedule[key] = time.Now().Add(-time.Second)
+	store.mu.Unlock()
+	proc.processBatch(context.Background())
+
+	share, ok = store.loadShare(roundID, 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, 1, share.Attempts)
+	assert.Equal(t, int32(1), prover.callCount.Load())
+	assert.Equal(t, int32(1), submitCalls.Load())
+
+	tree.blockHeight.Store(2)
+	store.mu.Lock()
+	store.schedule[key] = time.Now().Add(-time.Second)
+	store.mu.Unlock()
+	proc.processBatch(context.Background())
+
+	share, ok = store.loadShare(roundID, 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, 2, share.Attempts)
+	assert.Equal(t, int32(2), prover.callCount.Load())
+	assert.Equal(t, int32(2), submitCalls.Load())
 }
 
 func TestProcessor_ProcessBatch_SystemSubmitErrorDoesNotSpendFailedAttempt(t *testing.T) {
@@ -541,8 +594,10 @@ func TestProcessor_ProcessBatch_RepeatedSystemSubmitErrorDoesNotSpendFailedAttem
 	store := newTestStore(t)
 	prover := &mockProver{}
 	tree := newMockTreeReader()
+	var submitCalls atomic.Int32
 
 	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		submitCalls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		w.Write([]byte(`{"status":"warming"}`))
@@ -572,6 +627,8 @@ func TestProcessor_ProcessBatch_RepeatedSystemSubmitErrorDoesNotSpendFailedAttem
 	status := store.Status()
 	assert.Equal(t, 1, status[roundID].Pending)
 	assert.Equal(t, 0, status[roundID].Failed)
+	assert.Equal(t, int32(1), prover.callCount.Load())
+	assert.Equal(t, int32(1), submitCalls.Load())
 }
 
 func TestProcessor_ProcessBatch_SystemSubmitErrorPreservesFailedAttempts(t *testing.T) {
@@ -624,6 +681,7 @@ func TestProcessor_ProcessBatch_SystemSubmitErrorPreservesFailedAttempts(t *test
 	}
 
 	responseStatus.Store(http.StatusBadRequest)
+	tree.blockHeight.Store(2)
 	proc.processBatch(context.Background())
 
 	status := store.Status()
@@ -670,11 +728,11 @@ func TestProcessor_ProcessBatch_SystemErrorsPreserveExistingFailedAttempts(t *te
 		},
 		{
 			name: "merkle path error",
-			tree: &mockTreeReader{
-				leafCount:    1,
-				anchorHeight: 1,
-				pathErr:      assert.AnError,
-			},
+			tree: func() TreeReader {
+				tree := newMockTreeReader()
+				tree.pathErr = assert.AnError
+				return tree
+			}(),
 			submitter: NewChainSubmitter("http://example.test"),
 		},
 	}
