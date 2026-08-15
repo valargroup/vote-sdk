@@ -367,6 +367,7 @@ func (s *ABCIIntegrationSuite) TestCheckTxImmediatelyAfterRestart() {
 	delegationTx := testutil.MustEncodeVoteTx(testutil.ValidDelegation(roundID, 0x21))
 
 	s.app.RestartBeforeNextBlock()
+	s.Require().False(s.app.CheckTxBlockTimeReady(), "restart should wait for the first committed block time")
 
 	checkResp := s.app.CheckTxSync(delegationTx)
 	s.Require().Equal(
@@ -378,6 +379,7 @@ func (s *ABCIIntegrationSuite) TestCheckTxImmediatelyAfterRestart() {
 
 	result := s.app.DeliverVoteTx(delegationTx)
 	s.Require().Equal(uint32(0), result.Code, "FinalizeBlock should still validate with its real block time: %s", result.Log)
+	s.Require().True(s.app.CheckTxBlockTimeReady(), "Commit should publish the post-restart block time")
 }
 
 // ---------------------------------------------------------------------------
