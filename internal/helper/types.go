@@ -264,6 +264,9 @@ type TreeReader interface {
 	// ForRound returns an isolated reader for the given voting round.
 	ForRound(roundID []byte) TreeReader
 
+	// LatestBlockHeight returns the latest locally committed chain height.
+	LatestBlockHeight() uint64
+
 	// GetTreeStatus returns lightweight tree statistics (leaf count + anchor height).
 	GetTreeStatus() (TreeStatus, error)
 

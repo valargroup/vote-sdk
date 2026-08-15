@@ -90,6 +90,7 @@ type SvoteApp struct {
 	// checkTxBlockTimeReady is published by Commit after BaseApp rebuilds its
 	// CheckTx state with the latest consensus header.
 	checkTxBlockTimeReady atomic.Bool
+	checkTxBlockHeight    atomic.Int64
 
 	// Admin server (set externally by PostSetup, may be nil).
 	adminRef atomic.Pointer[admin.Admin]
@@ -151,7 +152,13 @@ func NewSvoteApp(
 
 	app.App = appBuilder.Build(db, traceStore, baseAppOptions...)
 	app.SetPrepareCheckStater(func(ctx sdk.Context) {
-		app.checkTxBlockTimeReady.Store(ctx.BlockTime().Unix() >= 0)
+		if ctx.BlockTime().Unix() < 0 {
+			app.checkTxBlockHeight.Store(0)
+			app.checkTxBlockTimeReady.Store(false)
+			return
+		}
+		app.checkTxBlockHeight.Store(ctx.BlockHeight())
+		app.checkTxBlockTimeReady.Store(true)
 	})
 
 	// Install custom TxDecoder that handles both vote wire format
@@ -285,6 +292,16 @@ func (app *SvoteApp) TxConfig() client.TxConfig {
 // CheckTx state with a non-negative consensus block time for this process.
 func (app *SvoteApp) CheckTxBlockTimeReady() bool {
 	return app.checkTxBlockTimeReady.Load()
+}
+
+// CheckTxBlockHeight returns the latest block height published by Commit, or
+// zero before the first post-restart block.
+func (app *SvoteApp) CheckTxBlockHeight() uint64 {
+	height := app.checkTxBlockHeight.Load()
+	if height < 0 {
+		return 0
+	}
+	return uint64(height)
 }
 
 // GetKey returns the KVStoreKey for the provided store key.

@@ -34,7 +34,9 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 - Preserve reveal-share witnesses after CheckTx acceptance while bounded retries
   check for the committed nullifier. After validator restarts, wait for CheckTx
   to receive a block time before generating another reveal proof, and prevent an
-  unset time from being interpreted as an expired round.
+  unset time from being interpreted as an expired round. Limit each share to one
+  outbound submission per locally committed height so a stalled chain cannot
+  exhaust its retry budget.
 
 ## v1.2.0
 
