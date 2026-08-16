@@ -8,6 +8,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Use Zakura's optimized Halo2 and related Zcash libraries to reduce validator
+  proof verification latency without changing the proof format.
 - Limit helper share queue selection to active rounds, and keep Vote Status
   responsive on long-running chains by loading current summaries first while
   completed history stays collapsed and loads ten rounds at a time.
