@@ -17,14 +17,19 @@ import (
 
 const maintenanceInterval = 30 * time.Second
 
-var (
-	errAwaitingCommit     = errors.New("broadcast accepted; awaiting committed transaction")
-	errWaitingForNewBlock = errors.New("share already submitted at the latest committed height")
-)
+var errAwaitingCommit = errors.New("broadcast accepted; awaiting committed transaction")
 
 // ErrCheckTxNotReady means BaseApp has not received its first post-restart
 // block time yet. Processing should wait without generating a proof.
 var ErrCheckTxNotReady = errors.New("local CheckTx block time is not initialized")
+
+type waitingForNewBlockError struct {
+	height uint64
+}
+
+func (e *waitingForNewBlockError) Error() string {
+	return fmt.Sprintf("share already submitted at the latest committed height: %d", e.height)
+}
 
 const (
 	failureStagePanic            = "panic"
@@ -121,17 +126,18 @@ func isCanceledShareError(err error) bool {
 // when wallet-provided submit_at times arrive, generates Merkle paths and ZKP
 // 3 proofs, and submits MsgRevealShare to the chain.
 type Processor struct {
-	store          *ShareStore
-	tree           TreeReader
-	prover         ProofGenerator
-	submitter      *ChainSubmitter
-	logger         log.Logger
-	maxConcurrent  int
-	isRoundActive  RoundStatusChecker
-	preProofDedupe *preProofShareDeduper
-	submitHeightMu sync.Mutex
-	submitHeight   uint64
-	submitKeys     map[string]struct{}
+	store             *ShareStore
+	tree              TreeReader
+	prover            ProofGenerator
+	submitter         *ChainSubmitter
+	logger            log.Logger
+	maxConcurrent     int
+	isRoundActive     RoundStatusChecker
+	preProofDedupe    *preProofShareDeduper
+	submitHeightMu    sync.Mutex
+	submitHeight      uint64
+	submitKeys        map[string]struct{}
+	stalledRetryCount map[string]uint8
 }
 
 type ProcessorOption func(*Processor)
@@ -187,14 +193,15 @@ func NewProcessor(
 	}
 
 	p := &Processor{
-		store:         store,
-		tree:          tree,
-		prover:        prover,
-		submitter:     submitter,
-		logger:        logger,
-		maxConcurrent: maxConcurrent,
-		isRoundActive: isRoundActive,
-		submitKeys:    make(map[string]struct{}),
+		store:             store,
+		tree:              tree,
+		prover:            prover,
+		submitter:         submitter,
+		logger:            logger,
+		maxConcurrent:     maxConcurrent,
+		isRoundActive:     isRoundActive,
+		submitKeys:        make(map[string]struct{}),
+		stalledRetryCount: make(map[string]uint8),
 	}
 	for _, option := range options {
 		option(p)
@@ -377,10 +384,13 @@ func (p *Processor) processBatch(ctx context.Context) {
 
 			if err := p.processShare(shareCtx, share); err != nil {
 				spanErr = err
-				if errors.Is(err, errWaitingForNewBlock) {
+				var waitingErr *waitingForNewBlockError
+				if errors.As(err, &waitingErr) {
 					shareSpan.SetData("outcome", "waiting_for_new_block")
 					spanErr = nil
-					p.store.MarkRetry(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+					retryCount := p.nextStalledRetryCount(share, waitingErr.height)
+					shareSpan.SetData("stalled_retry_count", retryCount)
+					p.store.MarkStalledRetry(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition, retryCount)
 					return nil
 				}
 				if errors.Is(err, errAwaitingCommit) {
@@ -495,7 +505,7 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	if blockHeight == 0 || p.submittedAtHeight(share, blockHeight) {
 		return retryableShareError(
 			failureStageSubmitChain,
-			fmt.Errorf("%w: %d", errWaitingForNewBlock, blockHeight),
+			&waitingForNewBlockError{height: blockHeight},
 		)
 	}
 
@@ -606,7 +616,7 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	if blockHeight == 0 || !p.claimSubmitHeight(share, blockHeight) {
 		return retryableShareError(
 			failureStageSubmitChain,
-			fmt.Errorf("%w: %d", errWaitingForNewBlock, blockHeight),
+			&waitingForNewBlockError{height: blockHeight},
 		)
 	}
 
@@ -670,13 +680,32 @@ func (p *Processor) claimSubmitHeight(share QueuedShare, height uint64) bool {
 		return false
 	}
 	p.submitKeys[key] = struct{}{}
+	delete(p.stalledRetryCount, key)
 	return true
+}
+
+// nextStalledRetryCount increments the bounded retry streak for a share at an
+// unchanged committed height. A newer height resets every stalled streak.
+func (p *Processor) nextStalledRetryCount(share QueuedShare, height uint64) uint8 {
+	p.submitHeightMu.Lock()
+	defer p.submitHeightMu.Unlock()
+
+	p.advanceSubmitHeightLocked(height)
+	key := shareScheduleKey(share)
+	retryCount := p.stalledRetryCount[key]
+	if retryCount < shareStalledRetryMaxCount {
+		retryCount++
+	}
+	p.stalledRetryCount[key] = retryCount
+	return retryCount
 }
 
 func (p *Processor) clearSubmitHeight(share QueuedShare) {
 	p.submitHeightMu.Lock()
 	defer p.submitHeightMu.Unlock()
-	delete(p.submitKeys, shareScheduleKey(share))
+	key := shareScheduleKey(share)
+	delete(p.submitKeys, key)
+	delete(p.stalledRetryCount, key)
 }
 
 // advanceSubmitHeightLocked rotates the cache when height increases and
@@ -687,6 +716,7 @@ func (p *Processor) advanceSubmitHeightLocked(height uint64) bool {
 	}
 	if height > p.submitHeight {
 		clear(p.submitKeys)
+		clear(p.stalledRetryCount)
 		p.submitHeight = height
 	}
 	return true
