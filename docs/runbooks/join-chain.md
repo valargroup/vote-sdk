@@ -294,7 +294,11 @@ Full operator checklist: [software-upgrades.md](software-upgrades.md).
 ### Fresh install with Cosmovisor (Linux default)
 
 Linux `join.sh` installs Cosmovisor with checksum-required binary auto-download
-by default. To run svoted directly instead:
+and `UNSAFE_SKIP_BACKUP=true` by default. Skipping Cosmovisor's local pre-upgrade
+chain data copy avoids duplicate storage use, but rollback requires an external
+backup or a fresh Valar snapshot. Continue to keep the validator identity files
+listed in [Backup and disaster recovery](#backup-and-disaster-recovery)
+encrypted off-host. To run svoted directly instead:
 
 ```bash
 curl -fsSL https://setup.valargroup.org/ | bash -s -- --env prod --upgrade-mode direct
