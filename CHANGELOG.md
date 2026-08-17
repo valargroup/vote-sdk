@@ -8,6 +8,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Make new Linux Cosmovisor validator services skip local pre-upgrade chain data
+  copies while retaining the existing external identity backup requirement.
 - Limit helper share queue selection to active rounds, and keep Vote Status
   responsive on long-running chains by loading current summaries first while
   completed history stays collapsed and loads ten rounds at a time.

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# test_chain_upgrade_runtime_mode.sh — unit tests for runtime-mode helper functions.
+# test_chain_upgrade_runtime_mode.sh — unit tests for runtime-mode helpers and join defaults.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMMON="${REPO_ROOT}/scripts/_chain_upgrade_common.sh"
 RUNTIME_HELPER="${REPO_ROOT}/scripts/ci/ensure_cosmovisor_runtime.sh"
+JOIN_SCRIPT="${REPO_ROOT}/join.sh"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -16,6 +17,15 @@ fail() {
 source "$COMMON"
 # shellcheck source=scripts/ci/ensure_cosmovisor_runtime.sh
 source "$RUNTIME_HELPER"
+
+echo "=== fresh join: cosmovisor skips local upgrade backups ==="
+grep -Fq "SYSTEMD_SKIP_BACKUP=\$(systemd_env_quote \"UNSAFE_SKIP_BACKUP=true\")" "$JOIN_SCRIPT" \
+  || fail "join.sh does not declare the Cosmovisor skip-backup environment value"
+grep -Fq "\${SYSTEMD_MUST_CHECKSUM} \${SYSTEMD_SKIP_BACKUP}" "$JOIN_SCRIPT" \
+  || fail "join.sh does not add skip-backup to the Cosmovisor service environment"
+if grep -F "SYSTEMD_ENV=\"\${SYSTEMD_PATH}" "$JOIN_SCRIPT" | grep -Fq 'SYSTEMD_SKIP_BACKUP'; then
+  fail "join.sh adds skip-backup to direct-mode services"
+fi
 
 echo "=== env parser: last duplicate value wins ==="
 ENV_BLOB='PATH=/usr/local/bin SVOTE_UPGRADE_MODE=cosmovisor SVOTE_UPGRADE_MODE=direct DAEMON_HOME=/tmp/a DAEMON_HOME=/tmp/b'
