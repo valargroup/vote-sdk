@@ -82,8 +82,13 @@ duplicate payloads return `"duplicate"`, and conflicting payloads for the same
   8 s, 16 s). Local submit transport errors, non-400 REST errors that do not
   carry a structured chain rejection, round-status check errors, and
   tree/Merkle readiness errors return to pending without spending attempts.
-  Attempt counts survive recovery, and failed-row witness material is retained
-  until expired-round purge.
+  Generic system retries remain at 10 s. After a share has submitted once at a
+  committed height, repeated checks at that same height back off at 10 s, 20 s,
+  40 s, 80 s, then 120 s until a newer height is observed. The existing urgent
+  retry behavior resumes in the final 30 s of the voting window. Stalled-height
+  retry counts are process-local and reset after a restart. Attempt counts
+  survive recovery, and failed-row witness material is retained until
+  expired-round purge.
 - Almost-submitted race: if the chain accepted a share but the server crashed
   before `MarkSubmitted`, recovery will retry it. The chain-side share nullifier
   makes the duplicate reveal idempotent.

@@ -11,6 +11,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 - Limit helper share queue selection to active rounds, and keep Vote Status
   responsive on long-running chains by loading current summaries first while
   completed history stays collapsed and loads ten rounds at a time.
+- Exponentially back off repeated helper share checks at an unchanged committed
+  height to two minutes while retaining urgent retries near vote close.
 
 ## v1.3.1
 

@@ -221,6 +221,40 @@ func TestMarkRetry_DoesNotSpendFailedAttempts(t *testing.T) {
 	assert.Equal(t, 0, status["round1"].Failed)
 }
 
+func TestMarkStalledRetry_BacksOffWithoutSpendingFailedAttempts(t *testing.T) {
+	s := newTestStore(t)
+	enqueueAndRequireInserted(t, s, testPayload("round1", 0))
+	key := schedKey("round1", 0, 1, 0)
+
+	for retryCount, expected := range []time.Duration{
+		shareSystemRetryBackoff,
+		20 * time.Second,
+		40 * time.Second,
+		80 * time.Second,
+		shareStalledRetryMaxBackoff,
+		shareStalledRetryMaxBackoff,
+	} {
+		ready := s.TakeReady()
+		require.Len(t, ready, 1, "retry %d", retryCount+1)
+		s.MarkStalledRetry("round1", 0, 1, 0, uint8(retryCount+1))
+
+		s.mu.Lock()
+		next, ok := s.schedule[key]
+		s.mu.Unlock()
+		require.True(t, ok)
+		assert.WithinDuration(t, time.Now().Add(expected), next, 300*time.Millisecond)
+
+		s.mu.Lock()
+		s.schedule[key] = time.Now().Add(-time.Second)
+		s.mu.Unlock()
+	}
+
+	share, ok := s.loadShare("round1", 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, ShareStateReceived, share.State)
+	assert.Equal(t, 0, share.Attempts)
+}
+
 func TestMarkRetry_PreservesFailedAttempts(t *testing.T) {
 	s := newTestStore(t)
 
@@ -347,6 +381,43 @@ func TestNextShareSystemRetryTime_HalvesRemainingNearDeadline(t *testing.T) {
 	next := nextShareSystemRetryTime(now, uint64(now.Add(3*time.Second).Unix()))
 
 	assert.Equal(t, now.Add(1500*time.Millisecond), next)
+}
+
+func TestNextShareStalledRetryTime_BackoffAndCap(t *testing.T) {
+	now := time.Unix(1000, 0)
+	tests := []struct {
+		retryCount uint8
+		delay      time.Duration
+	}{
+		{retryCount: 1, delay: 10 * time.Second},
+		{retryCount: 2, delay: 20 * time.Second},
+		{retryCount: 3, delay: 40 * time.Second},
+		{retryCount: 4, delay: 80 * time.Second},
+		{retryCount: 5, delay: 2 * time.Minute},
+		{retryCount: 255, delay: 2 * time.Minute},
+	}
+
+	for _, test := range tests {
+		assert.Equal(t, now.Add(test.delay), nextShareStalledRetryTime(now, 0, test.retryCount))
+	}
+}
+
+func TestNextShareStalledRetryTime_LandsAtUrgentWindow(t *testing.T) {
+	now := time.Unix(1000, 0)
+	deadline := now.Add(100 * time.Second)
+
+	next := nextShareStalledRetryTime(now, uint64(deadline.Unix()), shareStalledRetryMaxCount)
+
+	assert.Equal(t, deadline.Add(-shareSystemRetryDeadlineBuffer), next)
+}
+
+func TestNextShareStalledRetryTime_UsesUrgentBackoffInsideWindow(t *testing.T) {
+	now := time.Unix(1000, 0)
+	deadline := now.Add(20 * time.Second)
+
+	next := nextShareStalledRetryTime(now, uint64(deadline.Unix()), shareStalledRetryMaxCount)
+
+	assert.Equal(t, now.Add(shareSystemRetryUrgentBackoff), next)
 }
 
 func TestMarkFailed_PermanentUnknownVoteEndTimeScrubsWitnessMaterial(t *testing.T) {

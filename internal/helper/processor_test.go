@@ -282,7 +282,10 @@ func TestProcessor_ProcessBatch_WaitsForCheckTxBeforeProof(t *testing.T) {
 }
 
 func TestProcessor_SubmitHeightCacheEvictsOlderBlocks(t *testing.T) {
-	proc := &Processor{submitKeys: make(map[string]struct{})}
+	proc := &Processor{
+		submitKeys:        make(map[string]struct{}),
+		stalledRetryCount: make(map[string]uint8),
+	}
 	roundID := hex.EncodeToString(make([]byte, 32))
 	shareA := QueuedShare{Payload: SharePayload{
 		VoteRoundID:  roundID,
@@ -304,15 +307,20 @@ func TestProcessor_SubmitHeightCacheEvictsOlderBlocks(t *testing.T) {
 	require.True(t, proc.claimSubmitHeight(shareA, 10))
 	require.True(t, proc.claimSubmitHeight(shareB, 10))
 	assert.Len(t, proc.submitKeys, 2)
+	assert.Equal(t, uint8(1), proc.nextStalledRetryCount(shareA, 10))
+	assert.Equal(t, uint8(2), proc.nextStalledRetryCount(shareA, 10))
 
 	assert.False(t, proc.submittedAtHeight(shareA, 11))
 	assert.Equal(t, uint64(11), proc.submitHeight)
 	assert.Empty(t, proc.submitKeys)
+	assert.Empty(t, proc.stalledRetryCount)
+	assert.Equal(t, uint8(1), proc.nextStalledRetryCount(shareA, 11))
 
 	assert.False(t, proc.claimSubmitHeight(shareB, 10), "a stale observation must not rotate the cache backwards")
 	require.True(t, proc.claimSubmitHeight(shareA, 11))
 	assert.False(t, proc.claimSubmitHeight(shareA, 11))
 	assert.Len(t, proc.submitKeys, 1)
+	assert.NotContains(t, proc.stalledRetryCount, shareScheduleKey(shareA))
 }
 
 func TestProcessor_ProcessBatch_BroadcastAcceptedRetriesOncePerBlock(t *testing.T) {
@@ -357,7 +365,14 @@ func TestProcessor_ProcessBatch_BroadcastAcceptedRetriesOncePerBlock(t *testing.
 	assert.Equal(t, int32(1), submitCalls.Load())
 
 	key := schedKey(roundID, 0, 1, 0)
-	for range 6 {
+	for retry, expected := range []time.Duration{
+		shareSystemRetryBackoff,
+		20 * time.Second,
+		40 * time.Second,
+		80 * time.Second,
+		shareStalledRetryMaxBackoff,
+		shareStalledRetryMaxBackoff,
+	} {
 		store.mu.Lock()
 		store.schedule[key] = time.Now().Add(-time.Second)
 		store.mu.Unlock()
@@ -365,6 +380,11 @@ func TestProcessor_ProcessBatch_BroadcastAcceptedRetriesOncePerBlock(t *testing.
 		share, ok = store.loadShare(roundID, 0, 1, 0)
 		require.True(t, ok)
 		assert.Equal(t, 1, share.Attempts)
+		store.mu.Lock()
+		next, scheduled := store.schedule[key]
+		store.mu.Unlock()
+		require.True(t, scheduled, "retry %d", retry+1)
+		assert.WithinDuration(t, time.Now().Add(expected), next, 300*time.Millisecond)
 	}
 	assert.Equal(t, int32(1), prover.callCount.Load())
 	assert.Equal(t, int32(1), submitCalls.Load())
