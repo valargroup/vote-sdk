@@ -8,11 +8,11 @@
 use std::{fmt, io::Cursor};
 
 use nonempty::NonEmpty;
-use orchard::{
+use voting_crypto_deps::orchard::{
     bundle::{Bundle, BundleVersion, EffectsOnly, Flags, TxVersion as OrchardTxVersion},
     Anchor,
 };
-use zcash_primitives::transaction::{
+use voting_crypto_deps::zcash_primitives::transaction::{
     self,
     components::orchard::read_action_without_auth,
     txid::{to_txid, TxIdDigester},

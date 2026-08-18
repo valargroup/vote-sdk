@@ -8,8 +8,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
-- Use Zakura's optimized Halo2 and related Zcash libraries to reduce validator
-  proof verification latency without changing the proof format.
+- Default validator circuits to Zakura's optimized cryptography backend while
+  preserving an explicit upstream Zcash mode for compatibility testing.
 - Let Shielded Vote Creator import its JSON exports as new editable drafts,
   with schema validation and fresh local IDs.
 - Show production share queues only when a current vote-manager wallet is

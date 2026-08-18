@@ -14,13 +14,13 @@
 //! Delegation fixture (ZKP #1) is no longer generated here; the Rust E2E tests
 //! build the delegation bundle inline via e2e_tests::setup::build_delegation_bundle_for_test.
 
-use pasta_curves::group::ff::PrimeField;
 use std::fs;
 use std::path::Path;
+use voting_crypto_deps::pasta_curves::group::ff::PrimeField;
 
 use blake2b_simd::Params as Blake2bParams;
 use rand::{thread_rng, RngCore};
-use reddsa::{orchard as reddsa_orchard, SigningKey, VerificationKey};
+use voting_crypto_deps::reddsa::{orchard as reddsa_orchard, SigningKey, VerificationKey};
 
 use shielded_vote_circuits::redpallas as rp;
 use shielded_vote_circuits::toy;
@@ -74,7 +74,7 @@ fn generate_halo2_fixtures() {
     );
 
     // Write wrong public input (c = 999, which does not match any valid (a,b) for constant=7).
-    use halo2_proofs::pasta::Fp;
+    use voting_crypto_deps::halo2_proofs::pasta::Fp;
     let wrong_c = Fp::from(999u64);
     let wrong_bytes = wrong_c.to_repr();
     let wrong_path = testdata_dir.join("toy_wrong_input.bin");

@@ -3,7 +3,7 @@
 //! This module wraps the `reddsa` crate's Orchard SpendAuth verification,
 //! providing a simple byte-oriented API that the FFI layer can call.
 
-use reddsa::{orchard, Signature, VerificationKey};
+use voting_crypto_deps::reddsa::{orchard, Signature, VerificationKey};
 
 /// Verify a RedPallas SpendAuth signature.
 ///
@@ -13,13 +13,13 @@ use reddsa::{orchard, Signature, VerificationKey};
 /// * `sig_bytes` - 64-byte RedPallas signature.
 ///
 /// # Errors
-/// Returns `reddsa::Error` if the verification key cannot be deserialized
+/// Returns `voting_crypto_deps::reddsa::Error` if the verification key cannot be deserialized
 /// or the signature does not verify.
 pub fn verify_spend_auth_sig(
     rk_bytes: &[u8; 32],
     sighash: &[u8],
     sig_bytes: &[u8; 64],
-) -> Result<(), reddsa::Error> {
+) -> Result<(), voting_crypto_deps::reddsa::Error> {
     let vk = VerificationKey::<orchard::SpendAuth>::try_from(*rk_bytes)?;
     let sig = Signature::<orchard::SpendAuth>::from(*sig_bytes);
     vk.verify(sighash, &sig)

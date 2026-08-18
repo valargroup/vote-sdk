@@ -9,6 +9,7 @@ COMMIT  := $(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
 BUILD_TAGS_LIST := $(if $(BUILD_TAGS),$(BUILD_TAGS),)
 
 FFI_TAGS := halo2,redpallas
+CIRCUITS_CARGO_FLAGS := --no-default-features --features zakura
 
 VERSION_PKG := github.com/cosmos/cosmos-sdk/version
 LDFLAGS := -X $(VERSION_PKG).Name=shielded-vote \
@@ -145,15 +146,15 @@ fixtures-ts: fixtures
 
 ## circuits: Build the Rust static library (requires cargo)
 circuits:
-	cargo build --release --manifest-path circuits/Cargo.toml
+	cargo build --release --manifest-path circuits/Cargo.toml $(CIRCUITS_CARGO_FLAGS)
 
 ## circuits-test: Run Rust circuit unit tests
 circuits-test:
-	cargo test --release --manifest-path circuits/Cargo.toml
+	cargo test --release --manifest-path circuits/Cargo.toml $(CIRCUITS_CARGO_FLAGS)
 
 ## fixtures: Regenerate all fixture files (Halo2 + RedPallas) (requires circuits build)
 fixtures: circuits
-	cargo test --release --manifest-path circuits/Cargo.toml -- generate_fixtures --ignored --nocapture
+	cargo test --release --manifest-path circuits/Cargo.toml $(CIRCUITS_CARGO_FLAGS) -- generate_fixtures --ignored --nocapture
 
 ## test-halo2: Run Go tests that use real Halo2 verification via CGo (requires circuits)
 test-halo2: circuits
