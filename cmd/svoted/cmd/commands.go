@@ -104,7 +104,7 @@ disable = true
 # Voting-config base URL. The admin fetches static-voting-config.json,
 # follows dynamic_config_url for GET /api/voting-config, and uses the same
 # base when validating config PRs.
-config_url = "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/"
+config_url = "https://voting.valargroup.dev/prod/"
 
 # SQLite database path for pending validator join requests (empty = $HOME/.svoted/admin.db).
 # db_path = ""

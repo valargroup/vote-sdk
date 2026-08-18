@@ -183,7 +183,7 @@ make start-admin   # builds UI then starts svoted with --serve-ui
 ## Admin server configuration
 
 The admin server re-serves a cached copy of the
-[dynamic voting-config JSON](https://voting.valargroup.org/prod/dynamic-voting-config.json)
+[dynamic voting-config JSON](https://voting.valargroup.dev/prod/dynamic-voting-config.json)
 at `GET /api/voting-config` for tooling that wants the same payload from a
 chain host (refreshed in-process every minute). It also stores **pending
 validator join requests** in SQLite (`POST /api/register-validator`,

@@ -8,6 +8,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Route default production and staging voting-config reads through the
+  GitHub-primary `voting.valargroup.dev` gateway with its Cloudflare fallback.
 - Make new Linux Cosmovisor validator services skip local pre-upgrade chain data
   copies while retaining the existing external identity backup requirement.
 - Limit helper share queue selection to active rounds, and keep Vote Status

@@ -1,6 +1,5 @@
-// Package admin serves the voting-config endpoint by proxying the
-// GitHub Pages CDN (valargroup/token-holder-voting-config) and exposes
-// HTTP endpoints for validator join registration (pending queue in SQLite).
+// Package admin proxies canonical voting config and exposes HTTP endpoints for
+// validator join registration (pending queue in SQLite).
 package admin
 
 import "time"
@@ -44,7 +43,7 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		Disable:   true,
-		ConfigURL: "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/",
+		ConfigURL: "https://voting.valargroup.dev/prod/",
 	}
 }
 
