@@ -8,10 +8,10 @@ trap 'rm -rf "$backend_tmp"' EXIT
 
 cargo check --manifest-path "$circuit_manifest" --all-targets --locked
 cargo check --manifest-path "$circuit_manifest" --all-targets --locked \
-  --no-default-features --features zakura
+  --no-default-features --features upstream
 
 cargo tree --manifest-path "$circuit_manifest" --locked -e normal --prefix none \
-  --no-default-features --features zakura > "$backend_tmp/zakura-tree.txt"
+  > "$backend_tmp/zakura-tree.txt"
 
 if grep -Eq '^(halo2_gadgets|halo2_legacy_pdqsort|halo2_poseidon|halo2_proofs|orchard|pasta_curves|reddsa|redjubjub|sapling-crypto|sinsemilla|zcash_primitives) v' "$backend_tmp/zakura-tree.txt"; then
   echo "The Zakura circuit graph contains an upstream cryptography package:"
@@ -20,7 +20,7 @@ if grep -Eq '^(halo2_gadgets|halo2_legacy_pdqsort|halo2_poseidon|halo2_proofs|or
 fi
 
 cargo tree --manifest-path "$circuit_manifest" --locked -e normal --prefix none \
-  > "$backend_tmp/upstream-tree.txt"
+  --no-default-features --features upstream > "$backend_tmp/upstream-tree.txt"
 
 if grep -Eq '^zakura-[^ ]+ v' "$backend_tmp/upstream-tree.txt"; then
   echo "The upstream circuit graph contains a Zakura package:"
