@@ -332,8 +332,8 @@ func TestConfigPRPathForConfigURL(t *testing.T) {
 			branchName: "config-production-round-aaaaaaaaaaaa",
 		},
 		{
-			name:       "staging base URL",
-			configURL:  "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/stage/",
+			name:       "gateway staging base URL",
+			configURL:  "https://voting.valargroup.dev/stage/",
 			configPath: "stage",
 			label:      "staging",
 			dynamic:    "stage/dynamic-voting-config.json",
@@ -341,8 +341,8 @@ func TestConfigPRPathForConfigURL(t *testing.T) {
 			branchName: "config-staging-round-aaaaaaaaaaaa",
 		},
 		{
-			name:       "root base URL defaults to production",
-			configURL:  "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/",
+			name:       "gateway production base URL",
+			configURL:  "https://voting.valargroup.dev/prod/",
 			configPath: "prod",
 			label:      "production",
 			dynamic:    "prod/dynamic-voting-config.json",
@@ -403,16 +403,16 @@ func TestConfigURLForFile(t *testing.T) {
 		want      string
 	}{
 		{
-			name:      "production base URL",
-			configURL: "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/",
+			name:      "gateway production base URL",
+			configURL: "https://voting.valargroup.dev/prod/",
 			fileName:  dynamicConfigName,
-			want:      "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/prod/dynamic-voting-config.json",
+			want:      "https://voting.valargroup.dev/prod/dynamic-voting-config.json",
 		},
 		{
-			name:      "staging base URL",
-			configURL: "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/stage/",
+			name:      "gateway staging base URL",
+			configURL: "https://voting.valargroup.dev/stage/",
 			fileName:  staticConfigName,
-			want:      "https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/stage/static-voting-config.json",
+			want:      "https://voting.valargroup.dev/stage/static-voting-config.json",
 		},
 		{
 			name:      "legacy prod base URL",
@@ -565,7 +565,6 @@ func configDocuments(t *testing.T, rounds map[string]votingconfig.RoundEntry) ([
 func testConfigPIRLayout() votingconfig.PIRLayout {
 	return votingconfig.PIRLayout{PIRDepth: 19, Tier0Layers: 12, Tier1Layers: 7, PolyLen: votingconfig.PolyLen4096}
 }
-
 
 func testEd25519PrivateKey() ed25519.PrivateKey {
 	return ed25519.NewKeyFromSeed(bytes.Repeat([]byte{7}, ed25519.SeedSize))

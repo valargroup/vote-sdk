@@ -90,14 +90,14 @@ jobs:
               default_chain_id="svote-1"
               default_dns_prefix="stage."
               default_has_secondary="true"
-              default_voting_config_url="https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/stage/"
+              default_voting_config_url="https://voting.valargroup.dev/stage/"
               zcash_network="test"
               ;;
             production)
               default_chain_id="zvote-1"
               default_dns_prefix="prod."
               default_has_secondary="false"
-              default_voting_config_url="https://raw.githubusercontent.com/valargroup/token-holder-voting-config/main/prod/"
+              default_voting_config_url="https://voting.valargroup.dev/prod/"
               zcash_network="main"
               ;;
             *)

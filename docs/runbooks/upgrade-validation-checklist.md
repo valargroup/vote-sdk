@@ -150,7 +150,7 @@ Record for joiners:
 
 Publish a **local-only** voting-config JSON (file or temporary host) with
 `vote_servers[0].url` pointing at the primary REST base — **not**
-`voting.valargroup.org`.
+`voting.valargroup.dev`.
 
 ### Secondary (direct-mode join)
 
