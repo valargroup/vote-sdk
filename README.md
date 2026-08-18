@@ -53,10 +53,10 @@ make init
 make start
 ```
 
-The Make, mise, Docker, and release builds select the Zakura cryptography
-backend. Direct Cargo builds of `circuits/Cargo.toml` default to upstream Zcash
-crates; pass `--no-default-features --features zakura` to select Zakura. The
-E2E workspace deliberately keeps the upstream backend enabled.
+The circuit crate defaults to the Zakura cryptography backend, and the Make,
+mise, Docker, and release builds select it explicitly. Pass
+`--no-default-features --features upstream` for an upstream Zcash build. The
+E2E workspace deliberately selects the upstream backend.
 
 ### Consensus timing defaults
 

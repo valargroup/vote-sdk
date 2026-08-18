@@ -8,7 +8,7 @@ description = "Halo2 ZKP circuits and FFI verification for the Shielded-Vote cha
 crate-type = ["staticlib", "lib"]
 
 [features]
-default = ["upstream"]
+default = ["zakura"]
 upstream = [
     "voting-crypto-deps/upstream-validator",
     "voting-circuits/upstream",

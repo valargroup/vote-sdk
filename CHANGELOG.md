@@ -8,8 +8,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
-- Select Zakura's optimized cryptography backend for validator FFI builds while
-  preserving upstream Zcash crates as the default for direct circuit consumers.
+- Default validator circuits to Zakura's optimized cryptography backend while
+  preserving an explicit upstream Zcash mode for compatibility testing.
 - Route default production and staging voting-config reads through the
   GitHub-primary `voting.valargroup.dev` gateway with its Cloudflare fallback.
 - Make new Linux Cosmovisor validator services skip local pre-upgrade chain data
