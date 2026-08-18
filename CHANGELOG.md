@@ -10,9 +10,15 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 - Use Zakura's optimized Halo2 and related Zcash libraries to reduce validator
   proof verification latency without changing the proof format.
+- Route default production and staging voting-config reads through the
+  GitHub-primary `voting.valargroup.dev` gateway with its Cloudflare fallback.
+- Make new Linux Cosmovisor validator services skip local pre-upgrade chain data
+  copies while retaining the existing external identity backup requirement.
 - Limit helper share queue selection to active rounds, and keep Vote Status
   responsive on long-running chains by loading current summaries first while
   completed history stays collapsed and loads ten rounds at a time.
+- Exponentially back off repeated helper share checks at an unchanged committed
+  height to two minutes while retaining urgent retries near vote close.
 
 ## v1.3.1
 

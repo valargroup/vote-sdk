@@ -162,8 +162,8 @@ done
 
 default_voting_config_url_for_env() {
   case "$1" in
-    prod)  echo "https://voting.valargroup.org/prod/dynamic-voting-config.json" ;;
-    stage) echo "https://voting.valargroup.org/stage/dynamic-voting-config.json" ;;
+    prod)  echo "https://voting.valargroup.dev/prod/dynamic-voting-config.json" ;;
+    stage) echo "https://voting.valargroup.dev/stage/dynamic-voting-config.json" ;;
     *)     echo "" ;;
   esac
 }
@@ -810,7 +810,7 @@ confirm_existing_install_reset
 
 # ─── Discover network via voting-config (CDN) ───────────────────────────────
 # The dynamic voting-config JSON is the same one wallets fetch from
-# voting.valargroup.org (ZIP 1244 §Vote Configuration Format). We use
+# voting.valargroup.dev (ZIP 1244 §Vote Configuration Format). We use
 # vote_servers[0] as the seed peer for P2P; SVOTE_ADMIN_URL is a separate base
 # for one-time join registration.
 
@@ -1783,10 +1783,11 @@ else
   SYSTEMD_COSMOVISOR=$(systemd_env_quote "COSMOVISOR_BIN=${INSTALL_DIR}/cosmovisor")
   SYSTEMD_ALLOW_DOWNLOAD=$(systemd_env_quote "DAEMON_ALLOW_DOWNLOAD_BINARIES=true")
   SYSTEMD_MUST_CHECKSUM=$(systemd_env_quote "DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM=true")
+  SYSTEMD_SKIP_BACKUP=$(systemd_env_quote "UNSAFE_SKIP_BACKUP=true")
 
   SYSTEMD_ENV="${SYSTEMD_PATH} ${SYSTEMD_HOME} ${SYSTEMD_ADDR} ${SYSTEMD_VALOPER} ${SYSTEMD_MONIKER} ${SYSTEMD_CHAIN_ID} ${SYSTEMD_INSTALL} ${SYSTEMD_SVOTED} ${SYSTEMD_UPGRADE_MODE}"
   if [ "${SVOTE_UPGRADE_MODE}" = "cosmovisor" ]; then
-    SYSTEMD_ENV="${SYSTEMD_ENV} ${SYSTEMD_DAEMON_HOME} ${SYSTEMD_DAEMON_NAME} ${SYSTEMD_COSMOVISOR} ${SYSTEMD_ALLOW_DOWNLOAD} ${SYSTEMD_MUST_CHECKSUM}"
+    SYSTEMD_ENV="${SYSTEMD_ENV} ${SYSTEMD_DAEMON_HOME} ${SYSTEMD_DAEMON_NAME} ${SYSTEMD_COSMOVISOR} ${SYSTEMD_ALLOW_DOWNLOAD} ${SYSTEMD_MUST_CHECKSUM} ${SYSTEMD_SKIP_BACKUP}"
   fi
 
   sudo tee /etc/systemd/system/${SERVICE_NAME}.service > /dev/null <<SVCEOF

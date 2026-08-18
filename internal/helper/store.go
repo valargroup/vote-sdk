@@ -614,11 +614,23 @@ const (
 	shareSystemRetryBackoff        = 10 * time.Second
 	shareSystemRetryUrgentBackoff  = 2 * time.Second
 	shareSystemRetryDeadlineBuffer = 30 * time.Second
+	shareStalledRetryMaxBackoff    = 2 * time.Minute
+	shareStalledRetryMaxCount      = 5
 )
 
 // MarkRetry returns an in-flight share to the pending queue without spending a
 // failed-share attempt.
 func (s *ShareStore) MarkRetry(roundID string, shareIndex, proposalID uint32, treePosition uint64) {
+	s.markRetry(roundID, shareIndex, proposalID, treePosition, 0)
+}
+
+// MarkStalledRetry returns an in-flight share to the pending queue with a
+// bounded backoff for repeated retries at the same committed height.
+func (s *ShareStore) MarkStalledRetry(roundID string, shareIndex, proposalID uint32, treePosition uint64, retryCount uint8) {
+	s.markRetry(roundID, shareIndex, proposalID, treePosition, retryCount)
+}
+
+func (s *ShareStore) markRetry(roundID string, shareIndex, proposalID uint32, treePosition uint64, stalledRetryCount uint8) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -648,7 +660,11 @@ func (s *ShareStore) MarkRetry(roundID string, shareIndex, proposalID uint32, tr
 
 	key := schedKey(roundID, shareIndex, proposalID, treePosition)
 	now := time.Now()
-	s.schedule[key] = nextShareSystemRetryTime(now, voteEndTime)
+	if stalledRetryCount == 0 {
+		s.schedule[key] = nextShareSystemRetryTime(now, voteEndTime)
+	} else {
+		s.schedule[key] = nextShareStalledRetryTime(now, voteEndTime, stalledRetryCount)
+	}
 	s.notifyScheduleChangedLocked()
 }
 
@@ -672,6 +688,42 @@ func nextShareSystemRetryTime(now time.Time, voteEndTime uint64) time.Time {
 		return now.Add(urgentBackoff)
 	}
 	return scheduled
+}
+
+// nextShareStalledRetryTime backs off repeated checks at one committed height
+// while ensuring the share wakes at the start of the urgent deadline window.
+func nextShareStalledRetryTime(now time.Time, voteEndTime uint64, retryCount uint8) time.Time {
+	backoff := shareSystemRetryBackoff
+	for retry := uint8(1); retry < retryCount && backoff < shareStalledRetryMaxBackoff; retry++ {
+		backoff *= 2
+	}
+	if backoff > shareStalledRetryMaxBackoff {
+		backoff = shareStalledRetryMaxBackoff
+	}
+
+	scheduled := now.Add(backoff)
+	if voteEndTime == 0 {
+		return scheduled
+	}
+
+	deadline := time.Unix(int64(voteEndTime), 0)
+	remaining := deadline.Sub(now)
+	if remaining <= 0 {
+		return now
+	}
+	urgentStart := deadline.Add(-shareSystemRetryDeadlineBuffer)
+	if now.Before(urgentStart) {
+		if scheduled.After(urgentStart) {
+			return urgentStart
+		}
+		return scheduled
+	}
+
+	urgentBackoff := shareSystemRetryUrgentBackoff
+	if halfRemaining := remaining / 2; halfRemaining < urgentBackoff {
+		urgentBackoff = halfRemaining
+	}
+	return now.Add(urgentBackoff)
 }
 
 // MarkFailed marks a share processing attempt as failed, with retry or
