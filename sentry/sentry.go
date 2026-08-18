@@ -53,6 +53,9 @@ func InitSentry(dsn, release, serverName string, logger log.Logger) error {
 		AttachStacktrace: true,
 		EnableTracing:    true,
 		BeforeSend:       filterNoisyErrorEvents,
+		BeforeSendTransaction: func(event *sentrylib.Event, _ *sentrylib.EventHint) *sentrylib.Event {
+			return scrubSensitiveRequestEvent(event)
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("sentry init: %w", err)
@@ -69,11 +72,30 @@ func InitSentry(dsn, release, serverName string, logger log.Logger) error {
 }
 
 func filterNoisyErrorEvents(event *sentrylib.Event, _ *sentrylib.EventHint) *sentrylib.Event {
+	event = scrubSensitiveRequestEvent(event)
 	if event == nil {
 		return nil
 	}
 	if shouldDropEvent(event) {
 		return nil
+	}
+	return event
+}
+
+func scrubSensitiveRequestEvent(event *sentrylib.Event) *sentrylib.Event {
+	if event == nil {
+		return nil
+	}
+	if event.Request == nil {
+		return event
+	}
+	for header := range event.Request.Headers {
+		if strings.EqualFold(header, "X-Helper-Token") {
+			delete(event.Request.Headers, header)
+		}
+	}
+	if strings.Contains(event.Request.URL, "/shielded-vote/v1/shares") {
+		event.Request.Data = ""
 	}
 	return event
 }

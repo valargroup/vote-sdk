@@ -72,6 +72,10 @@ type RoundInfoFetcher func(roundID string) (RoundInfo, error)
 // that have transitioned to TALLYING or beyond, avoiding wasted ZKP computation.
 type RoundStatusChecker func(roundID string) (isActive bool, err error)
 
+// ShareChoiceValidator checks that a proposal and vote decision exist in the
+// authenticated configuration for a voting round.
+type ShareChoiceValidator func(roundID string, proposalID, voteDecision uint32) error
+
 // ShareNullifierChecker reports whether a share nullifier is recorded on-chain
 // for the given voting round (hex-encoded 32-byte round id). Used by the
 // share-status endpoint to confirm MsgRevealShare acceptance without exposing
@@ -82,6 +86,17 @@ type ShareNullifierChecker func(roundIDHex string, shareNullifier []byte) (bool,
 // is provided by the votecommitment CGo package but abstracted here so the
 // helper package doesn't depend on the Rust FFI library directly.
 type VCHashFunc func(roundID, sharesHash [32]byte, proposalID, voteDecision uint32) ([32]byte, error)
+
+// SharePayloadValidator checks the commitment relationships in a submitted
+// share. A false result with no error means the payload is inconsistent.
+type SharePayloadValidator func(
+	sharesHash [32]byte,
+	shareComms [16][32]byte,
+	primaryBlind [32]byte,
+	encC1 [32]byte,
+	encC2 [32]byte,
+	shareIndex uint32,
+) (bool, error)
 
 // ShareNullifierHashFunc computes the share nullifier from the vote commitment,
 // share index, and per-share primary blind before generating ZKP 3.

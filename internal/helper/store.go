@@ -21,7 +21,7 @@ import (
 // it from transient failures.
 var ErrUnknownRound = errors.New("unknown voting round")
 
-// ErrInvalidSubmitAt is returned when submit_at is after vote end time.
+// ErrInvalidSubmitAt is returned when submit_at is at or after vote end time.
 var ErrInvalidSubmitAt = errors.New("invalid submit_at")
 
 // ErrInvalidRoundInfo is returned when cached round metadata cannot produce a
@@ -414,9 +414,9 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 		return EnqueueConflict, err
 	}
 
-	// Validate submit_at: must not exceed vote end time.
-	if payload.SubmitAt > roundInfo.VoteEndTime {
-		return EnqueueConflict, fmt.Errorf("%w: submit_at (%d) > vote_end_time (%d)", ErrInvalidSubmitAt, payload.SubmitAt, roundInfo.VoteEndTime)
+	// A scheduled reveal must run before the round stops accepting votes.
+	if payload.SubmitAt != 0 && payload.SubmitAt >= roundInfo.VoteEndTime {
+		return EnqueueConflict, fmt.Errorf("%w: submit_at (%d) >= vote_end_time (%d)", ErrInvalidSubmitAt, payload.SubmitAt, roundInfo.VoteEndTime)
 	}
 	receivedAt := uint64(time.Now().Unix())
 	s.mu.Lock()
@@ -1006,8 +1006,8 @@ func (s *ShareStore) ImportQueue(export QueueExport, opts QueueImportOptions) (Q
 		if voteEndTime == 0 {
 			voteEndTime = export.Round.VoteEndTime
 		}
-		if !opts.ForceReady && submitAt > voteEndTime {
-			return QueueImportResult{}, fmt.Errorf("%w: imported submit_at (%d) > vote_end_time (%d) for share_index %d proposal_id %d tree_position %d", ErrInvalidSubmitAt, submitAt, voteEndTime, row.ShareIndex, row.ProposalID, row.TreePosition)
+		if !opts.ForceReady && submitAt != 0 && submitAt >= voteEndTime {
+			return QueueImportResult{}, fmt.Errorf("%w: imported submit_at (%d) >= vote_end_time (%d) for share_index %d proposal_id %d tree_position %d", ErrInvalidSubmitAt, submitAt, voteEndTime, row.ShareIndex, row.ProposalID, row.TreePosition)
 		}
 		commsJSON, err := json.Marshal(row.ShareComms)
 		if err != nil {

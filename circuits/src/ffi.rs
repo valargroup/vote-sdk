@@ -1837,6 +1837,147 @@ pub unsafe extern "C" fn sv_vote_commitment_hash(
     }
 }
 
+/// Validate the caller-controlled commitment relationships in a helper share
+/// payload before it is persisted for asynchronous proof generation.
+///
+/// # Safety
+/// All pointers must reference readable 32-byte buffers. `share_comms_ptr`
+/// must reference `share_comms_len` readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn sv_validate_share_payload(
+    shares_hash_ptr: *const u8,
+    share_comms_ptr: *const u8,
+    share_comms_len: usize,
+    primary_blind_ptr: *const u8,
+    enc_c1_ptr: *const u8,
+    enc_c2_ptr: *const u8,
+    share_index: u32,
+) -> i32 {
+    if shares_hash_ptr.is_null()
+        || share_comms_ptr.is_null()
+        || primary_blind_ptr.is_null()
+        || enc_c1_ptr.is_null()
+        || enc_c2_ptr.is_null()
+        || share_comms_len != 16 * 32
+        || share_index > 15
+    {
+        set_ffi_error("validate_share_payload: invalid argument");
+        return -1;
+    }
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        use group::Curve;
+        use pasta_curves::{arithmetic::CurveAffine, group::GroupEncoding, pallas};
+
+        let mut shares_hash_bytes = [0u8; 32];
+        shares_hash_bytes.copy_from_slice(std::slice::from_raw_parts(shares_hash_ptr, 32));
+        let shares_hash = match Option::from(Fp::from_repr(shares_hash_bytes)) {
+            Some(value) => value,
+            None => {
+                set_ffi_error("validate_share_payload: shares_hash is not canonical");
+                return -3;
+            }
+        };
+
+        let share_comms_raw = std::slice::from_raw_parts(share_comms_ptr, share_comms_len);
+        let mut share_comms = [pallas::Base::zero(); 16];
+        for (index, share_comm) in share_comms.iter_mut().enumerate() {
+            let mut bytes = [0u8; 32];
+            bytes.copy_from_slice(&share_comms_raw[index * 32..(index + 1) * 32]);
+            *share_comm = match Option::from(pallas::Base::from_repr(bytes)) {
+                Some(value) => value,
+                None => {
+                    set_ffi_error("validate_share_payload: share commitment is not canonical");
+                    return -3;
+                }
+            };
+        }
+
+        let mut blind_bytes = [0u8; 32];
+        blind_bytes.copy_from_slice(std::slice::from_raw_parts(primary_blind_ptr, 32));
+        let primary_blind = match Option::from(pallas::Base::from_repr(blind_bytes)) {
+            Some(value) => value,
+            None => {
+                set_ffi_error("validate_share_payload: primary blind is not canonical");
+                return -3;
+            }
+        };
+
+        let mut c1_bytes = [0u8; 32];
+        c1_bytes.copy_from_slice(std::slice::from_raw_parts(enc_c1_ptr, 32));
+        let c1_point: pallas::Point = match Option::from(pallas::Point::from_bytes(&c1_bytes)) {
+            Some(value) => value,
+            None => {
+                set_ffi_error(
+                    "validate_share_payload: enc_c1 is not a valid compressed Pallas point",
+                );
+                return -3;
+            }
+        };
+        let c1_affine = c1_point.to_affine();
+        let c1_coordinates: Option<pasta_curves::arithmetic::Coordinates<pallas::Affine>> =
+            c1_affine.coordinates().into();
+        let c1_coordinates = match c1_coordinates {
+            Some(value) => value,
+            None => {
+                set_ffi_error("validate_share_payload: enc_c1 must not be the identity point");
+                return -3;
+            }
+        };
+        let enc_c1_x = *c1_coordinates.x();
+        let enc_c1_y = *c1_coordinates.y();
+
+        let mut c2_bytes = [0u8; 32];
+        c2_bytes.copy_from_slice(std::slice::from_raw_parts(enc_c2_ptr, 32));
+        let c2_point: pallas::Point = match Option::from(pallas::Point::from_bytes(&c2_bytes)) {
+            Some(value) => value,
+            None => {
+                set_ffi_error(
+                    "validate_share_payload: enc_c2 is not a valid compressed Pallas point",
+                );
+                return -3;
+            }
+        };
+        let c2_affine = c2_point.to_affine();
+        let c2_coordinates: Option<pasta_curves::arithmetic::Coordinates<pallas::Affine>> =
+            c2_affine.coordinates().into();
+        let c2_coordinates = match c2_coordinates {
+            Some(value) => value,
+            None => {
+                set_ffi_error("validate_share_payload: enc_c2 must not be the identity point");
+                return -3;
+            }
+        };
+        let enc_c2_x = *c2_coordinates.x();
+        let enc_c2_y = *c2_coordinates.y();
+
+        let selected_commitment = voting_circuits::share_commitment(
+            primary_blind,
+            enc_c1_x,
+            enc_c2_x,
+            enc_c1_y,
+            enc_c2_y,
+        );
+        if selected_commitment != share_comms[share_index as usize] {
+            set_ffi_error("validate_share_payload: selected share commitment mismatch");
+            return -4;
+        }
+        if voting_circuits::shares_hash_from_comms(share_comms) != shares_hash {
+            set_ffi_error("validate_share_payload: shares hash mismatch");
+            return -4;
+        }
+
+        0
+    }));
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_ffi_error("sv_validate_share_payload: internal panic");
+            -6
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Share nullifier hash (Poseidon)
 // ---------------------------------------------------------------------------
@@ -1988,6 +2129,45 @@ pub unsafe extern "C" fn sv_derive_round_id(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_validate_share_payload_distinguishes_mismatch() {
+        let (_, flat_comms, blind, c1, c2, _, share_index, _, _, _) =
+            build_share_reveal_test_data();
+        let share_comms = core::array::from_fn(|index| {
+            let mut bytes = [0u8; 32];
+            bytes.copy_from_slice(&flat_comms[index * 32..(index + 1) * 32]);
+            Option::from(Fp::from_repr(bytes)).unwrap()
+        });
+        let shares_hash = voting_circuits::shares_hash_from_comms(share_comms).to_repr();
+
+        let valid = unsafe {
+            sv_validate_share_payload(
+                shares_hash.as_ptr(),
+                flat_comms.as_ptr(),
+                flat_comms.len(),
+                blind.as_ptr(),
+                c1.as_ptr(),
+                c2.as_ptr(),
+                share_index,
+            )
+        };
+        assert_eq!(valid, 0);
+
+        let wrong_hash = Fp::from(99u64).to_repr();
+        let mismatch = unsafe {
+            sv_validate_share_payload(
+                wrong_hash.as_ptr(),
+                flat_comms.as_ptr(),
+                flat_comms.len(),
+                blind.as_ptr(),
+                c1.as_ptr(),
+                c2.as_ptr(),
+                share_index,
+            )
+        };
+        assert_eq!(mismatch, -4);
+    }
 
     #[test]
     fn test_share_nullifier_hash_ffi_matches_rust() {
