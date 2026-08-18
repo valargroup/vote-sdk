@@ -74,9 +74,10 @@ Environment secret under both `staging` and `production`. The host-side
 
 ### What gets captured
 
-Only unexpected infrastructure errors are reported. Expected conditions
-(bad client input, duplicate nullifiers, inactive rounds) are **not** sent
-to Sentry.
+Known caller errors remain visible through HTTP responses and bounded counters,
+but are not captured as Sentry error events. Helper-owned and unexpected errors
+remain alertable. When tracing is enabled, rejected requests can still appear as
+scrubbed HTTP performance transactions.
 
 #### ABCI consensus handlers
 
@@ -114,10 +115,21 @@ invalid votes.
 |--------|----------------|
 | Processor (`processShare`) | Proof generation failures, tree read errors, chain submission errors |
 | Processor (round check) | Round status check failures (KV store errors) |
-| API handler (`/shielded-vote/v1/shares`) | Internal `Enqueue` errors (500s) |
+| API handler (`/shielded-vote/v1/shares`) | Validator, round-reader, commitment-tree, and internal `Enqueue` failures (500s/503s) |
 | API handler (`/shielded-vote/v1/share-status`) | Nullifier check failures (500s) |
 | HTTP panic recovery | Any panic in a helper HTTP handler |
 | Processor panic recovery | Any panic during share processing |
+
+At ingress, malformed JSON, invalid encodings or ranges, noncanonical fields,
+invalid curve points, inconsistent share commitments, proposals or options not
+present in the authenticated round, unknown or inactive rounds, invalid
+schedules, and duplicate conflicts are caller errors. They return a 4xx
+response and increment a fixed-path `helper.share_submission` counter without
+creating an incident event. Exact idempotent duplicates for an active round
+remain 200. If a configured validator, round reader, or commitment reader is
+unavailable, the helper returns 503 instead of accepting an unchecked share.
+The API does not impose processing headroom. It accepts immediate submissions
+while the round is active and scheduled submissions strictly before round end.
 
 ### Share pipeline observability
 
@@ -131,6 +143,7 @@ treat HTTP request counts as durable queue counts.
 | Shares Processed | `helper.process_share` span | A ready queued share was taken by the background processor after its `submit_at` time and processing began. |
 | Share Reveals Submitted | HTTP client span for `POST /shielded-vote/v1/reveal-share` | The helper submitted a `MsgRevealShare` to the chain REST API. |
 | Shares Confirmed | Share nullifier observed on-chain | Final confirmation that the reveal was accepted on-chain. The `/share-status/{roundId}/{nullifier}` endpoint reports this as `confirmed`. |
+| Share Submission Outcomes | `helper.share_submission.<outcome>.<reason>` counter | Bounded ingress outcomes such as queued, duplicate, invalid JSON, inactive round, or internal failure. No share identifiers or payload fields are attached. |
 
 For an individual share, the intended lifecycle is:
 
@@ -198,7 +211,10 @@ regressions visible in the Sentry releases dashboard.
 
 - **HTTP handlers** -- all helper routes are wrapped with the `sentryhttp`
   middleware, which recovers panics and reports them to Sentry before
-  returning a 500 response.
+  returning a 500 response. It can also create sampled transactions for 4xx
+  responses. Ordinary 4xx responses do not create Sentry error events. The
+  Sentry hooks remove helper request bodies and the `X-Helper-Token` header from
+  both error and transaction events.
 - **Processor goroutines** -- each share processing goroutine has a
   `recover()` guard that captures panics to Sentry and marks the share as
   failed, preventing a single bad share from crashing the processor loop.

@@ -17,6 +17,9 @@ type Helper struct {
 	ExposeQueueStatus     bool
 	ExposeQueueSummary    bool
 	VCHash                VCHashFunc
+	PayloadValidator      SharePayloadValidator
+	ChoiceValidator       ShareChoiceValidator
+	RoundStatus           RoundStatusChecker
 	ShareNullifierChecker ShareNullifierChecker
 	Logger                log.Logger
 }
@@ -28,17 +31,33 @@ type Helper struct {
 //   - tree: accesses the commitment tree (status + merkle paths + leaf reads) from the keeper's KV store
 //   - prover: generates ZKP #3 proofs (real FFI or mock)
 //   - roundFetcher: queries the chain for round metadata (direct keeper access)
-//   - isRoundActive: checks if a round is still ACTIVE (nil = skip check)
+//   - isRoundActive: checks if a round is still ACTIVE
 //   - vcHash: computes vote commitment Poseidon hash
+//   - payloadValidator: checks caller-controlled share commitment relationships
+//   - choiceValidator: checks proposal and vote-decision membership in the round
 //   - shareNFHash: computes share nullifier Poseidon hash before proof generation
 //   - homeDir: the chain's home directory (for default DB path)
 //   - logger: module logger
-func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundInfoFetcher, isRoundActive RoundStatusChecker, vcHash VCHashFunc, shareNFHash ShareNullifierHashFunc, shareNF ShareNullifierChecker, homeDir string, logger log.Logger) (*Helper, error) {
+func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundInfoFetcher, isRoundActive RoundStatusChecker, vcHash VCHashFunc, payloadValidator SharePayloadValidator, choiceValidator ShareChoiceValidator, shareNFHash ShareNullifierHashFunc, shareNF ShareNullifierChecker, homeDir string, logger log.Logger) (*Helper, error) {
 	logger = logger.With("module", "helper")
 
 	if cfg.Disable {
 		logger.Info("helper server disabled")
 		return nil, nil
+	}
+	for _, dependency := range []struct {
+		name        string
+		unavailable bool
+	}{
+		{name: "commitment tree", unavailable: tree == nil},
+		{name: "round status checker", unavailable: isRoundActive == nil},
+		{name: "vote commitment hash", unavailable: vcHash == nil},
+		{name: "share payload validator", unavailable: payloadValidator == nil},
+		{name: "share choice validator", unavailable: choiceValidator == nil},
+	} {
+		if dependency.unavailable {
+			return nil, fmt.Errorf("%w: %s", ErrShareValidationUnavailable, dependency.name)
+		}
 	}
 
 	// Default DB path: $HOME/.svoted/helper.db
@@ -92,6 +111,9 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundI
 		ExposeQueueStatus:     cfg.ExposeQueueStatus,
 		ExposeQueueSummary:    cfg.ExposeQueueSummary,
 		VCHash:                vcHash,
+		PayloadValidator:      payloadValidator,
+		ChoiceValidator:       choiceValidator,
+		RoundStatus:           isRoundActive,
 		ShareNullifierChecker: shareNF,
 		Logger:                logger,
 	}, nil
@@ -99,7 +121,7 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundI
 
 // RegisterRoutes registers the helper's HTTP routes on the given router.
 func (h *Helper) RegisterRoutes(router *mux.Router) {
-	RegisterRoutesWithQueueSummaryGetters(
+	RegisterRoutesWithValidationGetters(
 		router,
 		func() *ShareStore { return h.Store },
 		func() string { return h.APIToken },
@@ -109,6 +131,9 @@ func (h *Helper) RegisterRoutes(router *mux.Router) {
 		func() TreeReader { return h.Processor.tree },
 		func() VCHashFunc { return h.VCHash },
 		func() ShareNullifierChecker { return h.ShareNullifierChecker },
+		func() RoundStatusChecker { return h.RoundStatus },
+		func() SharePayloadValidator { return h.PayloadValidator },
+		func() ShareChoiceValidator { return h.ChoiceValidator },
 		h.Logger,
 	)
 }

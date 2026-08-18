@@ -91,7 +91,7 @@ func helperPostSetup(
 			kvStore := (*svoteApp).VoteKeeper.OpenKVStore(ctx)
 			return (*svoteApp).VoteKeeper.HasNullifier(kvStore, votetypes.NullifierTypeShare, roundBytes, shareNullifier)
 		}
-		h, err := helper.New(cfg, treeReader, prover, treeReader.GetRoundInfo, treeReader.GetRoundIsActive, votecommitment.VoteCommitmentHash, sharetracking.ShareNullifierHash, shareNullifierChecker, homeDir, logger)
+		h, err := helper.New(cfg, treeReader, prover, treeReader.GetRoundInfo, treeReader.GetRoundIsActive, votecommitment.VoteCommitmentHash, votecommitment.ValidateSharePayload, treeReader.ValidateShareChoice, sharetracking.ShareNullifierHash, shareNullifierChecker, homeDir, logger)
 		if err != nil {
 			helper.CaptureErr(err, map[string]string{"stage": "helper_new"})
 			return fmt.Errorf("helper: %w", err)
@@ -268,6 +268,41 @@ func (r *keeperTreeReader) GetRoundInfo(roundID string) (helper.RoundInfo, error
 	}, nil
 }
 
+// ValidateShareChoice checks proposal and option membership against the
+// immutable round configuration stored by the vote keeper.
+func (r *keeperTreeReader) ValidateShareChoice(roundID string, proposalID, voteDecision uint32) error {
+	roundBytes, err := hex.DecodeString(roundID)
+	if err != nil {
+		return fmt.Errorf("%w: invalid round_id hex: %v", helper.ErrUnknownRound, err)
+	}
+	ctx := r.app.NewUncachedContext(false, cmtproto.Header{})
+	kvStore := r.app.VoteKeeper.OpenKVStore(ctx)
+	round, err := r.app.VoteKeeper.GetVoteRound(kvStore, roundBytes)
+	if err != nil {
+		if errors.Is(err, votetypes.ErrRoundNotFound) {
+			return fmt.Errorf("%w: %s", helper.ErrUnknownRound, roundID)
+		}
+		return fmt.Errorf("read round for share choice: %w", err)
+	}
+	if len(round.Proposals) < int(votetypes.MinProposalID) || len(round.Proposals) > votetypes.MaxProposals {
+		return fmt.Errorf("round has invalid proposal count %d", len(round.Proposals))
+	}
+	if proposalID < votetypes.MinProposalID || int(proposalID) > len(round.Proposals) {
+		return fmt.Errorf("%w: proposal_id %d out of range [1, %d]", helper.ErrInvalidRoundChoice, proposalID, len(round.Proposals))
+	}
+	proposal := round.Proposals[proposalID-1]
+	if proposal == nil {
+		return fmt.Errorf("round contains nil proposal at id %d", proposalID)
+	}
+	if len(proposal.Options) < votetypes.MinVoteOptions || len(proposal.Options) > votetypes.MaxVoteOptions {
+		return fmt.Errorf("round proposal %d has invalid option count %d", proposalID, len(proposal.Options))
+	}
+	if err := votetypes.ValidateVoteChoice(proposalID, voteDecision, proposal.Options); err != nil {
+		return fmt.Errorf("%w: %v", helper.ErrInvalidRoundChoice, err)
+	}
+	return nil
+}
+
 // GetRoundIsActive returns true if CheckTx is ready and the round has ACTIVE status.
 func (r *keeperTreeReader) GetRoundIsActive(roundID string) (bool, error) {
 	if !r.app.CheckTxBlockTimeReady() {
@@ -282,6 +317,9 @@ func (r *keeperTreeReader) GetRoundIsActive(roundID string) (bool, error) {
 	kvStore := r.app.VoteKeeper.OpenKVStore(ctx)
 	round, err := r.app.VoteKeeper.GetVoteRound(kvStore, roundBytes)
 	if err != nil {
+		if errors.Is(err, votetypes.ErrRoundNotFound) {
+			return false, fmt.Errorf("%w: %s", helper.ErrUnknownRound, roundID)
+		}
 		return false, err
 	}
 	return round.Status == votetypes.SessionStatus_SESSION_STATUS_ACTIVE, nil

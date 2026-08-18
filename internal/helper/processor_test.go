@@ -1293,7 +1293,7 @@ func TestValidatePayload(t *testing.T) {
 		SharesHash:   b64_32,
 		ProposalID:   1,
 		VoteDecision: 0,
-		EncShare:     EncryptedShareWire{C1: b64_32, C2: b64_32, ShareIndex: 0},
+		EncShare:     testPayload(roundID, 0).EncShare,
 		TreePosition: 0,
 		VoteRoundID:  roundID,
 		ShareComms:   comms,

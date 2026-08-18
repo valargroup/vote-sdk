@@ -8,18 +8,24 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	"cosmossdk.io/log"
+	"github.com/cosmos/cosmos-sdk/telemetry"
 	sentryhttp "github.com/getsentry/sentry-go/http"
 	"github.com/gorilla/mux"
+	"github.com/mikelodder7/curvey/native/pasta/fp"
 
+	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
-// RegisterRoutes registers helper server HTTP routes on the given mux router.
+// RegisterRoutes registers helper routes without production validation hooks.
+// It is retained for package tests; the application uses
+// RegisterRoutesWithValidationGetters.
 func RegisterRoutes(router *mux.Router, store *ShareStore, logger log.Logger) {
 	RegisterRoutesWithGetters(
 		router,
@@ -43,10 +49,23 @@ func RegisterRoutesWithStoreGetter(router *mux.Router, getStore func() *ShareSto
 
 // ErrInvalidCommitment is returned when the share's recomputed vote commitment
 // hash does not match the on-chain leaf at the claimed tree position.
-var ErrInvalidCommitment = fmt.Errorf("invalid vote commitment")
+var ErrInvalidCommitment = errors.New("invalid vote commitment")
 
-// RegisterRoutesWithGetters registers helper routes using runtime getters for
-// store, API token, tree reader, VC hash function, and share-nullifier checker.
+// ErrInvalidSharePayload is returned when individually valid share fields do
+// not form the commitments claimed by the submitted payload.
+var ErrInvalidSharePayload = errors.New("invalid share payload")
+
+// ErrInvalidRoundChoice is returned when a proposal or vote decision is not
+// part of the submitted share's authenticated voting round.
+var ErrInvalidRoundChoice = errors.New("invalid voting round choice")
+
+// ErrShareValidationUnavailable means a configured ingress validator cannot
+// currently run. Production registration treats this as service unavailability
+// rather than accepting an unchecked share.
+var ErrShareValidationUnavailable = errors.New("share validation unavailable")
+
+// RegisterRoutesWithGetters is the compatibility registration for routes that
+// do not need the production round and payload validators.
 func RegisterRoutesWithGetters(
 	router *mux.Router,
 	getStore func() *ShareStore,
@@ -86,6 +105,41 @@ func RegisterRoutesWithQueueSummaryGetters(
 	getShareNullifier ShareNullifierCheckerGetter,
 	logger log.Logger,
 ) {
+	RegisterRoutesWithValidationGetters(
+		router,
+		getStore,
+		getAPIToken,
+		getExposeQueueStatus,
+		getExposeQueueSummary,
+		getIngressAllowed,
+		getTree,
+		getVCHash,
+		getShareNullifier,
+		nil,
+		nil,
+		nil,
+		logger,
+	)
+}
+
+// RegisterRoutesWithValidationGetters registers helper routes with production
+// share consistency, exact round choice, commitment, and round status checks.
+// A configured getter that returns nil makes share submission unavailable.
+func RegisterRoutesWithValidationGetters(
+	router *mux.Router,
+	getStore func() *ShareStore,
+	getAPIToken func() string,
+	getExposeQueueStatus func() bool,
+	getExposeQueueSummary func() bool,
+	getIngressAllowed func() bool,
+	getTree func() TreeReader,
+	getVCHash func() VCHashFunc,
+	getShareNullifier ShareNullifierCheckerGetter,
+	getRoundStatus func() RoundStatusChecker,
+	getPayloadValidator func() SharePayloadValidator,
+	getChoiceValidator func() ShareChoiceValidator,
+	logger log.Logger,
+) {
 	h := &apiHandler{
 		getStore:              getStore,
 		getAPIToken:           getAPIToken,
@@ -95,6 +149,9 @@ func RegisterRoutesWithQueueSummaryGetters(
 		getTree:               getTree,
 		getVCHash:             getVCHash,
 		getShareNullifier:     getShareNullifier,
+		getRoundStatus:        getRoundStatus,
+		getPayloadValidator:   getPayloadValidator,
+		getChoiceValidator:    getChoiceValidator,
 		logger:                logger,
 	}
 	recover := sentryhttp.New(sentryhttp.Options{Repanic: false}).Handle
@@ -117,6 +174,9 @@ type apiHandler struct {
 	getTree               func() TreeReader
 	getVCHash             func() VCHashFunc
 	getShareNullifier     ShareNullifierCheckerGetter
+	getRoundStatus        func() RoundStatusChecker
+	getPayloadValidator   func() SharePayloadValidator
+	getChoiceValidator    func() ShareChoiceValidator
 	logger                log.Logger
 }
 
@@ -138,14 +198,17 @@ func jsonError(w http.ResponseWriter, msg string, code int) {
 
 func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 	if !h.ensureIngressAllowed(w) {
+		recordShareSubmissionOutcome("unavailable", "ingress_disabled")
 		return
 	}
 	store := h.getStore()
 	if store == nil {
+		recordShareSubmissionOutcome("unavailable", "store")
 		jsonError(w, "helper unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	if !h.authorizeSubmit(r) {
+		recordShareSubmissionOutcome("rejected", "unauthorized")
 		jsonError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -154,13 +217,108 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 	var payload SharePayload
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&payload); err != nil {
+		recordShareSubmissionOutcome("rejected", "invalid_json")
 		jsonError(w, fmt.Sprintf("invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		recordShareSubmissionOutcome("rejected", "invalid_json")
+		jsonError(w, "invalid JSON: expected one object", http.StatusBadRequest)
 		return
 	}
 
 	if err := validatePayload(&payload); err != nil {
+		recordShareSubmissionOutcome("rejected", "invalid_fields")
 		jsonError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := h.validatePayloadConsistency(&payload); err != nil {
+		if errors.Is(err, ErrInvalidSharePayload) {
+			recordShareSubmissionOutcome("rejected", "inconsistent_payload")
+			jsonError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, ErrShareValidationUnavailable) {
+			h.logger.Error("share payload validator unavailable", "error", err)
+			CaptureErr(err, map[string]string{
+				"stage": "payload_consistency_check",
+			})
+			recordShareSubmissionOutcome("unavailable", "payload_validator")
+			jsonError(w, "helper unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		h.logger.Error("share payload validation failed", "error", err)
+		CaptureErr(err, map[string]string{
+			"stage": "payload_consistency_check",
+		})
+		recordShareSubmissionOutcome("failed", "payload_validator")
+		jsonError(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	if h.getRoundStatus != nil {
+		checker := h.getRoundStatus()
+		if checker == nil {
+			err := fmt.Errorf("%w: round status checker", ErrShareValidationUnavailable)
+			h.logger.Error("round status checker unavailable", "error", err)
+			CaptureErr(err, map[string]string{
+				"stage": "round_status_check_ingress",
+			})
+			recordShareSubmissionOutcome("unavailable", "round_status_checker")
+			jsonError(w, "helper unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		active, err := checker(payload.VoteRoundID)
+		if err != nil {
+			if errors.Is(err, ErrUnknownRound) || errors.Is(err, types.ErrRoundNotFound) {
+				recordShareSubmissionOutcome("rejected", "unknown_round")
+				jsonError(w, ErrUnknownRound.Error(), http.StatusBadRequest)
+				return
+			}
+			if errors.Is(err, ErrCheckTxNotReady) {
+				recordShareSubmissionOutcome("unavailable", "check_tx_not_ready")
+				jsonError(w, "helper unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			h.logger.Error("round status check failed", "error", err)
+			CaptureErr(err, map[string]string{
+				"stage": "round_status_check_ingress",
+			})
+			recordShareSubmissionOutcome("failed", "round_status_check")
+			jsonError(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if !active {
+			recordShareSubmissionOutcome("rejected", "round_inactive")
+			jsonError(w, "voting round is not active", http.StatusConflict)
+			return
+		}
+	}
+
+	if err := h.validateShareChoice(&payload); err != nil {
+		if errors.Is(err, ErrInvalidRoundChoice) || errors.Is(err, ErrUnknownRound) || errors.Is(err, types.ErrRoundNotFound) {
+			recordShareSubmissionOutcome("rejected", "invalid_round_choice")
+			jsonError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, ErrShareValidationUnavailable) {
+			h.logger.Error("share choice validator unavailable", "error", err)
+			CaptureErr(err, map[string]string{
+				"stage": "round_choice_check_ingress",
+			})
+			recordShareSubmissionOutcome("unavailable", "choice_validator")
+			jsonError(w, "helper unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		h.logger.Error("share choice validation failed", "error", err)
+		CaptureErr(err, map[string]string{
+			"stage": "round_choice_check_ingress",
+		})
+		recordShareSubmissionOutcome("failed", "choice_validator")
+		jsonError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
@@ -168,7 +326,26 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 	// payload and compare against the on-chain leaf at tree_position. This
 	// rejects fabricated shares before they enter the queue (microsecond cost).
 	if err := h.verifyCommitment(&payload); err != nil {
-		jsonError(w, err.Error(), http.StatusBadRequest)
+		if errors.Is(err, ErrInvalidCommitment) {
+			recordShareSubmissionOutcome("rejected", "invalid_commitment")
+			jsonError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, ErrShareValidationUnavailable) {
+			h.logger.Error("vote commitment validator unavailable", "error", err)
+			CaptureErr(err, map[string]string{
+				"stage": "commitment_check",
+			})
+			recordShareSubmissionOutcome("unavailable", "commitment_validator")
+			jsonError(w, "helper unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		h.logger.Error("vote commitment verification failed", "error", err)
+		CaptureErr(err, map[string]string{
+			"stage": "commitment_check",
+		})
+		recordShareSubmissionOutcome("failed", "commitment_check")
+		jsonError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
@@ -182,10 +359,12 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 	result, err := store.Enqueue(payload)
 	if err != nil {
 		if errors.Is(err, ErrUnknownRound) {
+			recordShareSubmissionOutcome("rejected", "unknown_round")
 			jsonError(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		if errors.Is(err, ErrInvalidSubmitAt) {
+			recordShareSubmissionOutcome("rejected", "invalid_schedule")
 			jsonError(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -194,10 +373,12 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 			"round_id": payload.VoteRoundID,
 			"stage":    "enqueue",
 		})
+		recordShareSubmissionOutcome("failed", "enqueue")
 		jsonError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	if result == EnqueueConflict {
+		recordShareSubmissionOutcome("rejected", "conflict")
 		jsonError(w, "conflicting share payload for round_id/share_index", http.StatusConflict)
 		return
 	}
@@ -217,6 +398,9 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 	status := "queued"
 	if result == EnqueueDuplicate {
 		status = "duplicate"
+		recordShareSubmissionOutcome("duplicate", "exact")
+	} else {
+		recordShareSubmissionOutcome("accepted", "queued")
 	}
 	json.NewEncoder(w).Encode(submitResponse{Status: status})
 }
@@ -398,22 +582,22 @@ func (h *apiHandler) ensureIngressAllowed(w http.ResponseWriter) bool {
 
 // verifyCommitment recomputes the vote commitment Poseidon hash from the
 // payload fields and compares it against the on-chain leaf at tree_position.
-// Returns nil when the VC hash function or tree reader is unavailable
-// (graceful degradation during startup).
+// Legacy route registrations that provide neither dependency skip this check.
+// A configured getter returning nil is treated as service unavailability.
 func (h *apiHandler) verifyCommitment(p *SharePayload) error {
-	var vcHash VCHashFunc
-	if h.getVCHash != nil {
-		vcHash = h.getVCHash()
+	if h.getVCHash == nil && h.getTree == nil {
+		return nil
 	}
+	if h.getVCHash == nil || h.getTree == nil {
+		return fmt.Errorf("%w: incomplete commitment validator", ErrShareValidationUnavailable)
+	}
+	vcHash := h.getVCHash()
 	if vcHash == nil {
-		return nil
+		return fmt.Errorf("%w: vote commitment hash", ErrShareValidationUnavailable)
 	}
-	var tree TreeReader
-	if h.getTree != nil {
-		tree = h.getTree()
-	}
+	tree := h.getTree()
 	if tree == nil {
-		return nil
+		return fmt.Errorf("%w: commitment tree", ErrShareValidationUnavailable)
 	}
 
 	var roundID [32]byte
@@ -434,26 +618,12 @@ func (h *apiHandler) verifyCommitment(p *SharePayload) error {
 
 	computed, err := vcHash(roundID, sharesHash, p.ProposalID, p.VoteDecision)
 	if err != nil {
-		h.logger.Error("vc hash computation failed", "error", err)
-		CaptureErr(err, map[string]string{
-			"round_id":      p.VoteRoundID,
-			"proposal_id":   fmt.Sprintf("%d", p.ProposalID),
-			"tree_position": fmt.Sprintf("%d", p.TreePosition),
-			"stage":         "vc_hash",
-		})
-		return ErrInvalidCommitment
+		return fmt.Errorf("compute vote commitment: %w", err)
 	}
 
 	onChain, err := tree.LeafAt(p.TreePosition)
 	if err != nil {
-		h.logger.Error("leaf read failed", "tree_position", p.TreePosition, "error", err)
-		CaptureErr(err, map[string]string{
-			"round_id":      p.VoteRoundID,
-			"proposal_id":   fmt.Sprintf("%d", p.ProposalID),
-			"tree_position": fmt.Sprintf("%d", p.TreePosition),
-			"stage":         "leaf_read",
-		})
-		return fmt.Errorf("%w: tree read error", ErrInvalidCommitment)
+		return fmt.Errorf("read commitment tree leaf: %w", err)
 	}
 	if onChain == nil {
 		return fmt.Errorf("%w: no leaf at position %d", ErrInvalidCommitment, p.TreePosition)
@@ -465,9 +635,75 @@ func (h *apiHandler) verifyCommitment(p *SharePayload) error {
 	return nil
 }
 
-// validatePayload checks required fields of a share submission.
+func (h *apiHandler) validatePayloadConsistency(p *SharePayload) error {
+	if h.getPayloadValidator == nil {
+		return nil
+	}
+	validator := h.getPayloadValidator()
+	if validator == nil {
+		return fmt.Errorf("%w: share payload validator", ErrShareValidationUnavailable)
+	}
+	return checkPayloadConsistency(p, validator)
+}
+
+// checkPayloadConsistency validates the commitment relationships in a
+// structurally decoded payload. A false validator result is caller-owned;
+// validator execution failures remain helper-owned.
+func checkPayloadConsistency(p *SharePayload, validator SharePayloadValidator) error {
+	if validator == nil {
+		return fmt.Errorf("%w: share payload validator", ErrShareValidationUnavailable)
+	}
+	sharesHash, err := decodeBase64Array32(p.SharesHash, "shares_hash")
+	if err != nil {
+		return fmt.Errorf("decode validated shares_hash: %w", err)
+	}
+	primaryBlind, err := decodeBase64Array32(p.PrimaryBlind, "primary_blind")
+	if err != nil {
+		return fmt.Errorf("decode validated primary_blind: %w", err)
+	}
+	encC1, err := decodeBase64Array32(p.EncShare.C1, "enc_share.c1")
+	if err != nil {
+		return fmt.Errorf("decode validated enc_share.c1: %w", err)
+	}
+	encC2, err := decodeBase64Array32(p.EncShare.C2, "enc_share.c2")
+	if err != nil {
+		return fmt.Errorf("decode validated enc_share.c2: %w", err)
+	}
+	var shareComms [16][32]byte
+	for i, encoded := range p.ShareComms {
+		shareComms[i], err = decodeBase64Array32(encoded, fmt.Sprintf("share_comms[%d]", i))
+		if err != nil {
+			return fmt.Errorf("decode validated share_comms[%d]: %w", i, err)
+		}
+	}
+
+	valid, err := validator(sharesHash, shareComms, primaryBlind, encC1, encC2, p.EncShare.ShareIndex)
+	if err != nil {
+		return fmt.Errorf("validate share payload consistency: %w", err)
+	}
+	if !valid {
+		return ErrInvalidSharePayload
+	}
+	return nil
+}
+
+func (h *apiHandler) validateShareChoice(p *SharePayload) error {
+	if h.getChoiceValidator == nil {
+		return nil
+	}
+	validator := h.getChoiceValidator()
+	if validator == nil {
+		return fmt.Errorf("%w: share choice validator", ErrShareValidationUnavailable)
+	}
+	return validator(p.VoteRoundID, p.ProposalID, p.VoteDecision)
+}
+
+// validatePayload checks required fields and canonicalizes vote_round_id.
 func validatePayload(p *SharePayload) error {
 	if err := validateB64Field(p.SharesHash, 32, "shares_hash"); err != nil {
+		return err
+	}
+	if err := validateCanonicalB64Field(p.SharesHash, "shares_hash"); err != nil {
 		return err
 	}
 	if err := validateB64Field(p.EncShare.C1, 32, "enc_share.c1"); err != nil {
@@ -475,6 +711,15 @@ func validatePayload(p *SharePayload) error {
 	}
 	if err := validateB64Field(p.EncShare.C2, 32, "enc_share.c2"); err != nil {
 		return err
+	}
+	c1, _ := base64.StdEncoding.DecodeString(p.EncShare.C1)
+	c2, _ := base64.StdEncoding.DecodeString(p.EncShare.C2)
+	ciphertext, err := elgamal.UnmarshalCiphertext(append(append(make([]byte, 0, 64), c1...), c2...))
+	if err != nil {
+		return fmt.Errorf("enc_share: invalid Pallas point encoding")
+	}
+	if ciphertext.C1.IsIdentity() || ciphertext.C2.IsIdentity() {
+		return fmt.Errorf("enc_share: identity points are not valid reveal inputs")
 	}
 	if p.EncShare.ShareIndex > types.MaxProposals {
 		return fmt.Errorf("enc_share.share_index must be 0..%d", types.MaxProposals)
@@ -499,6 +744,12 @@ func validatePayload(p *SharePayload) error {
 	if len(roundBytes) != 32 {
 		return fmt.Errorf("vote_round_id: expected 32 bytes, got %d", len(roundBytes))
 	}
+	var roundID [32]byte
+	copy(roundID[:], roundBytes)
+	if _, err := fp.PastaFpNew().SetBytes(&roundID); err != nil {
+		return fmt.Errorf("vote_round_id: non-canonical Pallas field element")
+	}
+	p.VoteRoundID = hex.EncodeToString(roundBytes)
 
 	// share_comms: exactly 16 entries, each base64-decodable to 32 bytes.
 	if len(p.ShareComms) != 16 {
@@ -508,13 +759,30 @@ func validatePayload(p *SharePayload) error {
 		if err := validateB64Field(c, 32, fmt.Sprintf("share_comms[%d]", i)); err != nil {
 			return err
 		}
+		if err := validateCanonicalB64Field(c, fmt.Sprintf("share_comms[%d]", i)); err != nil {
+			return err
+		}
 	}
 
 	// primary_blind: base64-decodable to 32 bytes.
 	if err := validateB64Field(p.PrimaryBlind, 32, "primary_blind"); err != nil {
 		return err
 	}
+	if err := validateCanonicalB64Field(p.PrimaryBlind, "primary_blind"); err != nil {
+		return err
+	}
 
+	return nil
+}
+
+func validateCanonicalB64Field(value, fieldName string) error {
+	decoded, err := decodeBase64Array32(value, fieldName)
+	if err != nil {
+		return err
+	}
+	if _, err := fp.PastaFpNew().SetBytes(&decoded); err != nil {
+		return fmt.Errorf("%s: non-canonical Pallas field element", fieldName)
+	}
 	return nil
 }
 
@@ -527,4 +795,10 @@ func validateB64Field(value string, expectedLen int, fieldName string) error {
 		return fmt.Errorf("%s: expected %d bytes, got %d", fieldName, expectedLen, len(bytes))
 	}
 	return nil
+}
+
+// recordShareSubmissionOutcome emits a bounded counter with no request or
+// share identifiers.
+func recordShareSubmissionOutcome(outcome, reason string) {
+	telemetry.IncrCounter(1, "helper", "share_submission", outcome, reason)
 }
