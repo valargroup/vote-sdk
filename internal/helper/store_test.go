@@ -12,6 +12,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/valargroup/vote-sdk/crypto/elgamal"
 )
 
 const (
@@ -37,6 +39,9 @@ func newTestStore(t *testing.T) *ShareStore {
 
 func testPayload(roundID string, shareIndex uint32) SharePayload {
 	const zeroB64 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+	generator := elgamal.PallasGenerator()
+	c1B64 := base64.StdEncoding.EncodeToString(generator.ToAffineCompressed())
+	c2B64 := base64.StdEncoding.EncodeToString(generator.Double().ToAffineCompressed())
 	comms := make([]string, 16)
 	for i := range comms {
 		comms[i] = zeroB64
@@ -46,8 +51,8 @@ func testPayload(roundID string, shareIndex uint32) SharePayload {
 		ProposalID:   1,
 		VoteDecision: 0,
 		EncShare: EncryptedShareWire{
-			C1:         zeroB64,
-			C2:         zeroB64,
+			C1:         c1B64,
+			C2:         c2B64,
 			ShareIndex: shareIndex,
 		},
 		TreePosition: 0,
@@ -826,6 +831,13 @@ func TestEnqueue_SubmitAtValidation(t *testing.T) {
 		assert.ErrorIs(t, err, ErrInvalidSubmitAt)
 	})
 
+	t.Run("submit_at at vote_end_time rejected", func(t *testing.T) {
+		p := testPayload("round2", 0)
+		p.SubmitAt = voteEndTime
+		_, err := s.Enqueue(p)
+		assert.ErrorIs(t, err, ErrInvalidSubmitAt)
+	})
+
 	t.Run("submit_at=0 accepted (immediate)", func(t *testing.T) {
 		p := testPayload("round3", 0)
 		p.SubmitAt = 0
@@ -1388,9 +1400,9 @@ func TestImportQueueRejectsMissingRoundID(t *testing.T) {
 	assert.Contains(t, err.Error(), "queue export missing round_id")
 }
 
-func TestImportQueueRejectsSubmitAtAfterVoteEndTime(t *testing.T) {
+func TestImportQueueRejectsSubmitAtAtVoteEndTime(t *testing.T) {
 	submitAt := uint64(time.Now().Add(2 * time.Hour).Unix())
-	voteEndTime := submitAt - 60
+	voteEndTime := submitAt
 	payload := testPayload("round1", 0)
 	payload.SubmitAt = submitAt
 	export := QueueExport{

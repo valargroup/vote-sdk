@@ -106,6 +106,31 @@ func TestFilterNoisyErrorEvents(t *testing.T) {
 	}
 }
 
+func TestScrubSensitiveRequestEvent(t *testing.T) {
+	event := &sentrylib.Event{
+		Request: &sentrylib.Request{
+			URL:    "https://helper.example/shielded-vote/v1/shares",
+			Method: "POST",
+			Data:   `{"primary_blind":"secret share material"}`,
+			Headers: map[string]string{
+				"Content-Type":   "application/json",
+				"x-helper-token": "operator-secret",
+			},
+		},
+	}
+
+	got := scrubSensitiveRequestEvent(event)
+	if got.Request.Data != "" {
+		t.Fatalf("request data was not scrubbed")
+	}
+	if _, ok := got.Request.Headers["x-helper-token"]; ok {
+		t.Fatalf("helper token header was not scrubbed")
+	}
+	if got.Request.Headers["Content-Type"] != "application/json" {
+		t.Fatalf("non-sensitive header was removed")
+	}
+}
+
 func TestStartSpanCreatesSearchableRootSpan(t *testing.T) {
 	transport := initTestSentry(t)
 

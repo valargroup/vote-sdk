@@ -553,6 +553,29 @@ int32_t sv_vote_commitment_hash(
     uint8_t* commitment_out
 );
 
+/*
+ * Validate the caller-controlled relationships within a helper share payload.
+ *
+ * This checks that share_comms[share_index] commits to primary_blind and the
+ * revealed ciphertext, and that shares_hash commits to all 16 share_comms.
+ *
+ * Returns:
+ *    0  when the payload is internally consistent.
+ *   -1  for null pointers, wrong lengths, or share_index > 15.
+ *   -3  for non-canonical fields or invalid/identity curve points.
+ *   -4  when a commitment relationship does not match.
+ *   -6  if an internal panic occurred.
+ */
+int32_t sv_validate_share_payload(
+    const uint8_t* shares_hash_ptr,
+    const uint8_t* share_comms_ptr,
+    size_t share_comms_len,
+    const uint8_t* primary_blind_ptr,
+    const uint8_t* enc_c1_ptr,
+    const uint8_t* enc_c2_ptr,
+    uint32_t share_index
+);
+
 /* -----------------------------------------------------------------------
  * Share nullifier hash (Poseidon)
  * ----------------------------------------------------------------------- */

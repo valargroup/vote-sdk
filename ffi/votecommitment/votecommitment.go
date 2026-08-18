@@ -46,3 +46,43 @@ func VoteCommitmentHash(roundID, sharesHash [32]byte, proposalID, voteDecision u
 		return commitment, fmt.Errorf("votecommitment: unexpected error code %d", rc)
 	}
 }
+
+// ValidateSharePayload checks that the selected share commitment matches the
+// submitted blind and ciphertext, and that sharesHash matches all 16 share
+// commitments. Inconsistent relationships return false with a nil error.
+// Structural encoding is checked before this boundary, so decoding failures
+// here are treated as internal errors rather than reclassified as caller data.
+func ValidateSharePayload(
+	sharesHash [32]byte,
+	shareComms [16][32]byte,
+	primaryBlind [32]byte,
+	encC1 [32]byte,
+	encC2 [32]byte,
+	shareIndex uint32,
+) (bool, error) {
+	var comms [16 * 32]byte
+	for i := range shareComms {
+		copy(comms[i*32:(i+1)*32], shareComms[i][:])
+	}
+
+	rc := C.sv_validate_share_payload(
+		(*C.uint8_t)(unsafe.Pointer(&sharesHash[0])),
+		(*C.uint8_t)(unsafe.Pointer(&comms[0])),
+		C.size_t(len(comms)),
+		(*C.uint8_t)(unsafe.Pointer(&primaryBlind[0])),
+		(*C.uint8_t)(unsafe.Pointer(&encC1[0])),
+		(*C.uint8_t)(unsafe.Pointer(&encC2[0])),
+		C.uint32_t(shareIndex),
+	)
+
+	switch rc {
+	case 0:
+		return true, nil
+	case -4:
+		return false, nil
+	case -1, -3, -6:
+		return false, fmt.Errorf("votecommitment: share payload validator failed: %s", C.GoString(C.sv_last_error()))
+	default:
+		return false, fmt.Errorf("votecommitment: unexpected share payload validator code %d", rc)
+	}
+}

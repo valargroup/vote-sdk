@@ -18,6 +18,8 @@ import (
 	"cosmossdk.io/log"
 )
 
+const apiTestRoundID = "0100000000000000000000000000000000000000000000000000000000000000"
+
 func newTestRouter(t *testing.T) (*mux.Router, *ShareStore) {
 	t.Helper()
 	store := newTestStore(t)
@@ -62,6 +64,32 @@ func newQueueSummaryRouter(t *testing.T, store *ShareStore, token string, expose
 	return router
 }
 
+func newValidatedSubmitRouter(t *testing.T, validator SharePayloadValidator, roundStatus RoundStatusChecker, choiceValidators ...ShareChoiceValidator) (*mux.Router, *ShareStore) {
+	t.Helper()
+	store := newTestStore(t)
+	router := mux.NewRouter()
+	choiceValidator := ShareChoiceValidator(func(string, uint32, uint32) error { return nil })
+	if len(choiceValidators) > 0 {
+		choiceValidator = choiceValidators[0]
+	}
+	RegisterRoutesWithValidationGetters(
+		router,
+		func() *ShareStore { return store },
+		func() string { return "" },
+		func() bool { return false },
+		func() bool { return true },
+		func() bool { return true },
+		nil,
+		nil,
+		nil,
+		func() RoundStatusChecker { return roundStatus },
+		func() SharePayloadValidator { return validator },
+		func() ShareChoiceValidator { return choiceValidator },
+		log.NewNopLogger(),
+	)
+	return router, store
+}
+
 func enqueueInserted(t *testing.T, s *ShareStore, p SharePayload) {
 	t.Helper()
 	result, err := s.Enqueue(p)
@@ -70,7 +98,7 @@ func enqueueInserted(t *testing.T, s *ShareStore, p SharePayload) {
 }
 
 func validPayloadJSON() string {
-	p := testPayload("aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd", 0)
+	p := testPayload(apiTestRoundID, 0)
 	b, _ := json.Marshal(p)
 	return string(b)
 }
@@ -91,12 +119,152 @@ func TestSubmitShare_Success(t *testing.T) {
 
 	// Verify share was actually enqueued.
 	status := store.Status()
-	assert.Equal(t, 1, status["aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd"].Total)
+	assert.Equal(t, 1, status[apiTestRoundID].Total)
+}
+
+func TestSubmitShare_ConsistencyValidation(t *testing.T) {
+	t.Run("valid payload reaches queue", func(t *testing.T) {
+		validatorCalls := 0
+		validator := func([32]byte, [16][32]byte, [32]byte, [32]byte, [32]byte, uint32) (bool, error) {
+			validatorCalls++
+			return true, nil
+		}
+		router, store := newValidatedSubmitRouter(t, validator, func(string) (bool, error) { return true, nil })
+
+		req := httptest.NewRequest(http.MethodPost, "/shielded-vote/v1/shares", strings.NewReader(validPayloadJSON()))
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, 1, validatorCalls)
+		assert.Equal(t, 1, store.Status()[apiTestRoundID].Total)
+	})
+
+	t.Run("inconsistent payload is caller error", func(t *testing.T) {
+		validator := func([32]byte, [16][32]byte, [32]byte, [32]byte, [32]byte, uint32) (bool, error) {
+			return false, nil
+		}
+		router, store := newValidatedSubmitRouter(t, validator, func(string) (bool, error) { return true, nil })
+
+		req := httptest.NewRequest(http.MethodPost, "/shielded-vote/v1/shares", strings.NewReader(validPayloadJSON()))
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), ErrInvalidSharePayload.Error())
+		assert.Empty(t, store.Status())
+	})
+
+	t.Run("inactive round is caller state", func(t *testing.T) {
+		validator := func([32]byte, [16][32]byte, [32]byte, [32]byte, [32]byte, uint32) (bool, error) {
+			return true, nil
+		}
+		router, store := newValidatedSubmitRouter(t, validator, func(string) (bool, error) { return false, nil })
+
+		req := httptest.NewRequest(http.MethodPost, "/shielded-vote/v1/shares", strings.NewReader(validPayloadJSON()))
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusConflict, w.Code)
+		assert.Contains(t, w.Body.String(), "not active")
+		assert.Empty(t, store.Status())
+	})
+
+}
+
+func TestSubmitShare_RoundChoiceValidation(t *testing.T) {
+	payloadValidator := SharePayloadValidator(func([32]byte, [16][32]byte, [32]byte, [32]byte, [32]byte, uint32) (bool, error) {
+		return true, nil
+	})
+
+	t.Run("proposal-specific option is rejected before queueing", func(t *testing.T) {
+		choiceValidator := ShareChoiceValidator(func(roundID string, proposalID, voteDecision uint32) error {
+			assert.Equal(t, apiTestRoundID, roundID)
+			assert.Equal(t, uint32(1), proposalID)
+			assert.Equal(t, uint32(2), voteDecision)
+			return fmt.Errorf("%w: vote_decision 2 is not an option", ErrInvalidRoundChoice)
+		})
+		router, store := newValidatedSubmitRouter(t, payloadValidator, func(string) (bool, error) { return true, nil }, choiceValidator)
+		payload := testPayload(apiTestRoundID, 0)
+		payload.VoteDecision = 2
+		body, err := json.Marshal(payload)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPost, "/shielded-vote/v1/shares", strings.NewReader(string(body)))
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), ErrInvalidRoundChoice.Error())
+		assert.Empty(t, store.Status())
+	})
+
+	t.Run("round read failure remains a helper error", func(t *testing.T) {
+		choiceValidator := ShareChoiceValidator(func(string, uint32, uint32) error { return assert.AnError })
+		router, store := newValidatedSubmitRouter(t, payloadValidator, func(string) (bool, error) { return true, nil }, choiceValidator)
+
+		req := httptest.NewRequest(http.MethodPost, "/shielded-vote/v1/shares", strings.NewReader(validPayloadJSON()))
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Empty(t, store.Status())
+	})
+}
+
+func TestSubmitShare_ConfiguredValidatorsFailClosed(t *testing.T) {
+	validPayloadValidator := SharePayloadValidator(func([32]byte, [16][32]byte, [32]byte, [32]byte, [32]byte, uint32) (bool, error) {
+		return true, nil
+	})
+	activeRound := RoundStatusChecker(func(string) (bool, error) { return true, nil })
+
+	t.Run("payload validator", func(t *testing.T) {
+		router, store := newValidatedSubmitRouter(t, nil, activeRound)
+		assertSubmitUnavailable(t, router, store)
+	})
+
+	t.Run("round status checker", func(t *testing.T) {
+		router, store := newValidatedSubmitRouter(t, validPayloadValidator, nil)
+		assertSubmitUnavailable(t, router, store)
+	})
+
+	t.Run("choice validator", func(t *testing.T) {
+		router, store := newValidatedSubmitRouter(t, validPayloadValidator, activeRound, nil)
+		assertSubmitUnavailable(t, router, store)
+	})
+
+	t.Run("commitment tree", func(t *testing.T) {
+		store := newTestStore(t)
+		router := mux.NewRouter()
+		RegisterRoutesWithGetters(
+			router,
+			func() *ShareStore { return store },
+			func() string { return "" },
+			func() bool { return false },
+			func() bool { return true },
+			func() TreeReader { return nil },
+			func() VCHashFunc {
+				return func([32]byte, [32]byte, uint32, uint32) ([32]byte, error) { return [32]byte{}, nil }
+			},
+			nil,
+			log.NewNopLogger(),
+		)
+		assertSubmitUnavailable(t, router, store)
+	})
+}
+
+func assertSubmitUnavailable(t *testing.T, router *mux.Router, store *ShareStore) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/shielded-vote/v1/shares", strings.NewReader(validPayloadJSON()))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.Empty(t, store.Status())
 }
 
 func TestShareStatus_PendingThenConfirmed(t *testing.T) {
 	store := newTestStore(t)
-	roundID := "aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd"
+	roundID := apiTestRoundID
 	enqueueInserted(t, store, testPayload(roundID, 0))
 
 	var nf [32]byte
@@ -152,6 +320,17 @@ func TestSubmitShare_InvalidJSON(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+func TestSubmitShare_RejectsMultipleJSONObjects(t *testing.T) {
+	router, _ := newTestRouter(t)
+	body := validPayloadJSON() + validPayloadJSON()
+	req := httptest.NewRequest(http.MethodPost, "/shielded-vote/v1/shares", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "expected one object")
+}
+
 func TestSubmitShare_ValidationErrors(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -162,6 +341,22 @@ func TestSubmitShare_ValidationErrors(t *testing.T) {
 			name:    "bad shares_hash base64",
 			modify:  func(p *SharePayload) { p.SharesHash = "not-valid-base64!!!" },
 			errPart: "shares_hash",
+		},
+		{
+			name: "noncanonical shares_hash",
+			modify: func(p *SharePayload) {
+				invalid := make([]byte, 32)
+				for i := range invalid {
+					invalid[i] = 0xff
+				}
+				p.SharesHash = base64.StdEncoding.EncodeToString(invalid)
+			},
+			errPart: "non-canonical",
+		},
+		{
+			name:    "identity ciphertext point",
+			modify:  func(p *SharePayload) { p.EncShare.C1 = base64.StdEncoding.EncodeToString(make([]byte, 32)) },
+			errPart: "identity",
 		},
 		{
 			name:    "share_index out of range",
@@ -184,7 +379,7 @@ func TestSubmitShare_ValidationErrors(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			router, _ := newTestRouter(t)
 
-			p := testPayload("aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd", 0)
+			p := testPayload(apiTestRoundID, 0)
 			tc.modify(&p)
 			body, _ := json.Marshal(p)
 
@@ -215,7 +410,7 @@ func TestStatus_Empty(t *testing.T) {
 func TestStatus_WithShares(t *testing.T) {
 	router, store := newTestRouter(t)
 
-	roundID := "aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd"
+	roundID := apiTestRoundID
 	enqueueInserted(t, store, testPayload(roundID, 0))
 	enqueueInserted(t, store, testPayload(roundID, 1))
 
@@ -245,7 +440,7 @@ func TestQueueStatus_DisabledByDefault(t *testing.T) {
 
 func TestQueueStatus_RequiresTokenWhenEnabled(t *testing.T) {
 	router, store := newQueueStatusRouter(t, "secret-token")
-	roundID := "aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd"
+	roundID := apiTestRoundID
 	enqueueInserted(t, store, testPayload(roundID, 0))
 
 	t.Run("missing token rejected", func(t *testing.T) {
@@ -278,7 +473,7 @@ func TestQueueStatus_RequiresTokenWhenEnabled(t *testing.T) {
 }
 
 func TestQueueSummary_PublicNoToken(t *testing.T) {
-	roundID := "aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd"
+	roundID := apiTestRoundID
 	start := uint64(time.Now().Add(-10 * time.Minute).Unix())
 	end := start + 10*60
 	fetcher := func(roundID string) (RoundInfo, error) {
@@ -308,7 +503,7 @@ func TestQueueSummary_PublicNoToken(t *testing.T) {
 func TestQueueSummary_Disabled(t *testing.T) {
 	store := newTestStore(t)
 	router := newQueueSummaryRouter(t, store, "", false)
-	roundID := "aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd"
+	roundID := apiTestRoundID
 
 	req := httptest.NewRequest("GET", "/shielded-vote/v1/queue-summary/"+roundID, nil)
 	w := httptest.NewRecorder()
@@ -426,10 +621,38 @@ func TestSubmitShare_DuplicateIsIdempotent(t *testing.T) {
 	assert.Equal(t, "duplicate", resp.Status)
 }
 
+func TestSubmitShare_RoundIDCaseIsIdempotent(t *testing.T) {
+	router, store := newTestRouter(t)
+	roundID := "ab" + strings.Repeat("00", 31)
+
+	first := testPayload(roundID, 0)
+	firstBody, err := json.Marshal(first)
+	require.NoError(t, err)
+	firstRequest := httptest.NewRequest(http.MethodPost, "/shielded-vote/v1/shares", strings.NewReader(string(firstBody)))
+	firstResponse := httptest.NewRecorder()
+	router.ServeHTTP(firstResponse, firstRequest)
+	require.Equal(t, http.StatusOK, firstResponse.Code)
+
+	second := first
+	second.VoteRoundID = strings.ToUpper(roundID)
+	secondBody, err := json.Marshal(second)
+	require.NoError(t, err)
+	secondRequest := httptest.NewRequest(http.MethodPost, "/shielded-vote/v1/shares", strings.NewReader(string(secondBody)))
+	secondResponse := httptest.NewRecorder()
+	router.ServeHTTP(secondResponse, secondRequest)
+	require.Equal(t, http.StatusOK, secondResponse.Code)
+
+	var response submitResponse
+	require.NoError(t, json.Unmarshal(secondResponse.Body.Bytes(), &response))
+	assert.Equal(t, "duplicate", response.Status)
+	assert.Equal(t, 1, store.Status()[roundID].Total)
+	assert.Len(t, store.Status(), 1)
+}
+
 func TestSubmitShare_ConflictingPayloadReturnsConflict(t *testing.T) {
 	router, _ := newTestRouter(t)
 
-	first := testPayload("aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd", 0)
+	first := testPayload(apiTestRoundID, 0)
 	b1, _ := json.Marshal(first)
 	req1 := httptest.NewRequest("POST", "/shielded-vote/v1/shares", strings.NewReader(string(b1)))
 	w1 := httptest.NewRecorder()
@@ -555,7 +778,7 @@ func TestSubmitShare_VCCrossCheck_Match(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	assert.Equal(t, "queued", resp.Status)
 
-	roundID := "aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd"
+	roundID := apiTestRoundID
 	status := store.Status()
 	assert.Equal(t, 1, status[roundID].Total)
 }
@@ -615,8 +838,9 @@ func TestSubmitShare_UnknownRound(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "unknown voting round")
 }
 
-func TestSubmitShare_VCCrossCheck_GracefulDegradation(t *testing.T) {
-	// When VCHash is nil (not configured), shares should still be accepted.
+func TestSubmitShare_LegacyRegistrationWithoutVCCrossCheck(t *testing.T) {
+	// Package tests retain a minimal compatibility registration. Production
+	// supplies configured validator getters and fails closed when they return nil.
 	store := newTestStore(t)
 	router := mux.NewRouter()
 	RegisterRoutesWithGetters(
@@ -647,7 +871,7 @@ func TestEnqueue_UnknownRoundRejected(t *testing.T) {
 	require.NoError(t, err)
 	defer s.Close()
 
-	p := testPayload("aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd", 0)
+	p := testPayload(apiTestRoundID, 0)
 	_, err = s.Enqueue(p)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrUnknownRound)
@@ -723,7 +947,7 @@ func TestSubmitShare_VCCrossCheck_BlocksPositionVariation(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w1.Code)
 
 	// Attacker tries same payload but with tree_position=999 — no leaf there.
-	p := testPayload("aabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd", 0)
+	p := testPayload(apiTestRoundID, 0)
 	p.TreePosition = 999
 	body, _ := json.Marshal(p)
 
