@@ -1457,15 +1457,13 @@ dependencies = [
 [[package]]
 name = "imt-tree"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0aad3e3ab5a46f4a08d00f5525b86cd0d5204cba64ba68f46e20a590e1808aec"
+source = "git+https://github.com/valargroup/vote-nullifier-pir?rev=3a89f2838e64475746805c25a2f999c8dc96adff#3a89f2838e64475746805c25a2f999c8dc96adff"
 dependencies = [
  "anyhow",
  "ff",
- "halo2_gadgets",
  "hex",
- "pasta_curves",
  "rayon",
+ "voting-crypto-deps",
 ]
 
 [[package]]
@@ -2696,19 +2694,14 @@ version = "0.1.0"
 dependencies = [
  "ff",
  "group",
- "halo2_gadgets",
- "halo2_proofs",
  "hex",
  "imt-tree",
  "incrementalmerkletree",
  "nonempty",
- "orchard",
- "pasta_curves",
  "rand_core",
- "reddsa",
  "vote-commitment-tree",
  "voting-circuits",
- "zcash_primitives",
+ "voting-crypto-deps",
  "zcash_protocol",
 ]
 
@@ -3334,18 +3327,16 @@ dependencies = [
 [[package]]
 name = "vote-commitment-tree"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22d1048977b2b16cd9ec141fd4521266565a970d41df67d446a6d2dbefe329bd"
+source = "git+https://github.com/valargroup/zcash_voting?rev=19296ce13ccf4428878ee4eb5c96a0d4d7063d2e#19296ce13ccf4428878ee4eb5c96a0d4d7063d2e"
 dependencies = [
  "anyhow",
  "ff",
- "halo2_gadgets",
  "imt-tree",
  "incrementalmerkletree",
  "lazy_static",
  "libc",
- "pasta_curves",
  "shardtree",
+ "voting-crypto-deps",
 ]
 
 [[package]]
@@ -3367,22 +3358,31 @@ dependencies = [
 [[package]]
 name = "voting-circuits"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "014def2d1738ecc42253d0cd0f6e74847bc51ccde55ad992abadede7fade76d5"
+source = "git+https://github.com/valargroup/voting-circuits?rev=83427979fccb8ae3bf010e21691742c78d283bc8#83427979fccb8ae3bf010e21691742c78d283bc8"
 dependencies = [
  "blake2b_simd",
  "ff",
  "group",
- "halo2_gadgets",
- "halo2_poseidon",
- "halo2_proofs",
  "incrementalmerkletree",
  "itertools",
  "lazy_static",
+ "rand",
+ "voting-crypto-deps",
+]
+
+[[package]]
+name = "voting-crypto-deps"
+version = "0.1.0"
+source = "git+https://github.com/valargroup/voting-circuits?rev=83427979fccb8ae3bf010e21691742c78d283bc8#83427979fccb8ae3bf010e21691742c78d283bc8"
+dependencies = [
+ "halo2_gadgets",
+ "halo2_poseidon",
+ "halo2_proofs",
  "orchard",
  "pasta_curves",
- "rand",
+ "reddsa",
  "sinsemilla",
+ "zcash_primitives",
 ]
 
 [[package]]

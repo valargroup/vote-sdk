@@ -87,6 +87,8 @@ jobs:
           key: ${{ runner.os }}-circuits-${{ hashFiles('circuits/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-circuits-
+      - name: Check circuit backend contract
+        run: bash scripts/ci/check_circuit_backends.sh
       - name: Build circuits
         run: mise run build:circuits
       - name: Run unit tests

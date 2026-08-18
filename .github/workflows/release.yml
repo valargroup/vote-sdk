@@ -117,7 +117,7 @@ jobs:
                    -X github.com/cosmos/cosmos-sdk/version.Commit=${COMMIT} \
                    -X 'github.com/cosmos/cosmos-sdk/version.BuildTags=${BUILD_TAGS}'"
           if [ "${{ matrix.cross }}" = "true" ]; then
-            cargo build --release --manifest-path circuits/Cargo.toml --target ${{ matrix.rust_target }}
+            cargo build --release --manifest-path circuits/Cargo.toml --no-default-features --features zakura --target ${{ matrix.rust_target }}
             mkdir -p circuits/target/release
             ln -sf "$(pwd)/circuits/target/${{ matrix.rust_target }}/release/libshielded_vote_circuits.a" \
                    circuits/target/release/libshielded_vote_circuits.a

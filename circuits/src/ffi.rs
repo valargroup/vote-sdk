@@ -12,8 +12,8 @@
 
 use std::ffi::CString;
 
-use halo2_proofs::pasta::Fp;
-use pasta_curves::group::ff::PrimeField;
+use voting_crypto_deps::halo2_proofs::pasta::Fp;
+use voting_crypto_deps::pasta_curves::group::ff::PrimeField;
 
 use crate::delegation;
 use crate::proof::{verify_halo2_proof_bytes, ProofVerifyError};
@@ -48,8 +48,12 @@ fn set_ffi_error(msg: impl AsRef<str>) {
 
 fn verify_ffi_halo2_proof(
     label: &str,
-    params: &halo2_proofs::poly::commitment::Params<halo2_proofs::pasta::EqAffine>,
-    vk: &halo2_proofs::plonk::VerifyingKey<halo2_proofs::pasta::EqAffine>,
+    params: &voting_crypto_deps::halo2_proofs::poly::commitment::Params<
+        voting_crypto_deps::halo2_proofs::pasta::EqAffine,
+    >,
+    vk: &voting_crypto_deps::halo2_proofs::plonk::VerifyingKey<
+        voting_crypto_deps::halo2_proofs::pasta::EqAffine,
+    >,
     proof: &[u8],
     public_inputs: &[Fp],
 ) -> i32 {
@@ -114,9 +118,11 @@ fn derive_round_id_poseidon(
     vote_end_time: u64,
     nullifier_imt_root: [u8; 32],
     nc_root: [u8; 32],
-) -> Result<pasta_curves::pallas::Base, &'static str> {
-    use halo2_gadgets::poseidon::primitives::{self as poseidon, ConstantLength, P128Pow5T3};
-    use pasta_curves::pallas;
+) -> Result<voting_crypto_deps::pasta_curves::pallas::Base, &'static str> {
+    use voting_crypto_deps::halo2_gadgets::poseidon::primitives::{
+        self as poseidon, ConstantLength, P128Pow5T3,
+    };
+    use voting_crypto_deps::pasta_curves::pallas;
 
     // Helper: split a 32-byte value into two 128-bit limbs (lo, hi) as Fp elements.
     let split_to_limbs = |bytes: &[u8; 32]| -> (pallas::Base, pallas::Base) {
@@ -154,7 +160,9 @@ fn vote_commitment_hash(
     proposal_id: Fp,
     vote_decision: Fp,
 ) -> Fp {
-    use halo2_gadgets::poseidon::primitives::{self as poseidon, ConstantLength, P128Pow5T3};
+    use voting_crypto_deps::halo2_gadgets::poseidon::primitives::{
+        self as poseidon, ConstantLength, P128Pow5T3,
+    };
 
     poseidon::Hash::<_, P128Pow5T3, ConstantLength<5>, 3, 2>::init().hash([
         Fp::from(vote_commitment_tree::DOMAIN_VC),
@@ -434,7 +442,9 @@ pub unsafe extern "C" fn sv_verify_delegation_proof(
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         use group::Curve;
-        use pasta_curves::{arithmetic::CurveAffine, group::GroupEncoding, pallas};
+        use voting_crypto_deps::pasta_curves::{
+            arithmetic::CurveAffine, group::GroupEncoding, pallas,
+        };
 
         let proof = std::slice::from_raw_parts(proof_ptr, proof_len);
         let raw = std::slice::from_raw_parts(public_inputs_ptr, public_inputs_len);
@@ -470,8 +480,9 @@ pub unsafe extern "C" fn sv_verify_delegation_proof(
             }
         };
         let rk_affine = rk_point.to_affine();
-        let rk_coords: Option<pasta_curves::arithmetic::Coordinates<pallas::Affine>> =
-            rk_affine.coordinates().into();
+        let rk_coords: Option<
+            voting_crypto_deps::pasta_curves::arithmetic::Coordinates<pallas::Affine>,
+        > = rk_affine.coordinates().into();
         let rk_coords = match rk_coords {
             Some(c) => c,
             None => {
@@ -568,7 +579,7 @@ pub unsafe extern "C" fn sv_verify_delegation_proof(
         };
 
         let dom = {
-            use halo2_gadgets::poseidon::primitives::{
+            use voting_crypto_deps::halo2_gadgets::poseidon::primitives::{
                 self as poseidon, ConstantLength, P128Pow5T3,
             };
             let mut tag_bytes = [0u8; 32];
@@ -673,7 +684,9 @@ pub unsafe extern "C" fn sv_verify_vote_proof(
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         use group::Curve;
-        use pasta_curves::{arithmetic::CurveAffine, group::GroupEncoding, pallas};
+        use voting_crypto_deps::pasta_curves::{
+            arithmetic::CurveAffine, group::GroupEncoding, pallas,
+        };
 
         let proof = std::slice::from_raw_parts(proof_ptr, proof_len);
         let raw = std::slice::from_raw_parts(public_inputs_ptr, public_inputs_len);
@@ -706,8 +719,9 @@ pub unsafe extern "C" fn sv_verify_vote_proof(
             }
         };
         let r_vpk_affine = r_vpk_point.to_affine();
-        let r_vpk_coords: Option<pasta_curves::arithmetic::Coordinates<pallas::Affine>> =
-            r_vpk_affine.coordinates().into();
+        let r_vpk_coords: Option<
+            voting_crypto_deps::pasta_curves::arithmetic::Coordinates<pallas::Affine>,
+        > = r_vpk_affine.coordinates().into();
         let r_vpk_coords = match r_vpk_coords {
             Some(c) => c,
             None => {
@@ -775,8 +789,9 @@ pub unsafe extern "C" fn sv_verify_vote_proof(
             }
         };
         let ea_pk_affine = ea_pk_point.to_affine();
-        let ea_pk_coords: Option<pasta_curves::arithmetic::Coordinates<pallas::Affine>> =
-            ea_pk_affine.coordinates().into();
+        let ea_pk_coords: Option<
+            voting_crypto_deps::pasta_curves::arithmetic::Coordinates<pallas::Affine>,
+        > = ea_pk_affine.coordinates().into();
         let ea_pk_coords = match ea_pk_coords {
             Some(c) => c,
             None => {
@@ -939,7 +954,7 @@ pub unsafe extern "C" fn sv_verify_share_reveal_proof(
     }
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        use pasta_curves::pallas;
+        use voting_crypto_deps::pasta_curves::pallas;
 
         let proof = std::slice::from_raw_parts(proof_ptr, proof_len);
         let raw = std::slice::from_raw_parts(public_inputs_ptr, public_inputs_len);
@@ -1083,7 +1098,9 @@ pub unsafe extern "C" fn sv_generate_share_reveal(
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         use group::Curve;
-        use pasta_curves::{arithmetic::CurveAffine, group::GroupEncoding, pallas};
+        use voting_crypto_deps::pasta_curves::{
+            arithmetic::CurveAffine, group::GroupEncoding, pallas,
+        };
 
         // --- Step 1: Decode Merkle auth path ---
         let merkle_path_raw = std::slice::from_raw_parts(merkle_path_ptr, merkle_path_len);
@@ -1141,8 +1158,9 @@ pub unsafe extern "C" fn sv_generate_share_reveal(
             }
         };
         let c1_affine = c1_point.to_affine();
-        let c1_coords: Option<pasta_curves::arithmetic::Coordinates<pallas::Affine>> =
-            c1_affine.coordinates().into();
+        let c1_coords: Option<
+            voting_crypto_deps::pasta_curves::arithmetic::Coordinates<pallas::Affine>,
+        > = c1_affine.coordinates().into();
         let c1_coords = match c1_coords {
             Some(c) => c,
             None => {
@@ -1164,8 +1182,9 @@ pub unsafe extern "C" fn sv_generate_share_reveal(
             }
         };
         let c2_affine = c2_point.to_affine();
-        let c2_coords: Option<pasta_curves::arithmetic::Coordinates<pallas::Affine>> =
-            c2_affine.coordinates().into();
+        let c2_coords: Option<
+            voting_crypto_deps::pasta_curves::arithmetic::Coordinates<pallas::Affine>,
+        > = c2_affine.coordinates().into();
         let c2_coords = match c2_coords {
             Some(c) => c,
             None => {
@@ -1266,10 +1285,10 @@ pub fn build_share_reveal_test_data() -> (
     u32,
     [u8; 32],
 ) {
-    use halo2_proofs::arithmetic::CurveAffine;
-    use pasta_curves::group::ff::PrimeField;
-    use pasta_curves::group::{Curve, GroupEncoding};
-    use pasta_curves::pallas;
+    use voting_crypto_deps::halo2_proofs::arithmetic::CurveAffine;
+    use voting_crypto_deps::pasta_curves::group::ff::PrimeField;
+    use voting_crypto_deps::pasta_curves::group::{Curve, GroupEncoding};
+    use voting_crypto_deps::pasta_curves::pallas;
 
     let proposal_id: u32 = 3;
     let vote_decision: u32 = 1;
@@ -1867,7 +1886,9 @@ pub unsafe extern "C" fn sv_validate_share_payload(
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         use group::Curve;
-        use pasta_curves::{arithmetic::CurveAffine, group::GroupEncoding, pallas};
+        use voting_crypto_deps::pasta_curves::{
+            arithmetic::CurveAffine, group::GroupEncoding, pallas,
+        };
 
         let mut shares_hash_bytes = [0u8; 32];
         shares_hash_bytes.copy_from_slice(std::slice::from_raw_parts(shares_hash_ptr, 32));
@@ -1915,8 +1936,9 @@ pub unsafe extern "C" fn sv_validate_share_payload(
             }
         };
         let c1_affine = c1_point.to_affine();
-        let c1_coordinates: Option<pasta_curves::arithmetic::Coordinates<pallas::Affine>> =
-            c1_affine.coordinates().into();
+        let c1_coordinates: Option<
+            voting_crypto_deps::pasta_curves::arithmetic::Coordinates<pallas::Affine>,
+        > = c1_affine.coordinates().into();
         let c1_coordinates = match c1_coordinates {
             Some(value) => value,
             None => {
@@ -1939,8 +1961,9 @@ pub unsafe extern "C" fn sv_validate_share_payload(
             }
         };
         let c2_affine = c2_point.to_affine();
-        let c2_coordinates: Option<pasta_curves::arithmetic::Coordinates<pallas::Affine>> =
-            c2_affine.coordinates().into();
+        let c2_coordinates: Option<
+            voting_crypto_deps::pasta_curves::arithmetic::Coordinates<pallas::Affine>,
+        > = c2_affine.coordinates().into();
         let c2_coordinates = match c2_coordinates {
             Some(value) => value,
             None => {
@@ -2203,7 +2226,9 @@ mod tests {
     #[ignore]
     fn test_generate_share_reveal() {
         use group::Curve;
-        use pasta_curves::{arithmetic::CurveAffine, group::GroupEncoding, pallas};
+        use voting_crypto_deps::pasta_curves::{
+            arithmetic::CurveAffine, group::GroupEncoding, pallas,
+        };
 
         let (
             merkle_path,
@@ -2346,7 +2371,7 @@ mod tests {
         assert_eq!(r1, r2, "round_id must be deterministic");
         assert_ne!(
             r1,
-            pasta_curves::pallas::Base::zero(),
+            voting_crypto_deps::pasta_curves::pallas::Base::zero(),
             "round_id must not be zero"
         );
     }

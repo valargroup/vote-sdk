@@ -11,7 +11,7 @@
 //!   - parent_count × Optional<H>: same encoding
 
 use incrementalmerkletree::{Hashable, Level};
-use orchard::tree::MerkleHashOrchard;
+use voting_crypto_deps::orchard::tree::MerkleHashOrchard;
 
 /// Ironwood note commitment tree depth.
 const DEPTH: u8 = 32;
@@ -149,8 +149,8 @@ mod tests {
     fn test_single_leaf() {
         // A tree with one leaf: left=Some(leaf), right=None, 0 parents.
         // The leaf is just Fp(1) for simplicity.
-        use pasta_curves::group::ff::PrimeField;
-        let leaf = pasta_curves::pallas::Base::one().to_repr();
+        use voting_crypto_deps::pasta_curves::group::ff::PrimeField;
+        let leaf = voting_crypto_deps::pasta_curves::pallas::Base::one().to_repr();
 
         // Encode: flag=1 + 32-byte leaf, flag=0 (no right), count=0
         let mut encoded = Vec::new();

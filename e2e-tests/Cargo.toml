@@ -49,4 +49,9 @@ incrementalmerkletree = "0.8"
 rand = "0.8"
 rand_chacha = "0.3"
 
+[patch.crates-io]
+imt-tree = { git = "https://github.com/valargroup/vote-nullifier-pir", rev = "3a89f2838e64475746805c25a2f999c8dc96adff" }
+vote-commitment-tree = { git = "https://github.com/valargroup/zcash_voting", rev = "19296ce13ccf4428878ee4eb5c96a0d4d7063d2e" }
+voting-circuits = { git = "https://github.com/valargroup/voting-circuits", rev = "83427979fccb8ae3bf010e21691742c78d283bc8" }
+
 [workspace]

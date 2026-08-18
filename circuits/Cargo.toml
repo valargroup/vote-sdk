@@ -7,22 +7,34 @@ description = "Halo2 ZKP circuits and FFI verification for the Shielded-Vote cha
 [lib]
 crate-type = ["staticlib", "lib"]
 
+[features]
+default = ["upstream"]
+upstream = [
+    "voting-crypto-deps/upstream-validator",
+    "voting-circuits/upstream",
+    "imt-tree/upstream",
+    "vote-commitment-tree/upstream",
+]
+zakura = [
+    "voting-crypto-deps/zakura-validator",
+    "voting-circuits/zakura",
+    "imt-tree/zakura",
+    "vote-commitment-tree/zakura",
+]
+
 [dependencies]
-halo2_proofs = { version = "0.3", features = ["batch"] }
-pasta_curves = "0.5"
+# This selector facade is not published yet, so it is the one intentional
+# direct git dependency in the temporary draft stack.
+voting-crypto-deps = { version = "0.1.0", git = "https://github.com/valargroup/voting-circuits", rev = "83427979fccb8ae3bf010e21691742c78d283bc8", default-features = false }
 group = "0.13"
 rand_core = { version = "0.6", features = ["getrandom"] }
-reddsa = { version = "0.5", default-features = false }
-vote-commitment-tree = "=0.5.0"
-orchard = { version = "0.15", features = ["unstable-voting-circuits"] }
-voting-circuits = "=0.10.0"
-imt-tree = "0.2.1"
+vote-commitment-tree = { version = "=0.5.0", default-features = false }
+voting-circuits = { version = "=0.10.0", default-features = false }
+imt-tree = { version = "=0.2.1", default-features = false }
 incrementalmerkletree = "0.8"
 nonempty = "0.11"
-zcash_primitives = { version = "0.30", default-features = false, features = ["std"] }
 zcash_protocol = "0.10"
 hex = "0.4"
-halo2_gadgets = "=0.5.0"
 
 [dependencies.ff]
 version = "0.13"
@@ -30,25 +42,16 @@ version = "0.13"
 [dev-dependencies]
 rand_core = { version = "0.6", features = ["getrandom"] }
 rand = "0.8"
-reddsa = { version = "0.5", features = ["std"] }
 blake2b_simd = "1"
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# Temporary until the Zakura verifier optimizations are published.
-# Keep the resolved Zcash crate family on one revision.
+# These selector-enabled crates are not released yet. Keep their normal
+# version requirements above and let this workspace own the temporary pins.
 [patch.crates-io]
-halo2_gadgets = { git = "https://github.com/zakura-core/libraries", rev = "7490b608930de93ee69ade037c7aea4bf8b29f32" }
-halo2_legacy_pdqsort = { git = "https://github.com/zakura-core/libraries", rev = "7490b608930de93ee69ade037c7aea4bf8b29f32" }
-halo2_poseidon = { git = "https://github.com/zakura-core/libraries", rev = "7490b608930de93ee69ade037c7aea4bf8b29f32" }
-halo2_proofs = { git = "https://github.com/zakura-core/libraries", rev = "7490b608930de93ee69ade037c7aea4bf8b29f32" }
-orchard = { git = "https://github.com/zakura-core/libraries", rev = "7490b608930de93ee69ade037c7aea4bf8b29f32" }
-pasta_curves = { git = "https://github.com/zakura-core/libraries", rev = "7490b608930de93ee69ade037c7aea4bf8b29f32" }
-reddsa = { git = "https://github.com/zakura-core/libraries", rev = "7490b608930de93ee69ade037c7aea4bf8b29f32" }
-redjubjub = { git = "https://github.com/zakura-core/libraries", rev = "7490b608930de93ee69ade037c7aea4bf8b29f32" }
-sapling-crypto = { git = "https://github.com/zakura-core/libraries", rev = "7490b608930de93ee69ade037c7aea4bf8b29f32" }
-sinsemilla = { git = "https://github.com/zakura-core/libraries", rev = "7490b608930de93ee69ade037c7aea4bf8b29f32" }
-zcash_primitives = { git = "https://github.com/zakura-core/libraries", rev = "7490b608930de93ee69ade037c7aea4bf8b29f32" }
+imt-tree = { git = "https://github.com/valargroup/vote-nullifier-pir", rev = "3a89f2838e64475746805c25a2f999c8dc96adff" }
+vote-commitment-tree = { git = "https://github.com/valargroup/zcash_voting", rev = "19296ce13ccf4428878ee4eb5c96a0d4d7063d2e" }
+voting-circuits = { git = "https://github.com/valargroup/voting-circuits", rev = "83427979fccb8ae3bf010e21691742c78d283bc8" }
 
 [workspace]

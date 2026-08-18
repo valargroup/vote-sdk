@@ -7,11 +7,11 @@
 //! The stateful [`TreeHandle`] wraps a [`TreeServer`] backed by a
 //! [`KvShardStore`] with live Go KV callbacks.
 
-use pasta_curves::group::ff::PrimeField;
-use pasta_curves::Fp;
 pub use vote_commitment_tree::kv_shard_store::KvCallbacks;
 pub use vote_commitment_tree::MERKLE_PATH_BYTES;
 use vote_commitment_tree::{MemoryTreeServer, TreeServer};
+use voting_crypto_deps::pasta_curves::group::ff::PrimeField;
+use voting_crypto_deps::pasta_curves::Fp;
 
 // ---------------------------------------------------------------------------
 // Error type

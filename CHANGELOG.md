@@ -8,8 +8,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
-- Use Zakura's optimized Halo2 and related Zcash libraries to reduce validator
-  proof verification latency without changing the proof format.
+- Select Zakura's optimized cryptography backend for validator FFI builds while
+  preserving upstream Zcash crates as the default for direct circuit consumers.
 - Route default production and staging voting-config reads through the
   GitHub-primary `voting.valargroup.dev` gateway with its Cloudflare fallback.
 - Make new Linux Cosmovisor validator services skip local pre-upgrade chain data
