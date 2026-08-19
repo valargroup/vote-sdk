@@ -385,6 +385,61 @@ Before rolling coordinated upgrades to production validators, follow the gated
 checklist in [upgrade-validation-checklist.md](upgrade-validation-checklist.md).
 Post-release artifact smoke checks: `scripts/verify_upgrade_release_artifacts.sh`.
 
+## v1.4.0 bounded reveal activation
+
+The `v1.4.0` binary enforces round-scoped reveal deduplication and a maximum of
+128 reveal proofs per block. Its coordinated upgrade handler applies a 5 MiB
+(`5242880` byte) consensus block limit. Existing chains run the old binary
+through H-1, switch binaries at upgrade height H, and use both limits for the
+first new proposal at H+1. Fresh chains use both limits from genesis.
+
+Pre-stage the binary on every validator under the exact `v1.4.0` Cosmovisor
+directory. Do not manually start the staged binary before the scheduled halt.
+Use matching plan and release names when staging:
+
+```bash
+sudo scripts/update_chain.sh --mode prepare --plan-name v1.4.0 --tag v1.4.0
+```
+
+Before the upgrade, confirm Comet mempool rechecking remains enabled because it
+removes duplicate reveal variants after one variant commits:
+
+```bash
+grep -E '^recheck[[:space:]]*=[[:space:]]*true' ~/.svoted/config/config.toml
+```
+
+Do not schedule the halt while a vote or ceremony is in progress. Every stored
+round must be finalized or ceremony-failed, and every validator helper queue
+must be empty, including rows with a known voting deadline. A coordinated halt
+drops Comet's in-memory mempool; an accepted reveal that has not committed yet
+otherwise waits for its bounded rebroadcast timeout after restart. Check the
+round state once and the helper database on every validator. Use the configured
+`[helper].db_path` when it is non-default:
+
+```bash
+curl -fsS http://127.0.0.1:1317/shielded-vote/v1/rounds | jq -e '
+  all(.rounds[]?;
+    (.status == 3 or .status == 5 or
+     .status == "SESSION_STATUS_FINALIZED" or
+     .status == "SESSION_STATUS_CEREMONY_FAILED"))'
+sqlite3 ~/.svoted/helper.db \
+  'SELECT COUNT(*) FROM shares WHERE state IN (0, 1);'
+```
+
+The SQLite query must return `0` on every validator before scheduling the halt.
+Start the next voting round only after all validators pass the post-upgrade
+checks below.
+
+After the chain resumes, confirm both the applied plan and the active byte
+limit. The genesis file can still display Comet's original default; the live
+RPC response is authoritative.
+
+```bash
+svoted query upgrade applied v1.4.0 --home ~/.svoted
+curl -fsS http://127.0.0.1:26657/consensus_params | \
+  jq -e '.result.consensus_params.block.max_bytes == "5242880"'
+```
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Action |

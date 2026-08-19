@@ -157,6 +157,9 @@ func migrate(db *sql.DB) error {
 			submit_at       INTEGER NOT NULL DEFAULT 0,
 			original_submit_at INTEGER NOT NULL DEFAULT 0,
 			received_at     INTEGER NOT NULL DEFAULT 0,
+			pending_reveal_json TEXT NOT NULL DEFAULT '',
+			pending_tx_hash TEXT NOT NULL DEFAULT '',
+			pending_since_height INTEGER NOT NULL DEFAULT 0,
 			PRIMARY KEY (round_id, share_index, proposal_id, tree_position)
 		)
 	`); err != nil {
@@ -252,6 +255,27 @@ func migrate(db *sql.DB) error {
 	if !hasReceivedAt {
 		if _, err := db.Exec("ALTER TABLE shares ADD COLUMN received_at INTEGER NOT NULL DEFAULT 0"); err != nil {
 			return fmt.Errorf("add shares.received_at: %w", err)
+		}
+	}
+
+	pendingColumns := []struct {
+		name       string
+		definition string
+	}{
+		{name: "pending_reveal_json", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "pending_tx_hash", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "pending_since_height", definition: "INTEGER NOT NULL DEFAULT 0"},
+	}
+	for _, column := range pendingColumns {
+		hasColumn, err := tableHasColumn(db, "shares", column.name)
+		if err != nil {
+			return fmt.Errorf("check shares.%s: %w", column.name, err)
+		}
+		if hasColumn {
+			continue
+		}
+		if _, err := db.Exec(fmt.Sprintf("ALTER TABLE shares ADD COLUMN %s %s", column.name, column.definition)); err != nil {
+			return fmt.Errorf("add shares.%s: %w", column.name, err)
 		}
 	}
 
@@ -597,7 +621,9 @@ func (s *ShareStore) MarkSubmitted(roundID string, shareIndex, proposalID uint32
 	if _, err := s.db.Exec(
 		`UPDATE shares SET state = 2,
 		        enc_share_c1 = '', enc_share_c2 = '',
-		        share_comms = '[]', primary_blind = ''
+		        share_comms = '[]', primary_blind = '',
+		        pending_reveal_json = '', pending_tx_hash = '',
+		        pending_since_height = 0
 		 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = 1`,
 		roundID, shareIndex, proposalID, treePosition,
 	); err != nil {
@@ -608,6 +634,91 @@ func (s *ShareStore) MarkSubmitted(roundID string, shareIndex, proposalID uint32
 		delete(s.schedule, key)
 		s.notifyScheduleChangedLocked()
 	}
+}
+
+// stagePendingReveal persists the exact generated reveal before its first
+// outbound attempt. The row stays in-flight so the caller can submit it, while
+// crash recovery and retry paths retain the same proof.
+func (s *ShareStore) stagePendingReveal(
+	roundID string,
+	shareIndex, proposalID uint32,
+	treePosition uint64,
+	reveal MsgRevealShareJSON,
+) error {
+	revealJSON, err := json.Marshal(&reveal)
+	if err != nil {
+		return fmt.Errorf("marshal staged reveal: %w", err)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	res, err := s.db.Exec(
+		`UPDATE shares SET pending_reveal_json = ?,
+		        pending_tx_hash = '', pending_since_height = 0
+		 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = 1`,
+		string(revealJSON), roundID, shareIndex, proposalID, treePosition,
+	)
+	if err != nil {
+		return fmt.Errorf("persist staged reveal: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("inspect staged reveal update: %w", err)
+	}
+	if affected != 1 {
+		return fmt.Errorf("persist staged reveal: updated %d rows", affected)
+	}
+	return nil
+}
+
+// markAwaitingCommit persists a CheckTx-accepted reveal and returns the
+// in-flight row to the pending queue without spending a failed attempt.
+func (s *ShareStore) markAwaitingCommit(
+	roundID string,
+	shareIndex, proposalID uint32,
+	treePosition uint64,
+	pending pendingRevealBroadcast,
+) error {
+	revealJSON, err := json.Marshal(&pending.Reveal)
+	if err != nil {
+		return fmt.Errorf("marshal pending reveal: %w", err)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var voteEndTime uint64
+	if err := s.db.QueryRow(
+		"SELECT vote_end_time FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = 1",
+		roundID, shareIndex, proposalID, treePosition,
+	).Scan(&voteEndTime); err != nil {
+		return fmt.Errorf("load pending reveal row: %w", err)
+	}
+
+	res, err := s.db.Exec(
+		`UPDATE shares SET state = 0,
+		        pending_reveal_json = ?, pending_tx_hash = ?,
+		        pending_since_height = ?
+		 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = 1`,
+		string(revealJSON), pending.TxHash, pending.SinceHeight,
+		roundID, shareIndex, proposalID, treePosition,
+	)
+	if err != nil {
+		return fmt.Errorf("persist pending reveal: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("inspect pending reveal update: %w", err)
+	}
+	if affected != 1 {
+		return fmt.Errorf("persist pending reveal: updated %d rows", affected)
+	}
+
+	key := schedKey(roundID, shareIndex, proposalID, treePosition)
+	s.schedule[key] = nextShareSystemRetryTime(time.Now(), voteEndTime)
+	s.notifyScheduleChangedLocked()
+	return nil
 }
 
 const (
@@ -754,7 +865,9 @@ func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, t
 			if _, err := s.db.Exec(
 				`UPDATE shares SET state = 3, attempts = ?,
 				        enc_share_c1 = '', enc_share_c2 = '',
-				        share_comms = '[]', primary_blind = ''
+				        share_comms = '[]', primary_blind = '',
+				        pending_reveal_json = '', pending_tx_hash = '',
+				        pending_since_height = 0
 				 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
 				newAttempts, roundID, shareIndex, proposalID, treePosition,
 			); err != nil {
@@ -766,7 +879,9 @@ func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, t
 			// Permanently failed. Keep witness data until round purge so operators
 			// can inspect or export failed rows before the voting window closes.
 			if _, err := s.db.Exec(
-				`UPDATE shares SET state = 3, attempts = ?
+				`UPDATE shares SET state = 3, attempts = ?,
+				        pending_reveal_json = '', pending_tx_hash = '',
+				        pending_since_height = 0
 				 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
 				newAttempts, roundID, shareIndex, proposalID, treePosition,
 			); err != nil {
@@ -780,7 +895,10 @@ func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, t
 	} else {
 		// Re-schedule with exponential backoff.
 		if _, err := s.db.Exec(
-			"UPDATE shares SET state = 0, attempts = ? WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
+			`UPDATE shares SET state = 0, attempts = ?,
+			        pending_reveal_json = '', pending_tx_hash = '',
+			        pending_since_height = 0
+			 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
 			newAttempts, roundID, shareIndex, proposalID, treePosition,
 		); err != nil {
 			s.logError("MarkFailed: db update (retry) failed", "error", err)
@@ -1542,11 +1660,14 @@ func (s *ShareStore) recover() error {
 func (s *ShareStore) loadShare(roundID string, shareIndex, proposalID uint32, treePosition uint64) (QueuedShare, bool) {
 	var q QueuedShare
 	var commsJSON string
+	var pendingRevealJSON, pendingTxHash string
+	var pendingSinceHeight uint64
 	var state, attempts int
 
 	err := s.db.QueryRow(
 		`SELECT shares_hash, proposal_id, vote_decision, enc_share_c1, enc_share_c2,
-		        tree_position, share_comms, primary_blind, state, attempts, vote_end_time, submit_at
+		        tree_position, share_comms, primary_blind, state, attempts, vote_end_time, submit_at,
+		        pending_reveal_json, pending_tx_hash, pending_since_height
 		 FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
 		roundID, shareIndex, proposalID, treePosition,
 	).Scan(
@@ -1562,6 +1683,9 @@ func (s *ShareStore) loadShare(roundID string, shareIndex, proposalID uint32, tr
 		&attempts,
 		&q.VoteEndTime,
 		&q.Payload.SubmitAt,
+		&pendingRevealJSON,
+		&pendingTxHash,
+		&pendingSinceHeight,
 	)
 	if err != nil {
 		return q, false
@@ -1574,6 +1698,17 @@ func (s *ShareStore) loadShare(roundID string, shareIndex, proposalID uint32, tr
 
 	if err := json.Unmarshal([]byte(commsJSON), &q.Payload.ShareComms); err != nil {
 		return q, false
+	}
+	if pendingRevealJSON != "" {
+		var reveal MsgRevealShareJSON
+		if err := json.Unmarshal([]byte(pendingRevealJSON), &reveal); err != nil {
+			return q, false
+		}
+		q.pendingBroadcast = &pendingRevealBroadcast{
+			Reveal:      reveal,
+			TxHash:      pendingTxHash,
+			SinceHeight: pendingSinceHeight,
+		}
 	}
 
 	return q, true

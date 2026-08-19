@@ -165,6 +165,107 @@ func TestMarkSubmitted(t *testing.T) {
 	assert.Empty(t, blind, "primary_blind should be cleared")
 }
 
+func TestPendingRevealPersistsAcrossRestartAndClearsOnSubmission(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "helper.db")
+	now := uint64(time.Now().Unix())
+	findRound := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: now, VoteEndTime: now + testVoteEndOffset}, nil
+	}
+
+	s, err := NewShareStore(dbPath, findRound)
+	require.NoError(t, err)
+	payload := testPayload("round1", 0)
+	enqueueAndRequireInserted(t, s, payload)
+	ready := s.TakeReady()
+	require.Len(t, ready, 1)
+
+	pending := pendingRevealBroadcast{
+		Reveal: MsgRevealShareJSON{
+			ShareNullifier:           testFieldB64(1),
+			EncShare:                 base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{2}, 64)),
+			ProposalID:               payload.ProposalID,
+			VoteDecision:             payload.VoteDecision,
+			Proof:                    base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{3}, 128)),
+			VoteRoundID:              base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{4}, 32)),
+			VoteCommTreeAnchorHeight: 99,
+		},
+		TxHash:      "AABBCCDD",
+		SinceHeight: 42,
+	}
+	require.NoError(t, s.markAwaitingCommit("round1", 0, 1, 0, pending))
+	stored, ok := s.loadShare("round1", 0, 1, 0)
+	require.True(t, ok)
+	require.NotNil(t, stored.pendingBroadcast)
+	assert.Equal(t, pending, *stored.pendingBroadcast)
+	assert.Equal(t, 0, stored.Attempts)
+	require.NoError(t, s.Close())
+
+	s, err = NewShareStore(dbPath, findRound)
+	require.NoError(t, err)
+	defer s.Close()
+	ready = s.TakeReady()
+	require.Len(t, ready, 1)
+	require.NotNil(t, ready[0].pendingBroadcast)
+	assert.Equal(t, pending, *ready[0].pendingBroadcast)
+	assert.Equal(t, 0, ready[0].Attempts)
+	s.MarkRetry("round1", 0, 1, 0)
+	stored, ok = s.loadShare("round1", 0, 1, 0)
+	require.True(t, ok)
+	require.NotNil(t, stored.pendingBroadcast)
+	assert.Equal(t, pending, *stored.pendingBroadcast)
+
+	s.mu.Lock()
+	s.schedule[schedKey("round1", 0, 1, 0)] = time.Now().Add(-time.Second)
+	s.mu.Unlock()
+	ready = s.TakeReady()
+	require.Len(t, ready, 1)
+
+	s.MarkSubmitted("round1", 0, 1, 0)
+	stored, ok = s.loadShare("round1", 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, ShareStateSubmitted, stored.State)
+	assert.Nil(t, stored.pendingBroadcast)
+
+	var pendingJSON, pendingTxHash string
+	var pendingSinceHeight uint64
+	err = s.db.QueryRow(
+		`SELECT pending_reveal_json, pending_tx_hash, pending_since_height
+		 FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
+		"round1", 0, 1, 0,
+	).Scan(&pendingJSON, &pendingTxHash, &pendingSinceHeight)
+	require.NoError(t, err)
+	assert.Empty(t, pendingJSON)
+	assert.Empty(t, pendingTxHash)
+	assert.Zero(t, pendingSinceHeight)
+}
+
+func TestMarkFailedClearsPendingRevealBeforeRetry(t *testing.T) {
+	s := newTestStore(t)
+	enqueueAndRequireInserted(t, s, testPayload("round1", 0))
+	require.Len(t, s.TakeReady(), 1)
+	pending := pendingRevealBroadcast{
+		Reveal: MsgRevealShareJSON{
+			ShareNullifier: testFieldB64(1),
+			Proof:          base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{2}, 128)),
+		},
+		TxHash:      "AABBCCDD",
+		SinceHeight: 42,
+	}
+	require.NoError(t, s.markAwaitingCommit("round1", 0, 1, 0, pending))
+
+	s.mu.Lock()
+	s.schedule[schedKey("round1", 0, 1, 0)] = time.Now().Add(-time.Second)
+	s.mu.Unlock()
+	require.Len(t, s.TakeReady(), 1)
+	s.MarkFailed("round1", 0, 1, 0)
+
+	stored, ok := s.loadShare("round1", 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, ShareStateReceived, stored.State)
+	assert.Equal(t, 1, stored.Attempts)
+	assert.Nil(t, stored.pendingBroadcast)
+}
+
 func TestMarkFailed_RetryAndPermanent(t *testing.T) {
 	s := newTestStore(t)
 
@@ -1131,6 +1232,12 @@ func TestMigrateOldSchema(t *testing.T) {
 	hasOriginalSubmitAt, err := tableHasColumn(s.db, "shares", "original_submit_at")
 	require.NoError(t, err)
 	assert.True(t, hasOriginalSubmitAt)
+
+	for _, column := range []string{"pending_reveal_json", "pending_tx_hash", "pending_since_height"} {
+		hasColumn, err := tableHasColumn(s.db, "shares", column)
+		require.NoError(t, err)
+		assert.True(t, hasColumn, "%s should exist after migration", column)
+	}
 
 	hasRoundCreatedAtTime, err := tableHasColumn(s.db, "rounds", "created_at_time")
 	require.NoError(t, err)

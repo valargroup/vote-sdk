@@ -134,10 +134,20 @@ const (
 
 // QueuedShare is a share payload with processing metadata.
 type QueuedShare struct {
-	Payload     SharePayload
-	State       ShareState
-	Attempts    int
-	VoteEndTime uint64 // unix seconds; 0 if unknown
+	Payload          SharePayload
+	State            ShareState
+	Attempts         int
+	VoteEndTime      uint64 // unix seconds; 0 if unknown
+	pendingBroadcast *pendingRevealBroadcast
+}
+
+// pendingRevealBroadcast retains one CheckTx-accepted reveal until its
+// nullifier is observed in committed state. Persisting the exact message avoids
+// generating a new randomized proof while a reveal waits behind a proposal cap.
+type pendingRevealBroadcast struct {
+	Reveal      MsgRevealShareJSON
+	TxHash      string
+	SinceHeight uint64
 }
 
 // QueueStatus holds per-round queue statistics.

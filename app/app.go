@@ -151,6 +151,7 @@ func NewSvoteApp(
 	}
 
 	app.App = appBuilder.Build(db, traceStore, baseAppOptions...)
+	app.installInitChainConsensusLimits()
 	app.SetPrepareCheckStater(func(ctx sdk.Context) {
 		if ctx.BlockTime().Unix() < 0 {
 			app.checkTxBlockHeight.Store(0)

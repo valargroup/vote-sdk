@@ -40,9 +40,9 @@ maintenance wake.
 ## Crash Recovery
 
 The helper server is designed for crash-safe operation. Share payloads,
-`submit_at`, vote end times, attempt counts, and processing state are persisted
-to SQLite with WAL mode enabled. On startup, `NewShareStore` calls `recover()`
-which:
+`submit_at`, vote end times, attempt counts, processing state, and any generated
+reveal awaiting delivery or commitment are persisted to SQLite with WAL mode
+enabled. On startup, `NewShareStore` calls `recover()` which:
 
 1. resets in-flight shares from Witnessed back to Received,
 2. rebuilds the round cache from the persisted `rounds` table,
@@ -55,7 +55,7 @@ same schedule the wallet provided.
 
 | State at crash | On recovery | Share lost? |
 |---|---|---|
-| Received (0) - waiting for `submit_at` | Re-enters schedule at persisted `submit_at` | No |
+| Received (0) - waiting for `submit_at` or commitment | Re-enters schedule with any accepted reveal intact | No |
 | Witnessed (1) - mid-processing | Reset to Received, re-enters schedule | No |
 | Submitted (2) - on chain | Terminal, no action needed | No |
 | Failed (3) - permanent failure | Terminal, no action needed | N/A |
@@ -82,13 +82,18 @@ duplicate payloads return `"duplicate"`, and conflicting payloads for the same
   8 s, 16 s). Local submit transport errors, non-400 REST errors that do not
   carry a structured chain rejection, round-status check errors, and
   tree/Merkle readiness errors return to pending without spending attempts.
-  Generic system retries remain at 10 s. After a share has submitted once at a
-  committed height, repeated checks at that same height back off at 10 s, 20 s,
-  40 s, 80 s, then 120 s until a newer height is observed. The existing urgent
-  retry behavior resumes in the final 30 s of the voting window. Stalled-height
-  retry counts are process-local and reset after a restart. Attempt counts
-  survive recovery, and failed-row witness material is retained until
-  expired-round purge.
+  Generic system retries remain at 10 s. The helper persists the exact generated
+  reveal before its first request, so ambiguous delivery retries reuse the same
+  proof at the next eligible height. After CheckTx accepts it, the helper polls
+  its nullifier without another broadcast. Repeated checks at the same committed
+  height back off at 10 s, 20 s, 40 s, 80 s, then 120 s. If the reveal is still
+  uncommitted after 20 new committed heights, the helper rebroadcasts the
+  persisted message and starts a new 20-height window. The existing urgent retry
+  behavior resumes in the final 30 s of the voting window. Stalled-height retry
+  counts are process-local and reset after a restart. Attempt counts survive
+  recovery, and failed-row witness material is retained until expired-round
+  purge.
 - Almost-submitted race: if the chain accepted a share but the server crashed
-  before `MarkSubmitted`, recovery will retry it. The chain-side share nullifier
-  makes the duplicate reveal idempotent.
+  before `MarkSubmitted`, recovery first checks its committed nullifier and can
+  later rebroadcast the same transaction without regenerating its proof. The
+  chain-side share nullifier makes a competing helper's reveal idempotent.
