@@ -57,6 +57,17 @@ func pendingBroadcastRetryDelay(pending pendingRevealBroadcast) uint64 {
 	return base + jitter
 }
 
+// pendingBroadcastDeadlineUrgent reports whether a known voting deadline is
+// close enough that waiting for the committed-height rescue window risks
+// missing it. A passed or unknown deadline does not bypass the window.
+func pendingBroadcastDeadlineUrgent(voteEndTime uint64, now time.Time) bool {
+	if voteEndTime == 0 {
+		return false
+	}
+	remaining := time.Unix(int64(voteEndTime), 0).Sub(now)
+	return remaining > 0 && remaining <= shareSystemRetryDeadlineBuffer
+}
+
 // ErrCheckTxNotReady means BaseApp has not received its first post-restart
 // block time yet. Processing should wait without generating a proof.
 var ErrCheckTxNotReady = errors.New("local CheckTx block time is not initialized")
@@ -734,7 +745,8 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare, pending
 
 // processPendingBroadcast checks commitment without reproving. A delivery with
 // unknown outcome is retried at the next eligible height; a code-0 broadcast is
-// rebroadcast only after the committed-height timeout.
+// rebroadcast after the committed-height timeout or inside the urgent deadline
+// window.
 func (p *Processor) processPendingBroadcast(ctx context.Context, share QueuedShare, roundBytes []byte, commitmentChecked bool) error {
 	pending := share.pendingBroadcast
 	if pending == nil {
@@ -754,8 +766,10 @@ func (p *Processor) processPendingBroadcast(ctx context.Context, share QueuedSha
 	tree := p.tree.ForRound(roundBytes)
 	blockHeight := tree.LatestBlockHeight()
 	accepted := pending.SinceHeight > 0
+	previousPending := *pending
 	retryDelay := pendingBroadcastRetryDelay(*pending)
-	if blockHeight == 0 || (accepted && (blockHeight < pending.SinceHeight || blockHeight-pending.SinceHeight < retryDelay)) {
+	deadlineUrgent := pendingBroadcastDeadlineUrgent(share.VoteEndTime, time.Now())
+	if blockHeight == 0 || (accepted && !deadlineUrgent && (blockHeight < pending.SinceHeight || blockHeight-pending.SinceHeight < retryDelay)) {
 		return retryableShareError(
 			failureStageSubmitChain,
 			&waitingForNewBlockError{height: blockHeight},
@@ -782,7 +796,7 @@ func (p *Processor) processPendingBroadcast(ctx context.Context, share QueuedSha
 			return retryableShareError(failureStagePendingPersist, err)
 		}
 		pending = &nextPending
-		p.logger.Info("rebroadcasting accepted reveal after commit timeout",
+		p.logger.Info("rebroadcasting accepted reveal",
 			"round_id", share.Payload.VoteRoundID,
 			"share_index", share.Payload.EncShare.ShareIndex,
 			"tx_hash", pending.TxHash,
@@ -790,6 +804,7 @@ func (p *Processor) processPendingBroadcast(ctx context.Context, share QueuedSha
 			"block_height", blockHeight,
 			"retry_delay_blocks", retryDelay,
 			"rebroadcast_count", pending.RebroadcastCount,
+			"deadline_urgent", deadlineUrgent,
 		)
 	} else {
 		p.logger.Info("retrying persisted reveal after unknown delivery outcome",
@@ -798,7 +813,32 @@ func (p *Processor) processPendingBroadcast(ctx context.Context, share QueuedSha
 			"block_height", blockHeight,
 		)
 	}
-	return p.submitReveal(ctx, share, &pending.Reveal, blockHeight, pending.RebroadcastCount)
+	submitErr := p.submitReveal(ctx, share, &pending.Reveal, blockHeight, pending.RebroadcastCount)
+	if accepted && submitErr != nil {
+		var statusErr *submitHTTPStatusError
+		if errors.As(submitErr, &statusErr) && statusErr.definitelyNotBroadcast() {
+			if err := p.store.restorePendingRebroadcast(
+				share.Payload.VoteRoundID,
+				share.Payload.EncShare.ShareIndex,
+				share.Payload.ProposalID,
+				share.Payload.TreePosition,
+				previousPending,
+				*pending,
+			); err != nil {
+				return retryableShareError(
+					failureStagePendingPersist,
+					errors.Join(submitErr, fmt.Errorf("restore pending rebroadcast window: %w", err)),
+				)
+			}
+			p.logger.Info("restored pending reveal retry window after local readiness rejection",
+				"round_id", share.Payload.VoteRoundID,
+				"share_index", share.Payload.EncShare.ShareIndex,
+				"pending_since_height", previousPending.SinceHeight,
+				"rebroadcast_count", previousPending.RebroadcastCount,
+			)
+		}
+	}
+	return submitErr
 }
 
 // pendingBroadcastCommitted checks the persisted message's exact nullifier.

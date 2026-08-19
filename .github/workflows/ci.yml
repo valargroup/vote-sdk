@@ -91,6 +91,8 @@ jobs:
         run: mise run build:circuits
       - name: Run unit tests
         run: mise run test:unit
+      - name: Run svoted command tests
+        run: go test -count=1 -race ./cmd/svoted/cmd/...
 
   test-helper:
     name: Helper Server Tests

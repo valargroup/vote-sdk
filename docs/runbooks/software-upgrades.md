@@ -440,8 +440,9 @@ svoted query upgrade applied v1.4.0 --home ~/.svoted
 curl -fsS http://127.0.0.1:26657/consensus_params | \
   jq -e '.result.consensus_params.block.max_bytes == "5242880"'
 journalctl -u svoted -b --no-pager | \
+  sed $'s/\033\\[[0-9;]*m//g' | \
   grep 'helper proof concurrency configured' | tail -n 1 | \
-  grep -q 'effective=1'
+  grep -Eq '(^|[[:space:]])effective=1([[:space:]]|$)'
 ```
 
 ## Troubleshooting

@@ -726,7 +726,8 @@ func (s *ShareStore) markAwaitingCommit(
 
 // markPendingRebroadcast advances the committed-height backoff before sending
 // the exact reveal again. Persisting first prevents a crash or ambiguous HTTP
-// result from immediately repeating the rescue broadcast after restart.
+// result from immediately repeating the rescue broadcast after restart. A
+// response that proves the local handler did not broadcast may restore it.
 func (s *ShareStore) markPendingRebroadcast(
 	roundID string,
 	shareIndex, proposalID uint32,
@@ -756,6 +757,44 @@ func (s *ShareStore) markPendingRebroadcast(
 	}
 	if affected != 1 {
 		return fmt.Errorf("persist pending rebroadcast: updated %d rows", affected)
+	}
+	return nil
+}
+
+// restorePendingRebroadcast restores the prior backoff window after a response
+// proves the local handler did not attempt a chain broadcast. The attempted
+// values make the update compare-and-swap so an unexpected state is not lost.
+func (s *ShareStore) restorePendingRebroadcast(
+	roundID string,
+	shareIndex, proposalID uint32,
+	treePosition uint64,
+	previous, attempted pendingRevealBroadcast,
+) error {
+	if previous.SinceHeight == 0 || attempted.SinceHeight == 0 || attempted.RebroadcastCount == 0 {
+		return fmt.Errorf("pending rebroadcast restore requires accepted windows")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	res, err := s.db.Exec(
+		`UPDATE shares SET pending_since_height = ?, pending_rebroadcast_count = ?
+		 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?
+		   AND state = 1 AND pending_reveal_json != ''
+		   AND pending_since_height = ? AND pending_rebroadcast_count = ?`,
+		previous.SinceHeight, previous.RebroadcastCount,
+		roundID, shareIndex, proposalID, treePosition,
+		attempted.SinceHeight, attempted.RebroadcastCount,
+	)
+	if err != nil {
+		return fmt.Errorf("restore pending rebroadcast: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("inspect pending rebroadcast restore: %w", err)
+	}
+	if affected != 1 {
+		return fmt.Errorf("restore pending rebroadcast: updated %d rows", affected)
 	}
 	return nil
 }
@@ -1031,6 +1070,68 @@ func isProcessableShareState(state ShareState) bool {
 	return state == ShareStateReceived || state == ShareStateWitnessed
 }
 
+func decodePendingRevealBroadcast(
+	revealJSON, txHash string,
+	sinceHeight uint64,
+	rebroadcastCount uint32,
+) (*pendingRevealBroadcast, error) {
+	if revealJSON == "" {
+		return nil, nil
+	}
+	var reveal MsgRevealShareJSON
+	if err := json.Unmarshal([]byte(revealJSON), &reveal); err != nil {
+		return nil, err
+	}
+	return &pendingRevealBroadcast{
+		Reveal:           reveal,
+		TxHash:           txHash,
+		SinceHeight:      sinceHeight,
+		RebroadcastCount: rebroadcastCount,
+	}, nil
+}
+
+func encodePendingRevealBroadcast(pending *pendingRevealBroadcast) (string, string, uint64, uint32, error) {
+	if pending == nil {
+		return "", "", 0, 0, nil
+	}
+	revealJSON, err := json.Marshal(&pending.Reveal)
+	if err != nil {
+		return "", "", 0, 0, err
+	}
+	return string(revealJSON), pending.TxHash, pending.SinceHeight, pending.RebroadcastCount, nil
+}
+
+func queueExportPendingBroadcast(pending *pendingRevealBroadcast) *QueueExportPendingBroadcast {
+	if pending == nil {
+		return nil
+	}
+	return &QueueExportPendingBroadcast{
+		Reveal:           pending.Reveal,
+		TxHash:           pending.TxHash,
+		SinceHeight:      pending.SinceHeight,
+		RebroadcastCount: pending.RebroadcastCount,
+	}
+}
+
+func pendingRevealBroadcastFromExport(pending *QueueExportPendingBroadcast) *pendingRevealBroadcast {
+	if pending == nil {
+		return nil
+	}
+	return &pendingRevealBroadcast{
+		Reveal:           pending.Reveal,
+		TxHash:           pending.TxHash,
+		SinceHeight:      pending.SinceHeight,
+		RebroadcastCount: pending.RebroadcastCount,
+	}
+}
+
+func pendingRevealBroadcastEqual(left, right *pendingRevealBroadcast) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
+}
+
 // ExportQueue returns every persisted row for a round. Terminal rows are
 // included for local debugging. Submitted rows should already have witness
 // material cleared, while failed rows retain it until round purge.
@@ -1055,7 +1156,8 @@ func (s *ShareStore) ExportQueue(roundID string, now time.Time) (QueueExport, er
 		`SELECT share_index, shares_hash, proposal_id, vote_decision,
 		        enc_share_c1, enc_share_c2, tree_position, share_comms,
 		        primary_blind, state, attempts, vote_end_time, submit_at,
-		        original_submit_at, received_at
+		        original_submit_at, received_at, pending_reveal_json,
+		        pending_tx_hash, pending_since_height, pending_rebroadcast_count
 		   FROM shares
 		  WHERE round_id = ?
 		  ORDER BY submit_at, received_at, proposal_id, vote_decision, share_index, tree_position`,
@@ -1069,7 +1171,9 @@ func (s *ShareStore) ExportQueue(roundID string, now time.Time) (QueueExport, er
 	for rows.Next() {
 		var row QueueExportRow
 		var state int
-		var commsJSON string
+		var commsJSON, pendingRevealJSON, pendingTxHash string
+		var pendingSinceHeight uint64
+		var pendingRebroadcastCount uint32
 		if err := rows.Scan(
 			&row.ShareIndex,
 			&row.SharesHash,
@@ -1086,6 +1190,10 @@ func (s *ShareStore) ExportQueue(roundID string, now time.Time) (QueueExport, er
 			&row.SubmitAt,
 			&row.OriginalSubmitAt,
 			&row.ReceivedAt,
+			&pendingRevealJSON,
+			&pendingTxHash,
+			&pendingSinceHeight,
+			&pendingRebroadcastCount,
 		); err != nil {
 			return QueueExport{}, fmt.Errorf("scan queue row: %w", err)
 		}
@@ -1100,6 +1208,16 @@ func (s *ShareStore) ExportQueue(roundID string, now time.Time) (QueueExport, er
 				return QueueExport{}, fmt.Errorf("decode share_comms for share_index %d: %w", row.ShareIndex, err)
 			}
 		}
+		pending, err := decodePendingRevealBroadcast(
+			pendingRevealJSON,
+			pendingTxHash,
+			pendingSinceHeight,
+			pendingRebroadcastCount,
+		)
+		if err != nil {
+			return QueueExport{}, fmt.Errorf("decode pending reveal for share_index %d: %w", row.ShareIndex, err)
+		}
+		row.PendingBroadcast = queueExportPendingBroadcast(pending)
 		if export.Round.VoteEndTime == 0 && row.VoteEndTime != 0 {
 			export.Round.VoteEndTime = row.VoteEndTime
 		}
@@ -1116,7 +1234,7 @@ func (s *ShareStore) ExportQueue(roundID string, now time.Time) (QueueExport, er
 // and permanently failed rows are counted and skipped so importing a full
 // export cannot submit terminal shares again.
 func (s *ShareStore) ImportQueue(export QueueExport, opts QueueImportOptions) (QueueImportResult, error) {
-	if export.Version != QueueExportVersion {
+	if export.Version != queueExportLegacyVersion && export.Version != QueueExportVersion {
 		return QueueImportResult{}, fmt.Errorf("unsupported queue export version %d", export.Version)
 	}
 	if strings.TrimSpace(export.RoundID) == "" {
@@ -1170,13 +1288,20 @@ func (s *ShareStore) ImportQueue(export QueueExport, opts QueueImportOptions) (Q
 		if err != nil {
 			return QueueImportResult{}, fmt.Errorf("marshal share_comms for share_index %d: %w", row.ShareIndex, err)
 		}
+		pendingRevealJSON, pendingTxHash, pendingSinceHeight, pendingRebroadcastCount, err := encodePendingRevealBroadcast(
+			pendingRevealBroadcastFromExport(row.PendingBroadcast),
+		)
+		if err != nil {
+			return QueueImportResult{}, fmt.Errorf("marshal pending reveal for share_index %d: %w", row.ShareIndex, err)
+		}
 
 		res, err := tx.Exec(
 			`INSERT INTO shares
 			 (round_id, share_index, shares_hash, proposal_id, vote_decision,
 			  enc_share_c1, enc_share_c2, tree_position, share_comms, primary_blind,
-			  state, attempts, vote_end_time, submit_at, original_submit_at, received_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+			  state, attempts, vote_end_time, submit_at, original_submit_at, received_at,
+			  pending_reveal_json, pending_tx_hash, pending_since_height, pending_rebroadcast_count)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(round_id, share_index, proposal_id, tree_position) DO NOTHING`,
 			export.RoundID,
 			row.ShareIndex,
@@ -1193,6 +1318,10 @@ func (s *ShareStore) ImportQueue(export QueueExport, opts QueueImportOptions) (Q
 			submitAt,
 			originalSubmitAt,
 			receivedAt,
+			pendingRevealJSON,
+			pendingTxHash,
+			pendingSinceHeight,
+			pendingRebroadcastCount,
 		)
 		if err != nil {
 			return QueueImportResult{}, fmt.Errorf("insert share_index %d proposal_id %d tree_position %d: %w", row.ShareIndex, row.ProposalID, row.TreePosition, err)
@@ -1293,11 +1422,14 @@ func forceReadyExistingImportRow(tx *sql.Tx, roundID string, row QueueExportRow,
 // importRowMatchesExisting compares an import row against the existing queue row.
 func importRowMatchesExisting(tx *sql.Tx, roundID string, row QueueExportRow) (bool, ShareState, error) {
 	var existing SharePayload
-	var commsJSON string
+	var commsJSON, pendingRevealJSON, pendingTxHash string
+	var pendingSinceHeight uint64
+	var pendingRebroadcastCount uint32
 	var state int
 	err := tx.QueryRow(
 		`SELECT shares_hash, vote_decision, enc_share_c1, enc_share_c2,
-		        share_comms, primary_blind, state
+		        share_comms, primary_blind, state, pending_reveal_json,
+		        pending_tx_hash, pending_since_height, pending_rebroadcast_count
 		   FROM shares
 		  WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
 		roundID,
@@ -1312,6 +1444,10 @@ func importRowMatchesExisting(tx *sql.Tx, roundID string, row QueueExportRow) (b
 		&commsJSON,
 		&existing.PrimaryBlind,
 		&state,
+		&pendingRevealJSON,
+		&pendingTxHash,
+		&pendingSinceHeight,
+		&pendingRebroadcastCount,
 	)
 	if err != nil {
 		return false, 0, fmt.Errorf("read existing share_index %d proposal_id %d tree_position %d: %w", row.ShareIndex, row.ProposalID, row.TreePosition, err)
@@ -1340,7 +1476,17 @@ func importRowMatchesExisting(tx *sql.Tx, roundID string, row QueueExportRow) (b
 		ShareComms:   row.ShareComms,
 		PrimaryBlind: row.PrimaryBlind,
 	}
-	return payloadEqual(existing, incoming), ShareState(state), nil
+	existingPending, err := decodePendingRevealBroadcast(
+		pendingRevealJSON,
+		pendingTxHash,
+		pendingSinceHeight,
+		pendingRebroadcastCount,
+	)
+	if err != nil {
+		return false, 0, fmt.Errorf("decode existing pending reveal for share_index %d: %w", row.ShareIndex, err)
+	}
+	incomingPending := pendingRevealBroadcastFromExport(row.PendingBroadcast)
+	return payloadEqual(existing, incoming) && pendingRevealBroadcastEqual(existingPending, incomingPending), ShareState(state), nil
 }
 
 const (
@@ -1740,18 +1886,16 @@ func (s *ShareStore) loadShare(roundID string, shareIndex, proposalID uint32, tr
 	if err := json.Unmarshal([]byte(commsJSON), &q.Payload.ShareComms); err != nil {
 		return q, false
 	}
-	if pendingRevealJSON != "" {
-		var reveal MsgRevealShareJSON
-		if err := json.Unmarshal([]byte(pendingRevealJSON), &reveal); err != nil {
-			return q, false
-		}
-		q.pendingBroadcast = &pendingRevealBroadcast{
-			Reveal:           reveal,
-			TxHash:           pendingTxHash,
-			SinceHeight:      pendingSinceHeight,
-			RebroadcastCount: pendingRebroadcastCount,
-		}
+	pending, err := decodePendingRevealBroadcast(
+		pendingRevealJSON,
+		pendingTxHash,
+		pendingSinceHeight,
+		pendingRebroadcastCount,
+	)
+	if err != nil {
+		return q, false
 	}
+	q.pendingBroadcast = pending
 
 	return q, true
 }
