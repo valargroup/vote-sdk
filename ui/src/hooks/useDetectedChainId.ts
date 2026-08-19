@@ -1,27 +1,60 @@
-import { useEffect, useState } from "react";
-import { fetchChainId } from "../api/chain";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import {
+  fetchChainId,
+  getChainUrl,
+  subscribeToChainUrlChanges,
+} from "../api/chain";
+
+const CHAIN_ID_RETRY_INTERVAL_MS = 5_000;
+
+interface ChainDetection {
+  endpoint: string;
+  chainId: string | null;
+}
+
+/** Return the currently selected voting-chain REST endpoint. */
+export function useSelectedChainUrl(): string {
+  return useSyncExternalStore(
+    subscribeToChainUrlChanges,
+    getChainUrl,
+    () => "",
+  );
+}
 
 /**
- * Fetch the connected chain id once on mount. Used by pages that need to
- * render env-specific links (prod/ vs stage/) before the user has connected
- * Keplr. Returns null while loading or when the request fails.
+ * Detect the selected endpoint's chain id. Used by pages that need to render
+ * environment-specific behavior before the user has connected Keplr. Returns
+ * null while loading and retries transient failures.
  */
 export function useDetectedChainId(): string | null {
-  const [chainId, setChainId] = useState<string | null>(null);
+  const endpoint = useSelectedChainUrl();
+  const [detection, setDetection] = useState<ChainDetection>({
+    endpoint,
+    chainId: null,
+  });
 
   useEffect(() => {
     let cancelled = false;
-    fetchChainId()
-      .then((id) => {
-        if (!cancelled) setChainId(id || null);
-      })
-      .catch(() => {
-        if (!cancelled) setChainId(null);
-      });
+    let retryTimer: number | undefined;
+
+    const detect = () => {
+      fetchChainId(endpoint)
+        .then((id) => {
+          if (!cancelled) setDetection({ endpoint, chainId: id || null });
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setDetection({ endpoint, chainId: null });
+          retryTimer = window.setTimeout(detect, CHAIN_ID_RETRY_INTERVAL_MS);
+        });
+    };
+
+    detect();
     return () => {
       cancelled = true;
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
     };
-  }, []);
+  }, [endpoint]);
 
-  return chainId;
+  return detection.endpoint === endpoint ? detection.chainId : null;
 }
