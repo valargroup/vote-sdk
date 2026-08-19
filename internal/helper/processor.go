@@ -2,6 +2,7 @@ package helper
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -17,9 +18,12 @@ import (
 
 const (
 	maintenanceInterval = 30 * time.Second
-	// Twenty blocks lets 2,560 reveals drain at the 128-per-block cap before an
-	// accepted transaction is rebroadcast. The delay advances only with commits.
-	pendingBroadcastRetryBlocks = uint64(20)
+	// Twenty blocks lets 2,560 reveals drain at the 128-per-block cap before the
+	// first rescue broadcast. Later attempts back off, and a small deterministic
+	// jitter prevents a cohort from retrying at one height.
+	pendingBroadcastInitialRetryBlocks = uint64(20)
+	pendingBroadcastMaxRetryBlocks     = uint64(80)
+	pendingBroadcastJitterBlocks       = uint64(5)
 )
 
 var errAwaitingCommit = errors.New("broadcast accepted; awaiting committed transaction")
@@ -34,6 +38,23 @@ func (e *acceptedBroadcastError) Error() string {
 
 func (e *acceptedBroadcastError) Unwrap() error {
 	return errAwaitingCommit
+}
+
+// pendingBroadcastRetryDelay returns a committed-height delay of 20, 40, then
+// 80 blocks, capped at 80, plus stable per-share jitter of zero to five blocks.
+func pendingBroadcastRetryDelay(pending pendingRevealBroadcast) uint64 {
+	base := pendingBroadcastInitialRetryBlocks
+	for retry := uint32(0); retry < pending.RebroadcastCount && base < pendingBroadcastMaxRetryBlocks; retry++ {
+		base *= 2
+		if base > pendingBroadcastMaxRetryBlocks {
+			base = pendingBroadcastMaxRetryBlocks
+		}
+	}
+
+	seed := pending.Reveal.VoteRoundID + "\x00" + pending.Reveal.ShareNullifier + "\x00" + strconv.FormatUint(uint64(pending.RebroadcastCount), 10)
+	digest := sha256.Sum256([]byte(seed))
+	jitter := uint64(digest[0]) % (pendingBroadcastJitterBlocks + 1)
+	return base + jitter
 }
 
 // ErrCheckTxNotReady means BaseApp has not received its first post-restart
@@ -708,7 +729,7 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare, pending
 		)
 	}
 
-	return p.submitReveal(ctx, share, msg, blockHeight)
+	return p.submitReveal(ctx, share, msg, blockHeight, 0)
 }
 
 // processPendingBroadcast checks commitment without reproving. A delivery with
@@ -733,7 +754,8 @@ func (p *Processor) processPendingBroadcast(ctx context.Context, share QueuedSha
 	tree := p.tree.ForRound(roundBytes)
 	blockHeight := tree.LatestBlockHeight()
 	accepted := pending.SinceHeight > 0
-	if blockHeight == 0 || (accepted && (blockHeight < pending.SinceHeight || blockHeight-pending.SinceHeight < pendingBroadcastRetryBlocks)) {
+	retryDelay := pendingBroadcastRetryDelay(*pending)
+	if blockHeight == 0 || (accepted && (blockHeight < pending.SinceHeight || blockHeight-pending.SinceHeight < retryDelay)) {
 		return retryableShareError(
 			failureStageSubmitChain,
 			&waitingForNewBlockError{height: blockHeight},
@@ -747,12 +769,27 @@ func (p *Processor) processPendingBroadcast(ctx context.Context, share QueuedSha
 	}
 
 	if accepted {
+		nextPending := *pending
+		nextPending.SinceHeight = blockHeight
+		nextPending.RebroadcastCount++
+		if err := p.store.markPendingRebroadcast(
+			share.Payload.VoteRoundID,
+			share.Payload.EncShare.ShareIndex,
+			share.Payload.ProposalID,
+			share.Payload.TreePosition,
+			nextPending,
+		); err != nil {
+			return retryableShareError(failureStagePendingPersist, err)
+		}
+		pending = &nextPending
 		p.logger.Info("rebroadcasting accepted reveal after commit timeout",
 			"round_id", share.Payload.VoteRoundID,
 			"share_index", share.Payload.EncShare.ShareIndex,
 			"tx_hash", pending.TxHash,
-			"pending_since_height", pending.SinceHeight,
+			"previous_pending_since_height", share.pendingBroadcast.SinceHeight,
 			"block_height", blockHeight,
+			"retry_delay_blocks", retryDelay,
+			"rebroadcast_count", pending.RebroadcastCount,
 		)
 	} else {
 		p.logger.Info("retrying persisted reveal after unknown delivery outcome",
@@ -761,7 +798,7 @@ func (p *Processor) processPendingBroadcast(ctx context.Context, share QueuedSha
 			"block_height", blockHeight,
 		)
 	}
-	return p.submitReveal(ctx, share, &pending.Reveal, blockHeight)
+	return p.submitReveal(ctx, share, &pending.Reveal, blockHeight, pending.RebroadcastCount)
 }
 
 // pendingBroadcastCommitted checks the persisted message's exact nullifier.
@@ -803,6 +840,7 @@ func (p *Processor) submitReveal(
 	share QueuedShare,
 	msg *MsgRevealShareJSON,
 	blockHeight uint64,
+	rebroadcastCount uint32,
 ) error {
 	result, err := p.submitter.SubmitRevealShareContext(ctx, msg)
 	if err != nil {
@@ -832,9 +870,10 @@ func (p *Processor) submitReveal(
 	return retryableShareError(
 		failureStageSubmitChain,
 		&acceptedBroadcastError{pending: pendingRevealBroadcast{
-			Reveal:      *msg,
-			TxHash:      result.TxHash,
-			SinceHeight: blockHeight,
+			Reveal:           *msg,
+			TxHash:           result.TxHash,
+			SinceHeight:      blockHeight,
+			RebroadcastCount: rebroadcastCount,
 		}},
 	)
 }
