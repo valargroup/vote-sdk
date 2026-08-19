@@ -26,6 +26,10 @@ describe("chain endpoint changes", () => {
     const setItem = vi.fn();
     const removeItem = vi.fn();
     vi.stubGlobal("localStorage", { setItem, removeItem });
+    vi.stubGlobal("window", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
     const listener = vi.fn();
     const unsubscribe = subscribeToChainUrlChanges(listener);
 
@@ -38,6 +42,24 @@ describe("chain endpoint changes", () => {
     setChainUrl("");
     expect(removeItem).toHaveBeenCalledWith("shielded-vote-chain-url");
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("notifies subscribers when another tab changes the endpoint", () => {
+    const addEventListener = vi.fn();
+    const removeEventListener = vi.fn();
+    vi.stubGlobal("window", { addEventListener, removeEventListener });
+    const listener = vi.fn();
+    const unsubscribe = subscribeToChainUrlChanges(listener);
+    const storageHandler = addEventListener.mock.calls[0][1] as (event: StorageEvent) => void;
+
+    storageHandler({ key: "unrelated" } as StorageEvent);
+    expect(listener).not.toHaveBeenCalled();
+
+    storageHandler({ key: "shielded-vote-chain-url" } as StorageEvent);
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    unsubscribe();
+    expect(removeEventListener).toHaveBeenCalledWith("storage", storageHandler);
   });
 
   it("detects the chain at the requested endpoint", async () => {

@@ -25,10 +25,17 @@ export function setChainUrl(url: string) {
   for (const listener of chainUrlListeners) listener();
 }
 
-/** Subscribe to same-page chain endpoint changes made through setChainUrl. */
+/** Subscribe to chain endpoint changes made in this page or another tab. */
 export function subscribeToChainUrlChanges(listener: () => void): () => void {
+  const handleStorage = (event: StorageEvent) => {
+    if (event.key === CHAIN_URL_KEY || event.key === null) listener();
+  };
   chainUrlListeners.add(listener);
-  return () => chainUrlListeners.delete(listener);
+  window.addEventListener("storage", handleStorage);
+  return () => {
+    chainUrlListeners.delete(listener);
+    window.removeEventListener("storage", handleStorage);
+  };
 }
 
 // The UI is served in-process by the same svoted that hosts the API, so
