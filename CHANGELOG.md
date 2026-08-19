@@ -9,7 +9,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 ## Unreleased
 
 - Persist generated helper reveals before broadcast so ambiguous delivery,
-  commitment checks, delayed rebroadcasts, and restarts reuse the exact proof.
+  commitment checks, delayed rebroadcasts, and restarts reuse the exact proof,
+  with committed-height exponential backoff and deterministic retry jitter.
   Honor Comet's final proposal byte budget after injected transactions, and
   reduce the consensus maximum block size to 5 MiB for fresh chains and the
   `v1.4.0` upgrade. Serialize first-round helper queue metadata writes so

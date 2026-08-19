@@ -147,9 +147,10 @@ type QueuedShare struct {
 // nullifier is observed in committed state. Persisting the exact message avoids
 // generating a new randomized proof while a reveal waits behind a proposal cap.
 type pendingRevealBroadcast struct {
-	Reveal      MsgRevealShareJSON
-	TxHash      string
-	SinceHeight uint64
+	Reveal           MsgRevealShareJSON
+	TxHash           string
+	SinceHeight      uint64
+	RebroadcastCount uint32
 }
 
 // QueueStatus holds per-round queue statistics.
