@@ -34,10 +34,6 @@ func filterVoteShareSubmissionTransactions(txs [][]byte) ([][]byte, voteShareSub
 	stats := voteShareSubmissionFilterStats{}
 
 	for _, txBytes := range txs {
-		if len(txBytes) > 0 && txBytes[0] == voteapi.TagRevealShare && stats.kept >= MaxVoteShareSubmissionsPerBlock {
-			stats.overLimit++
-			continue
-		}
 		key, isSubmission, err := voteShareSubmissionProposalKeyFromTx(txBytes)
 		if !isSubmission {
 			filtered = append(filtered, txBytes)
@@ -49,6 +45,10 @@ func filterVoteShareSubmissionTransactions(txs [][]byte) ([][]byte, voteShareSub
 		}
 		if _, exists := seen[key]; exists {
 			stats.duplicates++
+			continue
+		}
+		if stats.kept >= MaxVoteShareSubmissionsPerBlock {
+			stats.overLimit++
 			continue
 		}
 		seen[key] = struct{}{}
