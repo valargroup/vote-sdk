@@ -2,6 +2,8 @@ package helper
 
 import (
 	"database/sql"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1125,6 +1127,79 @@ func pendingRevealBroadcastFromExport(pending *QueueExportPendingBroadcast) *pen
 	}
 }
 
+// validateImportedPendingReveal ensures a preserved reveal belongs to its
+// enclosing queue row before the import can bypass proof generation.
+func validateImportedPendingReveal(roundID string, row QueueExportRow, opts QueueImportOptions) error {
+	if row.PendingBroadcast == nil {
+		return nil
+	}
+
+	roundBytes, err := hex.DecodeString(roundID)
+	if err != nil {
+		return fmt.Errorf("decode round_id: %w", err)
+	}
+	if len(roundBytes) != 32 {
+		return fmt.Errorf("round_id must be 32 bytes, got %d", len(roundBytes))
+	}
+
+	reveal := row.PendingBroadcast.Reveal
+	if reveal.VoteRoundID != base64.StdEncoding.EncodeToString(roundBytes) {
+		return errors.New("pending reveal vote_round_id does not match imported round_id")
+	}
+	if reveal.ProposalID != row.ProposalID {
+		return errors.New("pending reveal proposal_id does not match imported row")
+	}
+	if reveal.VoteDecision != row.VoteDecision {
+		return errors.New("pending reveal vote_decision does not match imported row")
+	}
+
+	c1, err := decodeBase64Array32(row.EncShare.C1, "imported enc_share.c1")
+	if err != nil {
+		return err
+	}
+	c2, err := decodeBase64Array32(row.EncShare.C2, "imported enc_share.c2")
+	if err != nil {
+		return err
+	}
+	encShare := make([]byte, 0, len(c1)+len(c2))
+	encShare = append(encShare, c1[:]...)
+	encShare = append(encShare, c2[:]...)
+	if reveal.EncShare != base64.StdEncoding.EncodeToString(encShare) {
+		return errors.New("pending reveal enc_share does not match imported row")
+	}
+	if opts.VCHash == nil || opts.ShareNullifierHash == nil {
+		return errors.New("pending reveal nullifier validation unavailable")
+	}
+
+	var roundIDField [32]byte
+	copy(roundIDField[:], roundBytes)
+	sharesHash, err := decodeBase64Array32(row.SharesHash, "imported shares_hash")
+	if err != nil {
+		return err
+	}
+	primaryBlind, err := decodeBase64Array32(row.PrimaryBlind, "imported primary_blind")
+	if err != nil {
+		return err
+	}
+	voteCommitment, err := opts.VCHash(roundIDField, sharesHash, row.ProposalID, row.VoteDecision)
+	if err != nil {
+		return fmt.Errorf("compute imported vote commitment: %w", err)
+	}
+	expectedNullifier, err := opts.ShareNullifierHash(voteCommitment, row.ShareIndex, primaryBlind)
+	if err != nil {
+		return fmt.Errorf("compute imported share nullifier: %w", err)
+	}
+	importedNullifier, err := decodeBase64Array32(reveal.ShareNullifier, "pending reveal share_nullifier")
+	if err != nil {
+		return err
+	}
+	if importedNullifier != expectedNullifier {
+		return errors.New("pending reveal share_nullifier does not match imported row")
+	}
+
+	return nil
+}
+
 func pendingRevealBroadcastEqual(left, right *pendingRevealBroadcast) bool {
 	if left == nil || right == nil {
 		return left == nil && right == nil
@@ -1265,6 +1340,15 @@ func (s *ShareStore) ImportQueue(export QueueExport, opts QueueImportOptions) (Q
 		if !isProcessableShareState(row.State) {
 			result.SkippedTerminal++
 			continue
+		}
+		if err := validateImportedPendingReveal(export.RoundID, row, opts); err != nil {
+			return QueueImportResult{}, fmt.Errorf(
+				"validate pending reveal for share_index %d proposal_id %d tree_position %d: %w",
+				row.ShareIndex,
+				row.ProposalID,
+				row.TreePosition,
+				err,
+			)
 		}
 
 		submitAt := row.SubmitAt

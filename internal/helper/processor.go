@@ -18,8 +18,8 @@ import (
 
 const (
 	maintenanceInterval = 30 * time.Second
-	// Twenty blocks lets 2,560 reveals drain at the 128-per-block cap before the
-	// first rescue broadcast. Later attempts back off, and a small deterministic
+	// Twenty blocks lets 5,120 vote share submissions drain at the 256-per-block
+	// cap before the first rescue broadcast. Later attempts back off, and a small
 	// jitter prevents a cohort from retrying at one height.
 	pendingBroadcastInitialRetryBlocks = uint64(20)
 	pendingBroadcastMaxRetryBlocks     = uint64(80)
@@ -830,6 +830,7 @@ func (p *Processor) processPendingBroadcast(ctx context.Context, share QueuedSha
 					errors.Join(submitErr, fmt.Errorf("restore pending rebroadcast window: %w", err)),
 				)
 			}
+			p.clearSubmitHeight(share)
 			p.logger.Info("restored pending reveal retry window after local readiness rejection",
 				"round_id", share.Payload.VoteRoundID,
 				"share_index", share.Payload.EncShare.ShareIndex,
