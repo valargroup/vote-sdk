@@ -67,6 +67,7 @@ interface SidebarProps {
   onNavigate: (section: string) => void;
   onDeleteRound: (id: string) => void;
   currentSection: string;
+  showShareQueues: boolean;
   isOpen: boolean;
   onClose: () => void;
 }
@@ -81,6 +82,7 @@ export function Sidebar({
   onNavigate: rawNavigate,
   onDeleteRound,
   currentSection,
+  showShareQueues,
   isOpen,
   onClose,
 }: SidebarProps) {
@@ -160,17 +162,19 @@ export function Sidebar({
           Vote status
         </button>
 
-        <button
-          onClick={() => onNavigate("queue-monitor")}
-          className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs transition-colors cursor-pointer ${
-            currentSection === "queue-monitor"
-              ? "bg-surface-3 text-text-primary"
-              : "text-text-secondary hover:bg-surface-2 hover:text-text-primary"
-          }`}
-        >
-          <Activity size={15} />
-          Share queues
-        </button>
+        {showShareQueues && (
+          <button
+            onClick={() => onNavigate("queue-monitor")}
+            className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs transition-colors cursor-pointer ${
+              currentSection === "queue-monitor"
+                ? "bg-surface-3 text-text-primary"
+                : "text-text-secondary hover:bg-surface-2 hover:text-text-primary"
+            }`}
+          >
+            <Activity size={15} />
+            Share queues
+          </button>
+        )}
 
         <button
           onClick={() => onNavigate("validators")}

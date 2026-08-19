@@ -8,6 +8,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Show production share queues only when a current vote-manager wallet is
+  connected, while keeping the staging monitor visible to everyone.
 - Serialize first-round helper queue metadata writes so concurrent submissions
   are not rejected by SQLite writer contention. Use a new helper
   proof-concurrency key that defaults validator-hosted helpers to one worker and
