@@ -257,9 +257,12 @@ type QueueExportPendingBroadcast struct {
 	RebroadcastCount uint32             `json:"rebroadcast_count,omitempty"`
 }
 
-// QueueImportOptions controls how processable rows from a rescue artifact are scheduled.
+// QueueImportOptions controls rescue scheduling and validates preserved reveals.
+// VCHash and ShareNullifierHash are required when a processable row retains one.
 type QueueImportOptions struct {
-	ForceReady bool
+	ForceReady         bool
+	VCHash             VCHashFunc
+	ShareNullifierHash ShareNullifierHashFunc
 }
 
 // QueueImportResult reports how an import handled each row in the rescue artifact.

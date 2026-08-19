@@ -82,13 +82,24 @@ func testPendingRevealForPayload(t *testing.T, payload SharePayload) MsgRevealSh
 	require.NoError(t, err)
 
 	return MsgRevealShareJSON{
-		ShareNullifier:           testFieldB64(1),
+		ShareNullifier:           payload.PrimaryBlind,
 		EncShare:                 base64.StdEncoding.EncodeToString(append(c1, c2...)),
 		ProposalID:               payload.ProposalID,
 		VoteDecision:             payload.VoteDecision,
 		Proof:                    testFieldB64(3),
 		VoteRoundID:              base64.StdEncoding.EncodeToString(roundID),
 		VoteCommTreeAnchorHeight: 55,
+	}
+}
+
+func testQueueImportOptions() QueueImportOptions {
+	return QueueImportOptions{
+		VCHash: func(_ [32]byte, sharesHash [32]byte, _, _ uint32) ([32]byte, error) {
+			return sharesHash, nil
+		},
+		ShareNullifierHash: func(_ [32]byte, _ uint32, primaryBlind [32]byte) ([32]byte, error) {
+			return primaryBlind, nil
+		},
 	}
 }
 
@@ -1501,7 +1512,7 @@ func TestExportImportQueueRoundTripsPendingReveal(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &decoded))
 
 	dest := newTestStore(t)
-	result, err := dest.ImportQueue(decoded, QueueImportOptions{})
+	result, err := dest.ImportQueue(decoded, testQueueImportOptions())
 	require.NoError(t, err)
 	assert.Equal(t, 1, result.Inserted)
 
@@ -1571,6 +1582,13 @@ func TestImportQueueRejectsPendingRevealMismatch(t *testing.T) {
 			},
 			errPart: "enc_share",
 		},
+		{
+			name: "share nullifier",
+			mutate: func(reveal *MsgRevealShareJSON) {
+				reveal.ShareNullifier = testFieldB64(9)
+			},
+			errPart: "share_nullifier",
+		},
 	}
 
 	for _, tt := range tests {
@@ -1589,7 +1607,7 @@ func TestImportQueueRejectsPendingRevealMismatch(t *testing.T) {
 			}
 
 			dest := newTestStore(t)
-			_, err := dest.ImportQueue(export, QueueImportOptions{})
+			_, err := dest.ImportQueue(export, testQueueImportOptions())
 			require.ErrorContains(t, err, tt.errPart)
 
 			var count int
