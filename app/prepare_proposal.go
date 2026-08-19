@@ -58,7 +58,14 @@ func ComposedPrepareProposalHandler(
 	return func(ctx sdk.Context, req *abci.RequestPrepareProposal) (*abci.ResponsePrepareProposal, error) {
 		totalStart := time.Now()
 
-		txs := req.Txs
+		txs, submissionStats := filterVoteShareSubmissionTransactions(req.Txs)
+		if submissionStats.duplicates > 0 || submissionStats.malformed > 0 || submissionStats.overLimit > 0 {
+			logger.Info("PrepareProposal: filtered vote share submission transactions",
+				"kept", submissionStats.kept,
+				"duplicates", submissionStats.duplicates,
+				"malformed", submissionStats.malformed,
+				"over_limit", submissionStats.overLimit)
+		}
 
 		start := time.Now()
 		txs = dealInjector(ctx, req, txs)

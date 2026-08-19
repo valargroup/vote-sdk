@@ -9,7 +9,7 @@ import (
 
 const (
 	// V140UpgradeName coordinates the five MiB consensus block limit with the
-	// binary release.
+	// binary release that enforces bounded vote share submission proposals.
 	V140UpgradeName = "v1.4.0"
 )
 
