@@ -49,7 +49,12 @@ import (
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
-const testChainID = "svote-test-1"
+const (
+	testChainID = "svote-test-1"
+	// defaultPrepareProposalMaxTxBytes gives tests a positive budget large
+	// enough to avoid incidental trimming. Zero means no transaction bytes.
+	defaultPrepareProposalMaxTxBytes = int64(cmttypes.MaxBlockSizeBytes)
+)
 
 // TestApp wraps SvoteApp with helpers for driving the ABCI lifecycle
 // in integration tests. No CometBFT process or network is involved —
@@ -742,6 +747,7 @@ func (ta *TestApp) CallPrepareProposal() *abci.ResponsePrepareProposal {
 	resp, err := ta.SvoteApp.PrepareProposal(&abci.RequestPrepareProposal{
 		Height:          ta.Height + 1,
 		Time:            ta.Time.Add(5 * time.Second),
+		MaxTxBytes:      defaultPrepareProposalMaxTxBytes,
 		ProposerAddress: ta.ProposerAddress,
 	})
 	require.NoError(ta.t, err)
@@ -752,7 +758,7 @@ func (ta *TestApp) CallPrepareProposal() *abci.ResponsePrepareProposal {
 // with the given mempool txs and calls PrepareProposal. Returns the response.
 func (ta *TestApp) CallPrepareProposalWithTxs(txs [][]byte) *abci.ResponsePrepareProposal {
 	ta.t.Helper()
-	return ta.CallPrepareProposalWithTxsAndMaxBytes(txs, 0)
+	return ta.CallPrepareProposalWithTxsAndMaxBytes(txs, defaultPrepareProposalMaxTxBytes)
 }
 
 // CallPrepareProposalWithTxsAndMaxBytes calls PrepareProposal with explicit
@@ -798,6 +804,7 @@ func (ta *TestApp) NextBlockWithPrepareProposal() {
 	ppResp, err := ta.SvoteApp.PrepareProposal(&abci.RequestPrepareProposal{
 		Height:          ta.Height,
 		Time:            ta.Time,
+		MaxTxBytes:      defaultPrepareProposalMaxTxBytes,
 		ProposerAddress: ta.ProposerAddress,
 	})
 	require.NoError(ta.t, err)
