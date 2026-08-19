@@ -86,7 +86,7 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundI
 
 	if cfg.MaxConcurrentProofs < 1 {
 		logger.Info(
-			"invalid helper.max_concurrent_proofs, using fallback",
+			"invalid helper proof concurrency, using fallback",
 			"configured", cfg.MaxConcurrentProofs,
 			"fallback", 1,
 		)

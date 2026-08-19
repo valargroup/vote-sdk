@@ -198,6 +198,18 @@ jobs:
             echo "  FAIL  [helper] section missing"
             fail=1
           fi
+          if grep -qE '^max_concurrent_proofs_v2 = 1$' "${D}/config/app.toml"; then
+            echo "  OK  helper proof concurrency v2 defaults to 1"
+          else
+            echo "  FAIL  helper proof concurrency v2 default is not 1"
+            fail=1
+          fi
+          if grep -qE '^max_concurrent_proofs[[:space:]]*=' "${D}/config/app.toml"; then
+            echo "  FAIL  deprecated helper proof concurrency key is still emitted"
+            fail=1
+          else
+            echo "  OK  deprecated helper proof concurrency key is absent"
+          fi
 
           if [ "$fail" -eq 0 ]; then
             echo "=== All checks passed ==="

@@ -1088,7 +1088,7 @@ fn voter_throughput_stress() {
         "  Per-share cost:      {:.0}ms (ZKP #3 prove + MsgRevealShare verify + tx)",
         per_share_ms
     );
-    eprintln!("  Concurrent provers:  16 (max_concurrent_proofs)");
+    eprintln!("  Concurrent provers:  16 (max_concurrent_proofs_v2)");
     eprintln!(
         "  Arrival pattern:     {} voters every {}ms ({} waves)",
         w_size,
