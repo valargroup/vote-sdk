@@ -18,7 +18,7 @@ import (
 
 const (
 	maintenanceInterval = 30 * time.Second
-	// Twenty blocks lets 2,560 reveals drain at the 128-per-block cap before the
+	// Twenty blocks lets 5,120 reveals drain at the 256-per-block cap before the
 	// first rescue broadcast. Later attempts back off, and a small deterministic
 	// jitter prevents a cohort from retrying at one height.
 	pendingBroadcastInitialRetryBlocks = uint64(20)

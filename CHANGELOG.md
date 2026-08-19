@@ -8,7 +8,7 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
-- Keep at most 128 unique reveal shares in each block, reject proposals that
+- Keep at most 256 unique reveal shares in each block, reject proposals that
   bypass the round-scoped deduplication or reveal cap, and persist generated
   helper reveals before broadcast so ambiguous delivery, commitment checks,
   delayed rebroadcasts, and restarts reuse the exact proof,
