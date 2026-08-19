@@ -4,35 +4,13 @@ import (
 	"context"
 	"fmt"
 
-	abci "github.com/cometbft/cometbft/abci/types"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	cmttypes "github.com/cometbft/cometbft/types"
-
-	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
 // MaxBlockBytes is the consensus maximum serialized block size. The limit
 // leaves room for normal voting traffic while bounding proposal propagation.
 const MaxBlockBytes int64 = 5 << 20
-
-// installInitChainConsensusLimits makes fresh chains use the same block limit
-// that existing chains receive through the coordinated upgrade handler.
-func (app *SvoteApp) installInitChainConsensusLimits() {
-	defaultInitChainer := app.App.InitChainer
-	app.SetInitChainer(func(ctx sdk.Context, req *abci.RequestInitChain) (*abci.ResponseInitChain, error) {
-		res, err := defaultInitChainer(ctx, req)
-		if err != nil {
-			return nil, err
-		}
-
-		params, err := app.applyConsensusLimits(ctx)
-		if err != nil {
-			return nil, err
-		}
-		res.ConsensusParams = &params
-		return res, nil
-	})
-}
 
 // applyConsensusLimits updates the application consensus-parameter store while
 // preserving populated fields and filling any omitted required sections from

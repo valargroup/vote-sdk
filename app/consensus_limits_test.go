@@ -8,20 +8,20 @@ import (
 	upgradetypes "cosmossdk.io/x/upgrade/types"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	cmttypes "github.com/cometbft/cometbft/types"
+	simtestutil "github.com/cosmos/cosmos-sdk/testutil/sims"
 
 	svoteapp "github.com/valargroup/vote-sdk/app"
 	"github.com/valargroup/vote-sdk/testutil"
 )
 
-func TestFreshChainUsesFiveMiBBlockLimit(t *testing.T) {
+func TestInitChainPreservesGenesisBlockLimit(t *testing.T) {
 	ta := testutil.SetupTestApp(t)
-	require.NotNil(t, ta.InitChainResponse.ConsensusParams)
-	require.Equal(t, svoteapp.MaxBlockBytes, ta.InitChainResponse.ConsensusParams.Block.MaxBytes)
 	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
 
 	params, err := ta.SvoteApp.ConsensusParamsKeeper.ParamsStore.Get(ctx)
 	require.NoError(t, err)
-	require.Equal(t, svoteapp.MaxBlockBytes, params.Block.MaxBytes)
+	require.Equal(t, simtestutil.DefaultConsensusParams.Block.MaxBytes, params.Block.MaxBytes)
+	require.NotEqual(t, svoteapp.MaxBlockBytes, params.Block.MaxBytes)
 }
 
 func TestV140UpgradeReducesExistingChainBlockLimit(t *testing.T) {
