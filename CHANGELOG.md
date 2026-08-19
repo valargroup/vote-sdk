@@ -8,20 +8,16 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
-- Keep at most 256 unique vote share submissions in each block, reject proposals
-  that bypass the round-scoped deduplication or submission cap, and persist
-  generated helper submissions before broadcast so ambiguous delivery,
-  commitment checks, delayed rebroadcasts, and restarts reuse the exact proof,
-  with committed-height exponential backoff, deterministic retry jitter, and
-  deadline-aware rescue rebroadcasts. Queue rescue exports preserve the same
-  pending broadcast state while retaining legacy v1 import support, and local
-  readiness rejections do not consume a rescue backoff window.
-  Honor Comet's final proposal byte budget after injected transactions, and
+- Show production share queues only when a current vote-manager wallet is
+  connected, while keeping the staging monitor visible to everyone.
+- Keep at most 256 unique vote share submissions in each block, and reject
+  proposals that bypass round-scoped deduplication or the submission cap.
+- Honor Comet's final proposal byte budget after injected transactions, and
   reduce the consensus maximum block size to 5 MiB for fresh chains and the
   `v1.4.0` upgrade.
-  Serialize first-round helper queue metadata writes so concurrent submissions
-  are not rejected by SQLite writer contention. Use a new helper proof
-  concurrency key that defaults validator-hosted helpers to one worker and
+- Serialize first-round helper queue metadata writes so concurrent submissions
+  are not rejected by SQLite writer contention. Use a new helper
+  proof-concurrency key that defaults validator-hosted helpers to one worker and
   ignores the earlier value, so the coordinated upgrade does not require manual
   edits on every validator.
 - Route default production and staging voting-config reads through the

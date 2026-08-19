@@ -136,21 +136,10 @@ const (
 
 // QueuedShare is a share payload with processing metadata.
 type QueuedShare struct {
-	Payload          SharePayload
-	State            ShareState
-	Attempts         int
-	VoteEndTime      uint64 // unix seconds; 0 if unknown
-	pendingBroadcast *pendingRevealBroadcast
-}
-
-// pendingRevealBroadcast retains one CheckTx-accepted reveal until its
-// nullifier is observed in committed state. Persisting the exact message avoids
-// generating a new randomized proof while a reveal waits behind a proposal cap.
-type pendingRevealBroadcast struct {
-	Reveal           MsgRevealShareJSON
-	TxHash           string
-	SinceHeight      uint64
-	RebroadcastCount uint32
+	Payload     SharePayload
+	State       ShareState
+	Attempts    int
+	VoteEndTime uint64 // unix seconds; 0 if unknown
 }
 
 // QueueStatus holds per-round queue statistics.
@@ -203,10 +192,8 @@ func (s ExpiredRoundSummary) Unsubmitted() int {
 	return s.Pending + s.Failed
 }
 
-const queueExportLegacyVersion = 1
-
 // QueueExportVersion is the current JSON schema version for queue rescue artifacts.
-const QueueExportVersion = 2
+const QueueExportVersion = 1
 
 // QueueExport is the local rescue artifact for one round's helper queue.
 // It is intentionally not exposed over HTTP. Treat files of this shape as
@@ -230,39 +217,26 @@ type QueueExportRound struct {
 // Submitted rows should have witness material cleared. Failed rows can retain
 // it until the helper purges the round after vote_end_time.
 type QueueExportRow struct {
-	ShareIndex       uint32                       `json:"share_index"`
-	SharesHash       string                       `json:"shares_hash,omitempty"`
-	ProposalID       uint32                       `json:"proposal_id"`
-	VoteDecision     uint32                       `json:"vote_decision"`
-	EncShare         EncryptedShareWire           `json:"enc_share,omitempty"`
-	TreePosition     uint64                       `json:"tree_position"`
-	ShareComms       []string                     `json:"share_comms,omitempty"`
-	PrimaryBlind     string                       `json:"primary_blind,omitempty"`
-	State            ShareState                   `json:"state"`
-	Attempts         int                          `json:"attempts"`
-	VoteEndTime      uint64                       `json:"vote_end_time"`
-	SubmitAt         uint64                       `json:"submit_at"`
-	OriginalSubmitAt uint64                       `json:"original_submit_at,omitempty"`
-	ReceivedAt       uint64                       `json:"received_at"`
-	PendingBroadcast *QueueExportPendingBroadcast `json:"pending_broadcast,omitempty"`
-	Processable      bool                         `json:"processable"`
+	ShareIndex       uint32             `json:"share_index"`
+	SharesHash       string             `json:"shares_hash,omitempty"`
+	ProposalID       uint32             `json:"proposal_id"`
+	VoteDecision     uint32             `json:"vote_decision"`
+	EncShare         EncryptedShareWire `json:"enc_share,omitempty"`
+	TreePosition     uint64             `json:"tree_position"`
+	ShareComms       []string           `json:"share_comms,omitempty"`
+	PrimaryBlind     string             `json:"primary_blind,omitempty"`
+	State            ShareState         `json:"state"`
+	Attempts         int                `json:"attempts"`
+	VoteEndTime      uint64             `json:"vote_end_time"`
+	SubmitAt         uint64             `json:"submit_at"`
+	OriginalSubmitAt uint64             `json:"original_submit_at,omitempty"`
+	ReceivedAt       uint64             `json:"received_at"`
+	Processable      bool               `json:"processable"`
 }
 
-// QueueExportPendingBroadcast preserves the exact reveal and committed-height
-// rescue window for a processable queue row.
-type QueueExportPendingBroadcast struct {
-	Reveal           MsgRevealShareJSON `json:"reveal"`
-	TxHash           string             `json:"tx_hash,omitempty"`
-	SinceHeight      uint64             `json:"since_height,omitempty"`
-	RebroadcastCount uint32             `json:"rebroadcast_count,omitempty"`
-}
-
-// QueueImportOptions controls rescue scheduling and validates preserved reveals.
-// VCHash and ShareNullifierHash are required when a processable row retains one.
+// QueueImportOptions controls how processable rows from a rescue artifact are scheduled.
 type QueueImportOptions struct {
-	ForceReady         bool
-	VCHash             VCHashFunc
-	ShareNullifierHash ShareNullifierHashFunc
+	ForceReady bool
 }
 
 // QueueImportResult reports how an import handled each row in the rescue artifact.

@@ -1,16 +1,13 @@
 package helper
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -326,159 +323,22 @@ func TestProcessor_SubmitHeightCacheEvictsOlderBlocks(t *testing.T) {
 	assert.NotContains(t, proc.stalledRetryCount, shareScheduleKey(shareA))
 }
 
-func TestPendingBroadcastRetryDelayBacksOffAndCaps(t *testing.T) {
-	pending := pendingRevealBroadcast{
-		Reveal: MsgRevealShareJSON{
-			VoteRoundID:    testFieldB64(1),
-			ShareNullifier: testFieldB64(2),
-		},
-	}
-
-	for _, tc := range []struct {
-		count uint32
-		base  uint64
-	}{
-		{count: 0, base: 20},
-		{count: 1, base: 40},
-		{count: 2, base: 80},
-		{count: 3, base: 80},
-		{count: 20, base: 80},
-	} {
-		pending.RebroadcastCount = tc.count
-		delay := pendingBroadcastRetryDelay(pending)
-		assert.GreaterOrEqual(t, delay, tc.base)
-		assert.LessOrEqual(t, delay, tc.base+pendingBroadcastJitterBlocks)
-		assert.Equal(t, delay, pendingBroadcastRetryDelay(pending), "jitter must be deterministic")
-	}
-
-	pending.RebroadcastCount = 0
-	delays := make(map[uint64]struct{})
-	for fill := byte(0); fill < 32; fill++ {
-		pending.Reveal.ShareNullifier = testFieldB64(fill)
-		delays[pendingBroadcastRetryDelay(pending)] = struct{}{}
-	}
-	assert.Greater(t, len(delays), 1, "per-share jitter should spread a retry cohort")
-}
-
-func TestProcessor_ProcessBatch_UrgentPendingRevealBypassesBlockDelayOncePerHeight(t *testing.T) {
-	for _, rebroadcastCount := range []uint32{0, 1, 2} {
-		t.Run(fmt.Sprintf("rebroadcast_count_%d", rebroadcastCount), func(t *testing.T) {
-			store := newTestStore(t)
-			tree := newMockTreeReader()
-			tree.blockHeight.Store(101)
-			var submitCalls atomic.Int32
-
-			chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				submitCalls.Add(1)
-				w.Header().Set("Content-Type", "application/json")
-				w.Write([]byte(`{"tx_hash":"AABB","code":0,"log":""}`))
-			}))
-			defer chainServer.Close()
-
-			roundID := hex.EncodeToString(make([]byte, 32))
-			enqueueAndRequireInserted(t, store, testPayload(roundID, 0))
-			_, err := store.db.Exec(
-				"UPDATE shares SET vote_end_time = ? WHERE round_id = ?",
-				time.Now().Add(20*time.Second).Unix(),
-				roundID,
-			)
-			require.NoError(t, err)
-			require.Len(t, store.TakeReady(), 1)
-
-			pending := pendingRevealBroadcast{
-				Reveal: MsgRevealShareJSON{
-					ShareNullifier: testFieldB64(1),
-					VoteRoundID:    testFieldB64(2),
-				},
-				TxHash:           "previous",
-				SinceHeight:      100,
-				RebroadcastCount: rebroadcastCount,
-			}
-			require.NoError(t, store.markAwaitingCommit(roundID, 0, 1, 0, pending))
-
-			key := schedKey(roundID, 0, 1, 0)
-			store.mu.Lock()
-			store.schedule[key] = time.Now().Add(-time.Second)
-			store.mu.Unlock()
-
-			proc := NewProcessor(
-				store,
-				tree,
-				&mockProver{},
-				NewChainSubmitter(chainServer.URL),
-				log.NewNopLogger(),
-				1,
-				nil,
-			)
-			proc.processBatch(context.Background())
-
-			share, ok := store.loadShare(roundID, 0, 1, 0)
-			require.True(t, ok)
-			require.NotNil(t, share.pendingBroadcast)
-			assert.Equal(t, uint64(101), share.pendingBroadcast.SinceHeight)
-			assert.Equal(t, rebroadcastCount+1, share.pendingBroadcast.RebroadcastCount)
-			assert.Equal(t, int32(1), submitCalls.Load())
-
-			store.mu.Lock()
-			store.schedule[key] = time.Now().Add(-time.Second)
-			store.mu.Unlock()
-			proc.processBatch(context.Background())
-			assert.Equal(t, int32(1), submitCalls.Load(), "urgent retries must still wait for a new committed height")
-		})
-	}
-}
-
-func TestProcessor_ProcessBatch_BroadcastAcceptedRetriesUntilCommit(t *testing.T) {
+func TestProcessor_ProcessBatch_BroadcastAcceptedRetriesOncePerBlock(t *testing.T) {
 	store := newTestStore(t)
 	prover := &mockProver{}
 	tree := newMockTreeReader()
 	var submitCalls atomic.Int32
-	var committed atomic.Bool
-	var submittedBodiesMu sync.Mutex
-	var submittedBodies [][]byte
 
-	// Fake chain server that accepts submissions except for one ambiguous rescue
-	// response after it has received the exact transaction bytes.
+	// Fake chain server that accepts submissions.
 	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		call := submitCalls.Add(1)
-		body, err := io.ReadAll(r.Body)
-		if err == nil {
-			submittedBodiesMu.Lock()
-			submittedBodies = append(submittedBodies, body)
-			submittedBodiesMu.Unlock()
-		}
-		if call == 2 {
-			http.Error(w, "rebroadcast outcome unknown", http.StatusBadGateway)
-			return
-		}
+		submitCalls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"tx_hash":"AABB","code":0,"log":""}`))
 	}))
 	defer chainServer.Close()
 
 	submitter := NewChainSubmitter(chainServer.URL)
-	expectedNullifier := [32]byte{0xBB}
-	proc := NewProcessor(
-		store,
-		tree,
-		prover,
-		submitter,
-		log.NewNopLogger(),
-		2,
-		nil,
-		WithPreProofShareDeduper(
-			func(roundID, sharesHash [32]byte, proposalID, voteDecision uint32) ([32]byte, error) {
-				return [32]byte{}, nil
-			},
-			func(voteCommitment [32]byte, shareIndex uint32, primaryBlind [32]byte) ([32]byte, error) {
-				return expectedNullifier, nil
-			},
-			func(roundIDHex string, shareNullifier []byte) (bool, error) {
-				require.Equal(t, expectedNullifier[:], shareNullifier)
-				return committed.Load(), nil
-			},
-		),
-	)
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
 
 	// Enqueue a share (zero delay in test store means immediately ready).
 	roundID := hex.EncodeToString(make([]byte, 32))
@@ -496,16 +356,11 @@ func TestProcessor_ProcessBatch_BroadcastAcceptedRetriesUntilCommit(t *testing.T
 	assert.Equal(t, 1, status[roundID].Pending)
 	share, ok := store.loadShare(roundID, 0, 1, 0)
 	require.True(t, ok)
-	assert.Equal(t, 0, share.Attempts)
+	assert.Equal(t, 1, share.Attempts)
 	assert.NotEmpty(t, share.Payload.EncShare.C1)
 	assert.NotEmpty(t, share.Payload.EncShare.C2)
 	assert.NotEmpty(t, share.Payload.ShareComms)
 	assert.NotEmpty(t, share.Payload.PrimaryBlind)
-	require.NotNil(t, share.pendingBroadcast)
-	assert.Equal(t, "AABB", share.pendingBroadcast.TxHash)
-	assert.Equal(t, uint64(1), share.pendingBroadcast.SinceHeight)
-	assert.Equal(t, uint32(0), share.pendingBroadcast.RebroadcastCount)
-	assert.NotEmpty(t, share.pendingBroadcast.Reveal.Proof)
 	assert.Equal(t, int32(1), prover.callCount.Load())
 	assert.Equal(t, int32(1), submitCalls.Load())
 
@@ -524,7 +379,7 @@ func TestProcessor_ProcessBatch_BroadcastAcceptedRetriesUntilCommit(t *testing.T
 		proc.processBatch(context.Background())
 		share, ok = store.loadShare(roundID, 0, 1, 0)
 		require.True(t, ok)
-		assert.Equal(t, 0, share.Attempts)
+		assert.Equal(t, 1, share.Attempts)
 		store.mu.Lock()
 		next, scheduled := store.schedule[key]
 		store.mu.Unlock()
@@ -534,11 +389,9 @@ func TestProcessor_ProcessBatch_BroadcastAcceptedRetriesUntilCommit(t *testing.T
 	assert.Equal(t, int32(1), prover.callCount.Load())
 	assert.Equal(t, int32(1), submitCalls.Load())
 
-	// New blocks poll committed state but do not reprove or rebroadcast before
-	// the first 20-block base delay plus deterministic jitter has elapsed.
-	firstRetryDelay := pendingBroadcastRetryDelay(*share.pendingBroadcast)
-	firstRebroadcastHeight := uint64(1) + firstRetryDelay
-	for height := uint64(2); height < firstRebroadcastHeight; height++ {
+	// The retry budget still applies when the chain commits new blocks without
+	// ever committing the accepted transaction.
+	for height := uint64(2); height <= 5; height++ {
 		tree.blockHeight.Store(height)
 		store.mu.Lock()
 		store.schedule[key] = time.Now().Add(-time.Second)
@@ -546,458 +399,21 @@ func TestProcessor_ProcessBatch_BroadcastAcceptedRetriesUntilCommit(t *testing.T
 		proc.processBatch(context.Background())
 		share, ok = store.loadShare(roundID, 0, 1, 0)
 		require.True(t, ok)
-		assert.Equal(t, 0, share.Attempts)
+		assert.Equal(t, int(height), share.Attempts)
 	}
 
-	assert.Equal(t, int32(1), prover.callCount.Load())
-	assert.Equal(t, int32(1), submitCalls.Load())
-
-	// Once the committed-height timeout elapses, persist the advanced backoff and
-	// rebroadcast the exact message. The ambiguous response must not undo that
-	// backoff or regenerate the proof.
-	tree.blockHeight.Store(firstRebroadcastHeight)
-	store.mu.Lock()
-	store.schedule[key] = time.Now().Add(-time.Second)
-	store.mu.Unlock()
-	proc.processBatch(context.Background())
-
-	assert.Equal(t, int32(1), prover.callCount.Load())
-	assert.Equal(t, int32(2), submitCalls.Load())
-	share, ok = store.loadShare(roundID, 0, 1, 0)
-	require.True(t, ok)
-	require.NotNil(t, share.pendingBroadcast)
-	assert.Equal(t, firstRebroadcastHeight, share.pendingBroadcast.SinceHeight)
-	assert.Equal(t, uint32(1), share.pendingBroadcast.RebroadcastCount)
-	submittedBodiesMu.Lock()
-	require.Len(t, submittedBodies, 2)
-	assert.Equal(t, submittedBodies[0], submittedBodies[1])
-	submittedBodiesMu.Unlock()
-
-	// The second rescue waits twice the base interval and still reuses the exact
-	// proof. This count is durable state rather than part of the failure budget.
-	secondRetryDelay := pendingBroadcastRetryDelay(*share.pendingBroadcast)
-	secondRebroadcastHeight := firstRebroadcastHeight + secondRetryDelay
-	for height := firstRebroadcastHeight + 1; height < secondRebroadcastHeight; height++ {
-		tree.blockHeight.Store(height)
-		store.mu.Lock()
-		store.schedule[key] = time.Now().Add(-time.Second)
-		store.mu.Unlock()
-		proc.processBatch(context.Background())
-	}
-	assert.Equal(t, int32(1), prover.callCount.Load())
-	assert.Equal(t, int32(2), submitCalls.Load())
-
-	tree.blockHeight.Store(secondRebroadcastHeight)
-	store.mu.Lock()
-	store.schedule[key] = time.Now().Add(-time.Second)
-	store.mu.Unlock()
-	proc.processBatch(context.Background())
-
-	assert.Equal(t, int32(1), prover.callCount.Load())
-	assert.Equal(t, int32(3), submitCalls.Load())
-	share, ok = store.loadShare(roundID, 0, 1, 0)
-	require.True(t, ok)
-	require.NotNil(t, share.pendingBroadcast)
-	assert.Equal(t, secondRebroadcastHeight, share.pendingBroadcast.SinceHeight)
-	assert.Equal(t, uint32(2), share.pendingBroadcast.RebroadcastCount)
-	submittedBodiesMu.Lock()
-	require.Len(t, submittedBodies, 3)
-	assert.Equal(t, submittedBodies[0], submittedBodies[2])
-	submittedBodiesMu.Unlock()
-
-	// A later committed-nullifier observation is the durable success signal. It
-	// marks the row submitted and scrubs both witness and pending message data.
-	committed.Store(true)
-	tree.blockHeight.Store(secondRebroadcastHeight + 1)
-	store.mu.Lock()
-	store.schedule[key] = time.Now().Add(-time.Second)
-	store.mu.Unlock()
-	proc.processBatch(context.Background())
-
+	assert.Equal(t, int32(5), prover.callCount.Load())
+	assert.Equal(t, int32(5), submitCalls.Load())
 	status = store.Status()
 	assert.Equal(t, 0, status[roundID].Pending)
-	assert.Equal(t, 0, status[roundID].Failed)
-	assert.Equal(t, 1, status[roundID].Submitted)
+	assert.Equal(t, 1, status[roundID].Failed)
 	share, ok = store.loadShare(roundID, 0, 1, 0)
 	require.True(t, ok)
-	assert.Equal(t, ShareStateSubmitted, share.State)
-	assert.Nil(t, share.pendingBroadcast)
-	assert.Empty(t, share.Payload.EncShare.C1)
-	assert.Empty(t, share.Payload.EncShare.C2)
-	assert.Empty(t, share.Payload.ShareComms)
-	assert.Empty(t, share.Payload.PrimaryBlind)
-}
-
-func TestProcessor_ProcessBatch_PendingRebroadcastOnlyAdvancesForAmbiguousFailure(t *testing.T) {
-	tests := []struct {
-		name              string
-		newSubmitter      func(*testing.T, *atomic.Int32) *ChainSubmitter
-		expectWindowReset bool
-	}{
-		{
-			name: "readiness response",
-			newSubmitter: func(t *testing.T, calls *atomic.Int32) *ChainSubmitter {
-				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					calls.Add(1)
-					w.Header().Set("Content-Type", "application/json")
-					w.Header().Set("Retry-After", "2")
-					w.WriteHeader(http.StatusServiceUnavailable)
-					w.Write([]byte(`{"status":"warming"}`))
-				}))
-				t.Cleanup(server.Close)
-				return NewChainSubmitter(server.URL)
-			},
-			expectWindowReset: true,
-		},
-		{
-			name: "ambiguous bad gateway",
-			newSubmitter: func(t *testing.T, calls *atomic.Int32) *ChainSubmitter {
-				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					calls.Add(1)
-					http.Error(w, "broadcast failed", http.StatusBadGateway)
-				}))
-				t.Cleanup(server.Close)
-				return NewChainSubmitter(server.URL)
-			},
-		},
-		{
-			name: "ambiguous transport timeout",
-			newSubmitter: func(t *testing.T, calls *atomic.Int32) *ChainSubmitter {
-				submitter := NewChainSubmitter("http://example.test")
-				submitter.httpClient = &http.Client{
-					Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-						calls.Add(1)
-						return nil, context.DeadlineExceeded
-					}),
-				}
-				return submitter
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			dbPath := filepath.Join(t.TempDir(), "helper.db")
-			now := uint64(time.Now().Unix())
-			findRound := func(roundID string) (RoundInfo, error) {
-				return RoundInfo{CreatedAtTime: now, VoteEndTime: now + testVoteEndOffset}, nil
-			}
-			store, err := NewShareStore(dbPath, findRound)
-			require.NoError(t, err)
-			t.Cleanup(func() {
-				if store != nil {
-					store.Close()
-				}
-			})
-
-			roundID := hex.EncodeToString(make([]byte, 32))
-			payload := testPayload(roundID, 0)
-			enqueueAndRequireInserted(t, store, payload)
-			require.Len(t, store.TakeReady(), 1)
-			pending := pendingRevealBroadcast{
-				Reveal: MsgRevealShareJSON{
-					ShareNullifier: testFieldB64(1),
-					VoteRoundID:    testFieldB64(2),
-				},
-				TxHash:           "previous",
-				SinceHeight:      100,
-				RebroadcastCount: 1,
-			}
-			require.NoError(t, store.markAwaitingCommit(
-				roundID,
-				payload.EncShare.ShareIndex,
-				payload.ProposalID,
-				payload.TreePosition,
-				pending,
-			))
-
-			blockHeight := pending.SinceHeight + pendingBroadcastRetryDelay(pending)
-			tree := newMockTreeReader()
-			tree.blockHeight.Store(blockHeight)
-			key := schedKey(roundID, payload.EncShare.ShareIndex, payload.ProposalID, payload.TreePosition)
-			store.mu.Lock()
-			store.schedule[key] = time.Now().Add(-time.Second)
-			store.mu.Unlock()
-
-			var submitCalls atomic.Int32
-			proc := NewProcessor(
-				store,
-				tree,
-				&mockProver{},
-				tt.newSubmitter(t, &submitCalls),
-				log.NewNopLogger(),
-				1,
-				nil,
-			)
-			proc.processBatch(context.Background())
-			assert.Equal(t, int32(1), submitCalls.Load())
-
-			expected := pending
-			if !tt.expectWindowReset {
-				expected.SinceHeight = blockHeight
-				expected.RebroadcastCount++
-			}
-			stored, ok := store.loadShare(roundID, payload.EncShare.ShareIndex, payload.ProposalID, payload.TreePosition)
-			require.True(t, ok)
-			require.NotNil(t, stored.pendingBroadcast)
-			assert.Equal(t, expected, *stored.pendingBroadcast)
-
-			if tt.expectWindowReset {
-				store.mu.Lock()
-				store.schedule[key] = time.Now().Add(-time.Second)
-				store.mu.Unlock()
-
-				proc.processBatch(context.Background())
-				assert.Equal(t, int32(2), submitCalls.Load(), "readiness retry should be allowed at the same committed height")
-			}
-
-			require.NoError(t, store.Close())
-			store = nil
-			store, err = NewShareStore(dbPath, findRound)
-			require.NoError(t, err)
-			stored, ok = store.loadShare(roundID, payload.EncShare.ShareIndex, payload.ProposalID, payload.TreePosition)
-			require.True(t, ok)
-			require.NotNil(t, stored.pendingBroadcast)
-			assert.Equal(t, expected, *stored.pendingBroadcast)
-		})
-	}
-}
-
-func TestProcessor_ProcessBatch_CommittedPendingRevealWinsRoundTransition(t *testing.T) {
-	store := newTestStore(t)
-	prover := &mockProver{}
-	expectedNullifier := bytes.Repeat([]byte{0x55}, 32)
-	var roundStatusCalls atomic.Int32
-	var nullifierCalls atomic.Int32
-
-	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("committed pending reveal must not be rebroadcast")
-	}))
-	defer chainServer.Close()
-
-	proc := NewProcessor(
-		store,
-		&mockTreeReader{err: assert.AnError},
-		prover,
-		NewChainSubmitter(chainServer.URL),
-		log.NewNopLogger(),
-		1,
-		func(roundID string) (bool, error) {
-			roundStatusCalls.Add(1)
-			return false, nil
-		},
-		WithPreProofShareDeduper(
-			func(roundID, sharesHash [32]byte, proposalID, voteDecision uint32) ([32]byte, error) {
-				return [32]byte{}, nil
-			},
-			func(voteCommitment [32]byte, shareIndex uint32, primaryBlind [32]byte) ([32]byte, error) {
-				return [32]byte{}, nil
-			},
-			func(roundIDHex string, shareNullifier []byte) (bool, error) {
-				nullifierCalls.Add(1)
-				assert.Equal(t, expectedNullifier, shareNullifier)
-				return true, nil
-			},
-		),
-	)
-
-	roundID := hex.EncodeToString(make([]byte, 32))
-	payload := testPayload(roundID, 0)
-	enqueueAndRequireInserted(t, store, payload)
-	require.Len(t, store.TakeReady(), 1)
-	require.NoError(t, store.markAwaitingCommit(roundID, 0, 1, 0, pendingRevealBroadcast{
-		Reveal: MsgRevealShareJSON{
-			ShareNullifier: base64.StdEncoding.EncodeToString(expectedNullifier),
-		},
-		TxHash:      "AABB",
-		SinceHeight: 1,
-	}))
-	store.mu.Lock()
-	store.schedule[schedKey(roundID, 0, 1, 0)] = time.Now().Add(-time.Second)
-	store.mu.Unlock()
-
-	proc.processBatch(context.Background())
-
-	assert.Equal(t, int32(1), nullifierCalls.Load())
-	assert.Equal(t, int32(0), roundStatusCalls.Load(), "commitment must be checked before inactive round status")
-	assert.Equal(t, int32(0), prover.callCount.Load())
-	status := store.Status()[roundID]
-	assert.Equal(t, 1, status.Submitted)
-	assert.Equal(t, 0, status.Pending)
-	assert.Equal(t, 0, status.Failed)
-	share, ok := store.loadShare(roundID, 0, 1, 0)
-	require.True(t, ok)
-	assert.Nil(t, share.pendingBroadcast)
-	assert.Empty(t, share.Payload.PrimaryBlind)
-}
-
-func TestProcessor_ProcessBatch_PendingLookupErrorDefersRoundTransition(t *testing.T) {
-	store := newTestStore(t)
-	expectedNullifier := bytes.Repeat([]byte{0x66}, 32)
-	var roundStatusCalls atomic.Int32
-
-	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("uncertain pending reveal must not be rebroadcast or failed")
-	}))
-	defer chainServer.Close()
-
-	proc := NewProcessor(
-		store,
-		&mockTreeReader{err: assert.AnError},
-		&mockProver{},
-		NewChainSubmitter(chainServer.URL),
-		log.NewNopLogger(),
-		1,
-		func(roundID string) (bool, error) {
-			roundStatusCalls.Add(1)
-			return false, nil
-		},
-		WithPreProofShareDeduper(
-			func(roundID, sharesHash [32]byte, proposalID, voteDecision uint32) ([32]byte, error) {
-				return [32]byte{}, nil
-			},
-			func(voteCommitment [32]byte, shareIndex uint32, primaryBlind [32]byte) ([32]byte, error) {
-				return [32]byte{}, nil
-			},
-			func(roundIDHex string, shareNullifier []byte) (bool, error) {
-				assert.Equal(t, expectedNullifier, shareNullifier)
-				return false, assert.AnError
-			},
-		),
-	)
-
-	roundID := hex.EncodeToString(make([]byte, 32))
-	enqueueAndRequireInserted(t, store, testPayload(roundID, 0))
-	require.Len(t, store.TakeReady(), 1)
-	pending := pendingRevealBroadcast{
-		Reveal: MsgRevealShareJSON{
-			ShareNullifier: base64.StdEncoding.EncodeToString(expectedNullifier),
-		},
-		TxHash:      "CCDD",
-		SinceHeight: 1,
-	}
-	require.NoError(t, store.markAwaitingCommit(roundID, 0, 1, 0, pending))
-	store.mu.Lock()
-	store.schedule[schedKey(roundID, 0, 1, 0)] = time.Now().Add(-time.Second)
-	store.mu.Unlock()
-
-	proc.processBatch(context.Background())
-
-	assert.Equal(t, int32(0), roundStatusCalls.Load(), "lookup uncertainty must be resolved before inactive status")
-	status := store.Status()[roundID]
-	assert.Equal(t, 1, status.Pending)
-	assert.Equal(t, 0, status.Submitted)
-	assert.Equal(t, 0, status.Failed)
-	share, ok := store.loadShare(roundID, 0, 1, 0)
-	require.True(t, ok)
-	assert.Equal(t, ShareStateReceived, share.State)
-	assert.Equal(t, 0, share.Attempts)
-	require.NotNil(t, share.pendingBroadcast)
-	assert.Equal(t, pending, *share.pendingBroadcast)
-}
-
-func TestProcessor_ProcessBatch_UnknownDeliveryReusesProofAcrossRestart(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "helper.db")
-	now := uint64(time.Now().Unix())
-	findRound := func(roundID string) (RoundInfo, error) {
-		return RoundInfo{CreatedAtTime: now, VoteEndTime: now + testVoteEndOffset}, nil
-	}
-	store, err := NewShareStore(dbPath, findRound)
-	require.NoError(t, err)
-	defer func() {
-		if store != nil {
-			store.Close()
-		}
-	}()
-
-	prover := &mockProver{}
-	tree := newMockTreeReader()
-	var submitCalls atomic.Int32
-	var submittedBodiesMu sync.Mutex
-	var submittedBodies [][]byte
-	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		submitCalls.Add(1)
-		body, readErr := io.ReadAll(r.Body)
-		if readErr == nil {
-			submittedBodiesMu.Lock()
-			submittedBodies = append(submittedBodies, body)
-			submittedBodiesMu.Unlock()
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadGateway)
-		w.Write([]byte(`{"error":"broadcast outcome unknown"}`))
-	}))
-	defer chainServer.Close()
-
-	roundID := hex.EncodeToString(make([]byte, 32))
-	enqueueAndRequireInserted(t, store, testPayload(roundID, 0))
-	proc := NewProcessor(store, tree, prover, NewChainSubmitter(chainServer.URL), log.NewNopLogger(), 1, nil)
-	proc.processBatch(context.Background())
-
-	assert.Equal(t, int32(1), prover.callCount.Load())
-	assert.Equal(t, int32(1), submitCalls.Load())
-	share, ok := store.loadShare(roundID, 0, 1, 0)
-	require.True(t, ok)
-	require.NotNil(t, share.pendingBroadcast)
-	assert.Empty(t, share.pendingBroadcast.TxHash)
-	assert.Zero(t, share.pendingBroadcast.SinceHeight)
-	require.NoError(t, store.Close())
-	store = nil
-
-	store, err = NewShareStore(dbPath, findRound)
-	require.NoError(t, err)
-	tree.blockHeight.Store(2)
-	proc = NewProcessor(store, tree, prover, NewChainSubmitter(chainServer.URL), log.NewNopLogger(), 1, nil)
-	proc.processBatch(context.Background())
-
-	assert.Equal(t, int32(1), prover.callCount.Load(), "restart retry must reuse the staged proof")
-	assert.Equal(t, int32(2), submitCalls.Load())
-	submittedBodiesMu.Lock()
-	require.Len(t, submittedBodies, 2)
-	assert.Equal(t, submittedBodies[0], submittedBodies[1])
-	submittedBodiesMu.Unlock()
-}
-
-func TestProcessor_ProcessBatch_BroadcastAcceptedUnknownDeadlineUsesFailureBudget(t *testing.T) {
-	store := newTestStore(t)
-	prover := &mockProver{}
-	tree := newMockTreeReader()
-
-	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"tx_hash":"AABB","code":0,"log":""}`))
-	}))
-	defer chainServer.Close()
-
-	proc := NewProcessor(store, tree, prover, NewChainSubmitter(chainServer.URL), log.NewNopLogger(), 2, nil)
-	roundID := hex.EncodeToString(make([]byte, 32))
-	p := testPayload(roundID, 0)
-	p.TreePosition = 0
-	enqueueAndRequireInserted(t, store, p)
-	_, err := store.db.Exec("UPDATE shares SET vote_end_time = 0 WHERE round_id = ?", roundID)
-	require.NoError(t, err)
-
-	key := schedKey(roundID, 0, 1, 0)
-	for height := uint64(1); height <= 5; height++ {
-		tree.blockHeight.Store(height)
-		if height > 1 {
-			store.mu.Lock()
-			store.schedule[key] = time.Now().Add(-time.Second)
-			store.mu.Unlock()
-		}
-		proc.processBatch(context.Background())
-	}
-
-	status := store.Status()
-	assert.Equal(t, 0, status[roundID].Pending)
-	assert.Equal(t, 1, status[roundID].Failed)
-	share, ok := store.loadShare(roundID, 0, 1, 0)
-	require.True(t, ok)
 	assert.Equal(t, ShareStateFailed, share.State)
-	assert.Empty(t, share.Payload.EncShare.C1)
-	assert.Empty(t, share.Payload.EncShare.C2)
-	assert.Empty(t, share.Payload.ShareComms)
-	assert.Empty(t, share.Payload.PrimaryBlind)
+	assert.Equal(t, p.EncShare.C1, share.Payload.EncShare.C1)
+	assert.Equal(t, p.EncShare.C2, share.Payload.EncShare.C2)
+	assert.Equal(t, p.ShareComms, share.Payload.ShareComms)
+	assert.Equal(t, p.PrimaryBlind, share.Payload.PrimaryBlind)
 }
 
 func TestProcessor_ProcessShare_RejectsSuccessWithoutTxHash(t *testing.T) {
@@ -1022,11 +438,8 @@ func TestProcessor_ProcessShare_RejectsSuccessWithoutTxHash(t *testing.T) {
 	)
 	roundID := hex.EncodeToString(make([]byte, 32))
 	payload := testPayload(roundID, 0)
-	enqueueAndRequireInserted(t, store, payload)
-	ready := store.TakeReady()
-	require.Len(t, ready, 1)
 
-	err := proc.processShare(context.Background(), ready[0], false)
+	err := proc.processShare(context.Background(), QueuedShare{Payload: payload})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "without a transaction hash")
 	action, stage := classifyShareFailure(err)
@@ -1762,7 +1175,7 @@ func TestProcessor_TreePositionOutOfRange(t *testing.T) {
 
 	// Directly call processShare.
 	share := QueuedShare{Payload: p}
-	err := proc.processShare(context.Background(), share, false)
+	err := proc.processShare(context.Background(), share)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "out of range")
 }
