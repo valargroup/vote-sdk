@@ -58,7 +58,14 @@ func ComposedPrepareProposalHandler(
 	return func(ctx sdk.Context, req *abci.RequestPrepareProposal) (*abci.ResponsePrepareProposal, error) {
 		totalStart := time.Now()
 
-		txs := req.Txs
+		txs, revealStats := filterRevealTransactions(req.Txs)
+		if revealStats.duplicates > 0 || revealStats.malformed > 0 || revealStats.overLimit > 0 {
+			logger.Info("PrepareProposal: filtered reveal transactions",
+				"kept", revealStats.kept,
+				"duplicates", revealStats.duplicates,
+				"malformed", revealStats.malformed,
+				"over_limit", revealStats.overLimit)
+		}
 
 		start := time.Now()
 		txs = dealInjector(ctx, req, txs)

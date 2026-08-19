@@ -10,6 +10,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 - Show production share queues only when a current vote-manager wallet is
   connected, while keeping the staging monitor visible to everyone.
+- Keep at most 128 unique reveal shares in each block, and reject proposals
+  that bypass round-scoped deduplication or the reveal cap.
 - Honor Comet's final proposal byte budget after injected transactions, and
   reduce the consensus maximum block size to 5 MiB for fresh chains and the
   `v1.4.0` upgrade.
