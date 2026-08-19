@@ -15,9 +15,26 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-const maintenanceInterval = 30 * time.Second
+const (
+	maintenanceInterval = 30 * time.Second
+	// Twenty blocks lets 2,560 reveals drain at the 128-per-block cap before an
+	// accepted transaction is rebroadcast. The delay advances only with commits.
+	pendingBroadcastRetryBlocks = uint64(20)
+)
 
 var errAwaitingCommit = errors.New("broadcast accepted; awaiting committed transaction")
+
+type acceptedBroadcastError struct {
+	pending pendingRevealBroadcast
+}
+
+func (e *acceptedBroadcastError) Error() string {
+	return fmt.Sprintf("%s: %s", errAwaitingCommit, e.pending.TxHash)
+}
+
+func (e *acceptedBroadcastError) Unwrap() error {
+	return errAwaitingCommit
+}
 
 // ErrCheckTxNotReady means BaseApp has not received its first post-restart
 // block time yet. Processing should wait without generating a proof.
@@ -39,6 +56,7 @@ const (
 	failureStageMerklePath       = "merkle_path"
 	failureStageDecodePayload    = "decode_payload"
 	failureStageProofGenerate    = "proof_generate"
+	failureStagePendingPersist   = "pending_reveal_persist"
 	failureStageSubmitHTTP       = "submit_http"
 	failureStageSubmitChain      = "submit_chain_reject"
 )
@@ -341,6 +359,40 @@ func (p *Processor) processBatch(ctx context.Context) {
 			default:
 			}
 
+			pendingCommitChecked := false
+			if share.pendingBroadcast != nil && p.preProofDedupe != nil {
+				committed, err := p.pendingBroadcastCommitted(shareCtx, share)
+				if err != nil {
+					spanErr = err
+					_, stage := classifyShareFailure(err)
+					p.logger.Warn("pending share nullifier check failed",
+						"round_id", share.Payload.VoteRoundID,
+						"share_index", share.Payload.EncShare.ShareIndex,
+						"tx_hash", share.pendingBroadcast.TxHash,
+						"error", err,
+					)
+					CaptureErr(err, map[string]string{
+						"round_id":    share.Payload.VoteRoundID,
+						"share_index": strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
+						"stage":       stage,
+					})
+					p.markShareFailure(share, err)
+					return nil
+				}
+				if committed {
+					shareSpan.SetData("outcome", "committed")
+					p.store.MarkSubmitted(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+					p.clearSubmitHeight(share)
+					p.logger.Info("accepted share observed in committed state",
+						"round_id", share.Payload.VoteRoundID,
+						"share_index", share.Payload.EncShare.ShareIndex,
+						"tx_hash", share.pendingBroadcast.TxHash,
+					)
+					return nil
+				}
+				pendingCommitChecked = true
+			}
+
 			if p.isRoundActive != nil {
 				_, statusSpan := StartTrace(shareCtx, "helper.round_status_check", "helper.round_status_check", nil, nil)
 				active, err := p.isRoundActive(share.Payload.VoteRoundID)
@@ -382,7 +434,7 @@ func (p *Processor) processBatch(ctx context.Context) {
 				}
 			}
 
-			if err := p.processShare(shareCtx, share); err != nil {
+			if err := p.processShare(shareCtx, share, pendingCommitChecked); err != nil {
 				spanErr = err
 				var waitingErr *waitingForNewBlockError
 				if errors.As(err, &waitingErr) {
@@ -393,12 +445,36 @@ func (p *Processor) processBatch(ctx context.Context) {
 					p.store.MarkStalledRetry(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition, retryCount)
 					return nil
 				}
-				if errors.Is(err, errAwaitingCommit) {
+				var acceptedErr *acceptedBroadcastError
+				if errors.As(err, &acceptedErr) {
 					shareSpan.SetData("outcome", "awaiting_commit")
 					spanErr = nil
-					// Bound accepted-but-unconfirmed broadcasts so an unavailable
-					// committed-state check cannot trigger proof generation forever.
-					p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+					if share.VoteEndTime == 0 {
+						// Legacy rows have no purge deadline, so retain their bounded
+						// failure budget instead of retrying accepted broadcasts forever.
+						p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+					} else if persistErr := p.store.markAwaitingCommit(
+						share.Payload.VoteRoundID,
+						share.Payload.EncShare.ShareIndex,
+						share.Payload.ProposalID,
+						share.Payload.TreePosition,
+						acceptedErr.pending,
+					); persistErr != nil {
+						spanErr = persistErr
+						shareSpan.SetData("outcome", "awaiting_commit_persist_failed")
+						p.logger.Error("failed to persist accepted reveal",
+							"round_id", share.Payload.VoteRoundID,
+							"share_index", share.Payload.EncShare.ShareIndex,
+							"tx_hash", acceptedErr.pending.TxHash,
+							"error", persistErr,
+						)
+						CaptureErr(persistErr, map[string]string{
+							"round_id":    share.Payload.VoteRoundID,
+							"share_index": strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
+							"stage":       "persist_accepted_reveal",
+						})
+						p.store.MarkRetry(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+					}
 					return nil
 				}
 				if isCanceledShareError(err) {
@@ -455,7 +531,7 @@ func (p *Processor) markShareFailure(share QueuedShare, err error) {
 }
 
 // processShare handles a single share: Merkle path → proof → submit.
-func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
+func (p *Processor) processShare(ctx context.Context, share QueuedShare, pendingCommitChecked bool) error {
 	// Scope the tree reader to this share's voting round.
 	roundBytes, err := hex.DecodeString(share.Payload.VoteRoundID)
 	if err != nil {
@@ -466,6 +542,9 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 		return failedShareAttemptError(failureStageDecodeRoundID, fmt.Errorf("vote_round_id must be 32 bytes, got %d", len(roundBytes)))
 	}
 	copy(roundID[:], roundBytes)
+	if share.pendingBroadcast != nil {
+		return p.processPendingBroadcast(ctx, share, roundBytes, pendingCommitChecked)
+	}
 
 	if p.preProofDedupe != nil {
 		alreadyRevealed, err := p.preProofDedupe.shareAlreadyRevealed(ctx, share, roundID)
@@ -609,6 +688,15 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 		VoteRoundID:              base64.StdEncoding.EncodeToString(roundBytes),
 		VoteCommTreeAnchorHeight: anchorHeight,
 	}
+	if err := p.store.stagePendingReveal(
+		share.Payload.VoteRoundID,
+		share.Payload.EncShare.ShareIndex,
+		share.Payload.ProposalID,
+		share.Payload.TreePosition,
+		*msg,
+	); err != nil {
+		return retryableShareError(failureStagePendingPersist, err)
+	}
 
 	// Proof generation may cross a block boundary, so claim the height again
 	// immediately before the outbound request.
@@ -620,7 +708,102 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 		)
 	}
 
-	// Submit to chain.
+	return p.submitReveal(ctx, share, msg, blockHeight)
+}
+
+// processPendingBroadcast checks commitment without reproving. A delivery with
+// unknown outcome is retried at the next eligible height; a code-0 broadcast is
+// rebroadcast only after the committed-height timeout.
+func (p *Processor) processPendingBroadcast(ctx context.Context, share QueuedShare, roundBytes []byte, commitmentChecked bool) error {
+	pending := share.pendingBroadcast
+	if pending == nil {
+		return failedShareAttemptError(failureStageSubmitChain, fmt.Errorf("missing pending reveal"))
+	}
+
+	if !commitmentChecked && p.preProofDedupe != nil {
+		committed, err := p.pendingBroadcastCommitted(ctx, share)
+		if err != nil {
+			return err
+		}
+		if committed {
+			return nil
+		}
+	}
+
+	tree := p.tree.ForRound(roundBytes)
+	blockHeight := tree.LatestBlockHeight()
+	accepted := pending.SinceHeight > 0
+	if blockHeight == 0 || (accepted && (blockHeight < pending.SinceHeight || blockHeight-pending.SinceHeight < pendingBroadcastRetryBlocks)) {
+		return retryableShareError(
+			failureStageSubmitChain,
+			&waitingForNewBlockError{height: blockHeight},
+		)
+	}
+	if !p.claimSubmitHeight(share, blockHeight) {
+		return retryableShareError(
+			failureStageSubmitChain,
+			&waitingForNewBlockError{height: blockHeight},
+		)
+	}
+
+	if accepted {
+		p.logger.Info("rebroadcasting accepted reveal after commit timeout",
+			"round_id", share.Payload.VoteRoundID,
+			"share_index", share.Payload.EncShare.ShareIndex,
+			"tx_hash", pending.TxHash,
+			"pending_since_height", pending.SinceHeight,
+			"block_height", blockHeight,
+		)
+	} else {
+		p.logger.Info("retrying persisted reveal after unknown delivery outcome",
+			"round_id", share.Payload.VoteRoundID,
+			"share_index", share.Payload.EncShare.ShareIndex,
+			"block_height", blockHeight,
+		)
+	}
+	return p.submitReveal(ctx, share, &pending.Reveal, blockHeight)
+}
+
+// pendingBroadcastCommitted checks the persisted message's exact nullifier.
+// A lookup error is retryable so round transitions cannot turn uncertainty into
+// a false failed result.
+func (p *Processor) pendingBroadcastCommitted(ctx context.Context, share QueuedShare) (bool, error) {
+	pending := share.pendingBroadcast
+	if pending == nil || p.preProofDedupe == nil {
+		return false, nil
+	}
+
+	_, span := StartTrace(ctx, "helper.dedupe", "helper.pending_share_nullifier_check", map[string]string{
+		"round_id":    share.Payload.VoteRoundID,
+		"share_index": strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
+	}, nil)
+	var spanErr error
+	defer func() { span.Finish(spanErr) }()
+
+	nullifier, err := base64.StdEncoding.DecodeString(pending.Reveal.ShareNullifier)
+	if err != nil {
+		spanErr = err
+		return false, failedShareAttemptError(failureStageDecodePayload, fmt.Errorf("decode pending share_nullifier: %w", err))
+	}
+	if len(nullifier) != 32 {
+		err := fmt.Errorf("pending share_nullifier must be 32 bytes, got %d", len(nullifier))
+		spanErr = err
+		return false, failedShareAttemptError(failureStageDecodePayload, err)
+	}
+	committed, err := p.preProofDedupe.shareNF(share.Payload.VoteRoundID, nullifier)
+	if err != nil {
+		spanErr = err
+		return false, retryableShareError(failureStageSubmitChain, fmt.Errorf("check pending share nullifier: %w", err))
+	}
+	return committed, nil
+}
+
+func (p *Processor) submitReveal(
+	ctx context.Context,
+	share QueuedShare,
+	msg *MsgRevealShareJSON,
+	blockHeight uint64,
+) error {
 	result, err := p.submitter.SubmitRevealShareContext(ctx, msg)
 	if err != nil {
 		return wrapSubmitError(err)
@@ -648,7 +831,11 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 		"tx_hash", result.TxHash)
 	return retryableShareError(
 		failureStageSubmitChain,
-		fmt.Errorf("%w %s", errAwaitingCommit, result.TxHash),
+		&acceptedBroadcastError{pending: pendingRevealBroadcast{
+			Reveal:      *msg,
+			TxHash:      result.TxHash,
+			SinceHeight: blockHeight,
+		}},
 	)
 }
 
