@@ -34,33 +34,11 @@ type BroadcastResult struct {
 type submitHTTPStatusError struct {
 	statusCode int
 	body       string
-	retryAfter string
 }
 
 // Error returns the local REST status failure in the historical submitter format.
 func (e *submitHTTPStatusError) Error() string {
 	return fmt.Sprintf("chain returned %d: %s", e.statusCode, e.body)
-}
-
-// definitelyNotBroadcast reports the local crypto readiness response that is
-// emitted before the handler calls CometBFT. Other HTTP and transport failures
-// remain ambiguous.
-func (e *submitHTTPStatusError) definitelyNotBroadcast() bool {
-	if e.statusCode != http.StatusServiceUnavailable || e.retryAfter != "2" {
-		return false
-	}
-	var readiness struct {
-		Status string `json:"status"`
-	}
-	if err := json.Unmarshal([]byte(e.body), &readiness); err != nil {
-		return false
-	}
-	switch readiness.Status {
-	case "not_started", "warming", "failed":
-		return true
-	default:
-		return false
-	}
 }
 
 // ChainSubmitter submits MsgRevealShare transactions to the chain's REST API.
@@ -157,11 +135,7 @@ func (c *ChainSubmitter) SubmitRevealShareContext(ctx context.Context, msg *MsgR
 	// body still contains a structured BroadcastResult. Parse both so the caller
 	// can inspect result.Code.
 	if resp.StatusCode != 200 && resp.StatusCode != 422 {
-		err := &submitHTTPStatusError{
-			statusCode: resp.StatusCode,
-			body:       string(respBody),
-			retryAfter: resp.Header.Get("Retry-After"),
-		}
+		err := &submitHTTPStatusError{statusCode: resp.StatusCode, body: string(respBody)}
 		span.Finish(err)
 		return nil, err
 	}

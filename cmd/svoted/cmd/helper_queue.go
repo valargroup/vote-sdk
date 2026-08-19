@@ -15,8 +15,6 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/valargroup/vote-sdk/app"
-	"github.com/valargroup/vote-sdk/ffi/sharetracking"
-	"github.com/valargroup/vote-sdk/ffi/votecommitment"
 	"github.com/valargroup/vote-sdk/internal/helper"
 )
 
@@ -135,11 +133,7 @@ func helperImportQueueCmd(dbPath *string) *cobra.Command {
 			}
 			defer store.Close()
 
-			result, err := store.ImportQueue(export, helper.QueueImportOptions{
-				ForceReady:         forceReady,
-				VCHash:             votecommitment.VoteCommitmentHash,
-				ShareNullifierHash: sharetracking.ShareNullifierHash,
-			})
+			result, err := store.ImportQueue(export, helper.QueueImportOptions{ForceReady: forceReady})
 			if err != nil {
 				return err
 			}

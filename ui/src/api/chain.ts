@@ -1,6 +1,7 @@
 // Chain API client for the Shielded-Vote chain REST endpoints.
 
 const CHAIN_URL_KEY = "shielded-vote-chain-url";
+const chainUrlListeners = new Set<() => void>();
 
 // Clear stale localhost defaults saved by earlier builds. The UI is now served
 // in-process by svoted, so same-origin (empty base) is the correct default.
@@ -21,6 +22,20 @@ export function setChainUrl(url: string) {
   } else {
     localStorage.removeItem(CHAIN_URL_KEY);
   }
+  for (const listener of chainUrlListeners) listener();
+}
+
+/** Subscribe to chain endpoint changes made in this page or another tab. */
+export function subscribeToChainUrlChanges(listener: () => void): () => void {
+  const handleStorage = (event: StorageEvent) => {
+    if (event.key === CHAIN_URL_KEY || event.key === null) listener();
+  };
+  chainUrlListeners.add(listener);
+  window.addEventListener("storage", handleStorage);
+  return () => {
+    chainUrlListeners.delete(listener);
+    window.removeEventListener("storage", handleStorage);
+  };
 }
 
 // The UI is served in-process by the same svoted that hosts the API, so
@@ -49,14 +64,17 @@ export function getApiBase(): string {
  * Fetch the chain id ("network" in tendermint node_info) from the resolved
  * chain REST endpoint. Used to detect prod vs stage at runtime.
  */
-export async function fetchChainId(): Promise<string> {
-  const url = getChainUrl();
+export async function fetchChainId(url = getChainUrl()): Promise<string> {
   const resp = await fetch(`${url}/cosmos/base/tendermint/v1beta1/node_info`);
   if (!resp.ok) {
     throw new HTTPError(resp.status, `node_info HTTP ${resp.status}`);
   }
   const data = await resp.json();
-  return data.default_node_info?.network ?? "";
+  const chainId = data.default_node_info?.network;
+  if (typeof chainId !== "string" || !chainId.trim()) {
+    throw new Error("node_info response is missing the chain ID");
+  }
+  return chainId;
 }
 
 export const TOKEN_HOLDER_VOTING_CONFIG_REPO_URL =

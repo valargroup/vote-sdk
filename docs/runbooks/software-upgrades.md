@@ -411,9 +411,8 @@ sudo scripts/update_chain.sh --mode prepare --plan-name v1.4.0 --tag v1.4.0 --al
 Do not schedule the halt while a vote or ceremony is in progress. Every stored
 round must be finalized or ceremony-failed, and every validator helper queue
 must be empty, including rows with a known voting deadline. A coordinated halt
-drops Comet's in-memory mempool; an accepted reveal that has not committed yet
-otherwise waits for its bounded rebroadcast timeout after restart. Check the
-round state once and the helper database on every validator. Use the configured
+drops Comet's in-memory mempool, so check the round state once and the helper
+database on every validator. Use the configured
 `[helper].db_path` when it is non-default:
 
 ```bash

@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/base64"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -70,37 +68,6 @@ func testPayload(roundID string, shareIndex uint32) SharePayload {
 // testFieldB64 returns a valid 32-byte base64 field with a recognizable byte pattern.
 func testFieldB64(fill byte) string {
 	return base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{fill}, 32))
-}
-
-func testPendingRevealForPayload(t *testing.T, payload SharePayload) MsgRevealShareJSON {
-	t.Helper()
-	roundID, err := hex.DecodeString(payload.VoteRoundID)
-	require.NoError(t, err)
-	c1, err := base64.StdEncoding.DecodeString(payload.EncShare.C1)
-	require.NoError(t, err)
-	c2, err := base64.StdEncoding.DecodeString(payload.EncShare.C2)
-	require.NoError(t, err)
-
-	return MsgRevealShareJSON{
-		ShareNullifier:           payload.PrimaryBlind,
-		EncShare:                 base64.StdEncoding.EncodeToString(append(c1, c2...)),
-		ProposalID:               payload.ProposalID,
-		VoteDecision:             payload.VoteDecision,
-		Proof:                    testFieldB64(3),
-		VoteRoundID:              base64.StdEncoding.EncodeToString(roundID),
-		VoteCommTreeAnchorHeight: 55,
-	}
-}
-
-func testQueueImportOptions() QueueImportOptions {
-	return QueueImportOptions{
-		VCHash: func(_ [32]byte, sharesHash [32]byte, _, _ uint32) ([32]byte, error) {
-			return sharesHash, nil
-		},
-		ShareNullifierHash: func(_ [32]byte, _ uint32, primaryBlind [32]byte) ([32]byte, error) {
-			return primaryBlind, nil
-		},
-	}
 }
 
 // distinctSensitivePayload returns a payload whose sensitive fields have
@@ -251,110 +218,6 @@ func TestMarkSubmitted(t *testing.T) {
 	assert.Empty(t, c2, "enc_share_c2 should be cleared")
 	assert.Equal(t, "[]", comms, "share_comms should be reset to empty array")
 	assert.Empty(t, blind, "primary_blind should be cleared")
-}
-
-func TestPendingRevealPersistsAcrossRestartAndClearsOnSubmission(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "helper.db")
-	now := uint64(time.Now().Unix())
-	findRound := func(roundID string) (RoundInfo, error) {
-		return RoundInfo{CreatedAtTime: now, VoteEndTime: now + testVoteEndOffset}, nil
-	}
-
-	s, err := NewShareStore(dbPath, findRound)
-	require.NoError(t, err)
-	payload := testPayload("round1", 0)
-	enqueueAndRequireInserted(t, s, payload)
-	ready := s.TakeReady()
-	require.Len(t, ready, 1)
-
-	pending := pendingRevealBroadcast{
-		Reveal: MsgRevealShareJSON{
-			ShareNullifier:           testFieldB64(1),
-			EncShare:                 base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{2}, 64)),
-			ProposalID:               payload.ProposalID,
-			VoteDecision:             payload.VoteDecision,
-			Proof:                    base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{3}, 128)),
-			VoteRoundID:              base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{4}, 32)),
-			VoteCommTreeAnchorHeight: 99,
-		},
-		TxHash:           "AABBCCDD",
-		SinceHeight:      42,
-		RebroadcastCount: 2,
-	}
-	require.NoError(t, s.markAwaitingCommit("round1", 0, 1, 0, pending))
-	stored, ok := s.loadShare("round1", 0, 1, 0)
-	require.True(t, ok)
-	require.NotNil(t, stored.pendingBroadcast)
-	assert.Equal(t, pending, *stored.pendingBroadcast)
-	assert.Equal(t, 0, stored.Attempts)
-	require.NoError(t, s.Close())
-
-	s, err = NewShareStore(dbPath, findRound)
-	require.NoError(t, err)
-	defer s.Close()
-	ready = s.TakeReady()
-	require.Len(t, ready, 1)
-	require.NotNil(t, ready[0].pendingBroadcast)
-	assert.Equal(t, pending, *ready[0].pendingBroadcast)
-	assert.Equal(t, 0, ready[0].Attempts)
-	s.MarkRetry("round1", 0, 1, 0)
-	stored, ok = s.loadShare("round1", 0, 1, 0)
-	require.True(t, ok)
-	require.NotNil(t, stored.pendingBroadcast)
-	assert.Equal(t, pending, *stored.pendingBroadcast)
-
-	s.mu.Lock()
-	s.schedule[schedKey("round1", 0, 1, 0)] = time.Now().Add(-time.Second)
-	s.mu.Unlock()
-	ready = s.TakeReady()
-	require.Len(t, ready, 1)
-
-	s.MarkSubmitted("round1", 0, 1, 0)
-	stored, ok = s.loadShare("round1", 0, 1, 0)
-	require.True(t, ok)
-	assert.Equal(t, ShareStateSubmitted, stored.State)
-	assert.Nil(t, stored.pendingBroadcast)
-
-	var pendingJSON, pendingTxHash string
-	var pendingSinceHeight uint64
-	var pendingRebroadcastCount uint32
-	err = s.db.QueryRow(
-		`SELECT pending_reveal_json, pending_tx_hash, pending_since_height, pending_rebroadcast_count
-		 FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
-		"round1", 0, 1, 0,
-	).Scan(&pendingJSON, &pendingTxHash, &pendingSinceHeight, &pendingRebroadcastCount)
-	require.NoError(t, err)
-	assert.Empty(t, pendingJSON)
-	assert.Empty(t, pendingTxHash)
-	assert.Zero(t, pendingSinceHeight)
-	assert.Zero(t, pendingRebroadcastCount)
-}
-
-func TestMarkFailedClearsPendingRevealBeforeRetry(t *testing.T) {
-	s := newTestStore(t)
-	enqueueAndRequireInserted(t, s, testPayload("round1", 0))
-	require.Len(t, s.TakeReady(), 1)
-	pending := pendingRevealBroadcast{
-		Reveal: MsgRevealShareJSON{
-			ShareNullifier: testFieldB64(1),
-			Proof:          base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{2}, 128)),
-		},
-		TxHash:      "AABBCCDD",
-		SinceHeight: 42,
-	}
-	require.NoError(t, s.markAwaitingCommit("round1", 0, 1, 0, pending))
-
-	s.mu.Lock()
-	s.schedule[schedKey("round1", 0, 1, 0)] = time.Now().Add(-time.Second)
-	s.mu.Unlock()
-	require.Len(t, s.TakeReady(), 1)
-	s.MarkFailed("round1", 0, 1, 0)
-
-	stored, ok := s.loadShare("round1", 0, 1, 0)
-	require.True(t, ok)
-	assert.Equal(t, ShareStateReceived, stored.State)
-	assert.Equal(t, 1, stored.Attempts)
-	assert.Nil(t, stored.pendingBroadcast)
 }
 
 func TestMarkFailed_RetryAndPermanent(t *testing.T) {
@@ -1324,12 +1187,6 @@ func TestMigrateOldSchema(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, hasOriginalSubmitAt)
 
-	for _, column := range []string{"pending_reveal_json", "pending_tx_hash", "pending_since_height", "pending_rebroadcast_count"} {
-		hasColumn, err := tableHasColumn(s.db, "shares", column)
-		require.NoError(t, err)
-		assert.True(t, hasColumn, "%s should exist after migration", column)
-	}
-
 	hasRoundCreatedAtTime, err := tableHasColumn(s.db, "rounds", "created_at_time")
 	require.NoError(t, err)
 	assert.True(t, hasRoundCreatedAtTime)
@@ -1475,148 +1332,6 @@ func TestExportQueueIncludesTerminalRows(t *testing.T) {
 	assert.True(t, sawSubmitted)
 }
 
-func TestExportImportQueueRoundTripsPendingReveal(t *testing.T) {
-	source := newTestStore(t)
-	roundID := strings.Repeat("00", 32)
-	payload := distinctSensitivePayload(roundID, 0)
-	enqueueAndRequireInserted(t, source, payload)
-	require.Len(t, source.TakeReady(), 1)
-
-	pending := pendingRevealBroadcast{
-		Reveal:           testPendingRevealForPayload(t, payload),
-		TxHash:           "AABB",
-		SinceHeight:      1234,
-		RebroadcastCount: 2,
-	}
-	require.NoError(t, source.markAwaitingCommit(
-		roundID,
-		payload.EncShare.ShareIndex,
-		payload.ProposalID,
-		payload.TreePosition,
-		pending,
-	))
-
-	export, err := source.ExportQueue(roundID, time.Unix(1234, 0))
-	require.NoError(t, err)
-	require.Equal(t, QueueExportVersion, export.Version)
-	require.Len(t, export.Rows, 1)
-	require.NotNil(t, export.Rows[0].PendingBroadcast)
-	assert.Equal(t, pending.Reveal, export.Rows[0].PendingBroadcast.Reveal)
-	assert.Equal(t, pending.TxHash, export.Rows[0].PendingBroadcast.TxHash)
-	assert.Equal(t, pending.SinceHeight, export.Rows[0].PendingBroadcast.SinceHeight)
-	assert.Equal(t, pending.RebroadcastCount, export.Rows[0].PendingBroadcast.RebroadcastCount)
-
-	raw, err := json.Marshal(export)
-	require.NoError(t, err)
-	var decoded QueueExport
-	require.NoError(t, json.Unmarshal(raw, &decoded))
-
-	dest := newTestStore(t)
-	result, err := dest.ImportQueue(decoded, testQueueImportOptions())
-	require.NoError(t, err)
-	assert.Equal(t, 1, result.Inserted)
-
-	stored, ok := dest.loadShare(roundID, payload.EncShare.ShareIndex, payload.ProposalID, payload.TreePosition)
-	require.True(t, ok)
-	require.NotNil(t, stored.pendingBroadcast)
-	assert.Equal(t, pending, *stored.pendingBroadcast)
-
-	loadPendingColumns := func(store *ShareStore) (string, string, uint64, uint32) {
-		t.Helper()
-		var revealJSON, txHash string
-		var sinceHeight uint64
-		var rebroadcastCount uint32
-		err := store.db.QueryRow(
-			`SELECT pending_reveal_json, pending_tx_hash, pending_since_height, pending_rebroadcast_count
-			   FROM shares
-			  WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
-			roundID,
-			payload.EncShare.ShareIndex,
-			payload.ProposalID,
-			payload.TreePosition,
-		).Scan(&revealJSON, &txHash, &sinceHeight, &rebroadcastCount)
-		require.NoError(t, err)
-		return revealJSON, txHash, sinceHeight, rebroadcastCount
-	}
-	sourceReveal, sourceHash, sourceHeight, sourceCount := loadPendingColumns(source)
-	destReveal, destHash, destHeight, destCount := loadPendingColumns(dest)
-	assert.Equal(t, sourceReveal, destReveal)
-	assert.Equal(t, sourceHash, destHash)
-	assert.Equal(t, sourceHeight, destHeight)
-	assert.Equal(t, sourceCount, destCount)
-}
-
-func TestImportQueueRejectsPendingRevealMismatch(t *testing.T) {
-	roundID := strings.Repeat("00", 32)
-	payload := distinctSensitivePayload(roundID, 0)
-	tests := []struct {
-		name    string
-		mutate  func(*MsgRevealShareJSON)
-		errPart string
-	}{
-		{
-			name: "round id",
-			mutate: func(reveal *MsgRevealShareJSON) {
-				reveal.VoteRoundID = testFieldB64(9)
-			},
-			errPart: "vote_round_id",
-		},
-		{
-			name: "proposal id",
-			mutate: func(reveal *MsgRevealShareJSON) {
-				reveal.ProposalID++
-			},
-			errPart: "proposal_id",
-		},
-		{
-			name: "vote decision",
-			mutate: func(reveal *MsgRevealShareJSON) {
-				reveal.VoteDecision++
-			},
-			errPart: "vote_decision",
-		},
-		{
-			name: "encrypted share",
-			mutate: func(reveal *MsgRevealShareJSON) {
-				reveal.EncShare = base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 64))
-			},
-			errPart: "enc_share",
-		},
-		{
-			name: "share nullifier",
-			mutate: func(reveal *MsgRevealShareJSON) {
-				reveal.ShareNullifier = testFieldB64(9)
-			},
-			errPart: "share_nullifier",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			reveal := testPendingRevealForPayload(t, payload)
-			tt.mutate(&reveal)
-			row := queueExportRowFromPayload(payload, ShareStateReceived, uint64(time.Now().Add(time.Hour).Unix()))
-			row.PendingBroadcast = &QueueExportPendingBroadcast{Reveal: reveal}
-			export := QueueExport{
-				Version: QueueExportVersion,
-				RoundID: roundID,
-				Round: QueueExportRound{
-					VoteEndTime: row.VoteEndTime,
-				},
-				Rows: []QueueExportRow{row},
-			}
-
-			dest := newTestStore(t)
-			_, err := dest.ImportQueue(export, testQueueImportOptions())
-			require.ErrorContains(t, err, tt.errPart)
-
-			var count int
-			require.NoError(t, dest.db.QueryRow("SELECT COUNT(*) FROM shares").Scan(&count))
-			assert.Zero(t, count)
-		})
-	}
-}
-
 func TestExportQueueIncludesFailedRowsWithWitnessMaterial(t *testing.T) {
 	s := newTestStore(t)
 
@@ -1686,7 +1401,7 @@ func TestImportQueuePreservesUnknownLegacyReceivedAt(t *testing.T) {
 	end := uint64(time.Now().Add(-time.Hour).Unix())
 	payload := testPayload("legacy_round", 0)
 	export := QueueExport{
-		Version: queueExportLegacyVersion,
+		Version: QueueExportVersion,
 		RoundID: payload.VoteRoundID,
 		Round: QueueExportRound{
 			CreatedAtTime: end - oneHourSecs,
@@ -1940,94 +1655,6 @@ func TestImportQueueForceReadyReschedulesDuplicate(t *testing.T) {
 	assert.Equal(t, 0, result.Inserted)
 	assert.Equal(t, 1, result.Duplicates)
 	assert.Equal(t, 0, result.Conflicts)
-}
-
-func TestImportQueueTreatsLocallyAdvancedPendingRevealAsDuplicate(t *testing.T) {
-	roundID := strings.Repeat("00", 32)
-	payload := distinctSensitivePayload(roundID, 0)
-	voteEndTime := uint64(time.Now().Add(time.Hour).Unix())
-	export := QueueExport{
-		Version: QueueExportVersion,
-		RoundID: roundID,
-		Round: QueueExportRound{
-			VoteEndTime: voteEndTime,
-		},
-		Rows: []QueueExportRow{
-			queueExportRowFromPayload(payload, ShareStateReceived, voteEndTime),
-		},
-	}
-
-	dest := newTestStore(t)
-	result, err := dest.ImportQueue(export, testQueueImportOptions())
-	require.NoError(t, err)
-	require.Equal(t, 1, result.Inserted)
-
-	require.Len(t, dest.TakeReady(), 1)
-	pending := pendingRevealBroadcast{
-		Reveal:           testPendingRevealForPayload(t, payload),
-		TxHash:           "AABB",
-		SinceHeight:      1234,
-		RebroadcastCount: 2,
-	}
-	require.NoError(t, dest.markAwaitingCommit(
-		roundID,
-		payload.EncShare.ShareIndex,
-		payload.ProposalID,
-		payload.TreePosition,
-		pending,
-	))
-
-	result, err = dest.ImportQueue(export, testQueueImportOptions())
-	require.NoError(t, err)
-	assert.Equal(t, 0, result.Inserted)
-	assert.Equal(t, 1, result.Duplicates)
-	assert.Equal(t, 0, result.Conflicts)
-
-	stored, ok := dest.loadShare(roundID, payload.EncShare.ShareIndex, payload.ProposalID, payload.TreePosition)
-	require.True(t, ok)
-	require.NotNil(t, stored.pendingBroadcast)
-	assert.Equal(t, pending, *stored.pendingBroadcast)
-}
-
-func TestPendingRevealImportMatchesExisting(t *testing.T) {
-	reveal := MsgRevealShareJSON{VoteRoundID: "same reveal"}
-	differentReveal := MsgRevealShareJSON{VoteRoundID: "different reveal"}
-	tests := []struct {
-		name     string
-		existing *pendingRevealBroadcast
-		incoming *pendingRevealBroadcast
-		matches  bool
-	}{
-		{name: "both absent", matches: true},
-		{
-			name:     "local lifecycle advanced",
-			existing: &pendingRevealBroadcast{Reveal: reveal, TxHash: "AABB", SinceHeight: 10, RebroadcastCount: 2},
-			matches:  true,
-		},
-		{
-			name:     "incoming reveal would be discarded",
-			incoming: &pendingRevealBroadcast{Reveal: reveal},
-			matches:  false,
-		},
-		{
-			name:     "same reveal with advanced metadata",
-			existing: &pendingRevealBroadcast{Reveal: reveal, TxHash: "AABB", SinceHeight: 10, RebroadcastCount: 2},
-			incoming: &pendingRevealBroadcast{Reveal: reveal, TxHash: "CCDD", SinceHeight: 5},
-			matches:  true,
-		},
-		{
-			name:     "different reveal",
-			existing: &pendingRevealBroadcast{Reveal: reveal},
-			incoming: &pendingRevealBroadcast{Reveal: differentReveal},
-			matches:  false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.matches, pendingRevealImportMatchesExisting(tt.existing, tt.incoming))
-		})
-	}
 }
 
 func queueExportRowFromPayload(payload SharePayload, state ShareState, voteEndTime uint64) QueueExportRow {

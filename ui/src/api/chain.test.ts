@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  fetchChainId,
   getActiveRoundsFromList,
   getPrimaryActiveRoundFromList,
   getPublishedSnapshotManifestUrl,
@@ -7,12 +8,82 @@ import {
   isActiveRoundStatus,
   LOCAL_PIR_URL,
   resolveDefaultPirUrl,
+  setChainUrl,
   shouldMigrateNullifierUrl,
+  subscribeToChainUrlChanges,
   type ChainRound,
   type PublishedSnapshotManifest,
   type VotingConfig,
   validatePublishedSnapshotManifestShape,
 } from "./chain";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("chain endpoint changes", () => {
+  it("notifies same-page subscribers when the endpoint changes", () => {
+    const setItem = vi.fn();
+    const removeItem = vi.fn();
+    vi.stubGlobal("localStorage", { setItem, removeItem });
+    vi.stubGlobal("window", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    const listener = vi.fn();
+    const unsubscribe = subscribeToChainUrlChanges(listener);
+
+    setChainUrl("https://prod.example");
+
+    expect(setItem).toHaveBeenCalledWith("shielded-vote-chain-url", "https://prod.example");
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    unsubscribe();
+    setChainUrl("");
+    expect(removeItem).toHaveBeenCalledWith("shielded-vote-chain-url");
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("notifies subscribers when another tab changes the endpoint", () => {
+    const addEventListener = vi.fn();
+    const removeEventListener = vi.fn();
+    vi.stubGlobal("window", { addEventListener, removeEventListener });
+    const listener = vi.fn();
+    const unsubscribe = subscribeToChainUrlChanges(listener);
+    const storageHandler = addEventListener.mock.calls[0][1] as (event: StorageEvent) => void;
+
+    storageHandler({ key: "unrelated" } as StorageEvent);
+    expect(listener).not.toHaveBeenCalled();
+
+    storageHandler({ key: "shielded-vote-chain-url" } as StorageEvent);
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    unsubscribe();
+    expect(removeEventListener).toHaveBeenCalledWith("storage", storageHandler);
+  });
+
+  it("detects the chain at the requested endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ default_node_info: { network: "zvote-1" } }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchChainId("https://prod.example")).resolves.toBe("zvote-1");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://prod.example/cosmos/base/tendermint/v1beta1/node_info",
+    );
+  });
+
+  it("rejects an empty chain ID so detection can retry", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ default_node_info: { network: "" } }),
+    }));
+
+    await expect(fetchChainId("https://prod.example")).rejects.toThrow("missing the chain ID");
+  });
+});
 
 const legacyFiles = {
   "tier0.bin": { size: 1, sha256: "a".repeat(64) },

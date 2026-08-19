@@ -91,9 +91,7 @@ systemctl start svoted
 ```
 
 Import inserts only processable rows. Terminal rows from the export are counted
-as `skipped_terminal` and are not scheduled. A preserved pending reveal must
-match its row's round, proposal, vote decision, encrypted share, and derived
-share nullifier.
+as `skipped_terminal` and are not scheduled.
 
 Duplicates are safe. Conflicts mean the rescue helper already has a different
 payload for the same `(round_id, share_index, proposal_id, tree_position)` key.
