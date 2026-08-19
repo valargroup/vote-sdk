@@ -32,8 +32,8 @@ func ProcessProposalHandler(
 	logger log.Logger,
 ) sdk.ProcessProposalHandler {
 	return func(ctx sdk.Context, req *abci.RequestProcessProposal) (*abci.ResponseProcessProposal, error) {
-		if err := validateRevealTransactions(req.Txs); err != nil {
-			logger.Error("ProcessProposal: rejecting block with invalid reveal transaction set", "err", err)
+		if err := validateVoteShareSubmissionTransactions(req.Txs); err != nil {
+			logger.Error("ProcessProposal: rejecting block with invalid vote share submission transaction set", "err", err)
 			return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
 		}
 

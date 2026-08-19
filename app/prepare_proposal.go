@@ -58,13 +58,13 @@ func ComposedPrepareProposalHandler(
 	return func(ctx sdk.Context, req *abci.RequestPrepareProposal) (*abci.ResponsePrepareProposal, error) {
 		totalStart := time.Now()
 
-		txs, revealStats := filterRevealTransactions(req.Txs)
-		if revealStats.duplicates > 0 || revealStats.malformed > 0 || revealStats.overLimit > 0 {
-			logger.Info("PrepareProposal: filtered reveal transactions",
-				"kept", revealStats.kept,
-				"duplicates", revealStats.duplicates,
-				"malformed", revealStats.malformed,
-				"over_limit", revealStats.overLimit)
+		txs, submissionStats := filterVoteShareSubmissionTransactions(req.Txs)
+		if submissionStats.duplicates > 0 || submissionStats.malformed > 0 || submissionStats.overLimit > 0 {
+			logger.Info("PrepareProposal: filtered vote share submission transactions",
+				"kept", submissionStats.kept,
+				"duplicates", submissionStats.duplicates,
+				"malformed", submissionStats.malformed,
+				"over_limit", submissionStats.overLimit)
 		}
 
 		start := time.Now()
