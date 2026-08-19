@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -69,6 +70,26 @@ func testPayload(roundID string, shareIndex uint32) SharePayload {
 // testFieldB64 returns a valid 32-byte base64 field with a recognizable byte pattern.
 func testFieldB64(fill byte) string {
 	return base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{fill}, 32))
+}
+
+func testPendingRevealForPayload(t *testing.T, payload SharePayload) MsgRevealShareJSON {
+	t.Helper()
+	roundID, err := hex.DecodeString(payload.VoteRoundID)
+	require.NoError(t, err)
+	c1, err := base64.StdEncoding.DecodeString(payload.EncShare.C1)
+	require.NoError(t, err)
+	c2, err := base64.StdEncoding.DecodeString(payload.EncShare.C2)
+	require.NoError(t, err)
+
+	return MsgRevealShareJSON{
+		ShareNullifier:           testFieldB64(1),
+		EncShare:                 base64.StdEncoding.EncodeToString(append(c1, c2...)),
+		ProposalID:               payload.ProposalID,
+		VoteDecision:             payload.VoteDecision,
+		Proof:                    testFieldB64(3),
+		VoteRoundID:              base64.StdEncoding.EncodeToString(roundID),
+		VoteCommTreeAnchorHeight: 55,
+	}
 }
 
 // distinctSensitivePayload returns a payload whose sensitive fields have
@@ -1451,15 +1472,7 @@ func TestExportImportQueueRoundTripsPendingReveal(t *testing.T) {
 	require.Len(t, source.TakeReady(), 1)
 
 	pending := pendingRevealBroadcast{
-		Reveal: MsgRevealShareJSON{
-			ShareNullifier:           testFieldB64(1),
-			EncShare:                 base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{2}, 64)),
-			ProposalID:               payload.ProposalID,
-			VoteDecision:             payload.VoteDecision,
-			Proof:                    testFieldB64(3),
-			VoteRoundID:              testFieldB64(4),
-			VoteCommTreeAnchorHeight: 55,
-		},
+		Reveal:           testPendingRevealForPayload(t, payload),
 		TxHash:           "AABB",
 		SinceHeight:      1234,
 		RebroadcastCount: 2,
@@ -1520,6 +1533,70 @@ func TestExportImportQueueRoundTripsPendingReveal(t *testing.T) {
 	assert.Equal(t, sourceHash, destHash)
 	assert.Equal(t, sourceHeight, destHeight)
 	assert.Equal(t, sourceCount, destCount)
+}
+
+func TestImportQueueRejectsPendingRevealMismatch(t *testing.T) {
+	roundID := strings.Repeat("00", 32)
+	payload := distinctSensitivePayload(roundID, 0)
+	tests := []struct {
+		name    string
+		mutate  func(*MsgRevealShareJSON)
+		errPart string
+	}{
+		{
+			name: "round id",
+			mutate: func(reveal *MsgRevealShareJSON) {
+				reveal.VoteRoundID = testFieldB64(9)
+			},
+			errPart: "vote_round_id",
+		},
+		{
+			name: "proposal id",
+			mutate: func(reveal *MsgRevealShareJSON) {
+				reveal.ProposalID++
+			},
+			errPart: "proposal_id",
+		},
+		{
+			name: "vote decision",
+			mutate: func(reveal *MsgRevealShareJSON) {
+				reveal.VoteDecision++
+			},
+			errPart: "vote_decision",
+		},
+		{
+			name: "encrypted share",
+			mutate: func(reveal *MsgRevealShareJSON) {
+				reveal.EncShare = base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 64))
+			},
+			errPart: "enc_share",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reveal := testPendingRevealForPayload(t, payload)
+			tt.mutate(&reveal)
+			row := queueExportRowFromPayload(payload, ShareStateReceived, uint64(time.Now().Add(time.Hour).Unix()))
+			row.PendingBroadcast = &QueueExportPendingBroadcast{Reveal: reveal}
+			export := QueueExport{
+				Version: QueueExportVersion,
+				RoundID: roundID,
+				Round: QueueExportRound{
+					VoteEndTime: row.VoteEndTime,
+				},
+				Rows: []QueueExportRow{row},
+			}
+
+			dest := newTestStore(t)
+			_, err := dest.ImportQueue(export, QueueImportOptions{})
+			require.ErrorContains(t, err, tt.errPart)
+
+			var count int
+			require.NoError(t, dest.db.QueryRow("SELECT COUNT(*) FROM shares").Scan(&count))
+			assert.Zero(t, count)
+		})
+	}
 }
 
 func TestExportQueueIncludesFailedRowsWithWitnessMaterial(t *testing.T) {
