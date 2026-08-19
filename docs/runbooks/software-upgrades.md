@@ -393,6 +393,14 @@ The `v1.4.0` binary enforces round-scoped reveal deduplication and a maximum of
 through H-1, switch binaries at upgrade height H, and use both limits for the
 first new proposal at H+1. Fresh chains use both limits from genesis.
 
+The same binary uses the new `helper.max_concurrent_proofs_v2` setting and
+defaults it to one. It intentionally ignores the legacy
+`helper.max_concurrent_proofs` value, which was commonly eight, so existing
+validators switch to the load-tested safe value when Cosmovisor starts v1.4.0.
+Operators do not need to edit ten local `app.toml` files. Fresh validator
+configs emit the v2 key with value one; a future separately benchmarked value
+can still be set explicitly through that key.
+
 Pre-stage the binary on every validator under the exact `v1.4.0` Cosmovisor
 directory. Do not manually start the staged binary before the scheduled halt.
 Use matching plan and release names when staging:
@@ -431,13 +439,17 @@ Start the next voting round only after all validators pass the post-upgrade
 checks below.
 
 After the chain resumes, confirm both the applied plan and the active byte
-limit. The genesis file can still display Comet's original default; the live
-RPC response is authoritative.
+limit, then confirm the helper startup log reports one effective proof worker.
+The genesis file can still display Comet's original default; the live RPC
+response is authoritative.
 
 ```bash
 svoted query upgrade applied v1.4.0 --home ~/.svoted
 curl -fsS http://127.0.0.1:26657/consensus_params | \
   jq -e '.result.consensus_params.block.max_bytes == "5242880"'
+journalctl -u svoted -b --no-pager | \
+  grep 'helper proof concurrency configured' | tail -n 1 | \
+  grep -q 'effective=1'
 ```
 
 ## Troubleshooting

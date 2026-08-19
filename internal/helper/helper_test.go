@@ -7,6 +7,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestDefaultConfigUsesSingleProofWorker(t *testing.T) {
+	require.Equal(t, 1, DefaultConfig().MaxConcurrentProofs)
+}
+
 func TestNewRequiresValidationDependencies(t *testing.T) {
 	cfg := DefaultConfig()
 	h, err := New(cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, t.TempDir(), log.NewNopLogger())

@@ -15,7 +15,10 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
   byte budget after injected transactions, and reduce the consensus maximum
   block size to 5 MiB for fresh chains and the `v1.4.0` upgrade. Serialize
   first-round helper queue metadata writes so concurrent submissions are not
-  rejected by SQLite writer contention.
+  rejected by SQLite writer contention. Use a new helper proof-concurrency key
+  that defaults validator-hosted helpers to one worker and ignores the earlier
+  value, so the coordinated upgrade does not require manual edits on every
+  validator.
 - Route default production and staging voting-config reads through the
   GitHub-primary `voting.valargroup.dev` gateway with its Cloudflare fallback.
 - Make new Linux Cosmovisor validator services skip local pre-upgrade chain data

@@ -155,7 +155,12 @@ the REST API port. It is configured in `app.toml` under `[helper]` (written by
 | `expose_queue_summary` | `true` | Enables public coarse round-level queue summaries at `/shielded-vote/v1/queue-summary/{round_id}`. |
 | `db_path` | `""` | Path to SQLite database. Empty = `$HOME/helper.db`. |
 | `chain_api_port` | `1418` | Port of the REST API (for `MsgRevealShare` submission). In production this is `1317`. |
-| `max_concurrent_proofs` | `8` | Maximum parallel proof generation goroutines (~500 MB RAM each). |
+| `max_concurrent_proofs_v2` | `1` | Maximum parallel proof generation goroutines (~500 MB RAM each). |
+
+The v1.4 binary ignores the legacy `max_concurrent_proofs` key. Existing
+validators that have only that key therefore use the safe v2 default of one
+without an `app.toml` edit. Set the v2 key explicitly only when applying a
+separately benchmarked value.
 
 The queue summary endpoint reports only per-round bucketed counts across all
 proposals. It omits proposal IDs, vote decisions, share indices, nullifiers,

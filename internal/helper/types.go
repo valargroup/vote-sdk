@@ -35,8 +35,10 @@ type Config struct {
 	// can miss the chain and surface to voters as zero-value tallies.
 	ChainAPIPort int `mapstructure:"chain_api_port"`
 
-	// MaxConcurrentProofs limits concurrent proof generation goroutines.
-	MaxConcurrentProofs int `mapstructure:"max_concurrent_proofs"`
+	// MaxConcurrentProofs limits concurrent proof generation goroutines. The
+	// command config layer populates it only from the v2 key and intentionally
+	// ignores the legacy key during the v1.4 cutover.
+	MaxConcurrentProofs int `mapstructure:"max_concurrent_proofs_v2"`
 
 	// SentryDSN is the Sentry DSN for error tracking. When empty, Sentry is
 	// disabled. Can also be set via the SENTRY_DSN environment variable at
@@ -53,7 +55,7 @@ func DefaultConfig() Config {
 		ExposeQueueSummary:  true,
 		DBPath:              "",
 		ChainAPIPort:        1317,
-		MaxConcurrentProofs: 2,
+		MaxConcurrentProofs: 1,
 	}
 }
 

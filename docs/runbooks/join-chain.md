@@ -179,7 +179,11 @@ The primary validator serves the admin UI [here](https://svote.valargroup.org/vo
 | `expose_queue_summary` | `true` | Enables public coarse round-level queue summaries at `/shielded-vote/v1/queue-summary/{round_id}`. |
 | `db_path` | `""` (= `~/.svoted/helper.db`) | SQLite path for queued shares. |
 | `chain_api_port` | `1317` | REST port the helper submits `MsgRevealShare` to. |
-| `max_concurrent_proofs` | `8` | Parallel proof goroutines (~500 MB each). |
+| `max_concurrent_proofs_v2` | `1` | Parallel proof goroutines (~500 MB each). |
+
+The v1.4 binary ignores the legacy `max_concurrent_proofs` key. An existing
+validator with only the legacy key automatically uses one worker after the
+coordinated binary switch, without a manual `app.toml` edit.
 
 Queue summaries omit proposal IDs, vote decisions, share indices, nullifiers,
 tree positions, and exact submit times. Failed rows are reported immediately,
