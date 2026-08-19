@@ -830,6 +830,7 @@ func (p *Processor) processPendingBroadcast(ctx context.Context, share QueuedSha
 					errors.Join(submitErr, fmt.Errorf("restore pending rebroadcast window: %w", err)),
 				)
 			}
+			p.clearSubmitHeight(share)
 			p.logger.Info("restored pending reveal retry window after local readiness rejection",
 				"round_id", share.Payload.VoteRoundID,
 				"share_index", share.Payload.EncShare.ShareIndex,

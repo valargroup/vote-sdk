@@ -742,6 +742,15 @@ func TestProcessor_ProcessBatch_PendingRebroadcastOnlyAdvancesForAmbiguousFailur
 			require.NotNil(t, stored.pendingBroadcast)
 			assert.Equal(t, expected, *stored.pendingBroadcast)
 
+			if tt.expectWindowReset {
+				store.mu.Lock()
+				store.schedule[key] = time.Now().Add(-time.Second)
+				store.mu.Unlock()
+
+				proc.processBatch(context.Background())
+				assert.Equal(t, int32(2), submitCalls.Load(), "readiness retry should be allowed at the same committed height")
+			}
+
 			require.NoError(t, store.Close())
 			store = nil
 			store, err = NewShareStore(dbPath, findRound)
