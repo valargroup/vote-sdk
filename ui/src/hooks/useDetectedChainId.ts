@@ -40,7 +40,7 @@ export function useDetectedChainId(): string | null {
     const detect = () => {
       fetchChainId(endpoint)
         .then((id) => {
-          if (!cancelled) setDetection({ endpoint, chainId: id || null });
+          if (!cancelled) setDetection({ endpoint, chainId: id });
         })
         .catch(() => {
           if (cancelled) return;

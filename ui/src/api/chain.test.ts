@@ -74,6 +74,15 @@ describe("chain endpoint changes", () => {
       "https://prod.example/cosmos/base/tendermint/v1beta1/node_info",
     );
   });
+
+  it("rejects an empty chain ID so detection can retry", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ default_node_info: { network: "" } }),
+    }));
+
+    await expect(fetchChainId("https://prod.example")).rejects.toThrow("missing the chain ID");
+  });
 });
 
 const legacyFiles = {

@@ -70,7 +70,11 @@ export async function fetchChainId(url = getChainUrl()): Promise<string> {
     throw new HTTPError(resp.status, `node_info HTTP ${resp.status}`);
   }
   const data = await resp.json();
-  return data.default_node_info?.network ?? "";
+  const chainId = data.default_node_info?.network;
+  if (typeof chainId !== "string" || !chainId.trim()) {
+    throw new Error("node_info response is missing the chain ID");
+  }
+  return chainId;
 }
 
 export const TOKEN_HOLDER_VOTING_CONFIG_REPO_URL =
