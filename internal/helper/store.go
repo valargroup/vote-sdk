@@ -1200,11 +1200,18 @@ func validateImportedPendingReveal(roundID string, row QueueExportRow, opts Queu
 	return nil
 }
 
-func pendingRevealBroadcastEqual(left, right *pendingRevealBroadcast) bool {
-	if left == nil || right == nil {
-		return left == nil && right == nil
+// pendingRevealImportMatchesExisting reports whether an imported pending
+// broadcast is compatible with the existing row. The local lifecycle may have
+// advanced since an older rescue artifact was created, but an imported reveal
+// must not be silently discarded or replaced with a different reveal.
+func pendingRevealImportMatchesExisting(existing, incoming *pendingRevealBroadcast) bool {
+	if incoming == nil {
+		return true
 	}
-	return *left == *right
+	if existing == nil {
+		return false
+	}
+	return existing.Reveal == incoming.Reveal
 }
 
 // ExportQueue returns every persisted row for a round. Terminal rows are
@@ -1570,7 +1577,7 @@ func importRowMatchesExisting(tx *sql.Tx, roundID string, row QueueExportRow) (b
 		return false, 0, fmt.Errorf("decode existing pending reveal for share_index %d: %w", row.ShareIndex, err)
 	}
 	incomingPending := pendingRevealBroadcastFromExport(row.PendingBroadcast)
-	return payloadEqual(existing, incoming) && pendingRevealBroadcastEqual(existingPending, incomingPending), ShareState(state), nil
+	return payloadEqual(existing, incoming) && pendingRevealImportMatchesExisting(existingPending, incomingPending), ShareState(state), nil
 }
 
 const (

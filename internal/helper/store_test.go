@@ -1942,6 +1942,94 @@ func TestImportQueueForceReadyReschedulesDuplicate(t *testing.T) {
 	assert.Equal(t, 0, result.Conflicts)
 }
 
+func TestImportQueueTreatsLocallyAdvancedPendingRevealAsDuplicate(t *testing.T) {
+	roundID := strings.Repeat("00", 32)
+	payload := distinctSensitivePayload(roundID, 0)
+	voteEndTime := uint64(time.Now().Add(time.Hour).Unix())
+	export := QueueExport{
+		Version: QueueExportVersion,
+		RoundID: roundID,
+		Round: QueueExportRound{
+			VoteEndTime: voteEndTime,
+		},
+		Rows: []QueueExportRow{
+			queueExportRowFromPayload(payload, ShareStateReceived, voteEndTime),
+		},
+	}
+
+	dest := newTestStore(t)
+	result, err := dest.ImportQueue(export, testQueueImportOptions())
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Inserted)
+
+	require.Len(t, dest.TakeReady(), 1)
+	pending := pendingRevealBroadcast{
+		Reveal:           testPendingRevealForPayload(t, payload),
+		TxHash:           "AABB",
+		SinceHeight:      1234,
+		RebroadcastCount: 2,
+	}
+	require.NoError(t, dest.markAwaitingCommit(
+		roundID,
+		payload.EncShare.ShareIndex,
+		payload.ProposalID,
+		payload.TreePosition,
+		pending,
+	))
+
+	result, err = dest.ImportQueue(export, testQueueImportOptions())
+	require.NoError(t, err)
+	assert.Equal(t, 0, result.Inserted)
+	assert.Equal(t, 1, result.Duplicates)
+	assert.Equal(t, 0, result.Conflicts)
+
+	stored, ok := dest.loadShare(roundID, payload.EncShare.ShareIndex, payload.ProposalID, payload.TreePosition)
+	require.True(t, ok)
+	require.NotNil(t, stored.pendingBroadcast)
+	assert.Equal(t, pending, *stored.pendingBroadcast)
+}
+
+func TestPendingRevealImportMatchesExisting(t *testing.T) {
+	reveal := MsgRevealShareJSON{VoteRoundID: "same reveal"}
+	differentReveal := MsgRevealShareJSON{VoteRoundID: "different reveal"}
+	tests := []struct {
+		name     string
+		existing *pendingRevealBroadcast
+		incoming *pendingRevealBroadcast
+		matches  bool
+	}{
+		{name: "both absent", matches: true},
+		{
+			name:     "local lifecycle advanced",
+			existing: &pendingRevealBroadcast{Reveal: reveal, TxHash: "AABB", SinceHeight: 10, RebroadcastCount: 2},
+			matches:  true,
+		},
+		{
+			name:     "incoming reveal would be discarded",
+			incoming: &pendingRevealBroadcast{Reveal: reveal},
+			matches:  false,
+		},
+		{
+			name:     "same reveal with advanced metadata",
+			existing: &pendingRevealBroadcast{Reveal: reveal, TxHash: "AABB", SinceHeight: 10, RebroadcastCount: 2},
+			incoming: &pendingRevealBroadcast{Reveal: reveal, TxHash: "CCDD", SinceHeight: 5},
+			matches:  true,
+		},
+		{
+			name:     "different reveal",
+			existing: &pendingRevealBroadcast{Reveal: reveal},
+			incoming: &pendingRevealBroadcast{Reveal: differentReveal},
+			matches:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.matches, pendingRevealImportMatchesExisting(tt.existing, tt.incoming))
+		})
+	}
+}
+
 func queueExportRowFromPayload(payload SharePayload, state ShareState, voteEndTime uint64) QueueExportRow {
 	return QueueExportRow{
 		ShareIndex:       payload.EncShare.ShareIndex,
