@@ -62,8 +62,6 @@ type TestApp struct {
 	appOpts servertypes.AppOptions
 	Height  int64
 	Time    time.Time
-	// InitChainResponse is retained for assertions about genesis consensus updates.
-	InitChainResponse *abci.ResponseInitChain
 	// ChainID is the chain identifier used for InitChain and tx signing.
 	ChainID string
 
@@ -278,7 +276,7 @@ func setupTestApp(t *testing.T, appOpts servertypes.AppOptions, chainID string) 
 	now := time.Unix(1_000_000, 0).UTC()
 
 	// Initialize the chain.
-	initChainResponse, err := svoteApp.InitChain(&abci.RequestInitChain{
+	_, err = svoteApp.InitChain(&abci.RequestInitChain{
 		ChainId:         chainID,
 		AppStateBytes:   stateBytes,
 		ConsensusParams: simtestutil.DefaultConsensusParams,
@@ -305,16 +303,15 @@ func setupTestApp(t *testing.T, appOpts servertypes.AppOptions, chainID string) 
 	require.NoError(t, err)
 
 	return &TestApp{
-		SvoteApp:          svoteApp,
-		t:                 t,
-		db:                db,
-		appOpts:           appOpts,
-		Height:            1,
-		Time:              now,
-		InitChainResponse: initChainResponse,
-		ChainID:           chainID,
-		ProposerAddress:   proposerAddr,
-		ValPrivKey:        privKey,
+		SvoteApp:        svoteApp,
+		t:               t,
+		db:              db,
+		appOpts:         appOpts,
+		Height:          1,
+		Time:            now,
+		ChainID:         chainID,
+		ProposerAddress: proposerAddr,
+		ValPrivKey:      privKey,
 	}
 }
 

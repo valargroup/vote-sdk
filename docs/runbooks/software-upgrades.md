@@ -405,7 +405,7 @@ directory. Do not manually start the staged binary before the scheduled halt.
 Use matching plan and release names when staging:
 
 ```bash
-sudo scripts/update_chain.sh --mode prepare --plan-name v1.4.0 --tag v1.4.0
+sudo scripts/update_chain.sh --mode prepare --plan-name v1.4.0 --tag v1.4.0 --allow-no-plan
 ```
 
 Do not schedule the halt while a vote or ceremony is in progress. Every stored
@@ -432,8 +432,8 @@ checks below.
 
 After the chain resumes, confirm both the applied plan and the active byte
 limit, then confirm the helper startup log reports one effective proof worker.
-The genesis file can still display Comet's original default; the live RPC
-response is authoritative.
+An existing chain's genesis file can still display Comet's original default;
+the live RPC response is authoritative.
 
 ```bash
 svoted query upgrade applied v1.4.0 --home ~/.svoted
