@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"time"
 
@@ -30,7 +31,9 @@ import (
 	"github.com/cosmos/cosmos-sdk/types/module"
 	"github.com/cosmos/cosmos-sdk/version"
 	authcmd "github.com/cosmos/cosmos-sdk/x/auth/client/cli"
+	"github.com/cosmos/cosmos-sdk/x/genutil"
 	genutilcli "github.com/cosmos/cosmos-sdk/x/genutil/client/cli"
+	genutiltypes "github.com/cosmos/cosmos-sdk/x/genutil/types"
 
 	votecli "github.com/valargroup/vote-sdk/x/vote/client/cli"
 )
@@ -158,7 +161,7 @@ func initRootCmd(
 	}
 
 	rootCmd.AddCommand(
-		genutilcli.InitCmd(basicManager, app.DefaultNodeHome),
+		initCommand(basicManager),
 		debug.Cmd(),
 		pruning.Cmd(newApp, app.DefaultNodeHome),
 		snapshot.Cmd(newApp),
@@ -200,6 +203,38 @@ func initRootCmd(
 		txCommand(),
 		keys.Commands(),
 	)
+}
+
+// initCommand puts the block limit in newly generated genesis files. InitChain
+// must preserve supplied parameters so existing chains can replay from genesis.
+func initCommand(basicManager module.BasicManager) *cobra.Command {
+	cmd := genutilcli.InitCmd(basicManager, app.DefaultNodeHome)
+	runE := cmd.RunE
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if err := runE(cmd, args); err != nil {
+			return err
+		}
+
+		serverCtx := server.GetServerContextFromCmd(cmd)
+		return setGenesisBlockLimit(serverCtx.Config.GenesisFile())
+	}
+	return cmd
+}
+
+func setGenesisBlockLimit(genesisPath string) error {
+	genesis, err := genutiltypes.AppGenesisFromFile(genesisPath)
+	if err != nil {
+		return fmt.Errorf("read generated genesis: %w", err)
+	}
+	if genesis.Consensus == nil || genesis.Consensus.Params == nil {
+		return fmt.Errorf("generated genesis is missing consensus parameters")
+	}
+
+	genesis.Consensus.Params.Block.MaxBytes = app.MaxBlockBytes
+	if err := genutil.ExportGenesisFile(genesis, genesisPath); err != nil {
+		return fmt.Errorf("write generated genesis: %w", err)
+	}
+	return nil
 }
 
 // genesisCommand builds genesis-related `svoted genesis` command.

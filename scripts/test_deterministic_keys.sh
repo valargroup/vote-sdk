@@ -56,6 +56,11 @@ export SVOTED_HOME="$PRIMARY_HOME"
 export VAL_PRIVKEY="$PRIMARY_VAL_KEY"
 bash "$REPO_ROOT/scripts/init.sh"
 
+if [ "$(jq -r '.consensus.params.block.max_bytes' "$PRIMARY_HOME/config/genesis.json")" != "5242880" ]; then
+    echo "FAIL: fresh genesis does not use the 5 MiB consensus block limit"
+    exit 1
+fi
+
 # Verify the address is deterministic: importing the same key twice should
 # yield the same address.
 PRIMARY_ADDR=$(svoted keys show validator -a --keyring-backend test --home "$PRIMARY_HOME")

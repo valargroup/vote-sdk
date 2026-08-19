@@ -7,6 +7,7 @@ import (
 	"time"
 
 	abci "github.com/cometbft/cometbft/abci/types"
+	cmttypes "github.com/cometbft/cometbft/types"
 
 	"cosmossdk.io/core/store"
 	"cosmossdk.io/log"
@@ -76,10 +77,37 @@ func ComposedPrepareProposalHandler(
 		modifiedReq.Txs = txs
 		resp, err := tallyHandler(ctx, &modifiedReq)
 		logger.Info("PrepareProposal: tally injector done", "duration_ms", time.Since(start).Milliseconds())
+		if err != nil || resp == nil {
+			return resp, err
+		}
+
+		var dropped int
+		resp.Txs, dropped = trimProposalToMaxTxBytes(resp.Txs, req.MaxTxBytes)
+		if dropped > 0 {
+			logger.Info("PrepareProposal: trimmed transactions to byte budget", "dropped", dropped, "max_tx_bytes", req.MaxTxBytes)
+		}
 
 		logger.Info("PrepareProposal: total duration", "duration_ms", time.Since(totalStart).Milliseconds())
 		return resp, err
 	}
+}
+
+// trimProposalToMaxTxBytes keeps the prioritized transaction prefix that fits
+// Comet's protobuf-encoded transaction byte budget.
+func trimProposalToMaxTxBytes(txs [][]byte, maxTxBytes int64) ([][]byte, int) {
+	if maxTxBytes < 0 {
+		return txs, 0
+	}
+
+	var totalBytes int64
+	for i, txBytes := range txs {
+		txSize := cmttypes.ComputeProtoSizeForTxs([]cmttypes.Tx{txBytes})
+		if totalBytes+txSize > maxTxBytes {
+			return txs[:i], len(txs) - i
+		}
+		totalBytes += txSize
+	}
+	return txs, 0
 }
 
 // TallyPrepareProposalHandler returns a PrepareProposalHandler that injects
