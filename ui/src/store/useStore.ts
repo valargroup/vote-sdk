@@ -7,6 +7,7 @@ import {
   createSampleRounds,
   type SampleRoundTemplateId,
 } from "./sampleRounds";
+import type { ImportedRound } from "../utils/roundJson";
 
 const STORAGE_KEY = "shielded-vote-rounds";
 const SEEDED_KEY = "shielded-vote-seeded";
@@ -115,6 +116,37 @@ export function useStore() {
 
   const createRound = useCallback((name?: string) => {
     const round = createDefaultRound(name ?? "Untitled Round");
+    setRounds((prev) => [round, ...prev]);
+    setActiveRoundId(round.id);
+    setActiveProposalId(round.proposals[0]?.id ?? null);
+    return round;
+  }, []);
+
+  const importRound = useCallback((draft: ImportedRound) => {
+    const now = new Date().toISOString();
+    const round: VotingRound = {
+      id: uuidv4(),
+      name: draft.name,
+      status: "draft",
+      settings: {
+        ...draft.settings,
+        defaultLabels: [
+          draft.settings.defaultLabels[0],
+          draft.settings.defaultLabels[1],
+        ],
+      },
+      proposals: draft.proposals.map((proposal) => ({
+        ...proposal,
+        id: uuidv4(),
+        options: proposal.options.map((option) => ({
+          ...option,
+          id: uuidv4(),
+        })),
+        metadata: proposal.metadata.map((item) => ({ ...item })),
+      })),
+      createdAt: now,
+      updatedAt: now,
+    };
     setRounds((prev) => [round, ...prev]);
     setActiveRoundId(round.id);
     setActiveProposalId(round.proposals[0]?.id ?? null);
@@ -292,6 +324,7 @@ export function useStore() {
     setActiveRoundId,
     setActiveProposalId,
     createRound,
+    importRound,
     createSampleRound,
     updateRound,
     deleteRound,

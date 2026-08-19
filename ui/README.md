@@ -7,7 +7,7 @@ A browser-based tool for creating, editing, and publishing shielded voting round
 - **Round builder** — create voting rounds with binary or multi-choice proposals
 - **Snapshot settings** — configure snapshot height and voter eligibility
 - **On-chain publishing** — sign and broadcast `MsgCreateVotingSession` / `MsgUpdateVoteManagers` transactions via Keplr
-- **JSON export** — preview and copy the generated round payload
+- **JSON import and export** — share a round payload, then import it as a new editable draft
 - **Local persistence** — rounds auto-save to localStorage as drafts
 
 ## Tech Stack

@@ -64,6 +64,7 @@ interface SidebarProps {
   onFilterChange: (filter: RoundStatus | "all") => void;
   onSelectRound: (id: string) => void;
   onCreateRound: () => void;
+  onImportRound: () => void;
   onNavigate: (section: string) => void;
   onDeleteRound: (id: string) => void;
   currentSection: string;
@@ -79,6 +80,7 @@ export function Sidebar({
   onFilterChange,
   onSelectRound: rawSelectRound,
   onCreateRound: rawCreateRound,
+  onImportRound: rawImportRound,
   onNavigate: rawNavigate,
   onDeleteRound,
   currentSection,
@@ -97,6 +99,10 @@ export function Sidebar({
   };
   const onCreateRound = () => {
     rawCreateRound();
+    onClose();
+  };
+  const onImportRound = () => {
+    rawImportRound();
     onClose();
   };
 
@@ -142,6 +148,13 @@ export function Sidebar({
         >
           <Plus size={14} />
           New voting round
+        </button>
+        <button
+          onClick={onImportRound}
+          className="flex items-center gap-2 px-3 py-2 bg-surface-2 hover:bg-surface-3 text-text-secondary hover:text-text-primary border border-border-subtle rounded-lg text-xs transition-colors cursor-pointer"
+        >
+          <Upload size={14} />
+          Import round JSON
         </button>
       </div>
 

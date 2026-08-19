@@ -8,6 +8,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Let Shielded Vote Creator import its JSON exports as new editable drafts,
+  with schema validation and fresh local IDs.
 - Show production share queues only when a current vote-manager wallet is
   connected, while keeping the staging monitor visible to everyone.
 - Keep at most 256 unique vote share submissions in each block, and reject
