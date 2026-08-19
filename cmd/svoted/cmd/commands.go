@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path/filepath"
 	"time"
 
 	cmtcfg "github.com/cometbft/cometbft/config"
@@ -21,7 +20,6 @@ import (
 
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/debug"
-	"github.com/cosmos/cosmos-sdk/client/flags"
 	"github.com/cosmos/cosmos-sdk/client/keys"
 	"github.com/cosmos/cosmos-sdk/client/pruning"
 	"github.com/cosmos/cosmos-sdk/client/rpc"
@@ -217,11 +215,8 @@ func initCommand(basicManager module.BasicManager) *cobra.Command {
 			return err
 		}
 
-		home, err := cmd.Flags().GetString(flags.FlagHome)
-		if err != nil {
-			return fmt.Errorf("read home directory: %w", err)
-		}
-		return setGenesisBlockLimit(filepath.Join(home, "config", "genesis.json"))
+		serverCtx := server.GetServerContextFromCmd(cmd)
+		return setGenesisBlockLimit(serverCtx.Config.GenesisFile())
 	}
 	return cmd
 }
