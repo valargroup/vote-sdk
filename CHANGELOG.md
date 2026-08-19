@@ -12,7 +12,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
   commitment checks, delayed rebroadcasts, and restarts reuse the exact proof,
   with committed-height exponential backoff, deterministic retry jitter, and
   deadline-aware rescue rebroadcasts. Queue rescue exports preserve the same
-  pending broadcast state while retaining legacy v1 import support.
+  pending broadcast state while retaining legacy v1 import support, and local
+  readiness rejections do not consume a rescue backoff window.
   Serialize first-round helper queue metadata writes so concurrent submissions
   are not rejected by SQLite writer contention. Use a new helper proof
   concurrency key that defaults validator-hosted helpers to one worker and

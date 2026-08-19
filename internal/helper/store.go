@@ -726,7 +726,8 @@ func (s *ShareStore) markAwaitingCommit(
 
 // markPendingRebroadcast advances the committed-height backoff before sending
 // the exact reveal again. Persisting first prevents a crash or ambiguous HTTP
-// result from immediately repeating the rescue broadcast after restart.
+// result from immediately repeating the rescue broadcast after restart. A
+// response that proves the local handler did not broadcast may restore it.
 func (s *ShareStore) markPendingRebroadcast(
 	roundID string,
 	shareIndex, proposalID uint32,
@@ -756,6 +757,44 @@ func (s *ShareStore) markPendingRebroadcast(
 	}
 	if affected != 1 {
 		return fmt.Errorf("persist pending rebroadcast: updated %d rows", affected)
+	}
+	return nil
+}
+
+// restorePendingRebroadcast restores the prior backoff window after a response
+// proves the local handler did not attempt a chain broadcast. The attempted
+// values make the update compare-and-swap so an unexpected state is not lost.
+func (s *ShareStore) restorePendingRebroadcast(
+	roundID string,
+	shareIndex, proposalID uint32,
+	treePosition uint64,
+	previous, attempted pendingRevealBroadcast,
+) error {
+	if previous.SinceHeight == 0 || attempted.SinceHeight == 0 || attempted.RebroadcastCount == 0 {
+		return fmt.Errorf("pending rebroadcast restore requires accepted windows")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	res, err := s.db.Exec(
+		`UPDATE shares SET pending_since_height = ?, pending_rebroadcast_count = ?
+		 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?
+		   AND state = 1 AND pending_reveal_json != ''
+		   AND pending_since_height = ? AND pending_rebroadcast_count = ?`,
+		previous.SinceHeight, previous.RebroadcastCount,
+		roundID, shareIndex, proposalID, treePosition,
+		attempted.SinceHeight, attempted.RebroadcastCount,
+	)
+	if err != nil {
+		return fmt.Errorf("restore pending rebroadcast: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("inspect pending rebroadcast restore: %w", err)
+	}
+	if affected != 1 {
+		return fmt.Errorf("restore pending rebroadcast: updated %d rows", affected)
 	}
 	return nil
 }

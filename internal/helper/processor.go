@@ -766,6 +766,7 @@ func (p *Processor) processPendingBroadcast(ctx context.Context, share QueuedSha
 	tree := p.tree.ForRound(roundBytes)
 	blockHeight := tree.LatestBlockHeight()
 	accepted := pending.SinceHeight > 0
+	previousPending := *pending
 	retryDelay := pendingBroadcastRetryDelay(*pending)
 	deadlineUrgent := pendingBroadcastDeadlineUrgent(share.VoteEndTime, time.Now())
 	if blockHeight == 0 || (accepted && !deadlineUrgent && (blockHeight < pending.SinceHeight || blockHeight-pending.SinceHeight < retryDelay)) {
@@ -812,7 +813,32 @@ func (p *Processor) processPendingBroadcast(ctx context.Context, share QueuedSha
 			"block_height", blockHeight,
 		)
 	}
-	return p.submitReveal(ctx, share, &pending.Reveal, blockHeight, pending.RebroadcastCount)
+	submitErr := p.submitReveal(ctx, share, &pending.Reveal, blockHeight, pending.RebroadcastCount)
+	if accepted && submitErr != nil {
+		var statusErr *submitHTTPStatusError
+		if errors.As(submitErr, &statusErr) && statusErr.definitelyNotBroadcast() {
+			if err := p.store.restorePendingRebroadcast(
+				share.Payload.VoteRoundID,
+				share.Payload.EncShare.ShareIndex,
+				share.Payload.ProposalID,
+				share.Payload.TreePosition,
+				previousPending,
+				*pending,
+			); err != nil {
+				return retryableShareError(
+					failureStagePendingPersist,
+					errors.Join(submitErr, fmt.Errorf("restore pending rebroadcast window: %w", err)),
+				)
+			}
+			p.logger.Info("restored pending reveal retry window after local readiness rejection",
+				"round_id", share.Payload.VoteRoundID,
+				"share_index", share.Payload.EncShare.ShareIndex,
+				"pending_since_height", previousPending.SinceHeight,
+				"rebroadcast_count", previousPending.RebroadcastCount,
+			)
+		}
+	}
+	return submitErr
 }
 
 // pendingBroadcastCommitted checks the persisted message's exact nullifier.

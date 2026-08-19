@@ -628,6 +628,132 @@ func TestProcessor_ProcessBatch_BroadcastAcceptedRetriesUntilCommit(t *testing.T
 	assert.Empty(t, share.Payload.PrimaryBlind)
 }
 
+func TestProcessor_ProcessBatch_PendingRebroadcastOnlyAdvancesForAmbiguousFailure(t *testing.T) {
+	tests := []struct {
+		name              string
+		newSubmitter      func(*testing.T, *atomic.Int32) *ChainSubmitter
+		expectWindowReset bool
+	}{
+		{
+			name: "readiness response",
+			newSubmitter: func(t *testing.T, calls *atomic.Int32) *ChainSubmitter {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					calls.Add(1)
+					w.Header().Set("Content-Type", "application/json")
+					w.Header().Set("Retry-After", "2")
+					w.WriteHeader(http.StatusServiceUnavailable)
+					w.Write([]byte(`{"status":"warming"}`))
+				}))
+				t.Cleanup(server.Close)
+				return NewChainSubmitter(server.URL)
+			},
+			expectWindowReset: true,
+		},
+		{
+			name: "ambiguous bad gateway",
+			newSubmitter: func(t *testing.T, calls *atomic.Int32) *ChainSubmitter {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					calls.Add(1)
+					http.Error(w, "broadcast failed", http.StatusBadGateway)
+				}))
+				t.Cleanup(server.Close)
+				return NewChainSubmitter(server.URL)
+			},
+		},
+		{
+			name: "ambiguous transport timeout",
+			newSubmitter: func(t *testing.T, calls *atomic.Int32) *ChainSubmitter {
+				submitter := NewChainSubmitter("http://example.test")
+				submitter.httpClient = &http.Client{
+					Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+						calls.Add(1)
+						return nil, context.DeadlineExceeded
+					}),
+				}
+				return submitter
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dbPath := filepath.Join(t.TempDir(), "helper.db")
+			now := uint64(time.Now().Unix())
+			findRound := func(roundID string) (RoundInfo, error) {
+				return RoundInfo{CreatedAtTime: now, VoteEndTime: now + testVoteEndOffset}, nil
+			}
+			store, err := NewShareStore(dbPath, findRound)
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				if store != nil {
+					store.Close()
+				}
+			})
+
+			roundID := hex.EncodeToString(make([]byte, 32))
+			payload := testPayload(roundID, 0)
+			enqueueAndRequireInserted(t, store, payload)
+			require.Len(t, store.TakeReady(), 1)
+			pending := pendingRevealBroadcast{
+				Reveal: MsgRevealShareJSON{
+					ShareNullifier: testFieldB64(1),
+					VoteRoundID:    testFieldB64(2),
+				},
+				TxHash:           "previous",
+				SinceHeight:      100,
+				RebroadcastCount: 1,
+			}
+			require.NoError(t, store.markAwaitingCommit(
+				roundID,
+				payload.EncShare.ShareIndex,
+				payload.ProposalID,
+				payload.TreePosition,
+				pending,
+			))
+
+			blockHeight := pending.SinceHeight + pendingBroadcastRetryDelay(pending)
+			tree := newMockTreeReader()
+			tree.blockHeight.Store(blockHeight)
+			key := schedKey(roundID, payload.EncShare.ShareIndex, payload.ProposalID, payload.TreePosition)
+			store.mu.Lock()
+			store.schedule[key] = time.Now().Add(-time.Second)
+			store.mu.Unlock()
+
+			var submitCalls atomic.Int32
+			proc := NewProcessor(
+				store,
+				tree,
+				&mockProver{},
+				tt.newSubmitter(t, &submitCalls),
+				log.NewNopLogger(),
+				1,
+				nil,
+			)
+			proc.processBatch(context.Background())
+			assert.Equal(t, int32(1), submitCalls.Load())
+
+			expected := pending
+			if !tt.expectWindowReset {
+				expected.SinceHeight = blockHeight
+				expected.RebroadcastCount++
+			}
+			stored, ok := store.loadShare(roundID, payload.EncShare.ShareIndex, payload.ProposalID, payload.TreePosition)
+			require.True(t, ok)
+			require.NotNil(t, stored.pendingBroadcast)
+			assert.Equal(t, expected, *stored.pendingBroadcast)
+
+			require.NoError(t, store.Close())
+			store = nil
+			store, err = NewShareStore(dbPath, findRound)
+			require.NoError(t, err)
+			stored, ok = store.loadShare(roundID, payload.EncShare.ShareIndex, payload.ProposalID, payload.TreePosition)
+			require.True(t, ok)
+			require.NotNil(t, stored.pendingBroadcast)
+			assert.Equal(t, expected, *stored.pendingBroadcast)
+		})
+	}
+}
+
 func TestProcessor_ProcessBatch_CommittedPendingRevealWinsRoundTransition(t *testing.T) {
 	store := newTestStore(t)
 	prover := &mockProver{}
