@@ -388,7 +388,7 @@ Post-release artifact smoke checks: `scripts/verify_upgrade_release_artifacts.sh
 ## v1.4.0 bounded reveal activation
 
 The `v1.4.0` binary enforces round-scoped reveal deduplication and a maximum of
-128 reveal proofs per block. Its coordinated upgrade handler applies a 5 MiB
+256 reveal proofs per block. Its coordinated upgrade handler applies a 5 MiB
 (`5242880` byte) consensus block limit. Existing chains run the old binary
 through H-1, switch binaries at upgrade height H, and use both limits for the
 first new proposal at H+1. Fresh chains use both limits from genesis.

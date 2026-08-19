@@ -8,9 +8,9 @@ import (
 )
 
 // MaxRevealSharesPerBlock bounds expensive reveal proof verification in a
-// single block. With normal block times, 128 reveals per block still provides
+// single block. With normal block times, 256 reveals per block still provides
 // substantially more capacity than a voting round needs over its active window.
-const MaxRevealSharesPerBlock = 128
+const MaxRevealSharesPerBlock = 256
 
 type revealProposalKey struct {
 	roundID   [types.RoundIDLen]byte
