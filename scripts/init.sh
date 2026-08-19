@@ -183,7 +183,7 @@ rm -f "${APP_TOML}.bak"
 HELPER_API_TOKEN="${SVOTE_HELPER_API_TOKEN:-}"
 HELPER_EXPOSE_QUEUE_STATUS="${SVOTE_HELPER_EXPOSE_QUEUE_STATUS:-false}"
 HELPER_EXPOSE_QUEUE_SUMMARY="${SVOTE_HELPER_EXPOSE_QUEUE_SUMMARY:-true}"
-HELPER_MAX_CONCURRENT_PROOFS="${SVOTE_HELPER_MAX_CONCURRENT_PROOFS:-8}"
+HELPER_MAX_CONCURRENT_PROOFS_V2="${SVOTE_HELPER_MAX_CONCURRENT_PROOFS_V2:-1}"
 HELPER_SENTRY_DSN="${SVOTE_HELPER_SENTRY_DSN:-}"
 
 # Append [helper] section (not in the default template).
@@ -216,8 +216,9 @@ db_path = ""
 # Port of the chain's REST API (used for MsgRevealShare submission).
 chain_api_port = 1317
 
-# Maximum concurrent proof generation goroutines.
-max_concurrent_proofs = $HELPER_MAX_CONCURRENT_PROOFS
+# Maximum concurrent proof generation goroutines. The v1.4 binary ignores the
+# legacy max_concurrent_proofs key so existing validators safely default to 1.
+max_concurrent_proofs_v2 = $HELPER_MAX_CONCURRENT_PROOFS_V2
 
 # Sentry DSN for error tracking. Empty disables Sentry.
 # Can also be set at runtime via the SENTRY_DSN environment variable.

@@ -24,6 +24,11 @@ import (
 	votetypes "github.com/valargroup/vote-sdk/x/vote/types"
 )
 
+const (
+	helperMaxConcurrentProofsV2Key     = "helper.max_concurrent_proofs_v2"
+	legacyHelperMaxConcurrentProofsKey = "helper.max_concurrent_proofs"
+)
+
 // addHelperFlags registers helper server CLI flags on the start command.
 func addHelperFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool("no-helper", false, "Disable the helper server")
@@ -118,7 +123,9 @@ func helperPostSetup(
 	}
 }
 
-// readHelperConfig reads the [helper] section from app.toml via viper.
+// readHelperConfig reads the [helper] section from app.toml via viper. The v2
+// proof-concurrency key intentionally does not inherit the legacy value so a
+// binary upgrade safely resets existing validator-hosted helpers to one worker.
 func readHelperConfig(v *viper.Viper, logger log.Logger) helper.Config {
 	cfg := helper.DefaultConfig()
 
@@ -140,9 +147,33 @@ func readHelperConfig(v *viper.Viper, logger log.Logger) helper.Config {
 	if v.IsSet("helper.chain_api_port") {
 		cfg.ChainAPIPort = v.GetInt("helper.chain_api_port")
 	}
-	if v.IsSet("helper.max_concurrent_proofs") {
-		cfg.MaxConcurrentProofs = v.GetInt("helper.max_concurrent_proofs")
+	proofConcurrencySource := "v2 default"
+	if v.IsSet(helperMaxConcurrentProofsV2Key) {
+		cfg.MaxConcurrentProofs = v.GetInt(helperMaxConcurrentProofsV2Key)
+		proofConcurrencySource = helperMaxConcurrentProofsV2Key
 	}
+	if cfg.MaxConcurrentProofs < 1 {
+		logger.Warn(
+			"invalid helper proof concurrency, using fallback",
+			"key", helperMaxConcurrentProofsV2Key,
+			"configured", cfg.MaxConcurrentProofs,
+			"fallback", 1,
+		)
+		cfg.MaxConcurrentProofs = 1
+	}
+	if v.IsSet(legacyHelperMaxConcurrentProofsKey) {
+		logger.Warn(
+			"deprecated helper proof concurrency setting ignored",
+			"key", legacyHelperMaxConcurrentProofsKey,
+			"configured", v.GetInt(legacyHelperMaxConcurrentProofsKey),
+			"replacement", helperMaxConcurrentProofsV2Key,
+		)
+	}
+	logger.Info(
+		"helper proof concurrency configured",
+		"effective", cfg.MaxConcurrentProofs,
+		"source", proofConcurrencySource,
+	)
 	if v.IsSet("helper.sentry_dsn") {
 		cfg.SentryDSN = v.GetString("helper.sentry_dsn")
 	}

@@ -9,7 +9,10 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 ## Unreleased
 
 - Serialize first-round helper queue metadata writes so concurrent submissions
-  are not rejected by SQLite writer contention.
+  are not rejected by SQLite writer contention. Use a new helper
+  proof-concurrency key that defaults validator-hosted helpers to one worker and
+  ignores the earlier value, so the coordinated upgrade does not require manual
+  edits on every validator.
 - Route default production and staging voting-config reads through the
   GitHub-primary `voting.valargroup.dev` gateway with its Cloudflare fallback.
 - Make new Linux Cosmovisor validator services skip local pre-upgrade chain data
