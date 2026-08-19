@@ -62,6 +62,8 @@ type TestApp struct {
 	appOpts servertypes.AppOptions
 	Height  int64
 	Time    time.Time
+	// InitChainResponse is retained for assertions about genesis consensus updates.
+	InitChainResponse *abci.ResponseInitChain
 	// ChainID is the chain identifier used for InitChain and tx signing.
 	ChainID string
 
@@ -276,7 +278,7 @@ func setupTestApp(t *testing.T, appOpts servertypes.AppOptions, chainID string) 
 	now := time.Unix(1_000_000, 0).UTC()
 
 	// Initialize the chain.
-	_, err = svoteApp.InitChain(&abci.RequestInitChain{
+	initChainResponse, err := svoteApp.InitChain(&abci.RequestInitChain{
 		ChainId:         chainID,
 		AppStateBytes:   stateBytes,
 		ConsensusParams: simtestutil.DefaultConsensusParams,
@@ -303,15 +305,16 @@ func setupTestApp(t *testing.T, appOpts servertypes.AppOptions, chainID string) 
 	require.NoError(t, err)
 
 	return &TestApp{
-		SvoteApp:        svoteApp,
-		t:               t,
-		db:              db,
-		appOpts:         appOpts,
-		Height:          1,
-		Time:            now,
-		ChainID:         chainID,
-		ProposerAddress: proposerAddr,
-		ValPrivKey:      privKey,
+		SvoteApp:          svoteApp,
+		t:                 t,
+		db:                db,
+		appOpts:           appOpts,
+		Height:            1,
+		Time:              now,
+		InitChainResponse: initChainResponse,
+		ChainID:           chainID,
+		ProposerAddress:   proposerAddr,
+		ValPrivKey:        privKey,
 	}
 }
 
@@ -622,11 +625,18 @@ func (ta *TestApp) ValidatorAccAddr() string {
 // Triggers EndBlocker (commitment tree root computation).
 func (ta *TestApp) NextBlock() {
 	ta.t.Helper()
+	ta.NextBlockResponse()
+}
+
+// NextBlockResponse commits an empty block and returns its FinalizeBlock
+// response for consensus update assertions.
+func (ta *TestApp) NextBlockResponse() *abci.ResponseFinalizeBlock {
+	ta.t.Helper()
 
 	ta.Height++
 	ta.Time = ta.Time.Add(5 * time.Second)
 
-	_, err := ta.FinalizeBlock(&abci.RequestFinalizeBlock{
+	resp, err := ta.FinalizeBlock(&abci.RequestFinalizeBlock{
 		Height:          ta.Height,
 		Time:            ta.Time,
 		ProposerAddress: ta.ProposerAddress,
@@ -635,6 +645,7 @@ func (ta *TestApp) NextBlock() {
 
 	_, err = ta.Commit()
 	require.NoError(ta.t, err)
+	return resp
 }
 
 // NextBlockAtTime commits an empty block at a specific time, advancing height by 1.
@@ -744,11 +755,19 @@ func (ta *TestApp) CallPrepareProposal() *abci.ResponsePrepareProposal {
 // with the given mempool txs and calls PrepareProposal. Returns the response.
 func (ta *TestApp) CallPrepareProposalWithTxs(txs [][]byte) *abci.ResponsePrepareProposal {
 	ta.t.Helper()
+	return ta.CallPrepareProposalWithTxsAndMaxBytes(txs, 0)
+}
+
+// CallPrepareProposalWithTxsAndMaxBytes calls PrepareProposal with explicit
+// mempool transactions and Comet's protobuf-encoded byte budget.
+func (ta *TestApp) CallPrepareProposalWithTxsAndMaxBytes(txs [][]byte, maxTxBytes int64) *abci.ResponsePrepareProposal {
+	ta.t.Helper()
 
 	resp, err := ta.SvoteApp.PrepareProposal(&abci.RequestPrepareProposal{
 		Height:          ta.Height + 1,
 		Time:            ta.Time.Add(5 * time.Second),
 		Txs:             txs,
+		MaxTxBytes:      maxTxBytes,
 		ProposerAddress: ta.ProposerAddress,
 	})
 	require.NoError(ta.t, err)
