@@ -326,6 +326,40 @@ func TestProcessor_SubmitHeightCacheEvictsOlderBlocks(t *testing.T) {
 	assert.NotContains(t, proc.stalledRetryCount, shareScheduleKey(shareA))
 }
 
+func TestPendingBroadcastRetryDelayBacksOffAndCaps(t *testing.T) {
+	pending := pendingRevealBroadcast{
+		Reveal: MsgRevealShareJSON{
+			VoteRoundID:    testFieldB64(1),
+			ShareNullifier: testFieldB64(2),
+		},
+	}
+
+	for _, tc := range []struct {
+		count uint32
+		base  uint64
+	}{
+		{count: 0, base: 20},
+		{count: 1, base: 40},
+		{count: 2, base: 80},
+		{count: 3, base: 80},
+		{count: 20, base: 80},
+	} {
+		pending.RebroadcastCount = tc.count
+		delay := pendingBroadcastRetryDelay(pending)
+		assert.GreaterOrEqual(t, delay, tc.base)
+		assert.LessOrEqual(t, delay, tc.base+pendingBroadcastJitterBlocks)
+		assert.Equal(t, delay, pendingBroadcastRetryDelay(pending), "jitter must be deterministic")
+	}
+
+	pending.RebroadcastCount = 0
+	delays := make(map[uint64]struct{})
+	for fill := byte(0); fill < 32; fill++ {
+		pending.Reveal.ShareNullifier = testFieldB64(fill)
+		delays[pendingBroadcastRetryDelay(pending)] = struct{}{}
+	}
+	assert.Greater(t, len(delays), 1, "per-share jitter should spread a retry cohort")
+}
+
 func TestProcessor_ProcessBatch_BroadcastAcceptedRetriesUntilCommit(t *testing.T) {
 	store := newTestStore(t)
 	prover := &mockProver{}
@@ -335,14 +369,19 @@ func TestProcessor_ProcessBatch_BroadcastAcceptedRetriesUntilCommit(t *testing.T
 	var submittedBodiesMu sync.Mutex
 	var submittedBodies [][]byte
 
-	// Fake chain server that accepts submissions.
+	// Fake chain server that accepts submissions except for one ambiguous rescue
+	// response after it has received the exact transaction bytes.
 	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		submitCalls.Add(1)
+		call := submitCalls.Add(1)
 		body, err := io.ReadAll(r.Body)
 		if err == nil {
 			submittedBodiesMu.Lock()
 			submittedBodies = append(submittedBodies, body)
 			submittedBodiesMu.Unlock()
+		}
+		if call == 2 {
+			http.Error(w, "rebroadcast outcome unknown", http.StatusBadGateway)
+			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"tx_hash":"AABB","code":0,"log":""}`))
@@ -397,6 +436,7 @@ func TestProcessor_ProcessBatch_BroadcastAcceptedRetriesUntilCommit(t *testing.T
 	require.NotNil(t, share.pendingBroadcast)
 	assert.Equal(t, "AABB", share.pendingBroadcast.TxHash)
 	assert.Equal(t, uint64(1), share.pendingBroadcast.SinceHeight)
+	assert.Equal(t, uint32(0), share.pendingBroadcast.RebroadcastCount)
 	assert.NotEmpty(t, share.pendingBroadcast.Reveal.Proof)
 	assert.Equal(t, int32(1), prover.callCount.Load())
 	assert.Equal(t, int32(1), submitCalls.Load())
@@ -426,9 +466,11 @@ func TestProcessor_ProcessBatch_BroadcastAcceptedRetriesUntilCommit(t *testing.T
 	assert.Equal(t, int32(1), prover.callCount.Load())
 	assert.Equal(t, int32(1), submitCalls.Load())
 
-	// New blocks poll committed state but do not reprove or rebroadcast while the
-	// accepted transaction has had fewer than 20 committed heights to land.
-	for height := uint64(2); height <= pendingBroadcastRetryBlocks; height++ {
+	// New blocks poll committed state but do not reprove or rebroadcast before
+	// the first 20-block base delay plus deterministic jitter has elapsed.
+	firstRetryDelay := pendingBroadcastRetryDelay(*share.pendingBroadcast)
+	firstRebroadcastHeight := uint64(1) + firstRetryDelay
+	for height := uint64(2); height < firstRebroadcastHeight; height++ {
 		tree.blockHeight.Store(height)
 		store.mu.Lock()
 		store.schedule[key] = time.Now().Add(-time.Second)
@@ -442,9 +484,10 @@ func TestProcessor_ProcessBatch_BroadcastAcceptedRetriesUntilCommit(t *testing.T
 	assert.Equal(t, int32(1), prover.callCount.Load())
 	assert.Equal(t, int32(1), submitCalls.Load())
 
-	// Once the committed-height timeout elapses, rebroadcast the exact persisted
-	// message without generating a new randomized proof.
-	tree.blockHeight.Store(1 + pendingBroadcastRetryBlocks)
+	// Once the committed-height timeout elapses, persist the advanced backoff and
+	// rebroadcast the exact message. The ambiguous response must not undo that
+	// backoff or regenerate the proof.
+	tree.blockHeight.Store(firstRebroadcastHeight)
 	store.mu.Lock()
 	store.schedule[key] = time.Now().Add(-time.Second)
 	store.mu.Unlock()
@@ -455,16 +498,49 @@ func TestProcessor_ProcessBatch_BroadcastAcceptedRetriesUntilCommit(t *testing.T
 	share, ok = store.loadShare(roundID, 0, 1, 0)
 	require.True(t, ok)
 	require.NotNil(t, share.pendingBroadcast)
-	assert.Equal(t, uint64(1+pendingBroadcastRetryBlocks), share.pendingBroadcast.SinceHeight)
+	assert.Equal(t, firstRebroadcastHeight, share.pendingBroadcast.SinceHeight)
+	assert.Equal(t, uint32(1), share.pendingBroadcast.RebroadcastCount)
 	submittedBodiesMu.Lock()
 	require.Len(t, submittedBodies, 2)
 	assert.Equal(t, submittedBodies[0], submittedBodies[1])
 	submittedBodiesMu.Unlock()
 
+	// The second rescue waits twice the base interval and still reuses the exact
+	// proof. This count is durable state rather than part of the failure budget.
+	secondRetryDelay := pendingBroadcastRetryDelay(*share.pendingBroadcast)
+	secondRebroadcastHeight := firstRebroadcastHeight + secondRetryDelay
+	for height := firstRebroadcastHeight + 1; height < secondRebroadcastHeight; height++ {
+		tree.blockHeight.Store(height)
+		store.mu.Lock()
+		store.schedule[key] = time.Now().Add(-time.Second)
+		store.mu.Unlock()
+		proc.processBatch(context.Background())
+	}
+	assert.Equal(t, int32(1), prover.callCount.Load())
+	assert.Equal(t, int32(2), submitCalls.Load())
+
+	tree.blockHeight.Store(secondRebroadcastHeight)
+	store.mu.Lock()
+	store.schedule[key] = time.Now().Add(-time.Second)
+	store.mu.Unlock()
+	proc.processBatch(context.Background())
+
+	assert.Equal(t, int32(1), prover.callCount.Load())
+	assert.Equal(t, int32(3), submitCalls.Load())
+	share, ok = store.loadShare(roundID, 0, 1, 0)
+	require.True(t, ok)
+	require.NotNil(t, share.pendingBroadcast)
+	assert.Equal(t, secondRebroadcastHeight, share.pendingBroadcast.SinceHeight)
+	assert.Equal(t, uint32(2), share.pendingBroadcast.RebroadcastCount)
+	submittedBodiesMu.Lock()
+	require.Len(t, submittedBodies, 3)
+	assert.Equal(t, submittedBodies[0], submittedBodies[2])
+	submittedBodiesMu.Unlock()
+
 	// A later committed-nullifier observation is the durable success signal. It
 	// marks the row submitted and scrubs both witness and pending message data.
 	committed.Store(true)
-	tree.blockHeight.Store(2 + pendingBroadcastRetryBlocks)
+	tree.blockHeight.Store(secondRebroadcastHeight + 1)
 	store.mu.Lock()
 	store.schedule[key] = time.Now().Add(-time.Second)
 	store.mu.Unlock()
