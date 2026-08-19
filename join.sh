@@ -1209,7 +1209,7 @@ db_path = ""
 chain_api_port = 1317
 
 # Maximum concurrent proof generation goroutines.
-max_concurrent_proofs = 8
+max_concurrent_proofs_v2 = 1
 
 HELPERCFG
 

@@ -385,6 +385,26 @@ Before rolling coordinated upgrades to production validators, follow the gated
 checklist in [upgrade-validation-checklist.md](upgrade-validation-checklist.md).
 Post-release artifact smoke checks: `scripts/verify_upgrade_release_artifacts.sh`.
 
+## v1.4.0 helper proof concurrency
+
+The same binary uses the new `helper.max_concurrent_proofs_v2` setting and
+defaults it to one. It intentionally ignores the legacy
+`helper.max_concurrent_proofs` value, which was commonly eight, so existing
+validators switch to the load-tested safe value when Cosmovisor starts v1.4.0.
+Operators do not need to edit ten local `app.toml` files. Fresh validator
+configs emit the v2 key with value one; a future separately benchmarked value
+can still be set explicitly through that key.
+
+After the coordinated binary switch, confirm the helper startup log reports one
+effective proof worker:
+
+```bash
+journalctl -u svoted -b --no-pager | \
+  sed $'s/\033\\[[0-9;]*m//g' | \
+  grep 'helper proof concurrency configured' | tail -n 1 | \
+  grep -Eq '(^|[[:space:]])effective=1([[:space:]]|$)'
+```
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Action |
