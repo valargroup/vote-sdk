@@ -385,13 +385,13 @@ Before rolling coordinated upgrades to production validators, follow the gated
 checklist in [upgrade-validation-checklist.md](upgrade-validation-checklist.md).
 Post-release artifact smoke checks: `scripts/verify_upgrade_release_artifacts.sh`.
 
-## v1.4.0 bounded reveal activation
+## v1.4.0 bounded vote share submission activation
 
-The `v1.4.0` binary enforces round-scoped reveal deduplication and a maximum of
-256 reveal proofs per block. Its coordinated upgrade handler applies a 5 MiB
-(`5242880` byte) consensus block limit. Existing chains run the old binary
-through H-1, switch binaries at upgrade height H, and use both limits for the
-first new proposal at H+1. Fresh chains use both limits from genesis.
+The `v1.4.0` binary enforces round-scoped vote share submission deduplication and
+a maximum of 256 submissions per block. Its coordinated upgrade handler applies
+a 5 MiB (`5242880` byte) consensus block limit. Existing chains run the old
+binary through H-1, switch binaries at upgrade height H, and use both limits for
+the first new proposal at H+1. Fresh chains use both limits from genesis.
 
 The same binary uses the new `helper.max_concurrent_proofs_v2` setting and
 defaults it to one. It intentionally ignores the legacy
@@ -410,7 +410,7 @@ sudo scripts/update_chain.sh --mode prepare --plan-name v1.4.0 --tag v1.4.0 --al
 ```
 
 Before the upgrade, confirm Comet mempool rechecking remains enabled because it
-removes duplicate reveal variants after one variant commits:
+removes duplicate vote share submission variants after one variant commits:
 
 ```bash
 grep -E '^recheck[[:space:]]*=[[:space:]]*true' ~/.svoted/config/config.toml
