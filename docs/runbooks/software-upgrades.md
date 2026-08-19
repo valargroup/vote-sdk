@@ -400,8 +400,9 @@ effective proof worker:
 
 ```bash
 journalctl -u svoted -b --no-pager | \
+  sed $'s/\033\\[[0-9;]*m//g' | \
   grep 'helper proof concurrency configured' | tail -n 1 | \
-  grep -q 'effective=1'
+  grep -Eq '(^|[[:space:]])effective=1([[:space:]]|$)'
 ```
 
 ## Troubleshooting
