@@ -360,6 +360,74 @@ func TestPendingBroadcastRetryDelayBacksOffAndCaps(t *testing.T) {
 	assert.Greater(t, len(delays), 1, "per-share jitter should spread a retry cohort")
 }
 
+func TestProcessor_ProcessBatch_UrgentPendingRevealBypassesBlockDelayOncePerHeight(t *testing.T) {
+	for _, rebroadcastCount := range []uint32{0, 1, 2} {
+		t.Run(fmt.Sprintf("rebroadcast_count_%d", rebroadcastCount), func(t *testing.T) {
+			store := newTestStore(t)
+			tree := newMockTreeReader()
+			tree.blockHeight.Store(101)
+			var submitCalls atomic.Int32
+
+			chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				submitCalls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				w.Write([]byte(`{"tx_hash":"AABB","code":0,"log":""}`))
+			}))
+			defer chainServer.Close()
+
+			roundID := hex.EncodeToString(make([]byte, 32))
+			enqueueAndRequireInserted(t, store, testPayload(roundID, 0))
+			_, err := store.db.Exec(
+				"UPDATE shares SET vote_end_time = ? WHERE round_id = ?",
+				time.Now().Add(20*time.Second).Unix(),
+				roundID,
+			)
+			require.NoError(t, err)
+			require.Len(t, store.TakeReady(), 1)
+
+			pending := pendingRevealBroadcast{
+				Reveal: MsgRevealShareJSON{
+					ShareNullifier: testFieldB64(1),
+					VoteRoundID:    testFieldB64(2),
+				},
+				TxHash:           "previous",
+				SinceHeight:      100,
+				RebroadcastCount: rebroadcastCount,
+			}
+			require.NoError(t, store.markAwaitingCommit(roundID, 0, 1, 0, pending))
+
+			key := schedKey(roundID, 0, 1, 0)
+			store.mu.Lock()
+			store.schedule[key] = time.Now().Add(-time.Second)
+			store.mu.Unlock()
+
+			proc := NewProcessor(
+				store,
+				tree,
+				&mockProver{},
+				NewChainSubmitter(chainServer.URL),
+				log.NewNopLogger(),
+				1,
+				nil,
+			)
+			proc.processBatch(context.Background())
+
+			share, ok := store.loadShare(roundID, 0, 1, 0)
+			require.True(t, ok)
+			require.NotNil(t, share.pendingBroadcast)
+			assert.Equal(t, uint64(101), share.pendingBroadcast.SinceHeight)
+			assert.Equal(t, rebroadcastCount+1, share.pendingBroadcast.RebroadcastCount)
+			assert.Equal(t, int32(1), submitCalls.Load())
+
+			store.mu.Lock()
+			store.schedule[key] = time.Now().Add(-time.Second)
+			store.mu.Unlock()
+			proc.processBatch(context.Background())
+			assert.Equal(t, int32(1), submitCalls.Load(), "urgent retries must still wait for a new committed height")
+		})
+	}
+}
+
 func TestProcessor_ProcessBatch_BroadcastAcceptedRetriesUntilCommit(t *testing.T) {
 	store := newTestStore(t)
 	prover := &mockProver{}

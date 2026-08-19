@@ -93,11 +93,12 @@ duplicate payloads return `"duplicate"`, and conflicting payloads for the same
   the persisted message. Later rescue windows double to 40 and then 80 blocks,
   remain capped at 80, and add zero to five blocks of deterministic per-share
   jitter. The helper persists the advanced window before each rebroadcast, so an
-  ambiguous response or restart cannot collapse the backoff. The existing urgent
-  retry behavior resumes in the final 30 s of the voting window. Stalled-height
-  retry counts are process-local and reset after a restart. Attempt counts
-  survive recovery, and failed-row witness material is retained until
-  expired-round purge.
+  ambiguous response or restart cannot collapse the backoff. During the final
+  30 s of the voting window, deadline urgency bypasses the remaining block
+  delay while the one-send-per-share-per-height limit remains in force.
+  Stalled-height retry counts are process-local and reset after a restart.
+  Attempt counts survive recovery, and failed-row witness material is retained
+  until expired-round purge.
 - Almost-submitted race: if the chain accepted a share but the server crashed
   before `MarkSubmitted`, recovery first checks its committed nullifier and can
   later rebroadcast the same transaction without regenerating its proof. The
