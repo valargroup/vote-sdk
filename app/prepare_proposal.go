@@ -95,7 +95,7 @@ func ComposedPrepareProposalHandler(
 // trimProposalToMaxTxBytes keeps the prioritized transaction prefix that fits
 // Comet's protobuf-encoded transaction byte budget.
 func trimProposalToMaxTxBytes(txs [][]byte, maxTxBytes int64) ([][]byte, int) {
-	if maxTxBytes <= 0 {
+	if maxTxBytes < 0 {
 		return txs, 0
 	}
 
