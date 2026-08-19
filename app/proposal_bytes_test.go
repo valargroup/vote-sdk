@@ -26,4 +26,12 @@ func TestTrimProposalToMaxTxBytes(t *testing.T) {
 	trimmed, dropped = trimProposalToMaxTxBytes(txs, firstSize-1)
 	require.Empty(t, trimmed)
 	require.Equal(t, 2, dropped)
+
+	trimmed, dropped = trimProposalToMaxTxBytes(txs, 0)
+	require.Empty(t, trimmed)
+	require.Equal(t, 2, dropped)
+
+	trimmed, dropped = trimProposalToMaxTxBytes(txs, -1)
+	require.Equal(t, txs, trimmed)
+	require.Zero(t, dropped)
 }
