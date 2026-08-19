@@ -1644,12 +1644,17 @@ func (s *ShareStore) getRoundInfo(roundID string) (RoundInfo, error) {
 		return RoundInfo{}, err
 	}
 
-	// Cache in both memory and SQLite.
+	// Another request may have populated the round while this request fetched it.
+	// Recheck under the store lock so only one request writes a cold round and so
+	// the rounds upsert cannot race the serialized share writes.
 	s.mu.Lock()
-	s.roundCache[roundID] = info
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+	if cached, ok := s.roundCache[roundID]; ok && (cached.CreatedAtTime != 0 || s.fetchRoundInfo == nil) {
+		return cached, nil
+	}
 
-	_, _ = s.db.Exec(
+	s.roundCache[roundID] = info
+	if _, err := s.db.Exec(
 		`INSERT INTO rounds (round_id, vote_end_time, created_at_time)
 		 VALUES (?, ?, ?)
 		 ON CONFLICT(round_id) DO UPDATE SET
@@ -1658,7 +1663,9 @@ func (s *ShareStore) getRoundInfo(roundID string) (RoundInfo, error) {
 		roundID,
 		info.VoteEndTime,
 		info.CreatedAtTime,
-	)
+	); err != nil {
+		s.logError("getRoundInfo: cache round failed", "round_id", roundID, "error", err)
+	}
 
 	return info, nil
 }

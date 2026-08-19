@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/base64"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -136,6 +138,59 @@ func TestEnqueueAndTakeReady(t *testing.T) {
 	// Second call: nothing ready (already taken).
 	ready = s.TakeReady()
 	assert.Empty(t, ready)
+}
+
+func TestConcurrentEnqueueColdRound(t *testing.T) {
+	const enqueueCount = 100
+
+	fetchStarted := sync.WaitGroup{}
+	fetchStarted.Add(enqueueCount)
+	releaseFetch := make(chan struct{})
+	now := uint64(time.Now().Unix())
+	fetcher := func(string) (RoundInfo, error) {
+		fetchStarted.Done()
+		<-releaseFetch
+		return RoundInfo{CreatedAtTime: now, VoteEndTime: now + testVoteEndOffset}, nil
+	}
+
+	s, err := NewShareStore(filepath.Join(t.TempDir(), "helper.db"), fetcher)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, s.Close()) })
+
+	results := make(chan error, enqueueCount)
+	workers := sync.WaitGroup{}
+	workers.Add(enqueueCount)
+	for i := range enqueueCount {
+		go func() {
+			defer workers.Done()
+			result, err := s.Enqueue(testPayload("cold-round", uint32(i)))
+			if err == nil && result != EnqueueInserted {
+				err = fmt.Errorf("unexpected enqueue result: %v", result)
+			}
+			results <- err
+		}()
+	}
+
+	allFetchesStarted := make(chan struct{})
+	go func() {
+		fetchStarted.Wait()
+		close(allFetchesStarted)
+	}()
+	select {
+	case <-allFetchesStarted:
+	case <-time.After(5 * time.Second):
+		close(releaseFetch)
+		workers.Wait()
+		t.Fatal("timed out waiting for concurrent cold-round fetches")
+	}
+	close(releaseFetch)
+	workers.Wait()
+	close(results)
+	for err := range results {
+		require.NoError(t, err)
+	}
+
+	assert.Equal(t, enqueueCount, s.Status()["cold-round"].Total)
 }
 
 func TestMarkSubmitted(t *testing.T) {
