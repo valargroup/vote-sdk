@@ -244,8 +244,9 @@ func TestPendingRevealPersistsAcrossRestartAndClearsOnSubmission(t *testing.T) {
 			VoteRoundID:              base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{4}, 32)),
 			VoteCommTreeAnchorHeight: 99,
 		},
-		TxHash:      "AABBCCDD",
-		SinceHeight: 42,
+		TxHash:           "AABBCCDD",
+		SinceHeight:      42,
+		RebroadcastCount: 2,
 	}
 	require.NoError(t, s.markAwaitingCommit("round1", 0, 1, 0, pending))
 	stored, ok := s.loadShare("round1", 0, 1, 0)
@@ -283,15 +284,17 @@ func TestPendingRevealPersistsAcrossRestartAndClearsOnSubmission(t *testing.T) {
 
 	var pendingJSON, pendingTxHash string
 	var pendingSinceHeight uint64
+	var pendingRebroadcastCount uint32
 	err = s.db.QueryRow(
-		`SELECT pending_reveal_json, pending_tx_hash, pending_since_height
+		`SELECT pending_reveal_json, pending_tx_hash, pending_since_height, pending_rebroadcast_count
 		 FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
 		"round1", 0, 1, 0,
-	).Scan(&pendingJSON, &pendingTxHash, &pendingSinceHeight)
+	).Scan(&pendingJSON, &pendingTxHash, &pendingSinceHeight, &pendingRebroadcastCount)
 	require.NoError(t, err)
 	assert.Empty(t, pendingJSON)
 	assert.Empty(t, pendingTxHash)
 	assert.Zero(t, pendingSinceHeight)
+	assert.Zero(t, pendingRebroadcastCount)
 }
 
 func TestMarkFailedClearsPendingRevealBeforeRetry(t *testing.T) {
@@ -1288,7 +1291,7 @@ func TestMigrateOldSchema(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, hasOriginalSubmitAt)
 
-	for _, column := range []string{"pending_reveal_json", "pending_tx_hash", "pending_since_height"} {
+	for _, column := range []string{"pending_reveal_json", "pending_tx_hash", "pending_since_height", "pending_rebroadcast_count"} {
 		hasColumn, err := tableHasColumn(s.db, "shares", column)
 		require.NoError(t, err)
 		assert.True(t, hasColumn, "%s should exist after migration", column)

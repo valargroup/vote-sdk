@@ -9,7 +9,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 ## Unreleased
 
 - Persist generated helper reveals before broadcast so ambiguous delivery,
-  commitment checks, delayed rebroadcasts, and restarts reuse the exact proof.
+  commitment checks, delayed rebroadcasts, and restarts reuse the exact proof,
+  with committed-height exponential backoff and deterministic retry jitter.
   Serialize first-round helper queue metadata writes so concurrent submissions
   are not rejected by SQLite writer contention. Use a new helper proof
   concurrency key that defaults validator-hosted helpers to one worker and
