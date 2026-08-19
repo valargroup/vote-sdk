@@ -15,7 +15,7 @@ import { EndorsersPage } from "./components/EndorsersPage";
 import { UpgradesPage } from "./components/UpgradesPage";
 import { QueueMonitorPage } from "./components/QueueMonitorPage";
 import { VoteManagerKeysPage } from "./components/VoteManagerKeysPage";
-import { useDetectedChainId } from "./hooks/useDetectedChainId";
+import { useDetectedChainId, useSelectedChainUrl } from "./hooks/useDetectedChainId";
 import { useStore } from "./store/useStore";
 import { SAMPLE_ROUND_TEMPLATES, type SampleRoundTemplateId } from "./store/sampleRounds";
 import { Shield, Plus, FileText, Settings, Settings2, RefreshCw, CheckCircle2, AlertCircle, AlertTriangle, X, Loader2, Server, Database, Eye, EyeOff, Wallet, Unplug, BarChart3, Copy, Check, Users, ExternalLink, ShieldAlert, ShieldCheck, GripVertical, MoreHorizontal, Trash2, Lock, ChevronDown, ArrowLeft, ClipboardCheck, Menu } from "lucide-react";
@@ -42,6 +42,10 @@ import {
   shouldEagerlyLoadVoteSummary,
 } from "./utils/voteStatus";
 import { resolveShareQueueVisibility } from "./utils/shareQueueVisibility";
+import {
+  startVoteManagerRefresh,
+  type VoteManagerSnapshot,
+} from "./utils/voteManagerRefresh";
 
 // Matches the iOS voteOptionColor palette in VotingComponents.swift.
 // For 2-option proposals: green, red. For 3+: cycles through 8 colors.
@@ -135,6 +139,7 @@ function routeFromPath(): AppRoute {
 function App() {
   const store = useStore();
   const wallet = useWallet();
+  const selectedChainUrl = useSelectedChainUrl();
   const detectedChainId = useDetectedChainId();
   const { precomputedBaseURL, zcashNetwork } = useUIConfig();
   const [route, setRouteState] = useState<AppRoute>(routeFromPath);
@@ -151,28 +156,26 @@ function App() {
   const [publishResult, setPublishResult] = useState<string>("");
   const [publishError, setPublishError] = useState("");
   const [expectedRoundCount, setExpectedRoundCount] = useState<number | null>(null);
-  const [productionVoteManagers, setProductionVoteManagers] = useState<string[] | null>(null);
+  const [productionVoteManagers, setProductionVoteManagers] =
+    useState<VoteManagerSnapshot | null>(null);
 
   useEffect(() => {
     if (detectedChainId !== "zvote-1") return;
 
-    let cancelled = false;
-    chainApi.getVoteManagers()
-      .then((response) => {
-        if (!cancelled) setProductionVoteManagers(response.vote_manager_addresses);
-      })
-      .catch(() => {
-        if (!cancelled) setProductionVoteManagers([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [detectedChainId]);
+    return startVoteManagerRefresh({
+      endpoint: selectedChainUrl,
+      load: async () => (await chainApi.getVoteManagers()).vote_manager_addresses,
+      onUpdate: setProductionVoteManagers,
+    });
+  }, [detectedChainId, selectedChainUrl]);
 
   const shareQueueVisibility = resolveShareQueueVisibility({
     chainId: detectedChainId,
     walletAddress: wallet.address,
-    voteManagerAddresses: productionVoteManagers,
+    voteManagerAddresses:
+      productionVoteManagers?.endpoint === selectedChainUrl
+        ? productionVoteManagers.addresses
+        : null,
   });
 
   // Sync section ↔ URL path, keeping nav instant (no full reload).
