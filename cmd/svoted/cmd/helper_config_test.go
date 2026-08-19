@@ -69,7 +69,7 @@ func TestReadHelperConfigProofConcurrencyV2(t *testing.T) {
 			}
 
 			var logs bytes.Buffer
-			cfg := readHelperConfig(v, log.NewLogger(&logs))
+			cfg := readHelperConfig(v, log.NewLogger(&logs, log.ColorOption(false)))
 
 			assert.Equal(t, tt.want, cfg.MaxConcurrentProofs)
 			assert.Contains(t, logs.String(), "helper proof concurrency configured")

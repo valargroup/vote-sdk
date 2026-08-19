@@ -68,7 +68,10 @@ them submitted. Permanently failed rows retain `enc_share_c1`, `enc_share_c2`,
 `vote_end_time`, so local queue exports remain sensitive while a failed round is
 still present in `helper.db`. Legacy or imported rows without a known
 `vote_end_time` are scrubbed when they become permanently failed because there
-is no reliable purge deadline.
+is no reliable purge deadline. Queue export schema v2 also preserves any
+pending reveal, transaction hash, committed-height retry window, and
+rebroadcast count. The importer continues to accept v1 artifacts that predate
+those fields.
 
 ## Wallet Retry Safety
 
@@ -93,11 +96,14 @@ duplicate payloads return `"duplicate"`, and conflicting payloads for the same
   the persisted message. Later rescue windows double to 40 and then 80 blocks,
   remain capped at 80, and add zero to five blocks of deterministic per-share
   jitter. The helper persists the advanced window before each rebroadcast, so an
-  ambiguous response or restart cannot collapse the backoff. The existing urgent
-  retry behavior resumes in the final 30 s of the voting window. Stalled-height
-  retry counts are process-local and reset after a restart. Attempt counts
-  survive recovery, and failed-row witness material is retained until
-  expired-round purge.
+  ambiguous response or restart cannot collapse the backoff. A local crypto
+  readiness rejection proves no chain broadcast occurred and restores the
+  previous window. During the final 30 s of the voting window, deadline urgency
+  bypasses the remaining block delay while the one-send-per-share-per-height
+  limit remains in force.
+  Stalled-height retry counts are process-local and reset after a restart.
+  Attempt counts survive recovery, and failed-row witness material is retained
+  until expired-round purge.
 - Almost-submitted race: if the chain accepted a share but the server crashed
   before `MarkSubmitted`, recovery first checks its committed nullifier and can
   later rebroadcast the same transaction without regenerating its proof. The

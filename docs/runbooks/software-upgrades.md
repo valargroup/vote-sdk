@@ -406,7 +406,7 @@ directory. Do not manually start the staged binary before the scheduled halt.
 Use matching plan and release names when staging:
 
 ```bash
-sudo scripts/update_chain.sh --mode prepare --plan-name v1.4.0 --tag v1.4.0
+sudo scripts/update_chain.sh --mode prepare --plan-name v1.4.0 --tag v1.4.0 --allow-no-plan
 ```
 
 Before the upgrade, confirm Comet mempool rechecking remains enabled because it
@@ -440,16 +440,17 @@ checks below.
 
 After the chain resumes, confirm both the applied plan and the active byte
 limit, then confirm the helper startup log reports one effective proof worker.
-The genesis file can still display Comet's original default; the live RPC
-response is authoritative.
+An existing chain's genesis file can still display Comet's original default;
+the live RPC response is authoritative.
 
 ```bash
 svoted query upgrade applied v1.4.0 --home ~/.svoted
 curl -fsS http://127.0.0.1:26657/consensus_params | \
   jq -e '.result.consensus_params.block.max_bytes == "5242880"'
 journalctl -u svoted -b --no-pager | \
+  sed $'s/\033\\[[0-9;]*m//g' | \
   grep 'helper proof concurrency configured' | tail -n 1 | \
-  grep -q 'effective=1'
+  grep -Eq '(^|[[:space:]])effective=1([[:space:]]|$)'
 ```
 
 ## Troubleshooting

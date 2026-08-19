@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1442,6 +1443,85 @@ func TestExportQueueIncludesTerminalRows(t *testing.T) {
 	assert.True(t, sawSubmitted)
 }
 
+func TestExportImportQueueRoundTripsPendingReveal(t *testing.T) {
+	source := newTestStore(t)
+	roundID := strings.Repeat("00", 32)
+	payload := distinctSensitivePayload(roundID, 0)
+	enqueueAndRequireInserted(t, source, payload)
+	require.Len(t, source.TakeReady(), 1)
+
+	pending := pendingRevealBroadcast{
+		Reveal: MsgRevealShareJSON{
+			ShareNullifier:           testFieldB64(1),
+			EncShare:                 base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{2}, 64)),
+			ProposalID:               payload.ProposalID,
+			VoteDecision:             payload.VoteDecision,
+			Proof:                    testFieldB64(3),
+			VoteRoundID:              testFieldB64(4),
+			VoteCommTreeAnchorHeight: 55,
+		},
+		TxHash:           "AABB",
+		SinceHeight:      1234,
+		RebroadcastCount: 2,
+	}
+	require.NoError(t, source.markAwaitingCommit(
+		roundID,
+		payload.EncShare.ShareIndex,
+		payload.ProposalID,
+		payload.TreePosition,
+		pending,
+	))
+
+	export, err := source.ExportQueue(roundID, time.Unix(1234, 0))
+	require.NoError(t, err)
+	require.Equal(t, QueueExportVersion, export.Version)
+	require.Len(t, export.Rows, 1)
+	require.NotNil(t, export.Rows[0].PendingBroadcast)
+	assert.Equal(t, pending.Reveal, export.Rows[0].PendingBroadcast.Reveal)
+	assert.Equal(t, pending.TxHash, export.Rows[0].PendingBroadcast.TxHash)
+	assert.Equal(t, pending.SinceHeight, export.Rows[0].PendingBroadcast.SinceHeight)
+	assert.Equal(t, pending.RebroadcastCount, export.Rows[0].PendingBroadcast.RebroadcastCount)
+
+	raw, err := json.Marshal(export)
+	require.NoError(t, err)
+	var decoded QueueExport
+	require.NoError(t, json.Unmarshal(raw, &decoded))
+
+	dest := newTestStore(t)
+	result, err := dest.ImportQueue(decoded, QueueImportOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.Inserted)
+
+	stored, ok := dest.loadShare(roundID, payload.EncShare.ShareIndex, payload.ProposalID, payload.TreePosition)
+	require.True(t, ok)
+	require.NotNil(t, stored.pendingBroadcast)
+	assert.Equal(t, pending, *stored.pendingBroadcast)
+
+	loadPendingColumns := func(store *ShareStore) (string, string, uint64, uint32) {
+		t.Helper()
+		var revealJSON, txHash string
+		var sinceHeight uint64
+		var rebroadcastCount uint32
+		err := store.db.QueryRow(
+			`SELECT pending_reveal_json, pending_tx_hash, pending_since_height, pending_rebroadcast_count
+			   FROM shares
+			  WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
+			roundID,
+			payload.EncShare.ShareIndex,
+			payload.ProposalID,
+			payload.TreePosition,
+		).Scan(&revealJSON, &txHash, &sinceHeight, &rebroadcastCount)
+		require.NoError(t, err)
+		return revealJSON, txHash, sinceHeight, rebroadcastCount
+	}
+	sourceReveal, sourceHash, sourceHeight, sourceCount := loadPendingColumns(source)
+	destReveal, destHash, destHeight, destCount := loadPendingColumns(dest)
+	assert.Equal(t, sourceReveal, destReveal)
+	assert.Equal(t, sourceHash, destHash)
+	assert.Equal(t, sourceHeight, destHeight)
+	assert.Equal(t, sourceCount, destCount)
+}
+
 func TestExportQueueIncludesFailedRowsWithWitnessMaterial(t *testing.T) {
 	s := newTestStore(t)
 
@@ -1511,7 +1591,7 @@ func TestImportQueuePreservesUnknownLegacyReceivedAt(t *testing.T) {
 	end := uint64(time.Now().Add(-time.Hour).Unix())
 	payload := testPayload("legacy_round", 0)
 	export := QueueExport{
-		Version: QueueExportVersion,
+		Version: queueExportLegacyVersion,
 		RoundID: payload.VoteRoundID,
 		Round: QueueExportRound{
 			CreatedAtTime: end - oneHourSecs,

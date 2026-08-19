@@ -203,8 +203,10 @@ func (s ExpiredRoundSummary) Unsubmitted() int {
 	return s.Pending + s.Failed
 }
 
+const queueExportLegacyVersion = 1
+
 // QueueExportVersion is the current JSON schema version for queue rescue artifacts.
-const QueueExportVersion = 1
+const QueueExportVersion = 2
 
 // QueueExport is the local rescue artifact for one round's helper queue.
 // It is intentionally not exposed over HTTP. Treat files of this shape as
@@ -228,21 +230,31 @@ type QueueExportRound struct {
 // Submitted rows should have witness material cleared. Failed rows can retain
 // it until the helper purges the round after vote_end_time.
 type QueueExportRow struct {
-	ShareIndex       uint32             `json:"share_index"`
-	SharesHash       string             `json:"shares_hash,omitempty"`
-	ProposalID       uint32             `json:"proposal_id"`
-	VoteDecision     uint32             `json:"vote_decision"`
-	EncShare         EncryptedShareWire `json:"enc_share,omitempty"`
-	TreePosition     uint64             `json:"tree_position"`
-	ShareComms       []string           `json:"share_comms,omitempty"`
-	PrimaryBlind     string             `json:"primary_blind,omitempty"`
-	State            ShareState         `json:"state"`
-	Attempts         int                `json:"attempts"`
-	VoteEndTime      uint64             `json:"vote_end_time"`
-	SubmitAt         uint64             `json:"submit_at"`
-	OriginalSubmitAt uint64             `json:"original_submit_at,omitempty"`
-	ReceivedAt       uint64             `json:"received_at"`
-	Processable      bool               `json:"processable"`
+	ShareIndex       uint32                       `json:"share_index"`
+	SharesHash       string                       `json:"shares_hash,omitempty"`
+	ProposalID       uint32                       `json:"proposal_id"`
+	VoteDecision     uint32                       `json:"vote_decision"`
+	EncShare         EncryptedShareWire           `json:"enc_share,omitempty"`
+	TreePosition     uint64                       `json:"tree_position"`
+	ShareComms       []string                     `json:"share_comms,omitempty"`
+	PrimaryBlind     string                       `json:"primary_blind,omitempty"`
+	State            ShareState                   `json:"state"`
+	Attempts         int                          `json:"attempts"`
+	VoteEndTime      uint64                       `json:"vote_end_time"`
+	SubmitAt         uint64                       `json:"submit_at"`
+	OriginalSubmitAt uint64                       `json:"original_submit_at,omitempty"`
+	ReceivedAt       uint64                       `json:"received_at"`
+	PendingBroadcast *QueueExportPendingBroadcast `json:"pending_broadcast,omitempty"`
+	Processable      bool                         `json:"processable"`
+}
+
+// QueueExportPendingBroadcast preserves the exact reveal and committed-height
+// rescue window for a processable queue row.
+type QueueExportPendingBroadcast struct {
+	Reveal           MsgRevealShareJSON `json:"reveal"`
+	TxHash           string             `json:"tx_hash,omitempty"`
+	SinceHeight      uint64             `json:"since_height,omitempty"`
+	RebroadcastCount uint32             `json:"rebroadcast_count,omitempty"`
 }
 
 // QueueImportOptions controls how processable rows from a rescue artifact are scheduled.
