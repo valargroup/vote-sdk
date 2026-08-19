@@ -8,15 +8,17 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
-- Persist generated helper reveals before broadcast so ambiguous delivery,
-  commitment checks, delayed rebroadcasts, and restarts reuse the exact proof.
-  Honor Comet's final proposal byte budget after injected transactions, and
-  reduce the consensus maximum block size to 5 MiB for fresh chains and the
-  `v1.4.0` upgrade. Serialize first-round helper queue metadata writes so
-  concurrent submissions are not rejected by SQLite writer contention. Use a
-  new helper proof concurrency key that defaults validator-hosted helpers to one
-  worker and ignores the earlier value, so the coordinated upgrade does not
-  require manual edits on every validator.
+- Keep at most 128 unique reveal shares in each block, reject proposals that
+  bypass the round-scoped deduplication or reveal cap, and persist generated
+  helper reveals before broadcast so ambiguous delivery, commitment checks, and
+  delayed rebroadcasts do not regenerate proofs. Honor Comet's final proposal
+  byte budget after injected transactions, and reduce the consensus maximum
+  block size to 5 MiB for fresh chains and the `v1.4.0` upgrade. Serialize
+  first-round helper queue metadata writes so concurrent submissions are not
+  rejected by SQLite writer contention. Use a new helper proof-concurrency key
+  that defaults validator-hosted helpers to one worker and ignores the earlier
+  value, so the coordinated upgrade does not require manual edits on every
+  validator.
 - Route default production and staging voting-config reads through the
   GitHub-primary `voting.valargroup.dev` gateway with its Cloudflare fallback.
 - Make new Linux Cosmovisor validator services skip local pre-upgrade chain data
