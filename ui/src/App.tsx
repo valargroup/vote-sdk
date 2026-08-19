@@ -46,6 +46,7 @@ import {
   startVoteManagerRefresh,
   type VoteManagerSnapshot,
 } from "./utils/voteManagerRefresh";
+import { parseRoundJson } from "./utils/roundJson";
 
 // Matches the iOS voteOptionColor palette in VotingComponents.swift.
 // For 2-option proposals: green, red. For 3+: cycles through 8 colors.
@@ -151,6 +152,7 @@ function App() {
     () => typeof window !== "undefined" && window.innerWidth >= 768,
   );
   const importRef = useRef<HTMLInputElement>(null);
+  const [importError, setImportError] = useState("");
   const [publishModal, setPublishModal] = useState<string | null>(null); // round id
   const [publishStatus, setPublishStatus] = useState<"idle" | "publishing" | "ok" | "error">("idle");
   const [publishResult, setPublishResult] = useState<string>("");
@@ -217,31 +219,30 @@ function App() {
   }, [store, setSection]);
 
   const handleFileImport = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const input = e.currentTarget;
+      const file = input.files?.[0];
       if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        try {
-          const data = JSON.parse(ev.target?.result as string);
-          const roundData = data.round ?? data;
-          const round = store.createRound(roundData.name ?? "Imported Round");
-          if (roundData.proposals) {
-            store.updateRound(round.id, { proposals: roundData.proposals });
-          }
-          if (roundData.settings) {
-            store.updateRound(round.id, { settings: roundData.settings });
-          }
-          setSection("builder");
-        } catch {
-          alert("Invalid JSON file");
-        }
-      };
-      reader.readAsText(file);
-      e.target.value = "";
+      try {
+        const draft = parseRoundJson(await file.text());
+        store.importRound(draft);
+        setImportError("");
+        setSection("builder");
+      } catch (error) {
+        setImportError(
+          error instanceof Error ? error.message : "The round couldn't be imported.",
+        );
+      } finally {
+        input.value = "";
+      }
     },
     [store, setSection]
   );
+
+  const handleImportRound = useCallback(() => {
+    setImportError("");
+    importRef.current?.click();
+  }, []);
 
   const handlePublish = useCallback(
     (roundId: string) => {
@@ -413,7 +414,7 @@ function App() {
       <input
         ref={importRef}
         type="file"
-        accept=".json"
+        accept=".json,application/json"
         className="hidden"
         onChange={handleFileImport}
       />
@@ -434,6 +435,7 @@ function App() {
         onFilterChange={setFilter}
         onSelectRound={handleSelectRound}
         onCreateRound={handleCreateRound}
+        onImportRound={handleImportRound}
         onNavigate={handleNavigate}
         onDeleteRound={store.deleteRound}
         currentSection={section}
@@ -453,6 +455,21 @@ function App() {
             <Menu size={18} />
           </button>
         </div>
+        {importError && (
+          <div
+            role="alert"
+            className="flex items-center justify-between gap-3 px-4 py-2 bg-danger/10 border-b border-danger/30 text-[11px] text-danger"
+          >
+            <span>Couldn't import round JSON. {importError}</span>
+            <button
+              onClick={() => setImportError("")}
+              className="shrink-0 p-1 hover:bg-danger/10 rounded cursor-pointer"
+              aria-label="Dismiss import error"
+            >
+              <X size={13} />
+            </button>
+          </div>
+        )}
         {/* About page */}
         {section === "about" && (
           <AboutPage

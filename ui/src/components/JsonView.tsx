@@ -2,38 +2,11 @@ import { useState } from "react";
 import { Copy, Download, CheckCircle2, AlertTriangle, Check, ArrowLeft } from "lucide-react";
 import type { VotingRound } from "../types";
 import { MAX_VOTE_OPTIONS, MIN_VOTE_OPTIONS } from "../constants/vote";
+import { generateRoundExport } from "../utils/roundJson";
 
 interface JsonViewProps {
   round: VotingRound;
   onBack?: () => void;
-}
-
-function generateExportJson(round: VotingRound) {
-  return {
-    schema: "v1",
-    round: {
-      id: round.id,
-      name: round.name,
-      status: round.status,
-      settings: round.settings,
-      proposals: round.proposals.map((p, i) => ({
-        index: i,
-        id: p.id,
-        title: p.title,
-        description: p.description,
-        type: p.type,
-        options: p.options.map((o) => ({
-          id: o.id,
-          label: o.label,
-          description: o.description ?? "",
-        })),
-        zipNumber: p.zipNumber,
-        forumURL: p.forumURL,
-        metadata: p.metadata,
-      })),
-    },
-    generatedAt: new Date().toISOString(),
-  };
 }
 
 function validateRound(round: VotingRound): string[] {
@@ -55,7 +28,7 @@ export function JsonView({ round, onBack }: JsonViewProps) {
   const [copied, setCopied] = useState(false);
   const [validated, setValidated] = useState<string[] | null>(null);
 
-  const json = JSON.stringify(generateExportJson(round), null, 2);
+  const json = JSON.stringify(generateRoundExport(round), null, 2);
   const issues = validateRound(round);
   const isValid = issues.length === 0;
 
