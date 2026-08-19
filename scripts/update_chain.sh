@@ -15,7 +15,7 @@
 #
 # Example:
 #   curl -fsSL https://shielded-vote.nyc3.digitaloceanspaces.com/update_chain.sh | sudo bash -s -- \
-#     --mode prepare --plan-name v1_4_0 --tag v1.4.0
+#     --mode prepare --plan-name v1.4.0 --tag v1.4.0
 set -euo pipefail
 
 readonly UPDATE_DEFAULT_RELEASE_TAG='latest'

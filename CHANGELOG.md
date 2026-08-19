@@ -10,6 +10,9 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 - Show production share queues only when a current vote-manager wallet is
   connected, while keeping the staging monitor visible to everyone.
+- Honor Comet's final proposal byte budget after injected transactions, and
+  reduce the consensus maximum block size to 5 MiB for fresh chains and the
+  `v1.4.0` upgrade.
 - Serialize first-round helper queue metadata writes so concurrent submissions
   are not rejected by SQLite writer contention. Use a new helper
   proof-concurrency key that defaults validator-hosted helpers to one worker and

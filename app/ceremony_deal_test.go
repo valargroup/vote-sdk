@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"os"
@@ -10,6 +11,7 @@ import (
 
 	abci "github.com/cometbft/cometbft/abci/types"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
+	cmttypes "github.com/cometbft/cometbft/types"
 	"github.com/mikelodder7/curvey"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -867,8 +869,11 @@ func TestDKGContributionThroughPipeline(t *testing.T) {
 	}
 	roundID := ta.SeedRegisteringCeremony(validators)
 
-	resp := ta.CallPrepareProposal()
+	filler := bytes.Repeat([]byte{0xAA}, 100_000)
+	maxTxBytes := cmttypes.ComputeProtoSizeForTxs([]cmttypes.Tx{filler})
+	resp := ta.CallPrepareProposalWithTxsAndMaxBytes([][]byte{filler}, maxTxBytes)
 	require.Len(t, resp.Txs, 1, "pipeline should inject exactly one DKG contribution tx")
+	require.LessOrEqual(t, cmttypes.ComputeProtoSizeForTxs([]cmttypes.Tx{resp.Txs[0]}), maxTxBytes)
 
 	tag, protoMsg, err := voteapi.DecodeCeremonyTx(resp.Txs[0])
 	require.NoError(t, err)
