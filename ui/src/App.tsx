@@ -41,6 +41,7 @@ import {
   partitionVoteStatusRounds,
   shouldEagerlyLoadVoteSummary,
 } from "./utils/voteStatus";
+import { resolveShareQueueVisibility } from "./utils/shareQueueVisibility";
 
 // Matches the iOS voteOptionColor palette in VotingComponents.swift.
 // For 2-option proposals: green, red. For 3+: cycles through 8 colors.
@@ -134,6 +135,7 @@ function routeFromPath(): AppRoute {
 function App() {
   const store = useStore();
   const wallet = useWallet();
+  const detectedChainId = useDetectedChainId();
   const { precomputedBaseURL, zcashNetwork } = useUIConfig();
   const [route, setRouteState] = useState<AppRoute>(routeFromPath);
   const section = route.section;
@@ -149,6 +151,29 @@ function App() {
   const [publishResult, setPublishResult] = useState<string>("");
   const [publishError, setPublishError] = useState("");
   const [expectedRoundCount, setExpectedRoundCount] = useState<number | null>(null);
+  const [productionVoteManagers, setProductionVoteManagers] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    if (detectedChainId !== "zvote-1") return;
+
+    let cancelled = false;
+    chainApi.getVoteManagers()
+      .then((response) => {
+        if (!cancelled) setProductionVoteManagers(response.vote_manager_addresses);
+      })
+      .catch(() => {
+        if (!cancelled) setProductionVoteManagers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detectedChainId]);
+
+  const shareQueueVisibility = resolveShareQueueVisibility({
+    chainId: detectedChainId,
+    walletAddress: wallet.address,
+    voteManagerAddresses: productionVoteManagers,
+  });
 
   // Sync section ↔ URL path, keeping nav instant (no full reload).
   const setSection = useCallback((s: Section) => {
@@ -409,6 +434,7 @@ function App() {
         onNavigate={handleNavigate}
         onDeleteRound={store.deleteRound}
         currentSection={section}
+        showShareQueues={shareQueueVisibility === "visible"}
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
       />
@@ -563,7 +589,23 @@ function App() {
           />
         )}
 
-        {section === "queue-monitor" && <QueueMonitorPage />}
+        {section === "queue-monitor" && shareQueueVisibility === "visible" && (
+          <QueueMonitorPage />
+        )}
+        {section === "queue-monitor" && shareQueueVisibility !== "visible" && (
+          <div className="flex h-full items-center justify-center px-6">
+            {shareQueueVisibility === "loading" ? (
+              <div className="flex items-center gap-2 text-xs text-text-muted">
+                <Loader2 size={14} className="animate-spin" />
+                Checking share queue access…
+              </div>
+            ) : (
+              <p className="max-w-sm text-center text-xs text-text-muted">
+                Connect a current vote-manager wallet in Settings to view production share queues.
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Snapshot settings */}
         {section === "snapshot" && <SnapshotSettingsPage />}
