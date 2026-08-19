@@ -160,6 +160,7 @@ func migrate(db *sql.DB) error {
 			pending_reveal_json TEXT NOT NULL DEFAULT '',
 			pending_tx_hash TEXT NOT NULL DEFAULT '',
 			pending_since_height INTEGER NOT NULL DEFAULT 0,
+			pending_rebroadcast_count INTEGER NOT NULL DEFAULT 0,
 			PRIMARY KEY (round_id, share_index, proposal_id, tree_position)
 		)
 	`); err != nil {
@@ -265,6 +266,7 @@ func migrate(db *sql.DB) error {
 		{name: "pending_reveal_json", definition: "TEXT NOT NULL DEFAULT ''"},
 		{name: "pending_tx_hash", definition: "TEXT NOT NULL DEFAULT ''"},
 		{name: "pending_since_height", definition: "INTEGER NOT NULL DEFAULT 0"},
+		{name: "pending_rebroadcast_count", definition: "INTEGER NOT NULL DEFAULT 0"},
 	}
 	for _, column := range pendingColumns {
 		hasColumn, err := tableHasColumn(db, "shares", column.name)
@@ -623,7 +625,7 @@ func (s *ShareStore) MarkSubmitted(roundID string, shareIndex, proposalID uint32
 		        enc_share_c1 = '', enc_share_c2 = '',
 		        share_comms = '[]', primary_blind = '',
 		        pending_reveal_json = '', pending_tx_hash = '',
-		        pending_since_height = 0
+		        pending_since_height = 0, pending_rebroadcast_count = 0
 		 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = 1`,
 		roundID, shareIndex, proposalID, treePosition,
 	); err != nil {
@@ -655,7 +657,8 @@ func (s *ShareStore) stagePendingReveal(
 
 	res, err := s.db.Exec(
 		`UPDATE shares SET pending_reveal_json = ?,
-		        pending_tx_hash = '', pending_since_height = 0
+		        pending_tx_hash = '', pending_since_height = 0,
+		        pending_rebroadcast_count = 0
 		 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = 1`,
 		string(revealJSON), roundID, shareIndex, proposalID, treePosition,
 	)
@@ -699,9 +702,9 @@ func (s *ShareStore) markAwaitingCommit(
 	res, err := s.db.Exec(
 		`UPDATE shares SET state = 0,
 		        pending_reveal_json = ?, pending_tx_hash = ?,
-		        pending_since_height = ?
+		        pending_since_height = ?, pending_rebroadcast_count = ?
 		 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = 1`,
-		string(revealJSON), pending.TxHash, pending.SinceHeight,
+		string(revealJSON), pending.TxHash, pending.SinceHeight, pending.RebroadcastCount,
 		roundID, shareIndex, proposalID, treePosition,
 	)
 	if err != nil {
@@ -718,6 +721,42 @@ func (s *ShareStore) markAwaitingCommit(
 	key := schedKey(roundID, shareIndex, proposalID, treePosition)
 	s.schedule[key] = nextShareSystemRetryTime(time.Now(), voteEndTime)
 	s.notifyScheduleChangedLocked()
+	return nil
+}
+
+// markPendingRebroadcast advances the committed-height backoff before sending
+// the exact reveal again. Persisting first prevents a crash or ambiguous HTTP
+// result from immediately repeating the rescue broadcast after restart.
+func (s *ShareStore) markPendingRebroadcast(
+	roundID string,
+	shareIndex, proposalID uint32,
+	treePosition uint64,
+	pending pendingRevealBroadcast,
+) error {
+	if pending.SinceHeight == 0 || pending.RebroadcastCount == 0 {
+		return fmt.Errorf("pending rebroadcast requires a height and positive count")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	res, err := s.db.Exec(
+		`UPDATE shares SET pending_since_height = ?, pending_rebroadcast_count = ?
+		 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?
+		   AND state = 1 AND pending_reveal_json != ''`,
+		pending.SinceHeight, pending.RebroadcastCount,
+		roundID, shareIndex, proposalID, treePosition,
+	)
+	if err != nil {
+		return fmt.Errorf("persist pending rebroadcast: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("inspect pending rebroadcast update: %w", err)
+	}
+	if affected != 1 {
+		return fmt.Errorf("persist pending rebroadcast: updated %d rows", affected)
+	}
 	return nil
 }
 
@@ -867,7 +906,7 @@ func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, t
 				        enc_share_c1 = '', enc_share_c2 = '',
 				        share_comms = '[]', primary_blind = '',
 				        pending_reveal_json = '', pending_tx_hash = '',
-				        pending_since_height = 0
+				        pending_since_height = 0, pending_rebroadcast_count = 0
 				 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
 				newAttempts, roundID, shareIndex, proposalID, treePosition,
 			); err != nil {
@@ -881,7 +920,7 @@ func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, t
 			if _, err := s.db.Exec(
 				`UPDATE shares SET state = 3, attempts = ?,
 				        pending_reveal_json = '', pending_tx_hash = '',
-				        pending_since_height = 0
+				        pending_since_height = 0, pending_rebroadcast_count = 0
 				 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
 				newAttempts, roundID, shareIndex, proposalID, treePosition,
 			); err != nil {
@@ -897,7 +936,7 @@ func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, t
 		if _, err := s.db.Exec(
 			`UPDATE shares SET state = 0, attempts = ?,
 			        pending_reveal_json = '', pending_tx_hash = '',
-			        pending_since_height = 0
+			        pending_since_height = 0, pending_rebroadcast_count = 0
 			 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
 			newAttempts, roundID, shareIndex, proposalID, treePosition,
 		); err != nil {
@@ -1662,12 +1701,13 @@ func (s *ShareStore) loadShare(roundID string, shareIndex, proposalID uint32, tr
 	var commsJSON string
 	var pendingRevealJSON, pendingTxHash string
 	var pendingSinceHeight uint64
+	var pendingRebroadcastCount uint32
 	var state, attempts int
 
 	err := s.db.QueryRow(
 		`SELECT shares_hash, proposal_id, vote_decision, enc_share_c1, enc_share_c2,
 		        tree_position, share_comms, primary_blind, state, attempts, vote_end_time, submit_at,
-		        pending_reveal_json, pending_tx_hash, pending_since_height
+		        pending_reveal_json, pending_tx_hash, pending_since_height, pending_rebroadcast_count
 		 FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
 		roundID, shareIndex, proposalID, treePosition,
 	).Scan(
@@ -1686,6 +1726,7 @@ func (s *ShareStore) loadShare(roundID string, shareIndex, proposalID uint32, tr
 		&pendingRevealJSON,
 		&pendingTxHash,
 		&pendingSinceHeight,
+		&pendingRebroadcastCount,
 	)
 	if err != nil {
 		return q, false
@@ -1705,9 +1746,10 @@ func (s *ShareStore) loadShare(roundID string, shareIndex, proposalID uint32, tr
 			return q, false
 		}
 		q.pendingBroadcast = &pendingRevealBroadcast{
-			Reveal:      reveal,
-			TxHash:      pendingTxHash,
-			SinceHeight: pendingSinceHeight,
+			Reveal:           reveal,
+			TxHash:           pendingTxHash,
+			SinceHeight:      pendingSinceHeight,
+			RebroadcastCount: pendingRebroadcastCount,
 		}
 	}
 
