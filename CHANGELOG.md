@@ -28,9 +28,9 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
   copies while retaining the existing external identity backup requirement.
 - Reject malformed, round-invalid, and internally inconsistent helper shares
   before queueing, while keeping validator and infrastructure failures alertable.
-- Limit helper share queue selection to active rounds, and keep Vote Status
-  responsive on long-running chains by loading current summaries first while
-  completed history stays collapsed and loads ten rounds at a time.
+- Limit helper share queue selection to active rounds, and use a lightweight
+  current-round query for Vote Status, Share Queues, and Attest Round. Keep
+  completed history collapsed and load it only when requested.
 - Exponentially back off repeated helper share checks at an unchanged committed
   height to two minutes while retaining urgent retries near vote close.
 

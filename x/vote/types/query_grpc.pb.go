@@ -36,6 +36,7 @@ const (
 	Query_EndorsedRounds_FullMethodName            = "/svote.v1.Query/EndorsedRounds"
 	Query_CoordinatorAction_FullMethodName         = "/svote.v1.Query/CoordinatorAction"
 	Query_PendingCoordinatorActions_FullMethodName = "/svote.v1.Query/PendingCoordinatorActions"
+	Query_RoundOverview_FullMethodName             = "/svote.v1.Query/RoundOverview"
 )
 
 // QueryClient is the client API for Query service.
@@ -81,6 +82,8 @@ type QueryClient interface {
 	CoordinatorAction(ctx context.Context, in *QueryCoordinatorActionRequest, opts ...grpc.CallOption) (*QueryCoordinatorActionResponse, error)
 	// PendingCoordinatorActions returns all pending threshold-gated actions.
 	PendingCoordinatorActions(ctx context.Context, in *QueryPendingCoordinatorActionsRequest, opts ...grpc.CallOption) (*QueryPendingCoordinatorActionsResponse, error)
+	// RoundOverview returns nonterminal rounds and the number of completed rounds.
+	RoundOverview(ctx context.Context, in *QueryRoundOverviewRequest, opts ...grpc.CallOption) (*QueryRoundOverviewResponse, error)
 }
 
 type queryClient struct {
@@ -261,6 +264,16 @@ func (c *queryClient) PendingCoordinatorActions(ctx context.Context, in *QueryPe
 	return out, nil
 }
 
+func (c *queryClient) RoundOverview(ctx context.Context, in *QueryRoundOverviewRequest, opts ...grpc.CallOption) (*QueryRoundOverviewResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(QueryRoundOverviewResponse)
+	err := c.cc.Invoke(ctx, Query_RoundOverview_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // QueryServer is the server API for Query service.
 // All implementations must embed UnimplementedQueryServer
 // for forward compatibility.
@@ -304,6 +317,8 @@ type QueryServer interface {
 	CoordinatorAction(context.Context, *QueryCoordinatorActionRequest) (*QueryCoordinatorActionResponse, error)
 	// PendingCoordinatorActions returns all pending threshold-gated actions.
 	PendingCoordinatorActions(context.Context, *QueryPendingCoordinatorActionsRequest) (*QueryPendingCoordinatorActionsResponse, error)
+	// RoundOverview returns nonterminal rounds and the number of completed rounds.
+	RoundOverview(context.Context, *QueryRoundOverviewRequest) (*QueryRoundOverviewResponse, error)
 	mustEmbedUnimplementedQueryServer()
 }
 
@@ -364,6 +379,9 @@ func (UnimplementedQueryServer) CoordinatorAction(context.Context, *QueryCoordin
 }
 func (UnimplementedQueryServer) PendingCoordinatorActions(context.Context, *QueryPendingCoordinatorActionsRequest) (*QueryPendingCoordinatorActionsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method PendingCoordinatorActions not implemented")
+}
+func (UnimplementedQueryServer) RoundOverview(context.Context, *QueryRoundOverviewRequest) (*QueryRoundOverviewResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RoundOverview not implemented")
 }
 func (UnimplementedQueryServer) mustEmbedUnimplementedQueryServer() {}
 func (UnimplementedQueryServer) testEmbeddedByValue()               {}
@@ -692,6 +710,24 @@ func _Query_PendingCoordinatorActions_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Query_RoundOverview_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryRoundOverviewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).RoundOverview(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Query_RoundOverview_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).RoundOverview(ctx, req.(*QueryRoundOverviewRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Query_ServiceDesc is the grpc.ServiceDesc for Query service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -766,6 +802,10 @@ var Query_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PendingCoordinatorActions",
 			Handler:    _Query_PendingCoordinatorActions_Handler,
+		},
+		{
+			MethodName: "RoundOverview",
+			Handler:    _Query_RoundOverview_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

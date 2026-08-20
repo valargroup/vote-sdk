@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   fetchChainId,
+  getActiveRounds,
   getActiveRoundsFromList,
   getPrimaryActiveRoundFromList,
   getPublishedSnapshotManifestUrl,
@@ -289,5 +290,35 @@ describe("active round helpers", () => {
       oldActive,
     ]);
     expect(getPrimaryActiveRoundFromList([oldActive, finalized, newActive])).toBe(newActive);
+  });
+
+  it("requests a fresh lightweight overview each time active rounds are loaded", async () => {
+    vi.stubGlobal("localStorage", { getItem: vi.fn().mockReturnValue(null) });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({
+        current_rounds: [{
+          vote_round_id: "active",
+          status: "SESSION_STATUS_ACTIVE",
+        }],
+        completed_round_count: 502,
+      }),
+      url: "/shielded-vote/v1/rounds/overview",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getActiveRounds()).resolves.toEqual({
+      rounds: [{
+        vote_round_id: "active",
+        status: "SESSION_STATUS_ACTIVE",
+      }],
+    });
+    await getActiveRounds();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/shielded-vote/v1/rounds/overview",
+      undefined,
+    );
   });
 });

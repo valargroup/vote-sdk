@@ -378,6 +378,7 @@ and coordinator-funded sends are submitted inside coordinator action proposals.
 | ------ | -------------------------------------------------- | ------------------------------------------ |
 | GET    | `/shielded-vote/v1/ceremony`                       | Current ceremony state and status          |
 | GET    | `/shielded-vote/v1/rounds`                         | List all stored vote rounds                |
+| GET    | `/shielded-vote/v1/rounds/overview`                | Nonterminal rounds and completed count     |
 | GET    | `/shielded-vote/v1/rounds/active`                  | Currently active voting round              |
 | GET    | `/shielded-vote/v1/round/{round_id}`               | Voting round by hex round ID               |
 | GET    | `/shielded-vote/v1/vote-summary/{round_id}`        | Denormalized round summary with proposals  |
