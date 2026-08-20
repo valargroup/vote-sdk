@@ -367,6 +367,33 @@ func (qs queryServer) ListRounds(goCtx context.Context, req *types.QueryListRoun
 	return &types.QueryListRoundsResponse{Rounds: rounds}, nil
 }
 
+// RoundOverview returns nonterminal rounds without returning completed round
+// payloads. Finalized and ceremony-failed rounds are counted as completed.
+func (qs queryServer) RoundOverview(goCtx context.Context, req *types.QueryRoundOverviewRequest) (*types.QueryRoundOverviewResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "empty request")
+	}
+
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	kvStore := qs.k.OpenKVStore(ctx)
+
+	resp := &types.QueryRoundOverviewResponse{}
+	if err := qs.k.IterateAllRounds(kvStore, func(round *types.VoteRound) bool {
+		switch round.Status {
+		case types.SessionStatus_SESSION_STATUS_FINALIZED,
+			types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED:
+			resp.CompletedRoundCount++
+		default:
+			resp.CurrentRounds = append(resp.CurrentRounds, round)
+		}
+		return false
+	}); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to iterate rounds: %v", err)
+	}
+
+	return resp, nil
+}
+
 // VoteSummary returns a denormalized view of a vote round with proposals,
 // ballot counts, and (if finalized) decrypted totals.
 func (qs queryServer) VoteSummary(goCtx context.Context, req *types.QueryVoteSummaryRequest) (*types.QueryVoteSummaryResponse, error) {

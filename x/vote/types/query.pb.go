@@ -1626,6 +1626,94 @@ func (x *QueryPendingCoordinatorActionsResponse) GetActions() []*CoordinatorActi
 	return nil
 }
 
+type QueryRoundOverviewRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryRoundOverviewRequest) Reset() {
+	*x = QueryRoundOverviewRequest{}
+	mi := &file_svote_v1_query_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryRoundOverviewRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryRoundOverviewRequest) ProtoMessage() {}
+
+func (x *QueryRoundOverviewRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_query_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryRoundOverviewRequest.ProtoReflect.Descriptor instead.
+func (*QueryRoundOverviewRequest) Descriptor() ([]byte, []int) {
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{35}
+}
+
+type QueryRoundOverviewResponse struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	CurrentRounds       []*VoteRound           `protobuf:"bytes,1,rep,name=current_rounds,json=currentRounds,proto3" json:"current_rounds,omitempty"`
+	CompletedRoundCount uint64                 `protobuf:"varint,2,opt,name=completed_round_count,json=completedRoundCount,proto3" json:"completed_round_count,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *QueryRoundOverviewResponse) Reset() {
+	*x = QueryRoundOverviewResponse{}
+	mi := &file_svote_v1_query_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryRoundOverviewResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryRoundOverviewResponse) ProtoMessage() {}
+
+func (x *QueryRoundOverviewResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_query_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryRoundOverviewResponse.ProtoReflect.Descriptor instead.
+func (*QueryRoundOverviewResponse) Descriptor() ([]byte, []int) {
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *QueryRoundOverviewResponse) GetCurrentRounds() []*VoteRound {
+	if x != nil {
+		return x.CurrentRounds
+	}
+	return nil
+}
+
+func (x *QueryRoundOverviewResponse) GetCompletedRoundCount() uint64 {
+	if x != nil {
+		return x.CompletedRoundCount
+	}
+	return 0
+}
+
 var File_svote_v1_query_proto protoreflect.FileDescriptor
 
 const file_svote_v1_query_proto_rawDesc = "" +
@@ -1719,7 +1807,11 @@ const file_svote_v1_query_proto_rawDesc = "" +
 	"\x06action\x18\x01 \x01(\v2\x1b.svote.v1.CoordinatorActionR\x06action\"'\n" +
 	"%QueryPendingCoordinatorActionsRequest\"_\n" +
 	"&QueryPendingCoordinatorActionsResponse\x125\n" +
-	"\aactions\x18\x01 \x03(\v2\x1b.svote.v1.CoordinatorActionR\aactions2\xbe\f\n" +
+	"\aactions\x18\x01 \x03(\v2\x1b.svote.v1.CoordinatorActionR\aactions\"\x1b\n" +
+	"\x19QueryRoundOverviewRequest\"\x8c\x01\n" +
+	"\x1aQueryRoundOverviewResponse\x12:\n" +
+	"\x0ecurrent_rounds\x18\x01 \x03(\v2\x13.svote.v1.VoteRoundR\rcurrentRounds\x122\n" +
+	"\x15completed_round_count\x18\x02 \x01(\x04R\x13completedRoundCount2\x9a\r\n" +
 	"\x05Query\x12e\n" +
 	"\x16CommitmentTreeAtHeight\x12$.svote.v1.QueryCommitmentTreeRequest\x1a%.svote.v1.QueryCommitmentTreeResponse\x12[\n" +
 	"\x14LatestCommitmentTree\x12 .svote.v1.QueryLatestTreeRequest\x1a!.svote.v1.QueryLatestTreeResponse\x12N\n" +
@@ -1739,7 +1831,8 @@ const file_svote_v1_query_proto_rawDesc = "" +
 	"\tEndorsers\x12\x1f.svote.v1.QueryEndorsersRequest\x1a .svote.v1.QueryEndorsersResponse\x12]\n" +
 	"\x0eEndorsedRounds\x12$.svote.v1.QueryEndorsedRoundsRequest\x1a%.svote.v1.QueryEndorsedRoundsResponse\x12f\n" +
 	"\x11CoordinatorAction\x12'.svote.v1.QueryCoordinatorActionRequest\x1a(.svote.v1.QueryCoordinatorActionResponse\x12~\n" +
-	"\x19PendingCoordinatorActions\x12/.svote.v1.QueryPendingCoordinatorActionsRequest\x1a0.svote.v1.QueryPendingCoordinatorActionsResponseB-Z+github.com/valargroup/vote-sdk/x/vote/typesb\x06proto3"
+	"\x19PendingCoordinatorActions\x12/.svote.v1.QueryPendingCoordinatorActionsRequest\x1a0.svote.v1.QueryPendingCoordinatorActionsResponse\x12Z\n" +
+	"\rRoundOverview\x12#.svote.v1.QueryRoundOverviewRequest\x1a$.svote.v1.QueryRoundOverviewResponseB-Z+github.com/valargroup/vote-sdk/x/vote/typesb\x06proto3"
 
 var (
 	file_svote_v1_query_proto_rawDescOnce sync.Once
@@ -1753,7 +1846,7 @@ func file_svote_v1_query_proto_rawDescGZIP() []byte {
 	return file_svote_v1_query_proto_rawDescData
 }
 
-var file_svote_v1_query_proto_msgTypes = make([]protoimpl.MessageInfo, 36)
+var file_svote_v1_query_proto_msgTypes = make([]protoimpl.MessageInfo, 38)
 var file_svote_v1_query_proto_goTypes = []any{
 	(*QueryCommitmentTreeRequest)(nil),             // 0: svote.v1.QueryCommitmentTreeRequest
 	(*QueryCommitmentTreeResponse)(nil),            // 1: svote.v1.QueryCommitmentTreeResponse
@@ -1790,74 +1883,79 @@ var file_svote_v1_query_proto_goTypes = []any{
 	(*QueryCoordinatorActionResponse)(nil),         // 32: svote.v1.QueryCoordinatorActionResponse
 	(*QueryPendingCoordinatorActionsRequest)(nil),  // 33: svote.v1.QueryPendingCoordinatorActionsRequest
 	(*QueryPendingCoordinatorActionsResponse)(nil), // 34: svote.v1.QueryPendingCoordinatorActionsResponse
-	nil,                         // 35: svote.v1.QueryProposalTallyResponse.TallyEntry
-	(*CommitmentTreeState)(nil), // 36: svote.v1.CommitmentTreeState
-	(*VoteRound)(nil),           // 37: svote.v1.VoteRound
-	(*TallyResult)(nil),         // 38: svote.v1.TallyResult
-	(*BlockCommitments)(nil),    // 39: svote.v1.BlockCommitments
-	(*CeremonyState)(nil),       // 40: svote.v1.CeremonyState
-	(SessionStatus)(0),          // 41: svote.v1.SessionStatus
-	(*ProposalSummary)(nil),     // 42: svote.v1.ProposalSummary
-	(*ValidatorPallasKey)(nil),  // 43: svote.v1.ValidatorPallasKey
-	(*Endorser)(nil),            // 44: svote.v1.Endorser
-	(*CoordinatorAction)(nil),   // 45: svote.v1.CoordinatorAction
+	(*QueryRoundOverviewRequest)(nil),              // 35: svote.v1.QueryRoundOverviewRequest
+	(*QueryRoundOverviewResponse)(nil),             // 36: svote.v1.QueryRoundOverviewResponse
+	nil,                                            // 37: svote.v1.QueryProposalTallyResponse.TallyEntry
+	(*CommitmentTreeState)(nil),                    // 38: svote.v1.CommitmentTreeState
+	(*VoteRound)(nil),                              // 39: svote.v1.VoteRound
+	(*TallyResult)(nil),                            // 40: svote.v1.TallyResult
+	(*BlockCommitments)(nil),                       // 41: svote.v1.BlockCommitments
+	(*CeremonyState)(nil),                          // 42: svote.v1.CeremonyState
+	(SessionStatus)(0),                             // 43: svote.v1.SessionStatus
+	(*ProposalSummary)(nil),                        // 44: svote.v1.ProposalSummary
+	(*ValidatorPallasKey)(nil),                     // 45: svote.v1.ValidatorPallasKey
+	(*Endorser)(nil),                               // 46: svote.v1.Endorser
+	(*CoordinatorAction)(nil),                      // 47: svote.v1.CoordinatorAction
 }
 var file_svote_v1_query_proto_depIdxs = []int32{
-	36, // 0: svote.v1.QueryCommitmentTreeResponse.tree:type_name -> svote.v1.CommitmentTreeState
-	36, // 1: svote.v1.QueryLatestTreeResponse.tree:type_name -> svote.v1.CommitmentTreeState
-	37, // 2: svote.v1.QueryVoteRoundResponse.round:type_name -> svote.v1.VoteRound
-	35, // 3: svote.v1.QueryProposalTallyResponse.tally:type_name -> svote.v1.QueryProposalTallyResponse.TallyEntry
-	38, // 4: svote.v1.QueryTallyResultsResponse.results:type_name -> svote.v1.TallyResult
+	38, // 0: svote.v1.QueryCommitmentTreeResponse.tree:type_name -> svote.v1.CommitmentTreeState
+	38, // 1: svote.v1.QueryLatestTreeResponse.tree:type_name -> svote.v1.CommitmentTreeState
+	39, // 2: svote.v1.QueryVoteRoundResponse.round:type_name -> svote.v1.VoteRound
+	37, // 3: svote.v1.QueryProposalTallyResponse.tally:type_name -> svote.v1.QueryProposalTallyResponse.TallyEntry
+	40, // 4: svote.v1.QueryTallyResultsResponse.results:type_name -> svote.v1.TallyResult
 	12, // 5: svote.v1.QueryPartialDecryptionsResponse.entries:type_name -> svote.v1.StoredPartialDecryption
-	39, // 6: svote.v1.QueryCommitmentLeavesResponse.blocks:type_name -> svote.v1.BlockCommitments
-	37, // 7: svote.v1.QueryActiveRoundResponse.round:type_name -> svote.v1.VoteRound
-	40, // 8: svote.v1.QueryCeremonyStateResponse.ceremony:type_name -> svote.v1.CeremonyState
-	41, // 9: svote.v1.QueryVoteSummaryResponse.status:type_name -> svote.v1.SessionStatus
-	42, // 10: svote.v1.QueryVoteSummaryResponse.proposals:type_name -> svote.v1.ProposalSummary
-	37, // 11: svote.v1.QueryListRoundsResponse.rounds:type_name -> svote.v1.VoteRound
-	43, // 12: svote.v1.QueryPallasKeysResponse.validators:type_name -> svote.v1.ValidatorPallasKey
-	44, // 13: svote.v1.QueryEndorsersResponse.endorsers:type_name -> svote.v1.Endorser
-	45, // 14: svote.v1.QueryCoordinatorActionResponse.action:type_name -> svote.v1.CoordinatorAction
-	45, // 15: svote.v1.QueryPendingCoordinatorActionsResponse.actions:type_name -> svote.v1.CoordinatorAction
-	0,  // 16: svote.v1.Query.CommitmentTreeAtHeight:input_type -> svote.v1.QueryCommitmentTreeRequest
-	2,  // 17: svote.v1.Query.LatestCommitmentTree:input_type -> svote.v1.QueryLatestTreeRequest
-	4,  // 18: svote.v1.Query.VoteRound:input_type -> svote.v1.QueryVoteRoundRequest
-	6,  // 19: svote.v1.Query.ProposalTally:input_type -> svote.v1.QueryProposalTallyRequest
-	8,  // 20: svote.v1.Query.TallyResults:input_type -> svote.v1.QueryTallyResultsRequest
-	10, // 21: svote.v1.Query.PartialDecryptions:input_type -> svote.v1.QueryPartialDecryptionsRequest
-	13, // 22: svote.v1.Query.CommitmentLeaves:input_type -> svote.v1.QueryCommitmentLeavesRequest
-	15, // 23: svote.v1.Query.ActiveRound:input_type -> svote.v1.QueryActiveRoundRequest
-	17, // 24: svote.v1.Query.CeremonyState:input_type -> svote.v1.QueryCeremonyStateRequest
-	19, // 25: svote.v1.Query.VoteManagers:input_type -> svote.v1.QueryVoteManagersRequest
-	21, // 26: svote.v1.Query.VoteSummary:input_type -> svote.v1.QueryVoteSummaryRequest
-	23, // 27: svote.v1.Query.ListRounds:input_type -> svote.v1.QueryListRoundsRequest
-	25, // 28: svote.v1.Query.PallasKeys:input_type -> svote.v1.QueryPallasKeysRequest
-	27, // 29: svote.v1.Query.Endorsers:input_type -> svote.v1.QueryEndorsersRequest
-	29, // 30: svote.v1.Query.EndorsedRounds:input_type -> svote.v1.QueryEndorsedRoundsRequest
-	31, // 31: svote.v1.Query.CoordinatorAction:input_type -> svote.v1.QueryCoordinatorActionRequest
-	33, // 32: svote.v1.Query.PendingCoordinatorActions:input_type -> svote.v1.QueryPendingCoordinatorActionsRequest
-	1,  // 33: svote.v1.Query.CommitmentTreeAtHeight:output_type -> svote.v1.QueryCommitmentTreeResponse
-	3,  // 34: svote.v1.Query.LatestCommitmentTree:output_type -> svote.v1.QueryLatestTreeResponse
-	5,  // 35: svote.v1.Query.VoteRound:output_type -> svote.v1.QueryVoteRoundResponse
-	7,  // 36: svote.v1.Query.ProposalTally:output_type -> svote.v1.QueryProposalTallyResponse
-	9,  // 37: svote.v1.Query.TallyResults:output_type -> svote.v1.QueryTallyResultsResponse
-	11, // 38: svote.v1.Query.PartialDecryptions:output_type -> svote.v1.QueryPartialDecryptionsResponse
-	14, // 39: svote.v1.Query.CommitmentLeaves:output_type -> svote.v1.QueryCommitmentLeavesResponse
-	16, // 40: svote.v1.Query.ActiveRound:output_type -> svote.v1.QueryActiveRoundResponse
-	18, // 41: svote.v1.Query.CeremonyState:output_type -> svote.v1.QueryCeremonyStateResponse
-	20, // 42: svote.v1.Query.VoteManagers:output_type -> svote.v1.QueryVoteManagersResponse
-	22, // 43: svote.v1.Query.VoteSummary:output_type -> svote.v1.QueryVoteSummaryResponse
-	24, // 44: svote.v1.Query.ListRounds:output_type -> svote.v1.QueryListRoundsResponse
-	26, // 45: svote.v1.Query.PallasKeys:output_type -> svote.v1.QueryPallasKeysResponse
-	28, // 46: svote.v1.Query.Endorsers:output_type -> svote.v1.QueryEndorsersResponse
-	30, // 47: svote.v1.Query.EndorsedRounds:output_type -> svote.v1.QueryEndorsedRoundsResponse
-	32, // 48: svote.v1.Query.CoordinatorAction:output_type -> svote.v1.QueryCoordinatorActionResponse
-	34, // 49: svote.v1.Query.PendingCoordinatorActions:output_type -> svote.v1.QueryPendingCoordinatorActionsResponse
-	33, // [33:50] is the sub-list for method output_type
-	16, // [16:33] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	41, // 6: svote.v1.QueryCommitmentLeavesResponse.blocks:type_name -> svote.v1.BlockCommitments
+	39, // 7: svote.v1.QueryActiveRoundResponse.round:type_name -> svote.v1.VoteRound
+	42, // 8: svote.v1.QueryCeremonyStateResponse.ceremony:type_name -> svote.v1.CeremonyState
+	43, // 9: svote.v1.QueryVoteSummaryResponse.status:type_name -> svote.v1.SessionStatus
+	44, // 10: svote.v1.QueryVoteSummaryResponse.proposals:type_name -> svote.v1.ProposalSummary
+	39, // 11: svote.v1.QueryListRoundsResponse.rounds:type_name -> svote.v1.VoteRound
+	45, // 12: svote.v1.QueryPallasKeysResponse.validators:type_name -> svote.v1.ValidatorPallasKey
+	46, // 13: svote.v1.QueryEndorsersResponse.endorsers:type_name -> svote.v1.Endorser
+	47, // 14: svote.v1.QueryCoordinatorActionResponse.action:type_name -> svote.v1.CoordinatorAction
+	47, // 15: svote.v1.QueryPendingCoordinatorActionsResponse.actions:type_name -> svote.v1.CoordinatorAction
+	39, // 16: svote.v1.QueryRoundOverviewResponse.current_rounds:type_name -> svote.v1.VoteRound
+	0,  // 17: svote.v1.Query.CommitmentTreeAtHeight:input_type -> svote.v1.QueryCommitmentTreeRequest
+	2,  // 18: svote.v1.Query.LatestCommitmentTree:input_type -> svote.v1.QueryLatestTreeRequest
+	4,  // 19: svote.v1.Query.VoteRound:input_type -> svote.v1.QueryVoteRoundRequest
+	6,  // 20: svote.v1.Query.ProposalTally:input_type -> svote.v1.QueryProposalTallyRequest
+	8,  // 21: svote.v1.Query.TallyResults:input_type -> svote.v1.QueryTallyResultsRequest
+	10, // 22: svote.v1.Query.PartialDecryptions:input_type -> svote.v1.QueryPartialDecryptionsRequest
+	13, // 23: svote.v1.Query.CommitmentLeaves:input_type -> svote.v1.QueryCommitmentLeavesRequest
+	15, // 24: svote.v1.Query.ActiveRound:input_type -> svote.v1.QueryActiveRoundRequest
+	17, // 25: svote.v1.Query.CeremonyState:input_type -> svote.v1.QueryCeremonyStateRequest
+	19, // 26: svote.v1.Query.VoteManagers:input_type -> svote.v1.QueryVoteManagersRequest
+	21, // 27: svote.v1.Query.VoteSummary:input_type -> svote.v1.QueryVoteSummaryRequest
+	23, // 28: svote.v1.Query.ListRounds:input_type -> svote.v1.QueryListRoundsRequest
+	25, // 29: svote.v1.Query.PallasKeys:input_type -> svote.v1.QueryPallasKeysRequest
+	27, // 30: svote.v1.Query.Endorsers:input_type -> svote.v1.QueryEndorsersRequest
+	29, // 31: svote.v1.Query.EndorsedRounds:input_type -> svote.v1.QueryEndorsedRoundsRequest
+	31, // 32: svote.v1.Query.CoordinatorAction:input_type -> svote.v1.QueryCoordinatorActionRequest
+	33, // 33: svote.v1.Query.PendingCoordinatorActions:input_type -> svote.v1.QueryPendingCoordinatorActionsRequest
+	35, // 34: svote.v1.Query.RoundOverview:input_type -> svote.v1.QueryRoundOverviewRequest
+	1,  // 35: svote.v1.Query.CommitmentTreeAtHeight:output_type -> svote.v1.QueryCommitmentTreeResponse
+	3,  // 36: svote.v1.Query.LatestCommitmentTree:output_type -> svote.v1.QueryLatestTreeResponse
+	5,  // 37: svote.v1.Query.VoteRound:output_type -> svote.v1.QueryVoteRoundResponse
+	7,  // 38: svote.v1.Query.ProposalTally:output_type -> svote.v1.QueryProposalTallyResponse
+	9,  // 39: svote.v1.Query.TallyResults:output_type -> svote.v1.QueryTallyResultsResponse
+	11, // 40: svote.v1.Query.PartialDecryptions:output_type -> svote.v1.QueryPartialDecryptionsResponse
+	14, // 41: svote.v1.Query.CommitmentLeaves:output_type -> svote.v1.QueryCommitmentLeavesResponse
+	16, // 42: svote.v1.Query.ActiveRound:output_type -> svote.v1.QueryActiveRoundResponse
+	18, // 43: svote.v1.Query.CeremonyState:output_type -> svote.v1.QueryCeremonyStateResponse
+	20, // 44: svote.v1.Query.VoteManagers:output_type -> svote.v1.QueryVoteManagersResponse
+	22, // 45: svote.v1.Query.VoteSummary:output_type -> svote.v1.QueryVoteSummaryResponse
+	24, // 46: svote.v1.Query.ListRounds:output_type -> svote.v1.QueryListRoundsResponse
+	26, // 47: svote.v1.Query.PallasKeys:output_type -> svote.v1.QueryPallasKeysResponse
+	28, // 48: svote.v1.Query.Endorsers:output_type -> svote.v1.QueryEndorsersResponse
+	30, // 49: svote.v1.Query.EndorsedRounds:output_type -> svote.v1.QueryEndorsedRoundsResponse
+	32, // 50: svote.v1.Query.CoordinatorAction:output_type -> svote.v1.QueryCoordinatorActionResponse
+	34, // 51: svote.v1.Query.PendingCoordinatorActions:output_type -> svote.v1.QueryPendingCoordinatorActionsResponse
+	36, // 52: svote.v1.Query.RoundOverview:output_type -> svote.v1.QueryRoundOverviewResponse
+	35, // [35:53] is the sub-list for method output_type
+	17, // [17:35] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_svote_v1_query_proto_init() }
@@ -1872,7 +1970,7 @@ func file_svote_v1_query_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_svote_v1_query_proto_rawDesc), len(file_svote_v1_query_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   36,
+			NumMessages:   38,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

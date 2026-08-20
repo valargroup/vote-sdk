@@ -610,6 +610,22 @@ export async function listRounds(): Promise<{ rounds: ChainRound[] | null }> {
   return fetchJson<{ rounds: ChainRound[] | null }>("/shielded-vote/v1/rounds");
 }
 
+export interface RoundOverview {
+  current_rounds: ChainRound[];
+  completed_round_count: number;
+}
+
+export async function getRoundOverview(): Promise<RoundOverview> {
+  const resp = await fetchJson<{
+    current_rounds?: ChainRound[];
+    completed_round_count?: number;
+  }>("/shielded-vote/v1/rounds/overview");
+  return {
+    current_rounds: resp.current_rounds ?? [],
+    completed_round_count: resp.completed_round_count ?? 0,
+  };
+}
+
 export function isActiveRoundStatus(status: unknown): boolean {
   const normalized = String(status ?? "").trim().toLowerCase();
   return normalized === "1" || normalized === "active" || normalized === "session_status_active";
@@ -642,13 +658,13 @@ export function getPrimaryActiveRoundFromList(rounds: ChainRound[] | null | unde
 }
 
 export async function getActiveRounds(): Promise<{ rounds: ChainRound[] }> {
-  const resp = await listRounds();
-  return { rounds: getActiveRoundsFromList(resp.rounds) };
+  const resp = await getRoundOverview();
+  return { rounds: getActiveRoundsFromList(resp.current_rounds) };
 }
 
 export async function getPrimaryActiveRound(): Promise<{ round: ChainRound | null }> {
-  const resp = await listRounds();
-  return { round: getPrimaryActiveRoundFromList(resp.rounds) };
+  const resp = await getRoundOverview();
+  return { round: getPrimaryActiveRoundFromList(resp.current_rounds) };
 }
 
 export interface AttestRoundEntryResponse {

@@ -28,6 +28,7 @@ import (
 //	GET /shielded-vote/v1/commitment-tree/{round_id}/{height}
 //	GET /shielded-vote/v1/round/{round_id}
 //	GET /shielded-vote/v1/rounds
+//	GET /shielded-vote/v1/rounds/overview
 //	GET /shielded-vote/v1/rounds/active
 //	GET /shielded-vote/v1/tally/{round_id}/{proposal_id}
 //	GET /shielded-vote/v1/tally-results/{round_id}
@@ -51,6 +52,7 @@ func (h *Handler) RegisterQueryRoutes(router *mux.Router, clientCtx client.Conte
 	router.Handle("/shielded-vote/v1/commitment-tree/{round_id}/leaves", trace(http.HandlerFunc(qh.handleCommitmentLeaves))).Methods("GET")
 	router.Handle("/shielded-vote/v1/commitment-tree/{round_id}/{height}", trace(http.HandlerFunc(qh.handleCommitmentTreeAtHeight))).Methods("GET")
 	router.Handle("/shielded-vote/v1/rounds/active", trace(http.HandlerFunc(qh.handleActiveRound))).Methods("GET")
+	router.Handle("/shielded-vote/v1/rounds/overview", trace(http.HandlerFunc(qh.handleRoundOverview))).Methods("GET")
 	router.Handle("/shielded-vote/v1/rounds", trace(http.HandlerFunc(qh.handleListRounds))).Methods("GET")
 	router.Handle("/shielded-vote/v1/round/{round_id}", trace(http.HandlerFunc(qh.handleVoteRound))).Methods("GET")
 	router.Handle("/shielded-vote/v1/tally/{round_id}/{proposal_id}", trace(http.HandlerFunc(qh.handleProposalTally))).Methods("GET")
@@ -318,6 +320,18 @@ func (qh *queryHandler) handleListRounds(w http.ResponseWriter, _ *http.Request)
 	resp := &types.QueryListRoundsResponse{}
 
 	if err := qh.abciQuery("/svote.v1.Query/ListRounds", req, resp); err != nil {
+		writeQueryError(w, err)
+		return
+	}
+
+	writeProtoJSON(w, resp)
+}
+
+func (qh *queryHandler) handleRoundOverview(w http.ResponseWriter, _ *http.Request) {
+	req := &types.QueryRoundOverviewRequest{}
+	resp := &types.QueryRoundOverviewResponse{}
+
+	if err := qh.abciQuery("/svote.v1.Query/RoundOverview", req, resp); err != nil {
 		writeQueryError(w, err)
 		return
 	}

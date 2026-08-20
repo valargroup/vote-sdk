@@ -60,6 +60,9 @@ service Query {
 
   // PendingCoordinatorActions returns all pending threshold-gated actions.
   rpc PendingCoordinatorActions(QueryPendingCoordinatorActionsRequest) returns (QueryPendingCoordinatorActionsResponse);
+
+  // RoundOverview returns nonterminal rounds and the number of completed rounds.
+  rpc RoundOverview(QueryRoundOverviewRequest) returns (QueryRoundOverviewResponse);
 }
 
 message QueryCommitmentTreeRequest {
@@ -202,4 +205,11 @@ message QueryPendingCoordinatorActionsRequest {}
 
 message QueryPendingCoordinatorActionsResponse {
   repeated CoordinatorAction actions = 1;
+}
+
+message QueryRoundOverviewRequest {}
+
+message QueryRoundOverviewResponse {
+  repeated VoteRound current_rounds = 1;
+  uint64 completed_round_count = 2;
 }

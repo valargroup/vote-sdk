@@ -179,6 +179,49 @@ func (s *QueryServerTestSuite) TestVoteRound_Found() {
 }
 
 // ---------------------------------------------------------------------------
+// RoundOverview
+// ---------------------------------------------------------------------------
+
+func (s *QueryServerTestSuite) TestRoundOverview_NilRequest() {
+	_, err := s.queryServer.RoundOverview(s.ctx, nil)
+	s.Require().Error(err)
+	s.Require().Equal(codes.InvalidArgument, status.Code(err))
+}
+
+func (s *QueryServerTestSuite) TestRoundOverview_ReturnsCurrentRoundsAndCompletedCount() {
+	kvStore := s.keeper.OpenKVStore(s.ctx)
+	statuses := []types.SessionStatus{
+		types.SessionStatus_SESSION_STATUS_ACTIVE,
+		types.SessionStatus_SESSION_STATUS_TALLYING,
+		types.SessionStatus_SESSION_STATUS_PENDING,
+		types.SessionStatus_SESSION_STATUS_FINALIZED,
+		types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED,
+	}
+	for i, roundStatus := range statuses {
+		roundID := bytes.Repeat([]byte{byte(i + 1)}, types.RoundIDLen)
+		s.Require().NoError(s.keeper.SetVoteRound(kvStore, &types.VoteRound{
+			VoteRoundId: roundID,
+			Status:      roundStatus,
+		}))
+	}
+
+	resp, err := s.queryServer.RoundOverview(s.ctx, &types.QueryRoundOverviewRequest{})
+	s.Require().NoError(err)
+	s.Require().Equal(uint64(2), resp.CompletedRoundCount)
+	s.Require().Len(resp.CurrentRounds, 3)
+
+	currentStatuses := make(map[types.SessionStatus]bool, len(resp.CurrentRounds))
+	for _, round := range resp.CurrentRounds {
+		currentStatuses[round.Status] = true
+	}
+	s.Require().Equal(map[types.SessionStatus]bool{
+		types.SessionStatus_SESSION_STATUS_ACTIVE:   true,
+		types.SessionStatus_SESSION_STATUS_TALLYING: true,
+		types.SessionStatus_SESSION_STATUS_PENDING:  true,
+	}, currentStatuses)
+}
+
+// ---------------------------------------------------------------------------
 // ProposalTally
 // ---------------------------------------------------------------------------
 

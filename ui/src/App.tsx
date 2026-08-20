@@ -3130,7 +3130,9 @@ function VoteStatusView({
   onBackToList,
 }: VoteStatusViewProps) {
   const { precomputedBaseURL, zcashNetwork } = useUIConfig();
-  const [rounds, setRounds] = useState<chainApi.ChainRound[]>([]);
+  const [currentRounds, setCurrentRounds] = useState<chainApi.ChainRound[]>([]);
+  const [completedRounds, setCompletedRounds] = useState<chainApi.ChainRound[]>([]);
+  const [completedRoundCount, setCompletedRoundCount] = useState(0);
   const [summaries, setSummaries] = useState<Record<string, chainApi.VoteSummaryResponse>>({});
   const [summaryErrors, setSummaryErrors] = useState<Record<string, string>>({});
   const [snapshotWarnings, setSnapshotWarnings] = useState<Record<string, string>>({});
@@ -3139,7 +3141,11 @@ function VoteStatusView({
   const [validatorMonikers, setValidatorMonikers] = useState<Record<string, string>>({});
   const [completedRoundsOpen, setCompletedRoundsOpen] = useState(false);
   const [completedRoundLimit, setCompletedRoundLimit] = useState(COMPLETED_ROUNDS_PAGE_SIZE);
+  const [completedRoundsLoading, setCompletedRoundsLoading] = useState(false);
   const [completedSummariesLoading, setCompletedSummariesLoading] = useState(false);
+  const [selectedRoundDetail, setSelectedRoundDetail] = useState<chainApi.ChainRound | null>(null);
+  const [selectedRoundLoading, setSelectedRoundLoading] = useState(false);
+  const [selectedRoundError, setSelectedRoundError] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const zcashChain = useChainInfo();
@@ -3153,30 +3159,19 @@ function VoteStatusView({
     setSnapshotWarnings({});
     setEndorsementError("");
     try {
-      const resp = await chainApi.listRounds();
-      const allRounds = (resp.rounds ?? []).sort((a, b) => {
-        const ha = Number(a.created_at_height ?? 0);
-        const hb = Number(b.created_at_height ?? 0);
-        return ha - hb;
-      });
-      setRounds(allRounds);
+      const resp = await chainApi.getRoundOverview();
+      const { currentRounds: nextCurrentRounds } = partitionVoteStatusRounds(resp.current_rounds);
+      setCurrentRounds(nextCurrentRounds);
+      setCompletedRoundCount(resp.completed_round_count);
+      if (resp.completed_round_count === 0) setCompletedRounds([]);
 
-      const roundById = new Map(
-        allRounds.map((round) => [round.vote_round_id ?? "", round])
-      );
       setSummaries((current) => Object.fromEntries(
-        Object.entries(current).filter(([id, summary]) => {
-          const round = roundById.get(id);
-          return (
-            round !== undefined &&
-            isTerminalVoteRoundStatus(round.status) &&
-            isTerminalVoteRoundStatus(summary.status)
-          );
-        })
+        Object.entries(current).filter(([, summary]) =>
+          isTerminalVoteRoundStatus(summary.status)
+        )
       ));
 
-      const { currentRounds } = partitionVoteStatusRounds(allRounds);
-      const eagerSummaryRounds = currentRounds.filter(
+      const eagerSummaryRounds = nextCurrentRounds.filter(
         (round) => shouldEagerlyLoadVoteSummary(round.status)
       );
 
@@ -3189,7 +3184,7 @@ function VoteStatusView({
       });
 
       const snapshotPromise = (async () => {
-        const activeSnapshotEntries = chainApi.getActiveRoundsFromList(allRounds)
+        const activeSnapshotEntries = chainApi.getActiveRoundsFromList(nextCurrentRounds)
           .map((round) => ({
             roundId: round.vote_round_id ?? "",
             height: Number(round.snapshot_height ?? 0),
@@ -3269,7 +3264,7 @@ function VoteStatusView({
       })();
 
       await Promise.all([summaryPromise, snapshotPromise, endorsementPromise]);
-      return allRounds.length;
+      return nextCurrentRounds.length + resp.completed_round_count;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       return -1;
@@ -3277,6 +3272,21 @@ function VoteStatusView({
       setLoading(false);
     }
   }, [precomputedBaseURL, zcashNetwork]);
+
+  const loadCompletedRounds = useCallback(async () => {
+    setCompletedRoundsLoading(true);
+    setError("");
+    try {
+      const resp = await chainApi.listRounds();
+      const { completedRounds: nextCompletedRounds } = partitionVoteStatusRounds(resp.rounds ?? []);
+      setCompletedRounds(nextCompletedRounds);
+      setCompletedRoundCount(nextCompletedRounds.length);
+    } catch (err) {
+      setError(`Completed rounds unavailable: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setCompletedRoundsLoading(false);
+    }
+  }, []);
 
   // Poll until the expected round count is reached after a publish.
   useEffect(() => {
@@ -3307,6 +3317,11 @@ function VoteStatusView({
   }, [expectRoundCount, fetchAll]);
 
   useEffect(() => {
+    if (!completedRoundsOpen) return;
+    void loadCompletedRounds();
+  }, [completedRoundsOpen, loadCompletedRounds]);
+
+  useEffect(() => {
     if (!selectedRoundIdHex) return;
     let cancelled = false;
 
@@ -3330,9 +3345,42 @@ function VoteStatusView({
     };
   }, [selectedRoundIdHex]);
 
-  const { currentRounds, completedRounds } = useMemo(
-    () => partitionVoteStatusRounds(rounds),
-    [rounds]
+  useEffect(() => {
+    const normalizedRoundID = selectedRoundIdHex
+      ? normalizeHex(selectedRoundIdHex)
+      : "";
+    if (!isRoundIdHex(normalizedRoundID)) {
+      setSelectedRoundDetail(null);
+      setSelectedRoundError("");
+      setSelectedRoundLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setSelectedRoundDetail(null);
+    setSelectedRoundError("");
+    setSelectedRoundLoading(true);
+    chainApi.getRound(normalizedRoundID)
+      .then((resp) => {
+        if (!cancelled) setSelectedRoundDetail(resp.round);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setSelectedRoundError(err instanceof Error ? err.message : String(err));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setSelectedRoundLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedRoundIdHex]);
+
+  const rounds = useMemo(
+    () => [...currentRounds, ...completedRounds],
+    [completedRounds, currentRounds]
   );
   const visibleCompletedRounds = useMemo(
     () => completedRounds.slice(0, completedRoundLimit),
@@ -3387,7 +3435,7 @@ function VoteStatusView({
     visibleCompletedRounds,
   ]);
 
-  const completedRoundsControl = completedRounds.length > 0 ? (
+  const completedRoundsControl = completedRoundCount > 0 ? (
     <button
       type="button"
       onClick={() => setCompletedRoundsOpen((open) => !open)}
@@ -3405,17 +3453,19 @@ function VoteStatusView({
           </span>
           <span className="block truncate text-[10px] text-text-muted">
             {completedRoundsOpen
-              ? `Showing ${visibleCompletedRounds.length} of ${completedRounds.length}`
+              ? completedRoundsLoading
+                ? "Loading completed rounds"
+                : `Showing ${visibleCompletedRounds.length} of ${completedRoundCount}`
               : "Hidden until you need historical results"}
           </span>
         </span>
       </span>
       <span className="flex shrink-0 items-center gap-2">
-        {completedSummariesLoading && (
+        {(completedRoundsLoading || completedSummariesLoading) && (
           <Loader2 size={12} className="animate-spin text-text-muted" />
         )}
         <span className="rounded-full bg-surface-3 px-2 py-0.5 font-mono text-[10px] text-text-secondary">
-          {completedRounds.length.toLocaleString()}
+          {completedRoundCount.toLocaleString()}
         </span>
       </span>
     </button>
@@ -3426,7 +3476,7 @@ function VoteStatusView({
     : null;
   const selectedRound =
     normalizedSelectedRoundId && isRoundIdHex(normalizedSelectedRoundId)
-      ? rounds.find((round) => normalizeHex(base64ToHex(round.vote_round_id ?? "")) === normalizedSelectedRoundId)
+      ? selectedRoundDetail ?? rounds.find((round) => normalizeHex(base64ToHex(round.vote_round_id ?? "")) === normalizedSelectedRoundId)
       : null;
 
   if (selectedRoundIdHex) {
@@ -3434,8 +3484,8 @@ function VoteStatusView({
       <VoteRoundEaDetail
         round={selectedRound ?? null}
         roundIdHex={selectedRoundIdHex}
-        loading={loading}
-        error={error}
+        loading={loading || selectedRoundLoading}
+        error={selectedRoundError || error}
         validatorMonikers={validatorMonikers}
         zcashChain={zcashChain}
         onBack={onBackToList}
@@ -3461,7 +3511,10 @@ function VoteStatusView({
             </div>
           </div>
           <button
-            onClick={fetchAll}
+            onClick={() => {
+              void fetchAll();
+              if (completedRoundsOpen) void loadCompletedRounds();
+            }}
             className="p-2 hover:bg-surface-3 rounded-lg text-text-muted hover:text-text-secondary cursor-pointer"
             title="Refresh"
           >
@@ -3483,7 +3536,7 @@ function VoteStatusView({
           </div>
         )}
 
-        {!loading && !error && rounds.length === 0 && (
+        {!loading && !error && currentRounds.length === 0 && completedRoundCount === 0 && (
           <div className="text-center py-12">
             <p className="text-xs text-text-muted">
               No voting rounds found on the chain.
@@ -3855,7 +3908,7 @@ function VoteStatusView({
               </Fragment>
             );
           })}
-          {!completedRoundsOpen && completedRoundsControl}
+          {(!completedRoundsOpen || visibleCompletedRounds.length === 0) && completedRoundsControl}
           {completedRoundsOpen && visibleCompletedRounds.length < completedRounds.length && (
             <button
               type="button"
