@@ -309,15 +309,15 @@ func (p *Processor) alertExpiredUnsubmittedShares() {
 	}
 }
 
-// processBatch takes all ready shares and processes them. It returns false
-// without touching the queue when the local node is not ready.
+// processBatch takes one worker-sized batch of ready shares and processes it.
+// It returns false without touching the queue when the local node is not ready.
 func (p *Processor) processBatch(ctx context.Context) bool {
 	if p.isNodeReady != nil && !p.isNodeReady() {
 		p.logger.Debug("helper processing paused: local node is catching up or stale")
 		return false
 	}
 
-	ready := p.store.TakeReady()
+	ready := p.store.TakeReadyBatch(p.maxConcurrent)
 	if len(ready) == 0 {
 		return true
 	}

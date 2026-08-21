@@ -520,6 +520,15 @@ func (s *ShareStore) NextScheduledTime() (time.Time, bool) {
 // TakeReady returns all shares past their scheduled submission time that are
 // in Received state, transitioning them to Witnessed.
 func (s *ShareStore) TakeReady() []QueuedShare {
+	return s.takeReady(0)
+}
+
+// TakeReadyBatch returns at most limit ready shares, leaving the rest queued.
+func (s *ShareStore) TakeReadyBatch(limit int) []QueuedShare {
+	return s.takeReady(limit)
+}
+
+func (s *ShareStore) takeReady(limit int) []QueuedShare {
 	now := time.Now()
 
 	s.mu.Lock()
@@ -539,6 +548,10 @@ func (s *ShareStore) TakeReady() []QueuedShare {
 
 	var result []QueuedShare
 	for _, key := range readyKeys {
+		if limit > 0 && len(result) >= limit {
+			break
+		}
+
 		// Parse round_id, share_index, proposal_id, and tree_position from key.
 		parts := strings.SplitN(key, ":", 4)
 		if len(parts) != 4 {
