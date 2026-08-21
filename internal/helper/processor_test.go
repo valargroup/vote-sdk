@@ -281,6 +281,57 @@ func TestProcessor_ProcessBatch_WaitsForCheckTxBeforeProof(t *testing.T) {
 	assert.Equal(t, 1, status[roundID].Submitted)
 }
 
+func TestProcessor_ProcessBatch_WaitsForNodeReadiness(t *testing.T) {
+	store := newTestStore(t)
+	prover := &mockProver{}
+	tree := newMockTreeReader()
+	var nodeReady atomic.Bool
+	var submitCalls atomic.Int32
+
+	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		submitCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"tx_hash":"","code":2,"log":"nullifier already spent"}`))
+	}))
+	defer chainServer.Close()
+
+	proc := NewProcessor(
+		store,
+		tree,
+		prover,
+		NewChainSubmitter(chainServer.URL),
+		log.NewNopLogger(),
+		1,
+		nil,
+		WithProcessingReadinessCheck(nodeReady.Load),
+	)
+
+	roundID := hex.EncodeToString(make([]byte, 32))
+	enqueueAndRequireInserted(t, store, testPayload(roundID, 0))
+	scheduledBefore, ok := store.NextScheduledTime()
+	require.True(t, ok)
+	require.False(t, proc.processBatch(context.Background()))
+
+	assert.Equal(t, int32(0), prover.callCount.Load())
+	assert.Equal(t, int32(0), submitCalls.Load())
+	scheduledAfter, ok := store.NextScheduledTime()
+	require.True(t, ok)
+	assert.Equal(t, scheduledBefore, scheduledAfter)
+	share, ok := store.loadShare(roundID, 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, ShareStateReceived, share.State)
+	assert.Equal(t, 0, share.Attempts)
+
+	nodeReady.Store(true)
+	require.True(t, proc.processBatch(context.Background()))
+
+	assert.Equal(t, int32(1), prover.callCount.Load())
+	assert.Equal(t, int32(1), submitCalls.Load())
+	status := store.Status()
+	assert.Equal(t, 1, status[roundID].Submitted)
+}
+
 func TestProcessor_SubmitHeightCacheEvictsOlderBlocks(t *testing.T) {
 	proc := &Processor{
 		submitKeys:        make(map[string]struct{}),

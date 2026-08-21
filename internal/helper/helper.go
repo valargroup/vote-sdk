@@ -32,13 +32,14 @@ type Helper struct {
 //   - prover: generates ZKP #3 proofs (real FFI or mock)
 //   - roundFetcher: queries the chain for round metadata (direct keeper access)
 //   - isRoundActive: checks if a round is still ACTIVE
+//   - isNodeReady: checks that the local Comet node is caught up and fresh
 //   - vcHash: computes vote commitment Poseidon hash
 //   - payloadValidator: checks caller-controlled share commitment relationships
 //   - choiceValidator: checks proposal and vote-decision membership in the round
 //   - shareNFHash: computes share nullifier Poseidon hash before proof generation
 //   - homeDir: the chain's home directory (for default DB path)
 //   - logger: module logger
-func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundInfoFetcher, isRoundActive RoundStatusChecker, vcHash VCHashFunc, payloadValidator SharePayloadValidator, choiceValidator ShareChoiceValidator, shareNFHash ShareNullifierHashFunc, shareNF ShareNullifierChecker, homeDir string, logger log.Logger) (*Helper, error) {
+func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundInfoFetcher, isRoundActive RoundStatusChecker, isNodeReady func() bool, vcHash VCHashFunc, payloadValidator SharePayloadValidator, choiceValidator ShareChoiceValidator, shareNFHash ShareNullifierHashFunc, shareNF ShareNullifierChecker, homeDir string, logger log.Logger) (*Helper, error) {
 	logger = logger.With("module", "helper")
 
 	if cfg.Disable {
@@ -101,6 +102,7 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundI
 		logger,
 		cfg.MaxConcurrentProofs,
 		isRoundActive,
+		WithProcessingReadinessCheck(isNodeReady),
 		WithPreProofShareDeduper(vcHash, shareNFHash, shareNF),
 	)
 

@@ -409,7 +409,7 @@ func (app *SvoteApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIC
 		}
 		return h.ExposeQueueSummary
 	}, func() bool {
-		return app.helperIngressAllowed()
+		return app.HelperNodeReady()
 	}, func() helper.TreeReader {
 		h := app.GetHelper()
 		if h == nil {
@@ -485,16 +485,19 @@ func (app *SvoteApp) resolveAdminPIRServiceURL(_ context.Context) (string, error
 	return cfg.PIRServers[0].URL, nil
 }
 
-func (app *SvoteApp) helperIngressAllowed() bool {
-	healthy, err := app.localNodeProducedRecently(helperMaxBlockStaleness)
+// HelperNodeReady reports whether the local Comet node is caught up and has a
+// recent block. Helper ingress and queued processing both fail closed on this
+// check so stale chain state cannot accept or submit shares.
+func (app *SvoteApp) HelperNodeReady() bool {
+	ready, err := app.localNodeReadyForHelper(helperMaxBlockStaleness)
 	if err != nil {
-		app.Logger().Warn("helper ingress disabled: local Comet status check failed", "error", err)
+		app.Logger().Warn("helper unavailable: local Comet status check failed", "error", err)
 		return false
 	}
-	return healthy
+	return ready
 }
 
-func (app *SvoteApp) localNodeProducedRecently(maxStaleness time.Duration) (bool, error) {
+func (app *SvoteApp) localNodeReadyForHelper(maxStaleness time.Duration) (bool, error) {
 	cometRPC := app.cometRPC
 	if cometRPC == "" {
 		cometRPC = "http://localhost:26657"
@@ -524,6 +527,7 @@ func (app *SvoteApp) localNodeProducedRecently(maxStaleness time.Duration) (bool
 		Result struct {
 			SyncInfo struct {
 				LatestBlockTime string `json:"latest_block_time"`
+				CatchingUp      bool   `json:"catching_up"`
 			} `json:"sync_info"`
 		} `json:"result"`
 	}
@@ -539,7 +543,7 @@ func (app *SvoteApp) localNodeProducedRecently(maxStaleness time.Duration) (bool
 		return false, fmt.Errorf("parse latest_block_time: %w", err)
 	}
 
-	return time.Since(latestBlockTime) <= maxStaleness, nil
+	return !statusResp.Result.SyncInfo.CatchingUp && time.Since(latestBlockTime) <= maxStaleness, nil
 }
 
 // SetHelper publishes the helper instance for concurrent readers.

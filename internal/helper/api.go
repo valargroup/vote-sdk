@@ -576,7 +576,7 @@ func (h *apiHandler) ensureIngressAllowed(w http.ResponseWriter) bool {
 	if h.getIngressAllowed == nil || h.getIngressAllowed() {
 		return true
 	}
-	jsonError(w, "helper ingress disabled: local node not producing recent blocks", http.StatusServiceUnavailable)
+	jsonError(w, "helper ingress disabled: local node is catching up or stale", http.StatusServiceUnavailable)
 	return false
 }
 

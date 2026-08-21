@@ -8,6 +8,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Pause helper ingress and queued share processing until the local Comet node
+  is caught up and its latest block is fresh.
 - Let Shielded Vote Creator import its JSON exports as new editable drafts,
   with schema validation and fresh local IDs.
 - Show production share queues only when a current vote-manager wallet is
