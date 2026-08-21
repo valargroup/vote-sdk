@@ -419,11 +419,10 @@ issue alerts on that stage tag to page when share data was accepted by the
 helper but not submitted on-chain before the round closed.
 
 Share-processing attempt failures emit `alert=helper_share_failure` with
-`stage`, `failure_action`, `round_id`, and `share_index`. Both alert classes use
-stable issue fingerprints that include environment and helper server. Repeated
-attempts with the same queue action in one round and stage stay grouped, while
-a different helper, environment, round, stage, or queue action creates a
-separate issue.
+`stage`, `failure_action`, `round_id`, and `share_index`. Stable fingerprints
+group retries by helper, round, processing stage, and queue action. The share
+index remains diagnostic context, so multiple shares for one incident stay
+grouped.
 
 ### On-Chain State (KV Store Keys)
 

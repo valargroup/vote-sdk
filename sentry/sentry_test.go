@@ -189,10 +189,6 @@ func TestStartSpanKeepsParentTransactionName(t *testing.T) {
 
 func TestCaptureErrWithGrouping(t *testing.T) {
 	transport := initTestSentry(t)
-	groupingContext.Store(&issueGroupingContext{
-		environment: "staging",
-		serverName:  "helper-a",
-	})
 
 	CaptureErrWithGrouping(
 		errors.New("temporary submit failure at height 123"),
@@ -215,7 +211,6 @@ func TestCaptureErrWithGrouping(t *testing.T) {
 		"helper_share_failure",
 		"round-1",
 		"submit_http",
-		"staging",
 		"helper-a",
 	}
 	if !reflect.DeepEqual(event.Fingerprint, wantFingerprint) {
@@ -232,7 +227,9 @@ func initTestSentry(t *testing.T) *captureTransport {
 	transport := &captureTransport{}
 	err := sentrylib.Init(sentrylib.ClientOptions{
 		Dsn:              "https://public@example.com/1",
+		Environment:      "staging",
 		EnableTracing:    true,
+		ServerName:       "helper-a",
 		TracesSampleRate: 1.0,
 		Transport:        transport,
 	})
@@ -242,7 +239,6 @@ func initTestSentry(t *testing.T) *captureTransport {
 	sentryEnabled.Store(true)
 	t.Cleanup(func() {
 		sentryEnabled.Store(false)
-		groupingContext.Store(nil)
 		sentrylib.CurrentHub().BindClient(nil)
 	})
 
