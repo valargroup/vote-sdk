@@ -2,6 +2,8 @@ package sentry
 
 import (
 	"context"
+	"errors"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -185,6 +187,45 @@ func TestStartSpanKeepsParentTransactionName(t *testing.T) {
 	}
 }
 
+func TestCaptureErrWithGrouping(t *testing.T) {
+	transport := initTestSentry(t)
+	groupingContext.Store(&issueGroupingContext{
+		environment: "staging",
+		serverName:  "helper-a",
+	})
+
+	CaptureErrWithGrouping(
+		errors.New("temporary submit failure at height 123"),
+		map[string]string{
+			"alert":    "helper_share_failure",
+			"round_id": "round-1",
+			"stage":    "submit_http",
+		},
+		"helper_share_failure",
+		"round-1",
+		"submit_http",
+	)
+
+	events := transport.Events()
+	if len(events) != 1 {
+		t.Fatalf("sent %d events, want 1", len(events))
+	}
+	event := events[0]
+	wantFingerprint := []string{
+		"helper_share_failure",
+		"round-1",
+		"submit_http",
+		"staging",
+		"helper-a",
+	}
+	if !reflect.DeepEqual(event.Fingerprint, wantFingerprint) {
+		t.Fatalf("fingerprint = %#v, want %#v", event.Fingerprint, wantFingerprint)
+	}
+	if event.Tags["alert"] != "helper_share_failure" {
+		t.Fatalf("alert tag = %q, want helper_share_failure", event.Tags["alert"])
+	}
+}
+
 func initTestSentry(t *testing.T) *captureTransport {
 	t.Helper()
 
@@ -201,6 +242,7 @@ func initTestSentry(t *testing.T) *captureTransport {
 	sentryEnabled.Store(true)
 	t.Cleanup(func() {
 		sentryEnabled.Store(false)
+		groupingContext.Store(nil)
 		sentrylib.CurrentHub().BindClient(nil)
 	})
 

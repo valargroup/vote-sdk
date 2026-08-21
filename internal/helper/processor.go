@@ -34,6 +34,7 @@ func (e *waitingForNewBlockError) Error() string {
 const (
 	failureStagePanic            = "panic"
 	failureStageRoundStatusCheck = "round_status_check"
+	failureStageRoundClosed      = "round_closed_unsubmitted_shares"
 	failureStageDecodeRoundID    = "decode_round_id"
 	failureStageTreeStatus       = "tree_status"
 	failureStageMerklePath       = "merkle_path"
@@ -41,6 +42,11 @@ const (
 	failureStageProofGenerate    = "proof_generate"
 	failureStageSubmitHTTP       = "submit_http"
 	failureStageSubmitChain      = "submit_chain_reject"
+)
+
+const (
+	helperShareFailureAlert = "helper_share_failure"
+	helperRoundClosedAlert  = "helper_round_closed"
 )
 
 type shareFailureAction int
@@ -260,15 +266,16 @@ func (p *Processor) alertExpiredUnsubmittedShares() {
 			continue
 		}
 		err := fmt.Errorf("round closed with unsubmitted shares")
-		CaptureErr(err, map[string]string{
+		CaptureErrWithGrouping(err, map[string]string{
+			"alert":              helperRoundClosedAlert,
 			"round_id":           summary.RoundID,
-			"stage":              "round_closed_unsubmitted_shares",
+			"stage":              failureStageRoundClosed,
 			"total_shares":       strconv.Itoa(summary.Total),
 			"pending_shares":     strconv.Itoa(summary.Pending),
 			"failed_shares":      strconv.Itoa(summary.Failed),
 			"submitted_shares":   strconv.Itoa(summary.Submitted),
 			"unsubmitted_shares": strconv.Itoa(unsubmitted),
-		})
+		}, helperRoundClosedAlert, summary.RoundID, failureStageRoundClosed)
 		p.logger.Error("round closed with unsubmitted shares",
 			"round_id", summary.RoundID,
 			"total", summary.Total,
@@ -319,11 +326,7 @@ func (p *Processor) processBatch(ctx context.Context) {
 				if r := recover(); r != nil {
 					err := failedShareAttemptError(failureStagePanic, fmt.Errorf("panic in processShare: %v", r))
 					spanErr = err
-					CaptureErr(err, map[string]string{
-						"round_id":    share.Payload.VoteRoundID,
-						"share_index": strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
-						"stage":       failureStagePanic,
-					})
+					captureShareProcessingFailure(share, failureStagePanic, err)
 					p.logger.Error("panic in share processing",
 						"round_id", share.Payload.VoteRoundID,
 						"share_index", share.Payload.EncShare.ShareIndex,
@@ -363,11 +366,7 @@ func (p *Processor) processBatch(ctx context.Context) {
 						"share_index", share.Payload.EncShare.ShareIndex,
 						"error", err,
 					)
-					CaptureErr(err, map[string]string{
-						"round_id":    share.Payload.VoteRoundID,
-						"share_index": strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
-						"stage":       failureStageRoundStatusCheck,
-					})
+					captureShareProcessingFailure(share, failureStageRoundStatusCheck, err)
 					p.markShareFailure(share, err)
 					return nil
 				}
@@ -416,11 +415,7 @@ func (p *Processor) processBatch(ctx context.Context) {
 					"share_index", share.Payload.EncShare.ShareIndex,
 					"error", err,
 				)
-				CaptureErr(err, map[string]string{
-					"round_id":    share.Payload.VoteRoundID,
-					"share_index": strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
-					"stage":       stage,
-				})
+				captureShareProcessingFailure(share, stage, err)
 				p.markShareFailure(share, err)
 				return nil
 			}
@@ -441,6 +436,24 @@ func (p *Processor) processBatch(ctx context.Context) {
 		return
 	}
 	batchSpan.Finish(nil)
+}
+
+// captureShareProcessingFailure groups repeated attempts for one helper,
+// round, and failure stage while preserving the share index as diagnostic
+// context. A new round or stage creates a separate actionable issue.
+func captureShareProcessingFailure(share QueuedShare, stage string, err error) {
+	action, _ := classifyShareFailure(err)
+	actionTag := "failed"
+	if action == shareFailureRetry {
+		actionTag = "retry"
+	}
+	CaptureErrWithGrouping(err, map[string]string{
+		"alert":          helperShareFailureAlert,
+		"failure_action": actionTag,
+		"round_id":       share.Payload.VoteRoundID,
+		"share_index":    strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
+		"stage":          stage,
+	}, helperShareFailureAlert, share.Payload.VoteRoundID, stage)
 }
 
 // markShareFailure records err using the queue action carried by its

@@ -413,10 +413,16 @@ tag that identifies the helper code path that emitted the error, such as
 When a voting round closes, the helper summarizes queued shares before purging
 expired witness data. If any shares for that round are still pending or failed,
 it emits a Sentry error with `stage=round_closed_unsubmitted_shares` and tags
-for `round_id`, `total_shares`, `pending_shares`, `failed_shares`,
-`submitted_shares`, and `unsubmitted_shares`. Configure Sentry issue alerts on
-that stage tag to page when share data was accepted by the helper but not
-submitted on-chain before the round closed.
+for `alert=helper_round_closed`, `round_id`, `total_shares`, `pending_shares`,
+`failed_shares`, `submitted_shares`, and `unsubmitted_shares`. Configure Sentry
+issue alerts on that stage tag to page when share data was accepted by the
+helper but not submitted on-chain before the round closed.
+
+Share-processing attempt failures emit `alert=helper_share_failure` with
+`stage`, `failure_action`, `round_id`, and `share_index`. Both alert classes use
+stable issue fingerprints that include environment and helper server. Repeated
+attempts in the same round and stage stay grouped, while a different helper,
+environment, round, or stage creates a separate issue.
 
 ### On-Chain State (KV Store Keys)
 

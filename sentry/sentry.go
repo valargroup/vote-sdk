@@ -14,6 +14,13 @@ import (
 
 var sentryEnabled atomic.Bool
 
+type issueGroupingContext struct {
+	environment string
+	serverName  string
+}
+
+var groupingContext atomic.Pointer[issueGroupingContext]
+
 // TraceSpan is a small wrapper around a Sentry span that keeps callers from
 // depending on sentry-go directly. Methods are safe to call when tracing is
 // disabled.
@@ -39,10 +46,7 @@ func InitSentry(dsn, release, serverName string, logger log.Logger) error {
 	if dsn == "" {
 		return nil
 	}
-	env := os.Getenv("SENTRY_ENVIRONMENT")
-	if env == "" {
-		env = "production"
-	}
+	env := sentryEnvironment()
 	err := sentrylib.Init(sentrylib.ClientOptions{
 		Dsn:              dsn,
 		Release:          release,
@@ -65,10 +69,33 @@ func InitSentry(dsn, release, serverName string, logger log.Logger) error {
 			scope.SetTag("validator", serverName)
 		})
 	}
+	groupingContext.Store(&issueGroupingContext{
+		environment: env,
+		serverName:  effectiveServerName(serverName),
+	})
 	sentryEnabled.Store(true)
 	logger.Info("sentry error tracking enabled", "server_name", serverName)
 
 	return nil
+}
+
+func sentryEnvironment() string {
+	environment := os.Getenv("SENTRY_ENVIRONMENT")
+	if environment == "" {
+		return "production"
+	}
+	return environment
+}
+
+func effectiveServerName(serverName string) string {
+	if serverName != "" {
+		return serverName
+	}
+	hostname, err := os.Hostname()
+	if err != nil || hostname == "" {
+		return "unknown"
+	}
+	return hostname
 }
 
 func filterNoisyErrorEvents(event *sentrylib.Event, _ *sentrylib.EventHint) *sentrylib.Event {
@@ -135,14 +162,44 @@ func FlushSentry() {
 // CaptureErr sends an error to Sentry with optional string tags for context
 // (e.g. round_id, share_index). No-op when Sentry is not initialized.
 func CaptureErr(err error, tags map[string]string) {
+	captureErr(err, tags, nil)
+}
+
+// CaptureErrWithGrouping sends an error with a stable caller-defined issue
+// fingerprint. The configured environment and server name are appended so an
+// incident on one fleet member cannot suppress alerts for another. Callers
+// should use stable operational dimensions and omit retry-specific values.
+func CaptureErrWithGrouping(err error, tags map[string]string, fingerprintParts ...string) {
+	if len(fingerprintParts) == 0 {
+		CaptureErr(err, tags)
+		return
+	}
+
+	grouping := groupingContext.Load()
+	environment := sentryEnvironment()
+	serverName := effectiveServerName("")
+	if grouping != nil {
+		environment = grouping.environment
+		serverName = grouping.serverName
+	}
+	fingerprint := make([]string, 0, len(fingerprintParts)+2)
+	fingerprint = append(fingerprint, fingerprintParts...)
+	fingerprint = append(fingerprint, environment, serverName)
+	captureErr(err, tags, fingerprint)
+}
+
+func captureErr(err error, tags map[string]string, fingerprint []string) {
 	if err == nil || !sentryEnabled.Load() {
 		return
 	}
-	if len(tags) > 0 {
+	if len(tags) > 0 || len(fingerprint) > 0 {
 		hub := sentrylib.CurrentHub().Clone()
 		hub.ConfigureScope(func(scope *sentrylib.Scope) {
 			for k, v := range tags {
 				scope.SetTag(k, v)
+			}
+			if len(fingerprint) > 0 {
+				scope.SetFingerprint(fingerprint)
 			}
 		})
 		hub.CaptureException(err)

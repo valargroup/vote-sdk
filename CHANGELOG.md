@@ -8,6 +8,9 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Group helper share-processing and round-close Sentry issues by environment,
+  helper, round, and stage so retries do not spam alerts or suppress a distinct
+  incident on another fleet member.
 - Let Shielded Vote Creator import its JSON exports as new editable drafts,
   with schema validation and fresh local IDs.
 - Show production share queues only when a current vote-manager wallet is
