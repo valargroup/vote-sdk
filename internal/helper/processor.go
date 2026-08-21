@@ -439,8 +439,8 @@ func (p *Processor) processBatch(ctx context.Context) {
 }
 
 // captureShareProcessingFailure groups repeated attempts for one helper,
-// round, and failure stage while preserving the share index as diagnostic
-// context. A new round or stage creates a separate actionable issue.
+// round, failure stage, and queue action while preserving the share index as
+// diagnostic context. A new round, stage, or action creates a separate issue.
 func captureShareProcessingFailure(share QueuedShare, stage string, err error) {
 	action, _ := classifyShareFailure(err)
 	actionTag := "failed"
@@ -453,7 +453,11 @@ func captureShareProcessingFailure(share QueuedShare, stage string, err error) {
 		"round_id":       share.Payload.VoteRoundID,
 		"share_index":    strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
 		"stage":          stage,
-	}, helperShareFailureAlert, share.Payload.VoteRoundID, stage)
+	}, helperShareFailureFingerprint(share.Payload.VoteRoundID, stage, actionTag)...)
+}
+
+func helperShareFailureFingerprint(roundID, stage, action string) []string {
+	return []string{helperShareFailureAlert, roundID, stage, action}
 }
 
 // markShareFailure records err using the queue action carried by its

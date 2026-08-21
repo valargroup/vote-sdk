@@ -206,11 +206,12 @@ Every captured error includes contextual tags where available:
   attempt, or `failed` when the attempt uses the bounded failed-share budget
 
 Helper processing alerts use a stable Sentry fingerprint containing the alert
-class, round, stage, deployment environment, and helper server. This keeps
-retries and multiple failed shares in the same operational incident grouped,
-without allowing staging, another helper, or another round to suppress its
-first alert. The share index remains a diagnostic tag and is deliberately not
-part of the fingerprint.
+class, round, stage, queue action, deployment environment, and helper server.
+This keeps retries and multiple failed shares in the same operational incident
+grouped without allowing a system retry to suppress a failed-attempt issue, or
+allowing staging, another helper, or another round to suppress its first alert.
+The share index remains a diagnostic tag and is deliberately not part of the
+fingerprint.
 
 ### Release tracking
 
