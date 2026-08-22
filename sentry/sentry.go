@@ -139,9 +139,9 @@ func CaptureErr(err error, tags map[string]string) {
 }
 
 // CaptureErrWithGrouping sends an error with a stable caller-defined issue
-// fingerprint. The configured server name is appended so an incident on one
-// fleet member cannot suppress alerts for another. Callers should use stable
-// operational dimensions and omit retry-specific values.
+// fingerprint. The configured server name scopes the fingerprint to the
+// process emitting the event. Callers should use stable operational dimensions
+// and omit retry-specific values.
 func CaptureErrWithGrouping(err error, tags map[string]string, fingerprintParts ...string) {
 	if len(fingerprintParts) == 0 {
 		CaptureErr(err, tags)

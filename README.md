@@ -408,7 +408,9 @@ pinned `to_height` until `next_from_height` is zero.
 The helper server uses Sentry when `[helper].sentry_dsn` is set in `app.toml`
 or `SENTRY_DSN` is present in the environment. Sentry events include a `stage`
 tag that identifies the helper code path that emitted the error, such as
-`enqueue`, `process_share`, `leaf_read`, `helper_new`, or `tree_status`.
+`enqueue`, `process_share`, `leaf_read`, `helper_new`, or `tree_status`. These
+events describe only the helper instance running this process; they do not
+monitor other helper servers.
 
 When a voting round closes, the helper summarizes queued shares before purging
 expired witness data. If any shares for that round are still pending or failed,
@@ -420,9 +422,9 @@ helper but not submitted on-chain before the round closed.
 
 Share-processing attempt failures emit `alert=helper_share_failure` with
 `stage`, `failure_action`, `round_id`, and `share_index`. Stable fingerprints
-group retries by helper, round, processing stage, and queue action. The share
-index remains diagnostic context, so multiple shares for one incident stay
-grouped.
+group retries from this helper instance by round, processing stage, and queue
+action. The share index remains diagnostic context, so multiple shares for one
+incident stay grouped.
 
 ### On-Chain State (KV Store Keys)
 

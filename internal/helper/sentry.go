@@ -24,7 +24,7 @@ func CaptureErr(err error, tags map[string]string) {
 }
 
 // CaptureErrWithGrouping delegates to the shared Sentry package and uses the
-// stable parts to keep alert issues separate by helper.
+// stable parts to group alerts emitted by this helper instance.
 func CaptureErrWithGrouping(err error, tags map[string]string, fingerprintParts ...string) {
 	sentry.CaptureErrWithGrouping(err, tags, fingerprintParts...)
 }

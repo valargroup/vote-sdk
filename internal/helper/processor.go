@@ -438,8 +438,8 @@ func (p *Processor) processBatch(ctx context.Context) {
 	batchSpan.Finish(nil)
 }
 
-// captureShareProcessingFailure groups repeated attempts for one helper,
-// round, failure stage, and queue action while preserving the share index as
+// captureShareProcessingFailure groups repeated attempts from the local helper
+// by round, failure stage, and queue action while preserving the share index as
 // diagnostic context. A new round, stage, or action creates a separate issue.
 func captureShareProcessingFailure(share QueuedShare, stage string, err error) {
 	action, _ := classifyShareFailure(err)

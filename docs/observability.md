@@ -206,9 +206,11 @@ Every captured error includes contextual tags where available:
   attempt, or `failed` when the attempt uses the bounded failed-share budget
 
 Share-processing alerts use a stable Sentry fingerprint containing the alert
-class, helper server, round, processing stage, and queue action. Round-close
-summaries group by alert class, helper, and round. The share index stays
-diagnostic context, so retries and multiple shares group together.
+class, local helper identity, round, processing stage, and queue action.
+Round-close summaries group by alert class, local helper identity, and round.
+The share index stays diagnostic context, so retries and multiple shares group
+together. These alerts come from the locally running helper process; they do
+not probe or monitor other helper servers.
 
 ### Release tracking
 
