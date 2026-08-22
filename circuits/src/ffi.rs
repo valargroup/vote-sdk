@@ -441,7 +441,7 @@ pub unsafe extern "C" fn sv_verify_delegation_proof(
     }
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        use group::Curve;
+        use voting_crypto_deps::pasta_curves::group::Curve;
         use voting_crypto_deps::pasta_curves::{
             arithmetic::CurveAffine, group::GroupEncoding, pallas,
         };
@@ -683,7 +683,7 @@ pub unsafe extern "C" fn sv_verify_vote_proof(
     }
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        use group::Curve;
+        use voting_crypto_deps::pasta_curves::group::Curve;
         use voting_crypto_deps::pasta_curves::{
             arithmetic::CurveAffine, group::GroupEncoding, pallas,
         };
@@ -1097,7 +1097,7 @@ pub unsafe extern "C" fn sv_generate_share_reveal(
     }
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        use group::Curve;
+        use voting_crypto_deps::pasta_curves::group::Curve;
         use voting_crypto_deps::pasta_curves::{
             arithmetic::CurveAffine, group::GroupEncoding, pallas,
         };
@@ -1885,7 +1885,7 @@ pub unsafe extern "C" fn sv_validate_share_payload(
     }
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        use group::Curve;
+        use voting_crypto_deps::pasta_curves::group::Curve;
         use voting_crypto_deps::pasta_curves::{
             arithmetic::CurveAffine, group::GroupEncoding, pallas,
         };
@@ -2225,7 +2225,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_generate_share_reveal() {
-        use group::Curve;
+        use voting_crypto_deps::pasta_curves::group::Curve;
         use voting_crypto_deps::pasta_curves::{
             arithmetic::CurveAffine, group::GroupEncoding, pallas,
         };

@@ -32,9 +32,13 @@ cargo check --manifest-path "$e2e_manifest" --all-targets --locked
 cargo tree --manifest-path "$e2e_manifest" --locked -e normal --prefix none \
   > "$backend_tmp/e2e-tree.txt"
 
-if grep -Eq '^zakura-[^ ]+ v' "$backend_tmp/e2e-tree.txt"; then
+# `zakura-wallet-lib` is the wallet selector facade used by both modes. In
+# upstream mode it must be the only package whose name starts with `zakura-`.
+if grep -E '^zakura-[^ ]+ v' "$backend_tmp/e2e-tree.txt" \
+  | grep -Fv 'zakura-wallet-lib v' > /dev/null; then
   echo "The upstream E2E graph contains a Zakura package:"
-  grep -E '^zakura-[^ ]+ v' "$backend_tmp/e2e-tree.txt"
+  grep -E '^zakura-[^ ]+ v' "$backend_tmp/e2e-tree.txt" \
+    | grep -Fv 'zakura-wallet-lib v'
   exit 1
 fi
 
@@ -43,7 +47,7 @@ if cargo check --manifest-path "$circuit_manifest" --locked --no-default-feature
   echo "The circuit crate unexpectedly accepted no backend feature."
   exit 1
 fi
-if ! grep -Fq 'enable exactly one of the `upstream` or `zakura` features' "$backend_tmp/neither.log"; then
+if ! grep -Fq 'enable at least one upstream or Zakura dependency feature' "$backend_tmp/neither.log"; then
   cat "$backend_tmp/neither.log"
   echo "The no-backend build failed for an unexpected reason."
   exit 1
@@ -54,7 +58,7 @@ if cargo check --manifest-path "$circuit_manifest" --locked --no-default-feature
   echo "The circuit crate unexpectedly accepted both backend features."
   exit 1
 fi
-if ! grep -Fq 'features `upstream` and `zakura` cannot be enabled together' "$backend_tmp/both.log"; then
+if ! grep -Fq 'upstream and Zakura dependency features cannot be enabled together' "$backend_tmp/both.log"; then
   cat "$backend_tmp/both.log"
   echo "The dual-backend build failed for an unexpected reason."
   exit 1

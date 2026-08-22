@@ -9,10 +9,10 @@ description = "Rust E2E API tests for Shielded-Vote voting flow (replaces TypeSc
 shielded-vote-circuits = { path = "../circuits", default-features = false, features = ["upstream"] }
 
 orchard = { version = "0.15", features = ["unstable-voting-circuits"] }
-voting-circuits = "=0.10.0"
-vote-commitment-tree = "=0.5.0"
-vote-commitment-tree-client = { version = "=0.7.0", features = ["http"] }
-zcash_voting = "=3.0.0"
+voting-circuits = { version = "=0.10.3", default-features = false, features = ["upstream"] }
+vote-commitment-tree = { version = "=0.5.2", default-features = false, features = ["upstream"] }
+vote-commitment-tree-client = { version = "=0.7.2", default-features = false, features = ["http", "upstream"] }
+zcash_voting = { version = "=3.1.0-rc.7", default-features = false, features = ["upstream"] }
 
 # HTTP and JSON
 reqwest = { version = "0.12", features = ["blocking", "json"] }
@@ -48,10 +48,5 @@ incrementalmerkletree = "0.8"
 [dev-dependencies]
 rand = "0.8"
 rand_chacha = "0.3"
-
-[patch.crates-io]
-imt-tree = { git = "https://github.com/valargroup/vote-nullifier-pir", rev = "3a89f2838e64475746805c25a2f999c8dc96adff" }
-vote-commitment-tree = { git = "https://github.com/valargroup/zcash_voting", rev = "19296ce13ccf4428878ee4eb5c96a0d4d7063d2e" }
-voting-circuits = { git = "https://github.com/valargroup/voting-circuits", rev = "83427979fccb8ae3bf010e21691742c78d283bc8" }
 
 [workspace]

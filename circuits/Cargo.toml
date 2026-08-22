@@ -23,35 +23,19 @@ zakura = [
 ]
 
 [dependencies]
-# This selector facade is not published yet, so it is the one intentional
-# direct git dependency in the temporary draft stack.
-voting-crypto-deps = { version = "0.1.0", git = "https://github.com/valargroup/voting-circuits", rev = "83427979fccb8ae3bf010e21691742c78d283bc8", default-features = false }
-group = "0.13"
-rand_core = { version = "0.6", features = ["getrandom"] }
-vote-commitment-tree = { version = "=0.5.0", default-features = false }
-voting-circuits = { version = "=0.10.0", default-features = false }
-imt-tree = { version = "=0.2.1", default-features = false }
+voting-crypto-deps = { version = "=0.1.2", default-features = false }
+vote-commitment-tree = { version = "=0.5.2", default-features = false }
+voting-circuits = { version = "=0.10.3", default-features = false }
+imt-tree = { version = "=0.4.0", default-features = false }
 incrementalmerkletree = "0.8"
 nonempty = "0.11"
 zcash_protocol = "0.10"
 hex = "0.4"
 
-[dependencies.ff]
-version = "0.13"
-
 [dev-dependencies]
-rand_core = { version = "0.6", features = ["getrandom"] }
-rand = "0.8"
 blake2b_simd = "1"
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-
-# These selector-enabled crates are not released yet. Keep their normal
-# version requirements above and let this workspace own the temporary pins.
-[patch.crates-io]
-imt-tree = { git = "https://github.com/valargroup/vote-nullifier-pir", rev = "3a89f2838e64475746805c25a2f999c8dc96adff" }
-vote-commitment-tree = { git = "https://github.com/valargroup/zcash_voting", rev = "19296ce13ccf4428878ee4eb5c96a0d4d7063d2e" }
-voting-circuits = { git = "https://github.com/valargroup/voting-circuits", rev = "83427979fccb8ae3bf010e21691742c78d283bc8" }
 
 [workspace]
