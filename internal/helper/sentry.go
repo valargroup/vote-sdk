@@ -23,6 +23,12 @@ func CaptureErr(err error, tags map[string]string) {
 	sentry.CaptureErr(err, tags)
 }
 
+// CaptureErrWithGrouping delegates to the shared Sentry package and uses the
+// stable parts to group alerts emitted by this helper instance.
+func CaptureErrWithGrouping(err error, tags map[string]string, fingerprintParts ...string) {
+	sentry.CaptureErrWithGrouping(err, tags, fingerprintParts...)
+}
+
 // TraceSpan wraps a Sentry performance span.
 type TraceSpan = sentry.TraceSpan
 
