@@ -1,4 +1,4 @@
-use halo2_proofs::{
+use voting_crypto_deps::halo2_proofs::{
     pasta::{EqAffine, Fp},
     plonk::{self, verify_proof, SingleVerifier},
     poly::commitment::Params,

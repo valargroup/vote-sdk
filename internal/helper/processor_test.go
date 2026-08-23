@@ -622,6 +622,19 @@ func TestProcessor_ProcessBatch_ProofFailureSpendsFailedAttempt(t *testing.T) {
 	}
 }
 
+func TestHelperShareFailureFingerprintSeparatesQueueActions(t *testing.T) {
+	retry := helperShareFailureFingerprint("round-1", failureStageSubmitHTTP, "retry")
+	failed := helperShareFailureFingerprint("round-1", failureStageSubmitHTTP, "failed")
+
+	assert.Equal(t, []string{
+		helperShareFailureAlert,
+		"round-1",
+		failureStageSubmitHTTP,
+		"retry",
+	}, retry)
+	assert.NotEqual(t, retry, failed)
+}
+
 func TestProcessor_ProcessBatch_SubmitCancellationReturnsShareToPending(t *testing.T) {
 	store := newTestStore(t)
 	prover := &mockProver{}

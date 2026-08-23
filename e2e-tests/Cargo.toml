@@ -5,14 +5,14 @@ edition = "2021"
 description = "Rust E2E API tests for Shielded-Vote voting flow (replaces TypeScript suite)"
 
 [dependencies]
-# Same-repo path dep (circuits/ is a sibling directory)
-shielded-vote-circuits = { path = "../circuits" }
+# Keep the independent E2E graph on the upstream backend.
+shielded-vote-circuits = { path = "../circuits", default-features = false, features = ["upstream"] }
 
 orchard = { version = "0.15", features = ["unstable-voting-circuits"] }
-voting-circuits = "=0.10.0"
-vote-commitment-tree = "=0.5.0"
-vote-commitment-tree-client = { version = "=0.7.0", features = ["http"] }
-zcash_voting = "=3.0.0"
+voting-circuits = { version = "=0.10.3", default-features = false, features = ["upstream"] }
+vote-commitment-tree = { version = "=0.5.2", default-features = false, features = ["upstream"] }
+vote-commitment-tree-client = { version = "=0.7.2", default-features = false, features = ["http", "upstream"] }
+zcash_voting = { version = "=3.1.0-rc.7", default-features = false, features = ["upstream"] }
 
 # HTTP and JSON
 reqwest = { version = "0.12", features = ["blocking", "json"] }
