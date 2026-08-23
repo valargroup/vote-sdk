@@ -16,6 +16,9 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
   preserving an explicit upstream Zcash mode for compatibility testing.
 - Group share failures emitted by the configured helper instance by round,
   processing stage, and queue action, with separate round-close summaries.
+
+## v1.4.0
+
 - Let Shielded Vote Creator import its JSON exports as new editable drafts,
   with schema validation and fresh local IDs.
 - Show production share queues only when a current vote-manager wallet is
