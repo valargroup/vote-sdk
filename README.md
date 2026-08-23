@@ -53,6 +53,11 @@ make init
 make start
 ```
 
+The circuit crate defaults to the Zakura cryptography backend, and the Make,
+mise, Docker, and release builds select it explicitly. Pass
+`--no-default-features --features upstream` for an upstream Zcash build. The
+E2E workspace deliberately selects the upstream backend.
+
 ### Consensus timing defaults
 
 `svoted` overrides CometBFT defaults at startup to reduce block time (~1.2s

@@ -8,12 +8,12 @@
 
 use std::marker::PhantomData;
 
-use group::ff::Field;
-use halo2_proofs::{
+use voting_crypto_deps::halo2_proofs::{
     circuit::{AssignedCell, Chip, Layouter, Region, SimpleFloorPlanner, Value},
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Fixed, Instance, Selector},
     poly::Rotation,
 };
+use voting_crypto_deps::pasta_curves::group::ff::Field;
 
 /// The constant multiplier baked into the circuit: constant * a^2 * b^2 = c.
 pub const CIRCUIT_CONSTANT: u64 = 7;
@@ -232,13 +232,13 @@ impl<F: Field> Circuit<F> for ToyCircuit<F> {
 // Prove / verify helpers (used by FFI and tests)
 // ---------------------------------------------------------------------------
 
-use halo2_proofs::{
+use voting_crypto_deps::halo2_proofs::{
     pasta::{EqAffine, Fp},
     plonk::{create_proof, keygen_pk, keygen_vk},
     poly::commitment::Params,
     transcript::{Blake2bWrite, Challenge255},
 };
-use rand_core::OsRng;
+use voting_crypto_deps::rand::rngs::OsRng;
 
 use crate::proof::{verify_halo2_proof_bytes, ProofVerifyError};
 
@@ -252,8 +252,8 @@ pub fn toy_params() -> Params<EqAffine> {
 pub fn toy_proving_key(
     params: &Params<EqAffine>,
 ) -> (
-    halo2_proofs::plonk::ProvingKey<EqAffine>,
-    halo2_proofs::plonk::VerifyingKey<EqAffine>,
+    voting_crypto_deps::halo2_proofs::plonk::ProvingKey<EqAffine>,
+    voting_crypto_deps::halo2_proofs::plonk::VerifyingKey<EqAffine>,
 ) {
     let empty_circuit = ToyCircuit::<Fp> {
         constant: Fp::from(CIRCUIT_CONSTANT),
@@ -322,7 +322,7 @@ pub fn verify_toy(proof: &[u8], public_input: &Fp) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use halo2_proofs::{dev::MockProver, pasta::Fp};
+    use voting_crypto_deps::halo2_proofs::{dev::MockProver, pasta::Fp};
 
     #[test]
     fn test_mock_prover_valid() {

@@ -7,30 +7,32 @@ description = "Halo2 ZKP circuits and FFI verification for the Shielded-Vote cha
 [lib]
 crate-type = ["staticlib", "lib"]
 
+[features]
+default = ["zakura"]
+upstream = [
+    "voting-crypto-deps/upstream-validator",
+    "voting-circuits/upstream",
+    "imt-tree/upstream",
+    "vote-commitment-tree/upstream",
+]
+zakura = [
+    "voting-crypto-deps/zakura-validator",
+    "voting-circuits/zakura",
+    "imt-tree/zakura",
+    "vote-commitment-tree/zakura",
+]
+
 [dependencies]
-halo2_proofs = { version = "0.3", features = ["batch"] }
-pasta_curves = "0.5"
-group = "0.13"
-rand_core = { version = "0.6", features = ["getrandom"] }
-reddsa = { version = "0.5", default-features = false }
-vote-commitment-tree = "=0.5.0"
-orchard = { version = "0.15", features = ["unstable-voting-circuits"] }
-voting-circuits = "=0.10.0"
-imt-tree = "0.2.1"
+voting-crypto-deps = { version = "=0.1.2", default-features = false }
+vote-commitment-tree = { version = "=0.5.2", default-features = false }
+voting-circuits = { version = "=0.10.3", default-features = false }
+imt-tree = { version = "=0.4.0", default-features = false }
 incrementalmerkletree = "0.8"
 nonempty = "0.11"
-zcash_primitives = { version = "0.30", default-features = false, features = ["std"] }
 zcash_protocol = "0.10"
 hex = "0.4"
-halo2_gadgets = "=0.5.0"
-
-[dependencies.ff]
-version = "0.13"
 
 [dev-dependencies]
-rand_core = { version = "0.6", features = ["getrandom"] }
-rand = "0.8"
-reddsa = { version = "0.5", features = ["std"] }
 blake2b_simd = "1"
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }

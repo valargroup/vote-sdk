@@ -14,13 +14,12 @@
 //! Delegation fixture (ZKP #1) is no longer generated here; the Rust E2E tests
 //! build the delegation bundle inline via e2e_tests::setup::build_delegation_bundle_for_test.
 
-use pasta_curves::group::ff::PrimeField;
 use std::fs;
 use std::path::Path;
+use voting_crypto_deps::pasta_curves::group::ff::PrimeField;
 
 use blake2b_simd::Params as Blake2bParams;
-use rand::{thread_rng, RngCore};
-use reddsa::{orchard as reddsa_orchard, SigningKey, VerificationKey};
+use voting_crypto_deps::reddsa::{orchard as reddsa_orchard, SigningKey, VerificationKey};
 
 use shielded_vote_circuits::redpallas as rp;
 use shielded_vote_circuits::toy;
@@ -74,7 +73,7 @@ fn generate_halo2_fixtures() {
     );
 
     // Write wrong public input (c = 999, which does not match any valid (a,b) for constant=7).
-    use halo2_proofs::pasta::Fp;
+    use voting_crypto_deps::halo2_proofs::pasta::Fp;
     let wrong_c = Fp::from(999u64);
     let wrong_bytes = wrong_c.to_repr();
     let wrong_path = testdata_dir.join("toy_wrong_input.bin");
@@ -107,7 +106,7 @@ fn generate_redpallas_fixtures() {
 
     fs::create_dir_all(&testdata_dir).expect("failed to create redpallas testdata directory");
 
-    let mut rng = thread_rng();
+    let mut rng = voting_crypto_deps::rand::rngs::OsRng;
 
     // Generate a signing key and derive the verification key (rk).
     let sk = SigningKey::<reddsa_orchard::SpendAuth>::new(&mut rng);
@@ -117,8 +116,7 @@ fn generate_redpallas_fixtures() {
     // Sighash: arbitrary 32 bytes. The chain only checks len==32 and verifies
     // the RedPallas sig over it. In production this is the ZIP-244 sighash
     // extracted from the governance PCZT.
-    let mut sighash = [0u8; 32];
-    rng.fill_bytes(&mut sighash);
+    let sighash = [0x42u8; 32];
 
     // Sign the sighash.
     let sig = sk.sign(&mut rng, &sighash);
@@ -230,7 +228,7 @@ fn generate_redpallas_fixtures() {
     println!("RedPallas delegation fixtures generated and validated.");
 
     // --- CastVote fixtures ---
-    generate_cast_vote_redpallas_fixtures(&testdata_dir, &mut rng);
+    generate_cast_vote_redpallas_fixtures(&testdata_dir);
 }
 
 /// Canonical cast vote sighash domain. Must match sdk/x/vote/types/sighash.go.
@@ -261,12 +259,11 @@ fn canonical_cast_vote_payload_for_fixture(r_vpk_bytes: &[u8; 32]) -> Vec<u8> {
 }
 
 /// Generate RedPallas SpendAuth signature fixtures for CastVote.
-fn generate_cast_vote_redpallas_fixtures(
-    testdata_dir: &std::path::Path,
-    rng: &mut (impl rand::RngCore + rand::CryptoRng),
-) {
+fn generate_cast_vote_redpallas_fixtures(testdata_dir: &std::path::Path) {
+    let mut rng = voting_crypto_deps::rand::rngs::OsRng;
+
     // Generate a signing key and derive the verification key (r_vpk).
-    let sk = SigningKey::<reddsa_orchard::SpendAuth>::new(&mut *rng);
+    let sk = SigningKey::<reddsa_orchard::SpendAuth>::new(&mut rng);
     let vk = VerificationKey::from(&sk);
     let r_vpk_bytes: [u8; 32] = vk.into();
 
@@ -277,7 +274,7 @@ fn generate_cast_vote_redpallas_fixtures(
     sighash.copy_from_slice(sighash_full.as_bytes());
 
     // Sign the sighash.
-    let sig = sk.sign(&mut *rng, &sighash);
+    let sig = sk.sign(&mut rng, &sighash);
     let sig_bytes: [u8; 64] = sig.into();
 
     // Write CastVote fixtures.
