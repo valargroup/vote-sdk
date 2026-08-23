@@ -200,6 +200,17 @@ Every captured error includes contextual tags where available:
 - `msg_type` -- Go type of the vote message (ante and API errors)
 - `round_id` -- the voting round identifier (hex)
 - `share_index` -- the share index within the round (helper only)
+- `alert` -- `helper_share_failure` for a failed processing attempt or
+  `helper_round_closed` for the close-time unsubmitted-share summary
+- `failure_action` -- `retry` when the helper retains the share for another
+  attempt, or `failed` when the attempt uses the bounded failed-share budget
+
+Share-processing alerts use a stable Sentry fingerprint containing the alert
+class, local helper identity, round, processing stage, and queue action.
+Round-close summaries group by alert class, local helper identity, and round.
+The share index stays diagnostic context, so retries and multiple shares group
+together. These alerts come from the locally running helper process; they do
+not probe or monitor other helper servers.
 
 ### Release tracking
 

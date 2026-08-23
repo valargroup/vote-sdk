@@ -135,14 +135,45 @@ func FlushSentry() {
 // CaptureErr sends an error to Sentry with optional string tags for context
 // (e.g. round_id, share_index). No-op when Sentry is not initialized.
 func CaptureErr(err error, tags map[string]string) {
+	captureErr(err, tags, nil)
+}
+
+// CaptureErrWithGrouping sends an error with a stable caller-defined issue
+// fingerprint. The configured server name scopes the fingerprint to the
+// process emitting the event. Callers should use stable operational dimensions
+// and omit retry-specific values.
+func CaptureErrWithGrouping(err error, tags map[string]string, fingerprintParts ...string) {
+	if len(fingerprintParts) == 0 {
+		CaptureErr(err, tags)
+		return
+	}
+
+	serverName := "unknown"
+	if client := sentrylib.CurrentHub().Client(); client != nil {
+		if configured := client.Options().ServerName; configured != "" {
+			serverName = configured
+		} else if hostname, err := os.Hostname(); err == nil && hostname != "" {
+			serverName = hostname
+		}
+	}
+	fingerprint := make([]string, 0, len(fingerprintParts)+1)
+	fingerprint = append(fingerprint, fingerprintParts...)
+	fingerprint = append(fingerprint, serverName)
+	captureErr(err, tags, fingerprint)
+}
+
+func captureErr(err error, tags map[string]string, fingerprint []string) {
 	if err == nil || !sentryEnabled.Load() {
 		return
 	}
-	if len(tags) > 0 {
+	if len(tags) > 0 || len(fingerprint) > 0 {
 		hub := sentrylib.CurrentHub().Clone()
 		hub.ConfigureScope(func(scope *sentrylib.Scope) {
 			for k, v := range tags {
 				scope.SetTag(k, v)
+			}
+			if len(fingerprint) > 0 {
+				scope.SetFingerprint(fingerprint)
 			}
 		})
 		hub.CaptureException(err)
