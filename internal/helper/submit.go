@@ -47,11 +47,22 @@ type ChainSubmitter struct {
 	httpClient *http.Client
 }
 
+// The chain API closes idle connections after its default 10-second read
+// timeout. Close pooled connections first so a scheduled submission cannot
+// race the server closing the same connection.
+const chainHTTPIdleConnTimeout = 5 * time.Second
+
 // NewChainSubmitter creates a submitter targeting the given base URL.
 func NewChainSubmitter(baseURL string) *ChainSubmitter {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.IdleConnTimeout = chainHTTPIdleConnTimeout
+
 	return &ChainSubmitter{
-		baseURL:    baseURL,
-		httpClient: &http.Client{Timeout: 180 * time.Second},
+		baseURL: baseURL,
+		httpClient: &http.Client{
+			Transport: transport,
+			Timeout:   180 * time.Second,
+		},
 	}
 }
 
