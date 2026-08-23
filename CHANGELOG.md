@@ -8,6 +8,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+## v1.4.1
+
 - Pause helper ingress and queued share processing until the local Comet node
   is caught up and its latest block is fresh.
 - Default validator circuits to Zakura's optimized cryptography backend while
