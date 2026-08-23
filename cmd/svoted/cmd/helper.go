@@ -96,7 +96,7 @@ func helperPostSetup(
 			kvStore := (*svoteApp).VoteKeeper.OpenKVStore(ctx)
 			return (*svoteApp).VoteKeeper.HasNullifier(kvStore, votetypes.NullifierTypeShare, roundBytes, shareNullifier)
 		}
-		h, err := helper.New(cfg, treeReader, prover, treeReader.GetRoundInfo, treeReader.GetRoundIsActive, votecommitment.VoteCommitmentHash, votecommitment.ValidateSharePayload, treeReader.ValidateShareChoice, sharetracking.ShareNullifierHash, shareNullifierChecker, homeDir, logger)
+		h, err := helper.New(cfg, treeReader, prover, treeReader.GetRoundInfo, treeReader.GetRoundIsActive, (*svoteApp).HelperNodeReady, votecommitment.VoteCommitmentHash, votecommitment.ValidateSharePayload, treeReader.ValidateShareChoice, sharetracking.ShareNullifierHash, shareNullifierChecker, homeDir, logger)
 		if err != nil {
 			helper.CaptureErr(err, map[string]string{"stage": "helper_new"})
 			return fmt.Errorf("helper: %w", err)

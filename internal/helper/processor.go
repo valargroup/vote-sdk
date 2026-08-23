@@ -15,7 +15,10 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-const maintenanceInterval = 30 * time.Second
+const (
+	maintenanceInterval              = 30 * time.Second
+	processingReadinessRetryInterval = 10 * time.Second
+)
 
 var errAwaitingCommit = errors.New("broadcast accepted; awaiting committed transaction")
 
@@ -139,6 +142,7 @@ type Processor struct {
 	logger            log.Logger
 	maxConcurrent     int
 	isRoundActive     RoundStatusChecker
+	isNodeReady       func() bool
 	preProofDedupe    *preProofShareDeduper
 	submitHeightMu    sync.Mutex
 	submitHeight      uint64
@@ -152,6 +156,14 @@ type preProofShareDeduper struct {
 	vcHash      VCHashFunc
 	shareNFHash ShareNullifierHashFunc
 	shareNF     ShareNullifierChecker
+}
+
+// WithProcessingReadinessCheck prevents queued shares from being taken while
+// the local chain state is catching up or stale.
+func WithProcessingReadinessCheck(isNodeReady func() bool) ProcessorOption {
+	return func(p *Processor) {
+		p.isNodeReady = isNodeReady
+	}
 }
 
 // WithPreProofShareDeduper enables an optional cheap share-nullifier lookup
@@ -222,10 +234,27 @@ func (p *Processor) Run(ctx context.Context) error {
 	for {
 		p.alertExpiredUnsubmittedShares()
 		p.store.PurgeExpiredRounds()
-		p.processBatch(ctx)
+		if !p.processBatch(ctx) {
+			if err := waitForProcessingReadiness(ctx); err != nil {
+				return err
+			}
+			continue
+		}
 		if err := p.waitForSchedule(ctx); err != nil {
 			return err
 		}
+	}
+}
+
+func waitForProcessingReadiness(ctx context.Context) error {
+	timer := time.NewTimer(processingReadinessRetryInterval)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
 }
 
@@ -287,11 +316,17 @@ func (p *Processor) alertExpiredUnsubmittedShares() {
 	}
 }
 
-// processBatch takes all ready shares and processes them.
-func (p *Processor) processBatch(ctx context.Context) {
-	ready := p.store.TakeReady()
+// processBatch takes one worker-sized batch of ready shares and processes it.
+// It returns false without touching the queue when the local node is not ready.
+func (p *Processor) processBatch(ctx context.Context) bool {
+	if p.isNodeReady != nil && !p.isNodeReady() {
+		p.logger.Debug("helper processing paused: local node is catching up or stale")
+		return false
+	}
+
+	ready := p.store.TakeReadyBatch(p.maxConcurrent)
 	if len(ready) == 0 {
-		return
+		return true
 	}
 
 	ctx, batchSpan := StartTrace(ctx, "helper.wakeup", "helper.process_ready_shares", nil, map[string]interface{}{
@@ -433,9 +468,10 @@ func (p *Processor) processBatch(ctx context.Context) {
 	if err := g.Wait(); err != nil {
 		batchSpan.Finish(err)
 		p.logger.Error("share processing batch had errors", "error", err)
-		return
+		return true
 	}
 	batchSpan.Finish(nil)
+	return true
 }
 
 // captureShareProcessingFailure groups repeated attempts from the local helper
