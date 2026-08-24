@@ -38,6 +38,11 @@ type DualAnteHandlerOptions struct {
 	// ZKP verifier. Use ProductionOpts().ZKPVerifier in production,
 	// zkp.NewMockVerifier() in tests.
 	ZKPVerifier zkp.Verifier
+
+	// LocalCommittedHeight returns the latest locally committed block height. When
+	// set, it lets CheckTx distinguish a future commitment tree anchor from a
+	// proof failure without changing transaction validation.
+	LocalCommittedHeight func() int64
 }
 
 // ProductionOpts returns ValidateOpts wired with real cryptographic verifiers
@@ -71,11 +76,12 @@ func NewDualAnteHandler(opts DualAnteHandlerOptions) (sdk.AnteHandler, error) {
 	voteKeeper := opts.VoteKeeper
 	sigVerifier := opts.SigVerifier
 	zkpVerifier := opts.ZKPVerifier
+	committedHeight := opts.LocalCommittedHeight
 
 	return func(ctx sdk.Context, tx sdk.Tx, simulate bool) (sdk.Context, error) {
 		// Custom tx path (vote or ceremony).
 		if vtx, ok := tx.(*voteapi.VoteTxWrapper); ok {
-			return handleVoteAnte(ctx, vtx, voteKeeper, sigVerifier, zkpVerifier)
+			return handleVoteAnte(ctx, vtx, voteKeeper, sigVerifier, zkpVerifier, committedHeight)
 		}
 
 		msgs := tx.GetMsgs()
@@ -117,6 +123,7 @@ func handleVoteAnte(
 	k *votekeeper.Keeper,
 	sigVerifier redpallas.Verifier,
 	zkpVerifier zkp.Verifier,
+	committedHeight func() int64,
 ) (sdk.Context, error) {
 	// All custom txs (vote + ceremony) are free — infinite gas meter.
 	ctx = ctx.WithGasMeter(storetypes.NewInfiniteGasMeter())
@@ -160,7 +167,7 @@ func handleVoteAnte(
 			"duration_ms", elapsed.Milliseconds(),
 			"msg_type", fmt.Sprintf("%T", vtx.VoteMsg),
 			"error", err.Error())
-		if errors.Is(err, types.ErrInvalidProof) || errors.Is(err, types.ErrInvalidSignature) {
+		if shouldCaptureVoteAnteError(ctx, err, committedHeight) {
 			sentry.CaptureErr(err, map[string]string{
 				"handler":  "ante",
 				"msg_type": fmt.Sprintf("%T", vtx.VoteMsg),
@@ -173,6 +180,23 @@ func handleVoteAnte(
 		"duration_ms", elapsed.Milliseconds(),
 		"msg_type", fmt.Sprintf("%T", vtx.VoteMsg))
 	return ctx, nil
+}
+
+func shouldCaptureVoteAnteError(ctx sdk.Context, err error, committedHeight func() int64) bool {
+	if !errors.Is(err, types.ErrInvalidProof) && !errors.Is(err, types.ErrInvalidSignature) {
+		return false
+	}
+	if committedHeight == nil || (!ctx.IsCheckTx() && !ctx.IsReCheckTx()) {
+		return true
+	}
+
+	var unavailableRoot *types.CommitmentRootUnavailableError
+	if !errors.As(err, &unavailableRoot) {
+		return true
+	}
+
+	localHeight := committedHeight()
+	return localHeight < 0 || unavailableRoot.AnchorHeight <= uint64(localHeight)
 }
 
 // buildStandardAnteHandler creates the standard Cosmos SDK ante handler chain

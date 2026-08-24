@@ -23,6 +23,7 @@ import (
 	"github.com/mikelodder7/curvey"
 
 	voteapi "github.com/valargroup/vote-sdk/api"
+	svoteapp "github.com/valargroup/vote-sdk/app"
 	"github.com/valargroup/vote-sdk/crypto/ecies"
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/crypto/shamir"
@@ -369,6 +370,20 @@ func (s *ABCIIntegrationSuite) TestCheckTxImmediatelyAfterRestart() {
 	s.app.RestartBeforeNextBlock()
 	s.Require().False(s.app.CheckTxBlockTimeReady(), "restart should wait for the first committed block time")
 	s.Require().Zero(s.app.CheckTxBlockHeight(), "restart should not publish a stale committed height")
+	loadedHeight := s.app.LastBlockHeight()
+	s.Require().Equal(s.app.Height, loadedHeight, "restart should expose the loaded committed height")
+
+	checkTxCtx := sdk.Context{}.WithIsCheckTx(true)
+	missingLoadedRoot := &types.CommitmentRootUnavailableError{AnchorHeight: uint64(loadedHeight)}
+	s.Require().True(
+		svoteapp.ShouldCaptureVoteAnteError(checkTxCtx, missingLoadedRoot, s.app.LastBlockHeight),
+		"a missing root at the loaded height should remain actionable after restart",
+	)
+	futureRoot := &types.CommitmentRootUnavailableError{AnchorHeight: uint64(loadedHeight + 1)}
+	s.Require().False(
+		svoteapp.ShouldCaptureVoteAnteError(checkTxCtx, futureRoot, s.app.LastBlockHeight),
+		"a root ahead of the loaded height should remain suppressed after restart",
+	)
 
 	checkResp := s.app.CheckTxSync(delegationTx)
 	s.Require().Equal(
