@@ -257,9 +257,10 @@ func (app *SvoteApp) setAnteHandler(txConfig client.TxConfig) {
 			SignModeHandler: txConfig.SignModeHandler(),
 			SigGasConsumer:  ante.DefaultSigVerificationGasConsumer,
 		},
-		VoteKeeper:  app.VoteKeeper,
-		SigVerifier: cryptoOpts.SigVerifier,
-		ZKPVerifier: cryptoOpts.ZKPVerifier,
+		VoteKeeper:           app.VoteKeeper,
+		SigVerifier:          cryptoOpts.SigVerifier,
+		ZKPVerifier:          cryptoOpts.ZKPVerifier,
+		LocalCommittedHeight: app.LastBlockHeight,
 	})
 	if err != nil {
 		panic(err)

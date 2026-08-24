@@ -1049,6 +1049,20 @@ func (s *ValidateTestSuite) TestValidateVoteTx_RevealShare() {
 	}
 }
 
+func (s *ValidateTestSuite) TestRevealShareMissingCommitmentRootIsClassified() {
+	s.setupActiveRound()
+	msg := newValidMsgRevealShare()
+	msg.VoteCommTreeAnchorHeight = 999
+
+	err := ante.ValidateVoteTx(s.ctx, msg, s.keeper, mockOpts())
+	s.Require().EqualError(err, "invalid zero-knowledge proof: no commitment tree root at height 999")
+	s.Require().ErrorIs(err, types.ErrInvalidProof)
+
+	var unavailableRoot *types.CommitmentRootUnavailableError
+	s.Require().ErrorAs(err, &unavailableRoot)
+	s.Require().Equal(uint64(999), unavailableRoot.AnchorHeight)
+}
+
 // ---------------------------------------------------------------------------
 // Tests: MsgSubmitTally
 // ---------------------------------------------------------------------------

@@ -246,7 +246,7 @@ func verifyRevealShare(ctx context.Context, msg *types.MsgRevealShare, k *keeper
 		return fmt.Errorf("failed to look up commitment tree root: %w", err)
 	}
 	if treeRoot == nil {
-		return fmt.Errorf("%w: no commitment tree root at height %d", types.ErrInvalidProof, msg.VoteCommTreeAnchorHeight)
+		return &types.CommitmentRootUnavailableError{AnchorHeight: msg.VoteCommTreeAnchorHeight}
 	}
 
 	if err := opts.ZKPVerifier.VerifyVoteShare(msg.Proof, zkp.VoteShareInputs{

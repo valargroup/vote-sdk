@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	sdkerrors "cosmossdk.io/errors"
 	sdkmath "cosmossdk.io/math"
 
 	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
@@ -89,6 +90,21 @@ func TestGenesisValidatorCreationSucceeds(t *testing.T) {
 	// Verify the genesis validator was actually created.
 	valAddr := app.ValidatorOperAddr()
 	require.NotEmpty(t, valAddr, "genesis validator should exist")
+}
+
+func TestFutureCommitmentRootCheckTxRemainsRejected(t *testing.T) {
+	ta := testutil.SetupTestApp(t)
+	roundID := ta.SeedVotingSession(testutil.ValidCreateVotingSession())
+	futureAnchor := ta.CheckTxBlockHeight() + 1
+	msg := testutil.ValidRevealShare(roundID, futureAnchor, 0x91)
+
+	resp := ta.CheckTxSync(testutil.MustEncodeVoteTx(msg))
+
+	legacyErr := fmt.Errorf("%w: no commitment tree root at height %d", votetypes.ErrInvalidProof, futureAnchor)
+	expectedCodespace, expectedCode, _ := sdkerrors.ABCIInfo(legacyErr, false)
+	require.Equal(t, expectedCode, resp.Code)
+	require.Equal(t, expectedCodespace, resp.Codespace)
+	require.Contains(t, resp.Log, fmt.Sprintf("no commitment tree root at height %d", futureAnchor))
 }
 
 // ---------------------------------------------------------------------------
