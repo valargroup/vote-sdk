@@ -15,7 +15,8 @@ func TestShouldCaptureVoteAnteError(t *testing.T) {
 	checkTxCtx := sdk.Context{}.WithIsCheckTx(true)
 	recheckTxCtx := sdk.Context{}.WithIsReCheckTx(true)
 	finalizeBlockCtx := sdk.Context{}
-	committedAt100 := func() uint64 { return 100 }
+	committedAt100 := func() int64 { return 100 }
+	uninitializedHeight := func() int64 { return -1 }
 
 	futureRoot := &types.CommitmentRootUnavailableError{AnchorHeight: 101}
 	committedRootMissing := &types.CommitmentRootUnavailableError{AnchorHeight: 100}
@@ -26,7 +27,7 @@ func TestShouldCaptureVoteAnteError(t *testing.T) {
 		name            string
 		ctx             sdk.Context
 		err             error
-		committedHeight func() uint64
+		committedHeight func() int64
 		want            bool
 	}{
 		{
@@ -74,6 +75,13 @@ func TestShouldCaptureVoteAnteError(t *testing.T) {
 			ctx:             checkTxCtx,
 			err:             futureRoot,
 			committedHeight: nil,
+			want:            true,
+		},
+		{
+			name:            "uninitialized committed height preserves capture behavior",
+			ctx:             checkTxCtx,
+			err:             futureRoot,
+			committedHeight: uninitializedHeight,
 			want:            true,
 		},
 		{

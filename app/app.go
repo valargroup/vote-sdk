@@ -260,7 +260,7 @@ func (app *SvoteApp) setAnteHandler(txConfig client.TxConfig) {
 		VoteKeeper:           app.VoteKeeper,
 		SigVerifier:          cryptoOpts.SigVerifier,
 		ZKPVerifier:          cryptoOpts.ZKPVerifier,
-		LocalCommittedHeight: app.CheckTxBlockHeight,
+		LocalCommittedHeight: app.LastBlockHeight,
 	})
 	if err != nil {
 		panic(err)

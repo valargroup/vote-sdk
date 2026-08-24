@@ -42,7 +42,7 @@ type DualAnteHandlerOptions struct {
 	// LocalCommittedHeight returns the latest locally committed block height. When
 	// set, it lets CheckTx distinguish a future commitment tree anchor from a
 	// proof failure without changing transaction validation.
-	LocalCommittedHeight func() uint64
+	LocalCommittedHeight func() int64
 }
 
 // ProductionOpts returns ValidateOpts wired with real cryptographic verifiers
@@ -123,7 +123,7 @@ func handleVoteAnte(
 	k *votekeeper.Keeper,
 	sigVerifier redpallas.Verifier,
 	zkpVerifier zkp.Verifier,
-	committedHeight func() uint64,
+	committedHeight func() int64,
 ) (sdk.Context, error) {
 	// All custom txs (vote + ceremony) are free — infinite gas meter.
 	ctx = ctx.WithGasMeter(storetypes.NewInfiniteGasMeter())
@@ -182,7 +182,7 @@ func handleVoteAnte(
 	return ctx, nil
 }
 
-func shouldCaptureVoteAnteError(ctx sdk.Context, err error, committedHeight func() uint64) bool {
+func shouldCaptureVoteAnteError(ctx sdk.Context, err error, committedHeight func() int64) bool {
 	if !errors.Is(err, types.ErrInvalidProof) && !errors.Is(err, types.ErrInvalidSignature) {
 		return false
 	}
@@ -195,7 +195,8 @@ func shouldCaptureVoteAnteError(ctx sdk.Context, err error, committedHeight func
 		return true
 	}
 
-	return unavailableRoot.AnchorHeight <= committedHeight()
+	localHeight := committedHeight()
+	return localHeight < 0 || unavailableRoot.AnchorHeight <= uint64(localHeight)
 }
 
 // buildStandardAnteHandler creates the standard Cosmos SDK ante handler chain
