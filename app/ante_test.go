@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	sdkerrors "cosmossdk.io/errors"
 	sdkmath "cosmossdk.io/math"
 
 	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
@@ -99,7 +100,10 @@ func TestFutureCommitmentRootCheckTxRemainsRejected(t *testing.T) {
 
 	resp := ta.CheckTxSync(testutil.MustEncodeVoteTx(msg))
 
-	require.Equal(t, votetypes.ErrInvalidProof.ABCICode(), resp.Code)
+	legacyErr := fmt.Errorf("%w: no commitment tree root at height %d", votetypes.ErrInvalidProof, futureAnchor)
+	expectedCodespace, expectedCode, _ := sdkerrors.ABCIInfo(legacyErr, false)
+	require.Equal(t, expectedCode, resp.Code)
+	require.Equal(t, expectedCodespace, resp.Codespace)
 	require.Contains(t, resp.Log, fmt.Sprintf("no commitment tree root at height %d", futureAnchor))
 }
 

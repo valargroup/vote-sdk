@@ -66,9 +66,9 @@ var (
 )
 
 // CommitmentRootUnavailableError identifies a reveal-share anchor whose
-// commitment root is absent from local state. It unwraps to ErrInvalidProof to
-// preserve the existing ABCI error code while allowing callers to distinguish
-// state availability from an actual proof verifier failure.
+// commitment root is absent from local state. It unwraps through the standard
+// Go error chain but intentionally does not implement Cause, preserving the
+// ABCI result of the previous fmt-wrapped error.
 type CommitmentRootUnavailableError struct {
 	AnchorHeight uint64
 }
@@ -77,10 +77,6 @@ func (e *CommitmentRootUnavailableError) Error() string {
 	return fmt.Sprintf("%s: no commitment tree root at height %d", ErrInvalidProof, e.AnchorHeight)
 }
 
-func (e *CommitmentRootUnavailableError) Cause() error {
-	return ErrInvalidProof
-}
-
 func (e *CommitmentRootUnavailableError) Unwrap() error {
-	return e.Cause()
+	return ErrInvalidProof
 }
