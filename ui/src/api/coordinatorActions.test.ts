@@ -78,6 +78,16 @@ describe("describeCoordinatorActionPayload", () => {
     expect(valueFor(description, "New threshold")).toBe("2");
     expect(valueFor(description, "New min ceremony validators")).toBe("3");
     expect(valueFor(description, "New managers")).toContain("svote1manager2");
+    expect(description.json).toEqual({
+      type_url: "type.googleapis.com/svote.v1.MsgUpdateVoteManagers",
+      value: {
+        creator: "svote1creator",
+        new_vote_managers: ["svote1manager1", "svote1manager2"],
+        new_threshold: 2,
+        new_min_ceremony_validators: 3,
+      },
+    });
+    expect(description.jsonDecoded).toBe(true);
   });
 
   it("shows create-vote session details before approval", () => {
@@ -114,6 +124,35 @@ describe("describeCoordinatorActionPayload", () => {
     expect(valueFor(description, "Proposals")).toContain("options: 0: Support (Vote yes.), 1: Oppose");
     expect(valueFor(description, "Snapshot blockhash")).toBe("aabb");
     expect(valueFor(description, "Proposals hash")).toBe("ccdd");
+    expect(description.json).toEqual({
+      type_url: "type.googleapis.com/svote.v1.MsgCreateVotingSession",
+      value: {
+        creator: "svote1creator",
+        title: "Round title",
+        description: "Round description",
+        discussion_url: "https://forum.example/round",
+        snapshot_height: 123,
+        vote_end_time: 1_778_000_000,
+        proposals: [
+          {
+            id: 7,
+            title: "ZIP vote",
+            description: "Proposal body",
+            options: [
+              { index: 0, label: "Support", description: "Vote yes." },
+              { index: 1, label: "Oppose", description: "" },
+            ],
+            zip_number: "ZIP-999",
+            forum_url: "https://forum.example/proposal",
+          },
+        ],
+        proposals_hash: "ccdd",
+        snapshot_blockhash: "aabb",
+        nullifier_imt_root: "0102",
+        nc_root: "0304",
+      },
+    });
+    expect(description.jsonDecoded).toBe(true);
   });
 
   it("shows coordinator send details before approval", () => {
@@ -128,6 +167,45 @@ describe("describeCoordinatorActionPayload", () => {
     expect(valueFor(description, "Funding source")).toBe("vote_funding");
     expect(valueFor(description, "To")).toBe("svote1to");
     expect(valueFor(description, "Amount")).toBe("1000000 usvote");
+    expect(description.json.value).toEqual({
+      creator: "svote1creator",
+      to_address: "svote1to",
+      amount: "1000000",
+    });
+  });
+
+  it("builds decoded JSON for upgrade and endorser actions", () => {
+    const schedule = describeCoordinatorActionPayload(action("svote.v1.MsgScheduleUpgrade", concat([
+      stringField(1, "svote1creator"),
+      stringField(2, "v1.5.0"),
+      varintField(3, 4_200_000),
+      stringField(4, "sha256:abc123"),
+      varintField(5, 1),
+    ])));
+    expect(schedule.json.value).toEqual({
+      creator: "svote1creator",
+      name: "v1.5.0",
+      height: 4_200_000,
+      info: "sha256:abc123",
+      replace_existing: true,
+    });
+
+    const cancel = describeCoordinatorActionPayload(action(
+      "svote.v1.MsgCancelUpgrade",
+      stringField(1, "svote1creator"),
+    ));
+    expect(cancel.json.value).toEqual({ creator: "svote1creator" });
+
+    const endorser = describeCoordinatorActionPayload(action("svote.v1.MsgSetEndorser", concat([
+      stringField(1, "svote1creator"),
+      stringField(2, "zodl"),
+      stringField(3, "svote1endorser"),
+    ])));
+    expect(endorser.json.value).toEqual({
+      creator: "svote1creator",
+      endorser_id: "zodl",
+      address: "svote1endorser",
+    });
   });
 
   it("blocks approval for unsupported action payloads", () => {
@@ -135,5 +213,10 @@ describe("describeCoordinatorActionPayload", () => {
 
     expect(description.canApprove).toBe(false);
     expect(description.error).toContain("unsupported action type");
+    expect(description.json).toEqual({
+      type_url: "type.googleapis.com/svote.v1.MsgEndorseRound",
+      value: expect.any(String),
+    });
+    expect(description.jsonDecoded).toBe(false);
   });
 });

@@ -9,7 +9,17 @@ export interface CoordinatorActionDetail {
 export interface CoordinatorActionDescription {
   canApprove: boolean;
   rows: CoordinatorActionDetail[];
+  json: {
+    type_url: string;
+    value: Record<string, unknown> | string;
+  };
+  jsonDecoded: boolean;
   error?: string;
+}
+
+interface DecodedCoordinatorActionPayload {
+  rows: CoordinatorActionDetail[];
+  value: Record<string, unknown>;
 }
 
 interface ProtoField {
@@ -132,7 +142,7 @@ function formatUnix(seconds: number): string {
   return `${seconds} (${new Date(seconds * 1000).toLocaleString()})`;
 }
 
-function decodeUpdateVoteManagers(bytes: Uint8Array): CoordinatorActionDetail[] {
+function decodeUpdateVoteManagers(bytes: Uint8Array): DecodedCoordinatorActionPayload {
   const reader = new ProtoReader(bytes);
   let creator = "";
   const managers: string[] = [];
@@ -162,15 +172,23 @@ function decodeUpdateVoteManagers(bytes: Uint8Array): CoordinatorActionDetail[] 
         reader.skip(field.wireType);
     }
   }
-  return [
-    detail("Creator", creator, true),
-    detail("New threshold", threshold),
-    detail("New min ceremony validators", minCeremonyValidators || 1),
-    detail("New managers", managers.join("\n"), true),
-  ];
+  return {
+    rows: [
+      detail("Creator", creator, true),
+      detail("New threshold", threshold),
+      detail("New min ceremony validators", minCeremonyValidators || 1),
+      detail("New managers", managers.join("\n"), true),
+    ],
+    value: {
+      creator,
+      new_vote_managers: managers,
+      new_threshold: threshold,
+      new_min_ceremony_validators: minCeremonyValidators || 1,
+    },
+  };
 }
 
-function decodeScheduleUpgrade(bytes: Uint8Array): CoordinatorActionDetail[] {
+function decodeScheduleUpgrade(bytes: Uint8Array): DecodedCoordinatorActionPayload {
   const reader = new ProtoReader(bytes);
   let creator = "";
   let name = "";
@@ -205,16 +223,25 @@ function decodeScheduleUpgrade(bytes: Uint8Array): CoordinatorActionDetail[] {
         reader.skip(field.wireType);
     }
   }
-  return [
-    detail("Creator", creator, true),
-    detail("Upgrade name", name),
-    detail("Height", height),
-    detail("Replace existing", replaceExisting ? "yes" : "no"),
-    detail("Info", info),
-  ];
+  return {
+    rows: [
+      detail("Creator", creator, true),
+      detail("Upgrade name", name),
+      detail("Height", height),
+      detail("Replace existing", replaceExisting ? "yes" : "no"),
+      detail("Info", info),
+    ],
+    value: {
+      creator,
+      name,
+      height,
+      info,
+      replace_existing: replaceExisting,
+    },
+  };
 }
 
-function decodeCancelUpgrade(bytes: Uint8Array): CoordinatorActionDetail[] {
+function decodeCancelUpgrade(bytes: Uint8Array): DecodedCoordinatorActionPayload {
   const reader = new ProtoReader(bytes);
   let creator = "";
   while (!reader.eof()) {
@@ -227,10 +254,13 @@ function decodeCancelUpgrade(bytes: Uint8Array): CoordinatorActionDetail[] {
       reader.skip(field.wireType);
     }
   }
-  return [detail("Creator", creator, true), detail("Action", "Cancel scheduled upgrade")];
+  return {
+    rows: [detail("Creator", creator, true), detail("Action", "Cancel scheduled upgrade")],
+    value: { creator },
+  };
 }
 
-function decodeSetEndorser(bytes: Uint8Array): CoordinatorActionDetail[] {
+function decodeSetEndorser(bytes: Uint8Array): DecodedCoordinatorActionPayload {
   const reader = new ProtoReader(bytes);
   let creator = "";
   let endorserID = "";
@@ -255,14 +285,21 @@ function decodeSetEndorser(bytes: Uint8Array): CoordinatorActionDetail[] {
         reader.skip(field.wireType);
     }
   }
-  return [
-    detail("Creator", creator, true),
-    detail("Endorser ID", endorserID),
-    detail("Address", address || "(clear mapping)", true),
-  ];
+  return {
+    rows: [
+      detail("Creator", creator, true),
+      detail("Endorser ID", endorserID),
+      detail("Address", address || "(clear mapping)", true),
+    ],
+    value: {
+      creator,
+      endorser_id: endorserID,
+      address,
+    },
+  };
 }
 
-function decodeAuthorizedSend(bytes: Uint8Array): CoordinatorActionDetail[] {
+function decodeAuthorizedSend(bytes: Uint8Array): DecodedCoordinatorActionPayload {
   const reader = new ProtoReader(bytes);
   let creator = "";
   let to = "";
@@ -287,12 +324,19 @@ function decodeAuthorizedSend(bytes: Uint8Array): CoordinatorActionDetail[] {
         reader.skip(field.wireType);
     }
   }
-  return [
-    detail("Creator", creator, true),
-    detail("Funding source", "vote_funding"),
-    detail("To", to, true),
-    detail("Amount", amount ? `${amount} usvote` : ""),
-  ];
+  return {
+    rows: [
+      detail("Creator", creator, true),
+      detail("Funding source", "vote_funding"),
+      detail("To", to, true),
+      detail("Amount", amount ? `${amount} usvote` : ""),
+    ],
+    value: {
+      creator,
+      to_address: to,
+      amount,
+    },
+  };
 }
 
 function decodeVoteOption(bytes: Uint8Array): { index: number; label: string; description: string } {
@@ -382,7 +426,7 @@ function describeProposals(proposals: DecodedProposal[]): string {
   }).join("\n");
 }
 
-function decodeCreateVotingSession(bytes: Uint8Array): CoordinatorActionDetail[] {
+function decodeCreateVotingSession(bytes: Uint8Array): DecodedCoordinatorActionPayload {
   const reader = new ProtoReader(bytes);
   let creator = "";
   let snapshotHeight = 0;
@@ -447,19 +491,67 @@ function decodeCreateVotingSession(bytes: Uint8Array): CoordinatorActionDetail[]
         reader.skip(field.wireType);
     }
   }
-  return [
-    detail("Creator", creator, true),
-    detail("Title", title),
-    detail("Description", description),
-    detail("Discussion URL", discussionURL),
-    detail("Snapshot height", snapshotHeight),
-    detail("Vote end time", formatUnix(voteEndTime)),
-    detail("Proposals", describeProposals(proposals)),
-    detail("Proposals hash", proposalsHash, true),
-    detail("Snapshot blockhash", snapshotBlockhash, true),
-    detail("Nullifier IMT root", nullifierImtRoot, true),
-    detail("NC root", ncRoot, true),
-  ];
+  return {
+    rows: [
+      detail("Creator", creator, true),
+      detail("Title", title),
+      detail("Description", description),
+      detail("Discussion URL", discussionURL),
+      detail("Snapshot height", snapshotHeight),
+      detail("Vote end time", formatUnix(voteEndTime)),
+      detail("Proposals", describeProposals(proposals)),
+      detail("Proposals hash", proposalsHash, true),
+      detail("Snapshot blockhash", snapshotBlockhash, true),
+      detail("Nullifier IMT root", nullifierImtRoot, true),
+      detail("NC root", ncRoot, true),
+    ],
+    value: {
+      creator,
+      title,
+      description,
+      discussion_url: discussionURL,
+      snapshot_height: snapshotHeight,
+      vote_end_time: voteEndTime,
+      proposals: proposals.map((proposal) => ({
+        id: proposal.id,
+        title: proposal.title,
+        description: proposal.description,
+        options: proposal.options.map((option) => ({
+          index: option.index,
+          label: option.label,
+          description: option.description,
+        })),
+        zip_number: proposal.zipNumber,
+        forum_url: proposal.forumURL,
+      })),
+      proposals_hash: proposalsHash,
+      snapshot_blockhash: snapshotBlockhash,
+      nullifier_imt_root: nullifierImtRoot,
+      nc_root: ncRoot,
+    },
+  };
+}
+
+function decodedDescription(
+  typeURL: string,
+  payload: DecodedCoordinatorActionPayload,
+): CoordinatorActionDescription {
+  return {
+    canApprove: true,
+    rows: payload.rows,
+    json: {
+      type_url: typeURL,
+      value: payload.value,
+    },
+    jsonDecoded: true,
+  };
+}
+
+function rawPayloadJson(action: CoordinatorAction): CoordinatorActionDescription["json"] {
+  return {
+    type_url: action.payload?.type_url ?? "",
+    value: action.payload?.value ?? "",
+  };
 }
 
 export function describeCoordinatorActionPayload(action: CoordinatorAction): CoordinatorActionDescription {
@@ -470,6 +562,8 @@ export function describeCoordinatorActionPayload(action: CoordinatorAction): Coo
       canApprove: false,
       error: "Cannot approve: action payload is missing.",
       rows: [detail("Payload", "missing")],
+      json: rawPayloadJson(action),
+      jsonDecoded: false,
     };
   }
 
@@ -478,22 +572,24 @@ export function describeCoordinatorActionPayload(action: CoordinatorAction): Coo
     const typeName = payloadTypeName(typeURL);
     switch (typeName) {
       case "svote.v1.MsgCreateVotingSession":
-        return { canApprove: true, rows: decodeCreateVotingSession(bytes) };
+        return decodedDescription(typeURL, decodeCreateVotingSession(bytes));
       case "svote.v1.MsgUpdateVoteManagers":
-        return { canApprove: true, rows: decodeUpdateVoteManagers(bytes) };
+        return decodedDescription(typeURL, decodeUpdateVoteManagers(bytes));
       case "svote.v1.MsgScheduleUpgrade":
-        return { canApprove: true, rows: decodeScheduleUpgrade(bytes) };
+        return decodedDescription(typeURL, decodeScheduleUpgrade(bytes));
       case "svote.v1.MsgCancelUpgrade":
-        return { canApprove: true, rows: decodeCancelUpgrade(bytes) };
+        return decodedDescription(typeURL, decodeCancelUpgrade(bytes));
       case "svote.v1.MsgSetEndorser":
-        return { canApprove: true, rows: decodeSetEndorser(bytes) };
+        return decodedDescription(typeURL, decodeSetEndorser(bytes));
       case "svote.v1.MsgAuthorizedSend":
-        return { canApprove: true, rows: decodeAuthorizedSend(bytes) };
+        return decodedDescription(typeURL, decodeAuthorizedSend(bytes));
       default:
         return {
           canApprove: false,
           error: `Cannot approve: unsupported action type ${typeURL}.`,
           rows: [detail("Payload type", typeURL, true)],
+          json: rawPayloadJson(action),
+          jsonDecoded: false,
         };
     }
   } catch (err) {
@@ -501,6 +597,8 @@ export function describeCoordinatorActionPayload(action: CoordinatorAction): Coo
       canApprove: false,
       error: `Cannot approve: failed to decode payload (${err instanceof Error ? err.message : String(err)}).`,
       rows: [detail("Payload type", typeURL, true)],
+      json: rawPayloadJson(action),
+      jsonDecoded: false,
     };
   }
 }
