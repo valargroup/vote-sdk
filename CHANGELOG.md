@@ -8,6 +8,9 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Let coordinators review pending action payloads as decoded, copyable JSON in
+  the approvals UI.
+
 ## v1.4.1
 
 - Pause helper ingress and queued share processing until the local Comet node
