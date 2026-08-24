@@ -8,6 +8,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Close idle helper REST connections before the node API timeout so scheduled
+  reveal submissions do not race stale pooled connections.
 - Stop reporting reveal-share proofs as invalid when CheckTx sees a commitment
   anchor ahead of locally committed state, while keeping the transaction
   rejected and retaining alerts for block execution and proof verifier failures.
