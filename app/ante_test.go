@@ -91,6 +91,18 @@ func TestGenesisValidatorCreationSucceeds(t *testing.T) {
 	require.NotEmpty(t, valAddr, "genesis validator should exist")
 }
 
+func TestFutureCommitmentRootCheckTxRemainsRejected(t *testing.T) {
+	ta := testutil.SetupTestApp(t)
+	roundID := ta.SeedVotingSession(testutil.ValidCreateVotingSession())
+	futureAnchor := ta.CheckTxBlockHeight() + 1
+	msg := testutil.ValidRevealShare(roundID, futureAnchor, 0x91)
+
+	resp := ta.CheckTxSync(testutil.MustEncodeVoteTx(msg))
+
+	require.Equal(t, votetypes.ErrInvalidProof.ABCICode(), resp.Code)
+	require.Contains(t, resp.Log, fmt.Sprintf("no commitment tree root at height %d", futureAnchor))
+}
+
 // ---------------------------------------------------------------------------
 // Bank MsgSend / MsgMultiSend ante handler blocking tests
 // ---------------------------------------------------------------------------

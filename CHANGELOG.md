@@ -8,6 +8,10 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Stop reporting reveal-share proofs as invalid when CheckTx sees a commitment
+  anchor ahead of locally committed state, while keeping the transaction
+  rejected and retaining alerts for block execution and proof verifier failures.
+
 ## v1.4.1
 
 - Pause helper ingress and queued share processing until the local Comet node

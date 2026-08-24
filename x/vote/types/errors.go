@@ -1,6 +1,10 @@
 package types
 
-import "cosmossdk.io/errors"
+import (
+	"fmt"
+
+	"cosmossdk.io/errors"
+)
 
 // x/vote module sentinel errors.
 var (
@@ -60,3 +64,23 @@ var (
 	ErrUnsupportedCoordinatorAction = errors.Register(ModuleName, 48, "unsupported coordinator action")
 	ErrInvalidCoordinatorAction     = errors.Register(ModuleName, 49, "invalid coordinator action")
 )
+
+// CommitmentRootUnavailableError identifies a reveal-share anchor whose
+// commitment root is absent from local state. It unwraps to ErrInvalidProof to
+// preserve the existing ABCI error code while allowing callers to distinguish
+// state availability from an actual proof verifier failure.
+type CommitmentRootUnavailableError struct {
+	AnchorHeight uint64
+}
+
+func (e *CommitmentRootUnavailableError) Error() string {
+	return fmt.Sprintf("%s: no commitment tree root at height %d", ErrInvalidProof, e.AnchorHeight)
+}
+
+func (e *CommitmentRootUnavailableError) Cause() error {
+	return ErrInvalidProof
+}
+
+func (e *CommitmentRootUnavailableError) Unwrap() error {
+	return e.Cause()
+}
