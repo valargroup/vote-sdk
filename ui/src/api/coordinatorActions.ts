@@ -57,14 +57,30 @@ class ProtoReader {
   }
 
   readVarint(): number {
-    let result = 0;
-    let shift = 0;
-    while (this.offset < this.bytes.length) {
+    const value = this.readVarintBigInt();
+    if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new Error("varint exceeds JavaScript's safe integer range");
+    }
+    return Number(value);
+  }
+
+  // Return decimal text so 64-bit protobuf values remain exact in JSON.
+  readUint64(): string {
+    return this.readVarintBigInt().toString();
+  }
+
+  // Protobuf int64 uses the same varint bytes interpreted as signed two's complement.
+  readInt64(): string {
+    return BigInt.asIntN(64, this.readVarintBigInt()).toString();
+  }
+
+  private readVarintBigInt(): bigint {
+    let result = 0n;
+    for (let shift = 0n; shift <= 63n && this.offset < this.bytes.length; shift += 7n) {
       const b = this.bytes[this.offset++];
-      result += (b & 0x7f) * 2 ** shift;
+      if (shift === 63n && (b & 0xfe) !== 0) break;
+      result |= BigInt(b & 0x7f) << shift;
       if ((b & 0x80) === 0) return result;
-      shift += 7;
-      if (shift > 56) break;
     }
     throw new Error("invalid varint");
   }
@@ -87,7 +103,7 @@ class ProtoReader {
   skip(wireType: number) {
     switch (wireType) {
       case 0:
-        this.readVarint();
+        this.readVarintBigInt();
         return;
       case 1:
         this.offset += 8;
@@ -137,9 +153,13 @@ function payloadTypeName(typeURL: string): string {
   return slash >= 0 ? withoutPrefix.slice(slash + 1) : withoutPrefix;
 }
 
-function formatUnix(seconds: number): string {
-  if (!seconds) return "(empty)";
-  return `${seconds} (${new Date(seconds * 1000).toLocaleString()})`;
+function formatUnix(seconds: string): string {
+  if (seconds === "0") return "(empty)";
+  const value = Number(seconds);
+  if (!Number.isSafeInteger(value)) return seconds;
+  const date = new Date(value * 1000);
+  if (Number.isNaN(date.getTime())) return seconds;
+  return `${seconds} (${date.toLocaleString()})`;
 }
 
 function decodeUpdateVoteManagers(bytes: Uint8Array): DecodedCoordinatorActionPayload {
@@ -192,7 +212,7 @@ function decodeScheduleUpgrade(bytes: Uint8Array): DecodedCoordinatorActionPaylo
   const reader = new ProtoReader(bytes);
   let creator = "";
   let name = "";
-  let height = 0;
+  let height = "0";
   let info = "";
   let replaceExisting = false;
   while (!reader.eof()) {
@@ -209,7 +229,7 @@ function decodeScheduleUpgrade(bytes: Uint8Array): DecodedCoordinatorActionPaylo
         break;
       case 3:
         expectWire(field, 0, "height");
-        height = reader.readVarint();
+        height = reader.readInt64();
         break;
       case 4:
         expectWire(field, 2, "info");
@@ -429,10 +449,10 @@ function describeProposals(proposals: DecodedProposal[]): string {
 function decodeCreateVotingSession(bytes: Uint8Array): DecodedCoordinatorActionPayload {
   const reader = new ProtoReader(bytes);
   let creator = "";
-  let snapshotHeight = 0;
+  let snapshotHeight = "0";
   let snapshotBlockhash = "";
   let proposalsHash = "";
-  let voteEndTime = 0;
+  let voteEndTime = "0";
   let nullifierImtRoot = "";
   let ncRoot = "";
   const proposals: DecodedProposal[] = [];
@@ -449,7 +469,7 @@ function decodeCreateVotingSession(bytes: Uint8Array): DecodedCoordinatorActionP
         break;
       case 2:
         expectWire(field, 0, "snapshot_height");
-        snapshotHeight = reader.readVarint();
+        snapshotHeight = reader.readUint64();
         break;
       case 3:
         expectWire(field, 2, "snapshot_blockhash");
@@ -461,7 +481,7 @@ function decodeCreateVotingSession(bytes: Uint8Array): DecodedCoordinatorActionP
         break;
       case 5:
         expectWire(field, 0, "vote_end_time");
-        voteEndTime = reader.readVarint();
+        voteEndTime = reader.readUint64();
         break;
       case 6:
         expectWire(field, 2, "nullifier_imt_root");
