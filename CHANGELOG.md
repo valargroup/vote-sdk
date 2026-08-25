@@ -8,6 +8,9 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Add atomic cast-vote batches with one batch-wide authorization digest,
+  chained unchanged ZKP #2 proofs, deterministic wire encoding, and recovery
+  events that retain every vote commitment while appending only the final VAN.
 - Preserve CometBFT transaction event attributes exactly in transaction status
   responses instead of interpreting Base64-like plain text as encoded data.
 - Close idle helper REST and local CometBFT RPC connections before their server

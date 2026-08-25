@@ -21,6 +21,7 @@ import (
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/ffi/redpallas"
 	"github.com/valargroup/vote-sdk/ffi/tx1"
+	"github.com/valargroup/vote-sdk/ffi/votetree"
 	"github.com/valargroup/vote-sdk/ffi/zkp"
 	"github.com/valargroup/vote-sdk/x/vote/keeper"
 	"github.com/valargroup/vote-sdk/x/vote/types"
@@ -109,6 +110,9 @@ func verifyProofs(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper, 
 
 	case *types.MsgCastVote:
 		return verifyCastVote(ctx, m, k, opts)
+
+	case *types.MsgCastVoteBatch:
+		return verifyCastVoteBatch(ctx, m, k, opts)
 
 	case *types.MsgRevealShare:
 		return verifyRevealShare(ctx, m, k, opts)
@@ -218,7 +222,56 @@ func verifyCastVote(ctx context.Context, msg *types.MsgCastVote, k *keeper.Keepe
 		return fmt.Errorf("failed to look up round for ZKP inputs: %w", err)
 	}
 
-	if err := opts.ZKPVerifier.VerifyVoteCommitment(msg.Proof, zkp.VoteCommitmentInputs{
+	return verifyVoteCommitmentProof(msg, root, round.EaPk, opts.ZKPVerifier)
+}
+
+// verifyCastVoteBatch verifies all batch-wide signatures before paying for any
+// proofs. The first proof uses the real chain root at the shared anchor. Each
+// later proof uses the canonical single-leaf root of its predecessor's new VAN.
+func verifyCastVoteBatch(ctx context.Context, msg *types.MsgCastVoteBatch, k *keeper.Keeper, opts ValidateOpts) error {
+	digest := types.ComputeCastVoteBatchSighash(msg)
+	for i, vote := range msg.Votes {
+		if _, err := elgamal.UnmarshalPublicKey(vote.RVpk); err != nil {
+			return fmt.Errorf("%w: votes[%d] r_vpk: %v", types.ErrInvalidSignature, i, err)
+		}
+		if err := opts.SigVerifier.Verify(vote.RVpk, digest, vote.VoteAuthSig); err != nil {
+			return fmt.Errorf("%w: votes[%d]: %v", types.ErrInvalidSignature, i, err)
+		}
+	}
+
+	first := msg.Votes[0]
+	kvStore := k.OpenKVStore(ctx)
+	root, err := k.GetCommitmentRootAtHeight(kvStore, first.VoteRoundId, first.VoteCommTreeAnchorHeight)
+	if err != nil {
+		return fmt.Errorf("failed to get commitment tree root at height %d: %w", first.VoteCommTreeAnchorHeight, err)
+	}
+	if root == nil {
+		return fmt.Errorf("%w: no commitment tree root at height %d", types.ErrInvalidAnchorHeight, first.VoteCommTreeAnchorHeight)
+	}
+
+	round, err := k.GetVoteRound(kvStore, first.VoteRoundId)
+	if err != nil {
+		return fmt.Errorf("failed to look up round for ZKP inputs: %w", err)
+	}
+
+	proofRoot := root
+	for i, vote := range msg.Votes {
+		if err := verifyVoteCommitmentProof(vote, proofRoot, round.EaPk, opts.ZKPVerifier); err != nil {
+			return fmt.Errorf("votes[%d]: %w", i, err)
+		}
+		if i+1 < len(msg.Votes) {
+			proofRoot, err = votetree.SingleLeafRoot(vote.VoteAuthorityNoteNew)
+			if err != nil {
+				return fmt.Errorf("derive synthetic root after votes[%d]: %w", i, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func verifyVoteCommitmentProof(msg *types.MsgCastVote, root, eaPk []byte, verifier zkp.Verifier) error {
+	if err := verifier.VerifyVoteCommitment(msg.Proof, zkp.VoteCommitmentInputs{
 		VanNullifier:         msg.VanNullifier,
 		RVpk:                 msg.RVpk,
 		VoteAuthorityNoteNew: msg.VoteAuthorityNoteNew,
@@ -227,7 +280,7 @@ func verifyCastVote(ctx context.Context, msg *types.MsgCastVote, k *keeper.Keepe
 		VoteRoundId:          msg.VoteRoundId,
 		AnchorHeight:         msg.VoteCommTreeAnchorHeight,
 		VoteCommTreeRoot:     root,
-		EaPk:                 round.EaPk,
+		EaPk:                 eaPk,
 	}); err != nil {
 		return fmt.Errorf("%w: vote commitment: %v", types.ErrInvalidProof, err)
 	}

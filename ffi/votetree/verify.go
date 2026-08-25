@@ -5,6 +5,35 @@ import (
 	"fmt"
 )
 
+// SingleLeafRoot returns the canonical depth-24 vote commitment tree root for
+// a tree whose only leaf is leaf at position zero. Batch vote verification uses
+// this root for every action after the first, anchoring that proof to the
+// previous action's public successor VAN without appending intermediate VANs to
+// global chain state.
+func SingleLeafRoot(leaf []byte) ([]byte, error) {
+	if len(leaf) != LeafBytes {
+		return nil, fmt.Errorf("votetree.SingleLeafRoot: leaf must be %d bytes, got %d", LeafBytes, len(leaf))
+	}
+
+	h, err := NewEphemeralTreeHandle()
+	if err != nil {
+		return nil, fmt.Errorf("votetree.SingleLeafRoot: create ephemeral handle: %w", err)
+	}
+	defer h.Close()
+
+	if err := h.AppendBatch([][]byte{leaf}); err != nil {
+		return nil, fmt.Errorf("votetree.SingleLeafRoot: append leaf: %w", err)
+	}
+	if err := h.Checkpoint(1); err != nil {
+		return nil, fmt.Errorf("votetree.SingleLeafRoot: checkpoint: %w", err)
+	}
+	root, err := h.Root()
+	if err != nil {
+		return nil, fmt.Errorf("votetree.SingleLeafRoot: get root: %w", err)
+	}
+	return root, nil
+}
+
 // VerifyRootFromLeaves rebuilds a fresh ephemeral tree from leaves and checks
 // that its root matches expectedRoot.
 //

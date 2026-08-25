@@ -53,6 +53,7 @@ func init() {
 			ProvideModule,
 			ProvideDelegateVoteSigner,
 			ProvideCastVoteSigner,
+			ProvideCastVoteBatchSigner,
 			ProvideRevealShareSigner,
 			ProvideSubmitTallySigner,
 			ProvideSubmitPartialDecryptionSigner,
@@ -143,6 +144,15 @@ func ProvideDelegateVoteSigner() signing.CustomGetSigner {
 func ProvideCastVoteSigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
 		MsgType: protoreflect.FullName("svote.v1.MsgCastVote"),
+		Fn:      noopSignerFn,
+	}
+}
+
+// ProvideCastVoteBatchSigner registers the no-op Cosmos signer used by atomic
+// vote batches, which are authenticated by their batch-wide RedPallas digest.
+func ProvideCastVoteBatchSigner() signing.CustomGetSigner {
+	return signing.CustomGetSigner{
+		MsgType: protoreflect.FullName("svote.v1.MsgCastVoteBatch"),
 		Fn:      noopSignerFn,
 	}
 }

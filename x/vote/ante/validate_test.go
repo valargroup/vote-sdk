@@ -21,6 +21,7 @@ import (
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
 	"github.com/valargroup/vote-sdk/ffi/redpallas"
+	"github.com/valargroup/vote-sdk/ffi/votetree"
 	"github.com/valargroup/vote-sdk/ffi/zkp"
 	svtest "github.com/valargroup/vote-sdk/testutil"
 	"github.com/valargroup/vote-sdk/x/vote/ante"
@@ -104,6 +105,7 @@ func (errZKPVerifier) VerifyVoteShare(_ []byte, _ zkp.VoteShareInputs) error {
 // spyZKPVerifier captures the DelegationInputs passed to VerifyDelegation.
 type spyZKPVerifier struct {
 	capturedDelegationInputs *zkp.DelegationInputs
+	capturedVoteInputs       []zkp.VoteCommitmentInputs
 }
 
 func (s *spyZKPVerifier) VerifyDelegation(_ []byte, inputs zkp.DelegationInputs) error {
@@ -111,11 +113,26 @@ func (s *spyZKPVerifier) VerifyDelegation(_ []byte, inputs zkp.DelegationInputs)
 	return nil
 }
 
-func (s *spyZKPVerifier) VerifyVoteCommitment(_ []byte, _ zkp.VoteCommitmentInputs) error {
+func (s *spyZKPVerifier) VerifyVoteCommitment(_ []byte, inputs zkp.VoteCommitmentInputs) error {
+	s.capturedVoteInputs = append(s.capturedVoteInputs, inputs)
 	return nil
 }
 
 func (s *spyZKPVerifier) VerifyVoteShare(_ []byte, _ zkp.VoteShareInputs) error {
+	return nil
+}
+
+type spySigVerifier struct {
+	digests [][]byte
+	failAt  int
+}
+
+func (s *spySigVerifier) Verify(_, digest, _ []byte) error {
+	call := len(s.digests)
+	s.digests = append(s.digests, append([]byte(nil), digest...))
+	if s.failAt >= 0 && call == s.failAt {
+		return fmt.Errorf("mock signature failure at call %d", call)
+	}
 	return nil
 }
 
@@ -162,6 +179,13 @@ func newValidMsgCastVote() *types.MsgCastVote {
 		VoteAuthSig:              bytes.Repeat([]byte{0xBB}, 64),
 		RVpk:                     bytes.Repeat([]byte{0x3c}, 32),
 	}
+}
+
+func newValidMsgCastVoteBatch() *types.MsgCastVoteBatch {
+	votes := svtest.ValidCastVoteN(testRoundID, 10, 2, 70)
+	votes[0].ProposalId = 1
+	votes[1].ProposalId = 2
+	return &types.MsgCastVoteBatch{Votes: votes}
 }
 
 func newValidMsgRevealShare() *types.MsgRevealShare {
@@ -860,6 +884,43 @@ func (s *ValidateTestSuite) TestValidateVoteTx_CastVote() {
 			}
 		})
 	}
+}
+
+func (s *ValidateTestSuite) TestValidateVoteTx_CastVoteBatchUsesSharedDigestAndSyntheticRoot() {
+	s.setupActiveRound()
+	batch := newValidMsgCastVoteBatch()
+	sigVerifier := &spySigVerifier{failAt: -1}
+	zkpVerifier := &spyZKPVerifier{}
+
+	err := ante.ValidateVoteTx(s.ctx, batch, s.keeper, ante.ValidateOpts{
+		SigVerifier: sigVerifier,
+		ZKPVerifier: zkpVerifier,
+	})
+	s.Require().NoError(err)
+	s.Require().Len(sigVerifier.digests, 2)
+	s.Require().Equal(types.ComputeCastVoteBatchSighash(batch), sigVerifier.digests[0])
+	s.Require().Equal(sigVerifier.digests[0], sigVerifier.digests[1])
+	s.Require().Len(zkpVerifier.capturedVoteInputs, 2)
+	s.Require().Equal(bytes.Repeat([]byte{0xCC}, 32), zkpVerifier.capturedVoteInputs[0].VoteCommTreeRoot)
+
+	wantSyntheticRoot, err := votetree.SingleLeafRoot(batch.Votes[0].VoteAuthorityNoteNew)
+	s.Require().NoError(err)
+	s.Require().Equal(wantSyntheticRoot, zkpVerifier.capturedVoteInputs[1].VoteCommTreeRoot)
+}
+
+func (s *ValidateTestSuite) TestValidateVoteTx_CastVoteBatchChecksAllSignaturesBeforeProofs() {
+	s.setupActiveRound()
+	batch := newValidMsgCastVoteBatch()
+	sigVerifier := &spySigVerifier{failAt: 1}
+	zkpVerifier := &spyZKPVerifier{}
+
+	err := ante.ValidateVoteTx(s.ctx, batch, s.keeper, ante.ValidateOpts{
+		SigVerifier: sigVerifier,
+		ZKPVerifier: zkpVerifier,
+	})
+	s.Require().ErrorContains(err, "votes[1]")
+	s.Require().Len(sigVerifier.digests, 2)
+	s.Require().Empty(zkpVerifier.capturedVoteInputs)
 }
 
 // ---------------------------------------------------------------------------
