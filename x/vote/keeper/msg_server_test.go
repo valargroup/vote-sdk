@@ -765,6 +765,77 @@ func (s *MsgServerTestSuite) TestCastVote() {
 	}
 }
 
+func (s *MsgServerTestSuite) TestCastVoteBatchAppendsOnlyFinalVANAndAllCommitments() {
+	roundID := bytes.Repeat([]byte{0x21}, 32)
+	s.setupActiveRound(roundID)
+	s.setupRootAtHeight(roundID, 10)
+	votes := svtest.ValidCastVoteN(roundID, 10, 2, 30)
+	votes[0].ProposalId = 1
+	votes[1].ProposalId = 2
+	batch := &types.MsgCastVoteBatch{Votes: votes}
+
+	response, err := s.msgServer.CastVoteBatch(s.ctx, batch)
+	s.Require().NoError(err)
+	s.Require().Equal(types.ComputeCastVoteBatchSighash(batch), response.BatchDigest)
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	state, err := s.keeper.GetCommitmentTreeState(kv, roundID)
+	s.Require().NoError(err)
+	s.Require().Equal(uint64(3), state.NextIndex)
+
+	leaf0, err := kv.Get(types.CommitmentLeafKey(roundID, 0))
+	s.Require().NoError(err)
+	leaf1, err := kv.Get(types.CommitmentLeafKey(roundID, 1))
+	s.Require().NoError(err)
+	leaf2, err := kv.Get(types.CommitmentLeafKey(roundID, 2))
+	s.Require().NoError(err)
+	s.Require().Equal(votes[1].VoteAuthorityNoteNew, leaf0)
+	s.Require().Equal(votes[0].VoteCommitment, leaf1)
+	s.Require().Equal(votes[1].VoteCommitment, leaf2)
+
+	for _, vote := range votes {
+		has, err := s.keeper.HasNullifier(kv, types.NullifierTypeVoteAuthorityNote, roundID, vote.VanNullifier)
+		s.Require().NoError(err)
+		s.Require().True(has)
+	}
+
+	events := s.ctx.EventManager().Events()
+	s.Require().NotEmpty(events)
+	event := events[len(events)-1]
+	s.Require().Equal(types.EventTypeCastVoteBatch, event.Type)
+	attributes := make(map[string]string, len(event.Attributes))
+	for _, attribute := range event.Attributes {
+		attributes[attribute.Key] = attribute.Value
+	}
+	s.Require().Equal("2", attributes[types.AttributeKeyBatchSize])
+	s.Require().Equal("0", attributes[types.AttributeKeyFinalVANLeafIndex])
+	s.Require().Equal("1,2", attributes[types.AttributeKeyVoteCommitmentLeafIndices])
+	s.Require().Equal("1,2", attributes[types.AttributeKeyProposalIDs])
+	s.Require().Equal(fmt.Sprintf("%x", response.BatchDigest), attributes[types.AttributeKeyBatchDigest])
+}
+
+func (s *MsgServerTestSuite) TestCastVoteBatchValidatesWholeBatchBeforeMutation() {
+	roundID := bytes.Repeat([]byte{0x22}, 32)
+	s.setupActiveRound(roundID)
+	s.setupRootAtHeight(roundID, 10)
+	votes := svtest.ValidCastVoteN(roundID, 10, 2, 40)
+	votes[0].ProposalId = 1
+	votes[1].ProposalId = 3
+
+	_, err := s.msgServer.CastVoteBatch(s.ctx, &types.MsgCastVoteBatch{Votes: votes})
+	s.Require().ErrorContains(err, "invalid proposal ID")
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	state, stateErr := s.keeper.GetCommitmentTreeState(kv, roundID)
+	s.Require().NoError(stateErr)
+	s.Require().Zero(state.NextIndex)
+	for _, vote := range votes {
+		has, hasErr := s.keeper.HasNullifier(kv, types.NullifierTypeVoteAuthorityNote, roundID, vote.VanNullifier)
+		s.Require().NoError(hasErr)
+		s.Require().False(has)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // UpdateVoteManagers policy validation and atomic replace; no balance transfer.
 // ---------------------------------------------------------------------------

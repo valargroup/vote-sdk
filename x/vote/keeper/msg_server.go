@@ -215,6 +215,74 @@ func (ms msgServer) CastVote(goCtx context.Context, msg *types.MsgCastVote) (*ty
 	return &types.MsgCastVoteResponse{}, nil
 }
 
+// CastVoteBatch handles an ordered, atomic sequence of ZKP #2 actions. Only
+// the final successor VAN is appended globally; every vote commitment is
+// retained in action order for later share reveals.
+func (ms msgServer) CastVoteBatch(goCtx context.Context, msg *types.MsgCastVoteBatch) (*types.MsgCastVoteBatchResponse, error) {
+	if err := msg.ValidateBasic(); err != nil {
+		return nil, err
+	}
+	ctx := sdk.UnwrapSDKContext(goCtx)
+	kvStore := ms.k.OpenKVStore(ctx)
+	first := msg.Votes[0]
+
+	root, err := ms.k.GetCommitmentRootAtHeight(kvStore, first.VoteRoundId, first.VoteCommTreeAnchorHeight)
+	if err != nil {
+		return nil, err
+	}
+	if root == nil {
+		return nil, fmt.Errorf("%w: no root at height %d", types.ErrInvalidAnchorHeight, first.VoteCommTreeAnchorHeight)
+	}
+
+	for _, vote := range msg.Votes {
+		if err := ms.k.ValidateProposalId(kvStore, vote.VoteRoundId, vote.ProposalId); err != nil {
+			return nil, err
+		}
+	}
+	if err := ms.k.CheckNullifiersUnique(ctx, types.NullifierTypeVoteAuthorityNote, first.VoteRoundId, msg.GetNullifiers()); err != nil {
+		return nil, err
+	}
+
+	for _, vote := range msg.Votes {
+		if err := ms.k.SetNullifier(kvStore, types.NullifierTypeVoteAuthorityNote, first.VoteRoundId, vote.VanNullifier); err != nil {
+			return nil, err
+		}
+	}
+
+	finalVote := msg.Votes[len(msg.Votes)-1]
+	finalVANIndex, err := ms.k.AppendCommitment(kvStore, first.VoteRoundId, finalVote.VoteAuthorityNoteNew)
+	if err != nil {
+		return nil, err
+	}
+
+	vcIndices := make([]string, 0, len(msg.Votes))
+	proposalIDs := make([]string, 0, len(msg.Votes))
+	nullifiers := make([]string, 0, len(msg.Votes))
+	for _, vote := range msg.Votes {
+		vcIndex, err := ms.k.AppendCommitment(kvStore, first.VoteRoundId, vote.VoteCommitment)
+		if err != nil {
+			return nil, err
+		}
+		vcIndices = append(vcIndices, strconv.FormatUint(vcIndex, 10))
+		proposalIDs = append(proposalIDs, strconv.FormatUint(uint64(vote.ProposalId), 10))
+		nullifiers = append(nullifiers, fmt.Sprintf("%x", vote.VanNullifier))
+	}
+
+	batchDigest := types.ComputeCastVoteBatchSighash(msg)
+	ctx.EventManager().EmitEvent(sdk.NewEvent(
+		types.EventTypeCastVoteBatch,
+		sdk.NewAttribute(types.AttributeKeyRoundID, fmt.Sprintf("%x", first.VoteRoundId)),
+		sdk.NewAttribute(types.AttributeKeyBatchDigest, fmt.Sprintf("%x", batchDigest)),
+		sdk.NewAttribute(types.AttributeKeyBatchSize, strconv.Itoa(len(msg.Votes))),
+		sdk.NewAttribute(types.AttributeKeyFinalVANLeafIndex, strconv.FormatUint(finalVANIndex, 10)),
+		sdk.NewAttribute(types.AttributeKeyVoteCommitmentLeafIndices, strings.Join(vcIndices, ",")),
+		sdk.NewAttribute(types.AttributeKeyProposalIDs, strings.Join(proposalIDs, ",")),
+		sdk.NewAttribute(types.AttributeKeyVANNullifiers, strings.Join(nullifiers, ",")),
+	))
+
+	return &types.MsgCastVoteBatchResponse{BatchDigest: batchDigest}, nil
+}
+
 // executeUpdateVoteManagers atomically replaces the vote-manager set, threshold,
 // and min_ceremony_validators. See proto for semantics. Allows the caller to
 // remove themselves from the new set — the non-empty check is the only liveness

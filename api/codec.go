@@ -3,15 +3,17 @@
 package api
 
 import (
+	"bytes"
 	"fmt"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
 // Vote transaction type tags. The first byte of the wire format identifies
-// the message type. Tags 0x02–0x05 are vote-round transactions that use
+// the message type. Tags 0x02–0x06 are vote-round transactions that use
 // ZKP/RedPallas authentication. Tags 0x08, 0x0D, and 0x0E are ceremony/tally
 // tags auto-injected by PrepareProposal that also use the custom wire format.
 //
@@ -23,10 +25,11 @@ import (
 // Tag 0x0A is deliberately absent: it collides with the standard Cosmos Tx
 // protobuf encoding (field 1, wire type 2).
 const (
-	TagDelegateVote byte = 0x02
-	TagCastVote     byte = 0x03
-	TagRevealShare  byte = 0x04
-	TagSubmitTally  byte = 0x05
+	TagDelegateVote  byte = 0x02
+	TagCastVote      byte = 0x03
+	TagRevealShare   byte = 0x04
+	TagSubmitTally   byte = 0x05
+	TagCastVoteBatch byte = 0x06
 
 	// Auto-injected by PrepareProposal; never client-signed.
 	TagAckExecutiveAuthorityKey byte = 0x08
@@ -42,16 +45,16 @@ const (
 )
 
 // IsCustomTag returns true if b is a valid custom transaction type tag
-// (vote-round 0x02–0x05 or ceremony 0x08/0x0D/0x0E). Other ceremony
+// (vote-round 0x02–0x06 or ceremony 0x08/0x0D/0x0E). Other ceremony
 // messages use standard Cosmos SDK transactions.
 func IsCustomTag(b byte) bool {
 	return IsVoteTag(b) || IsCeremonyTag(b)
 }
 
-// IsVoteTag returns true if b is a vote-round transaction type tag (0x02–0x05).
+// IsVoteTag returns true if b is a vote-round transaction type tag (0x02–0x06).
 // MsgCreateVotingSession is submitted through coordinator action approval.
 func IsVoteTag(b byte) bool {
-	return b >= TagDelegateVote && b <= TagSubmitTally
+	return b >= TagDelegateVote && b <= TagCastVoteBatch
 }
 
 // IsCeremonyTag returns true if b is an auto-injected ceremony/tally
@@ -71,6 +74,8 @@ func TagForMessage(msg types.VoteMessage) (byte, error) {
 		return TagDelegateVote, nil
 	case *types.MsgCastVote:
 		return TagCastVote, nil
+	case *types.MsgCastVoteBatch:
+		return TagCastVoteBatch, nil
 	case *types.MsgRevealShare:
 		return TagRevealShare, nil
 	case *types.MsgSubmitTally:
@@ -89,7 +94,7 @@ func EncodeVoteTx(msg types.VoteMessage) ([]byte, error) {
 		return nil, err
 	}
 
-	body, err := proto.Marshal(msg.(proto.Message))
+	body, err := (proto.MarshalOptions{Deterministic: true}).Marshal(msg.(proto.Message))
 	if err != nil {
 		return nil, fmt.Errorf("protobuf marshal failed: %w", err)
 	}
@@ -117,6 +122,8 @@ func DecodeVoteTx(raw []byte) (byte, types.VoteMessage, error) {
 		msg = &types.MsgDelegateVote{}
 	case TagCastVote:
 		msg = &types.MsgCastVote{}
+	case TagCastVoteBatch:
+		msg = &types.MsgCastVoteBatch{}
 	case TagRevealShare:
 		msg = &types.MsgRevealShare{}
 	case TagSubmitTally:
@@ -128,6 +135,18 @@ func DecodeVoteTx(raw []byte) (byte, types.VoteMessage, error) {
 	if err := proto.Unmarshal(body, msg); err != nil {
 		return 0, nil, fmt.Errorf("protobuf unmarshal failed for tag 0x%02x: %w", tag, err)
 	}
+	if tag == TagCastVoteBatch {
+		if err := rejectUnknownProtoFields(msg.ProtoReflect()); err != nil {
+			return 0, nil, fmt.Errorf("non-canonical vote batch: %w", err)
+		}
+		canonical, err := (proto.MarshalOptions{Deterministic: true}).Marshal(msg)
+		if err != nil {
+			return 0, nil, fmt.Errorf("canonical protobuf marshal failed for vote batch: %w", err)
+		}
+		if !bytes.Equal(body, canonical) {
+			return 0, nil, fmt.Errorf("non-canonical vote batch protobuf encoding")
+		}
+	}
 
 	voteMsg, ok := msg.(types.VoteMessage)
 	if !ok {
@@ -135,6 +154,41 @@ func DecodeVoteTx(raw []byte) (byte, types.VoteMessage, error) {
 	}
 
 	return tag, voteMsg, nil
+}
+
+func rejectUnknownProtoFields(msg protoreflect.Message) error {
+	if len(msg.GetUnknown()) > 0 {
+		return fmt.Errorf("message %s contains unknown fields", msg.Descriptor().FullName())
+	}
+	var nestedErr error
+	msg.Range(func(field protoreflect.FieldDescriptor, value protoreflect.Value) bool {
+		if field.IsList() && field.Kind() == protoreflect.MessageKind {
+			list := value.List()
+			for i := 0; i < list.Len(); i++ {
+				if err := rejectUnknownProtoFields(list.Get(i).Message()); err != nil {
+					nestedErr = err
+					return false
+				}
+			}
+			return true
+		}
+		if field.IsMap() && field.MapValue().Kind() == protoreflect.MessageKind {
+			value.Map().Range(func(_ protoreflect.MapKey, mapValue protoreflect.Value) bool {
+				if err := rejectUnknownProtoFields(mapValue.Message()); err != nil {
+					nestedErr = err
+					return false
+				}
+				return true
+			})
+			return nestedErr == nil
+		}
+		if field.Kind() == protoreflect.MessageKind {
+			nestedErr = rejectUnknownProtoFields(value.Message())
+			return nestedErr == nil
+		}
+		return true
+	})
+	return nestedErr
 }
 
 // EncodeCeremonyTx serializes an auto-injected message into the custom wire format:

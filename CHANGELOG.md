@@ -8,6 +8,9 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Add atomic cast-vote batches with one batch-wide authorization digest,
+  chained unchanged ZKP #2 proofs, deterministic wire encoding, and recovery
+  events that retain every vote commitment while appending only the final VAN.
 - Close idle helper REST connections before the node API timeout so scheduled
   reveal submissions do not race stale pooled connections.
 - Stop reporting reveal-share proofs as invalid when CheckTx sees a commitment

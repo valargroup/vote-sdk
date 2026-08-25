@@ -127,6 +127,7 @@ func (s CryptoReadinessStatus) ready() bool {
 //
 //	POST /shielded-vote/v1/delegate-vote          → MsgDelegateVote
 //	POST /shielded-vote/v1/cast-vote              → MsgCastVote
+//	POST /shielded-vote/v1/cast-vote-batch        → MsgCastVoteBatch
 //	POST /shielded-vote/v1/reveal-share           → MsgRevealShare
 //
 // MsgSubmitTally is proposer-only (auto-injected via PrepareProposal) and
@@ -145,6 +146,7 @@ func (h *Handler) RegisterTxRoutes(router *mux.Router) {
 	trace := sentryhttp.New(sentryhttp.Options{Repanic: true}).Handle
 	router.Handle("/shielded-vote/v1/delegate-vote", trace(http.HandlerFunc(h.handleDelegateVote))).Methods("POST")
 	router.Handle("/shielded-vote/v1/cast-vote", trace(http.HandlerFunc(h.handleCastVote))).Methods("POST")
+	router.Handle("/shielded-vote/v1/cast-vote-batch", trace(http.HandlerFunc(h.handleCastVoteBatch))).Methods("POST")
 	router.Handle("/shielded-vote/v1/reveal-share", trace(http.HandlerFunc(h.handleRevealShare))).Methods("POST")
 
 	router.Handle("/shielded-vote/v1/snapshot-data/{height}", trace(http.HandlerFunc(h.handleSnapshotData))).Methods("GET")
@@ -172,6 +174,17 @@ func (h *Handler) handleCastVote(w http.ResponseWriter, r *http.Request) {
 	}
 	msg := &types.MsgCastVote{}
 	if !h.decodeAndValidate(w, r, msg) {
+		return
+	}
+	h.broadcastVoteTx(r.Context(), w, msg)
+}
+
+func (h *Handler) handleCastVoteBatch(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureCryptoReady(w) {
+		return
+	}
+	msg := &types.MsgCastVoteBatch{}
+	if !h.decodeAndValidateCanonicalJSON(w, r, msg) {
 		return
 	}
 	h.broadcastVoteTx(r.Context(), w, msg)
@@ -428,9 +441,10 @@ func (h *Handler) handleTxStatus(w http.ResponseWriter, r *http.Request) {
 
 // BroadcastResult is the JSON response returned to clients after tx submission.
 type BroadcastResult struct {
-	TxHash string `json:"tx_hash"`
-	Code   uint32 `json:"code"`
-	Log    string `json:"log,omitempty"`
+	TxHash      string `json:"tx_hash"`
+	Code        uint32 `json:"code"`
+	Log         string `json:"log,omitempty"`
+	BatchDigest string `json:"batch_digest,omitempty"`
 }
 
 // broadcastVoteTx encodes a vote message, broadcasts it to the local CometBFT
@@ -464,6 +478,9 @@ func (h *Handler) broadcastVoteTx(ctx context.Context, w http.ResponseWriter, ms
 		})
 		writeError(w, http.StatusBadGateway, fmt.Sprintf("broadcast failed: %v", err))
 		return
+	}
+	if batch, ok := msg.(*types.MsgCastVoteBatch); ok {
+		result.BatchDigest = hex.EncodeToString(types.ComputeCastVoteBatchSighash(batch))
 	}
 
 	if result.Code != 0 {
@@ -774,6 +791,44 @@ func (h *Handler) decodeAndValidate(w http.ResponseWriter, r *http.Request, msg 
 		return false
 	}
 
+	return true
+}
+
+// decodeAndValidateCanonicalJSON applies strict JSON decoding for atomic vote
+// batches. JSON object key order is not significant; after decoding, the wire
+// transaction is always produced with deterministic protobuf serialization.
+// Rejecting unknown fields and trailing values keeps retries reproducible and
+// prevents clients from believing unsigned data was accepted.
+func (h *Handler) decodeAndValidateCanonicalJSON(w http.ResponseWriter, r *http.Request, msg voteProtoMessage) bool {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("read body: %v", err))
+		return false
+	}
+	if len(body) == 0 {
+		writeError(w, http.StatusBadRequest, "empty request body")
+		return false
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(msg); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid JSON: %v", err))
+		return false
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON: trailing value")
+		} else {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid JSON: %v", err))
+		}
+		return false
+	}
+
+	if err := msg.ValidateBasic(); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("validation failed: %v", err))
+		return false
+	}
 	return true
 }
 

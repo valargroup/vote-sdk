@@ -1099,6 +1099,7 @@ func TestCustomSignerProviders_Registered(t *testing.T) {
 	allSigners := []signing.CustomGetSigner{
 		vote.ProvideDelegateVoteSigner(),
 		vote.ProvideCastVoteSigner(),
+		vote.ProvideCastVoteBatchSigner(),
 		vote.ProvideRevealShareSigner(),
 		vote.ProvideSubmitTallySigner(),
 		vote.ProvideSubmitPartialDecryptionSigner(),
@@ -1112,6 +1113,7 @@ func TestCustomSignerProviders_Registered(t *testing.T) {
 	wantMsgTypes := []protoreflect.FullName{
 		"svote.v1.MsgDelegateVote",
 		"svote.v1.MsgCastVote",
+		"svote.v1.MsgCastVoteBatch",
 		"svote.v1.MsgRevealShare",
 		"svote.v1.MsgSubmitTally",
 		"svote.v1.MsgSubmitPartialDecryption",

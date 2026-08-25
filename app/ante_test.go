@@ -252,6 +252,18 @@ func TestDualAnteHandler_StandardTxRestrictions(t *testing.T) {
 				},
 			},
 			{
+				name: "MsgCastVoteBatch",
+				msg: &votetypes.MsgCastVoteBatch{Votes: []*votetypes.MsgCastVote{
+					{
+						VanNullifier:         bytes.Repeat([]byte{0xD2}, 32),
+						VoteAuthorityNoteNew: testutil.FpLE(0xA2A2), VoteCommitment: testutil.FpLE(0xB3B3),
+						ProposalId: 1, Proof: []byte{0x42}, VoteRoundId: roundID,
+						VoteCommTreeAnchorHeight: anchorHeight,
+						VoteAuthSig:              bytes.Repeat([]byte{0xC4}, 64), RVpk: append([]byte(nil), testutil.DummyPallasPoint...),
+					},
+				}},
+			},
+			{
 				name: "MsgRevealShare",
 				msg: &votetypes.MsgRevealShare{
 					ShareNullifier: bytes.Repeat([]byte{0xE1}, 32),

@@ -4,7 +4,7 @@ Go CGO bindings to the Poseidon Merkle tree in the shielded-vote-circuits Rust s
 
 ## Role in the protocol
 
-The vote commitment tree is an append-only, depth-24 Poseidon Merkle tree maintained by the vote chain. Every `MsgDelegateVote` appends one Vote Authority Note (VAN) leaf; every `MsgCastVote` appends two leaves (new VAN + Vote Commitment). EndBlocker snapshots the root at each block height. That root becomes the on-chain anchor for ZKP #2 (VAN membership) and ZKP #3 (VC membership).
+The vote commitment tree is an append-only, depth-24 Poseidon Merkle tree maintained by the vote chain. Every `MsgDelegateVote` appends one Vote Authority Note (VAN) leaf; every `MsgCastVote` appends two leaves (new VAN + Vote Commitment). An atomic `MsgCastVoteBatch` appends its final VAN followed by every vote commitment in action order. Intermediate VANs anchor later batch proofs through deterministic ephemeral single-leaf roots and are not appended globally. EndBlocker snapshots the global root at each block height. That root becomes the on-chain anchor for ZKP #2 (VAN membership) and ZKP #3 (VC membership).
 
 This package is the Go-side interface to the tree. The tree itself is implemented in `vote-commitment-tree/` and compiled into the Rust static library. All root and path computations happen in Rust; Go calls through CGO.
 
