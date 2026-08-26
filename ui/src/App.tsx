@@ -3548,6 +3548,16 @@ function VoteStatusView({
             const isActive =
               Number(statusKey) === 1 ||
               statusKey === "SESSION_STATUS_ACTIVE";
+            const maxRoundShares = isFinalized
+              ? 1
+              : Math.max(
+                  1,
+                  ...(summary?.proposals ?? []).flatMap((proposal) =>
+                    (proposal.options ?? []).map((option) =>
+                      Number(option.ballot_count ?? 0)
+                    )
+                  )
+                );
             const statusInfo = STATUS_MAP[statusKey] ?? {
               label: String(statusKey || "Unknown"),
               color: "bg-surface-3 text-text-muted",
@@ -3784,13 +3794,16 @@ function VoteStatusView({
                               const value = Number(opt.total_value ?? 0);
                               const barValue = isFinalized ? value : shares;
 
-                              // Compute bar width relative to max in this proposal.
-                              const allValues = options.map((o) =>
-                                isFinalized
-                                  ? Number(o.total_value ?? 0)
-                                  : Number(o.ballot_count ?? 0)
-                              );
-                              const maxVal = Math.max(1, ...allValues);
+                              // Finalized results are comparable within a proposal.
+                              // Before finalization, compare shares across the round.
+                              const maxVal = isFinalized
+                                ? Math.max(
+                                    1,
+                                    ...options.map((o) =>
+                                      Number(o.total_value ?? 0)
+                                    )
+                                  )
+                                : maxRoundShares;
                               const pct = (barValue / maxVal) * 100;
                               const isWinner = winnerIndices.has(opt.index ?? 0);
 
