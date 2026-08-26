@@ -18,6 +18,7 @@
 //!   ZASHI_LIGHTWALLETD     - Lightwalletd host:port (default: us.zec.stardust.rest:443)
 //!   ZASHI_PIR_URL          - PIR server URL (default: http://46.101.255.48:3000)
 //!   ZASHI_VOTE_WINDOW_SECS - Voting window in seconds (default: 604800 = 7 days)
+//!   ZASHI_PROPOSAL_COUNT   - Generate that many two-option speed-test proposals
 
 use e2e_tests::{
     api::{
@@ -230,6 +231,17 @@ fn snapshot_height() -> u64 {
 
 /// The proposals for the voting round.
 fn proposals() -> serde_json::Value {
+    if let Ok(raw_count) = std::env::var("ZASHI_PROPOSAL_COUNT") {
+        let count = raw_count
+            .parse::<u32>()
+            .expect("ZASHI_PROPOSAL_COUNT must be a positive integer");
+        assert!(
+            (1..=100).contains(&count),
+            "ZASHI_PROPOSAL_COUNT must be between 1 and 100"
+        );
+        return speed_test_proposals(count);
+    }
+
     json!([
         {
             "id": 1,
@@ -256,6 +268,35 @@ fn proposals() -> serde_json::Value {
             "options": [{"index": 0, "label": "Support"}, {"index": 1, "label": "Oppose"}]
         }
     ])
+}
+
+fn speed_test_proposals(count: u32) -> serde_json::Value {
+    serde_json::Value::Array(
+        (1..=count)
+            .map(|id| {
+                json!({
+                    "id": id,
+                    "title": format!("Atomic batch speed question {id}"),
+                    "description": format!(
+                        "Local performance test question {id} of {count}."
+                    ),
+                    "options": [
+                        {"index": 0, "label": "Yes"},
+                        {"index": 1, "label": "No"}
+                    ]
+                })
+            })
+            .collect(),
+    )
+}
+
+#[test]
+fn generates_requested_speed_test_proposals() {
+    let generated = speed_test_proposals(15);
+    let proposals = generated.as_array().unwrap();
+    assert_eq!(proposals.len(), 15);
+    assert_eq!(proposals[0]["id"], 1);
+    assert_eq!(proposals[14]["id"], 15);
 }
 
 fn to_base64(bytes: &[u8]) -> String {
