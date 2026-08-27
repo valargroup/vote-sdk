@@ -279,24 +279,6 @@ type abciAttribute struct {
 	Index bool   `json:"index,omitempty"`
 }
 
-// decodeBase64IfPlain tries to base64-decode s. CometBFT ≤0.37 encodes event
-// attribute keys/values as base64; ≥0.38 sends plain strings. If decoding
-// succeeds and the result is valid UTF-8, the decoded string is returned;
-// otherwise the original value is returned unchanged.
-func decodeBase64IfPlain(s string) string {
-	b, err := base64.StdEncoding.DecodeString(s)
-	if err != nil {
-		return s
-	}
-	decoded := string(b)
-	for _, r := range decoded {
-		if r == '\uFFFD' {
-			return s
-		}
-	}
-	return decoded
-}
-
 // errTxNotFound is returned by queryTxByHash when CometBFT has no record of the TX in any block.
 var errTxNotFound = errors.New("tx not found in any block")
 
@@ -371,19 +353,14 @@ func (h *Handler) queryTxByHash(ctx context.Context, txHash string) (*txStatusRe
 		return nil, fmt.Errorf("unexpected empty result from CometBFT")
 	}
 
-	events := rpcResp.Result.TxResult.Events
-	for i, ev := range events {
-		for j, attr := range ev.Attributes {
-			events[i].Attributes[j].Key = decodeBase64IfPlain(attr.Key)
-			events[i].Attributes[j].Value = decodeBase64IfPlain(attr.Value)
-		}
-	}
-
+	// Supported CometBFT versions already return event attributes as plain
+	// strings. Preserve them exactly; content-based Base64 detection corrupts
+	// valid values that happen to resemble encoded data.
 	return &txStatusResult{
 		Height: rpcResp.Result.Height,
 		Code:   rpcResp.Result.TxResult.Code,
 		Log:    rpcResp.Result.TxResult.Log,
-		Events: events,
+		Events: rpcResp.Result.TxResult.Events,
 	}, nil
 }
 
