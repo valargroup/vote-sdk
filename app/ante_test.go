@@ -22,6 +22,7 @@ import (
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/testutil"
@@ -252,18 +253,6 @@ func TestDualAnteHandler_StandardTxRestrictions(t *testing.T) {
 				},
 			},
 			{
-				name: "MsgCastVoteBatch",
-				msg: &votetypes.MsgCastVoteBatch{Votes: []*votetypes.MsgCastVote{
-					{
-						VanNullifier:         bytes.Repeat([]byte{0xD2}, 32),
-						VoteAuthorityNoteNew: testutil.FpLE(0xA2A2), VoteCommitment: testutil.FpLE(0xB3B3),
-						ProposalId: 1, Proof: []byte{0x42}, VoteRoundId: roundID,
-						VoteCommTreeAnchorHeight: anchorHeight,
-						VoteAuthSig:              bytes.Repeat([]byte{0xC4}, 64), RVpk: append([]byte(nil), testutil.DummyPallasPoint...),
-					},
-				}},
-			},
-			{
 				name: "MsgRevealShare",
 				msg: &votetypes.MsgRevealShare{
 					ShareNullifier: bytes.Repeat([]byte{0xE1}, 32),
@@ -299,6 +288,12 @@ func TestDualAnteHandler_StandardTxRestrictions(t *testing.T) {
 					Entries: []*votetypes.TallyEntry{{ProposalId: 1, VoteDecision: 1, TotalValue: 0}},
 				},
 			},
+		}
+		if votetypes.AtomicVoteBatchesEnabled {
+			tests = append(tests, struct {
+				name string
+				msg  sdk.Msg
+			}{name: "MsgCastVoteBatch", msg: validStandardCastVoteBatch(roundID, anchorHeight)})
 		}
 
 		for _, tc := range tests {
@@ -336,6 +331,59 @@ func TestDualAnteHandler_StandardTxRestrictions(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestDormantAtomicVoteBatchStandardTxCompatibility(t *testing.T) {
+	if votetypes.AtomicVoteBatchesEnabled {
+		t.Skip("only applies before atomic vote batch activation")
+	}
+
+	ta := testutil.SetupTestApp(t)
+	batch := validStandardCastVoteBatch(bytes.Repeat([]byte{0x55}, 32), 1)
+	signerAddr := sdk.AccAddress(ta.ValPrivKey.PubKey().Address()).String()
+	payload, err := anypb.New(batch)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name string
+		msg  sdk.Msg
+	}{
+		{name: "top-level", msg: batch},
+		{name: "nested coordinator payload", msg: &votetypes.MsgProposeCoordinatorAction{
+			Creator: signerAddr,
+			Payload: payload,
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			txBytes := buildSignedTxWithKey(t, ta, ta.ValPrivKey, 0, 0, tc.msg)
+
+			checkResp := ta.CheckTxSync(txBytes)
+			require.Equal(t, uint32(2), checkResp.Code)
+			require.Zero(t, checkResp.GasWanted)
+			require.Contains(t, checkResp.Log, "unable to resolve type URL")
+			require.Contains(t, checkResp.Log, "svote.v1.MsgCastVoteBatch")
+
+			deliverResp := ta.DeliverVoteTx(txBytes)
+			require.Equal(t, uint32(2), deliverResp.Code)
+			require.Zero(t, deliverResp.GasWanted)
+			require.Zero(t, deliverResp.GasUsed)
+		})
+	}
+}
+
+func validStandardCastVoteBatch(roundID []byte, anchorHeight uint64) *votetypes.MsgCastVoteBatch {
+	return &votetypes.MsgCastVoteBatch{Votes: []*votetypes.MsgCastVote{{
+		VanNullifier:             bytes.Repeat([]byte{0xD2}, 32),
+		VoteAuthorityNoteNew:     testutil.FpLE(0xA2A2),
+		VoteCommitment:           testutil.FpLE(0xB3B3),
+		ProposalId:               1,
+		Proof:                    []byte{0x42},
+		VoteRoundId:              roundID,
+		VoteCommTreeAnchorHeight: anchorHeight,
+		VoteAuthSig:              bytes.Repeat([]byte{0xC4}, 64),
+		RVpk:                     append([]byte(nil), testutil.DummyPallasPoint...),
+	}}}
 }
 
 // ---------------------------------------------------------------------------
