@@ -8,6 +8,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Preserve CometBFT transaction event attributes exactly in transaction status
+  responses instead of interpreting Base64-like plain text as encoded data.
 - Close idle helper REST and local CometBFT RPC connections before their server
   timeouts, and reconcile interrupted broadcasts before retrying, so scheduled
   reveal submissions do not race stale pooled connections.
