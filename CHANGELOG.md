@@ -8,6 +8,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Preserve CometBFT transaction event attributes exactly in transaction status
+  responses instead of interpreting Base64-like plain text as encoded data.
 - Close idle helper REST connections before the node API timeout so scheduled
   reveal submissions do not race stale pooled connections.
 - Stop reporting reveal-share proofs as invalid when CheckTx sees a commitment
