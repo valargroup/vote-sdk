@@ -236,8 +236,8 @@ fn proposals() -> serde_json::Value {
             .parse::<u32>()
             .expect("ZASHI_PROPOSAL_COUNT must be a positive integer");
         assert!(
-            (1..=100).contains(&count),
-            "ZASHI_PROPOSAL_COUNT must be between 1 and 100"
+            (1..=15).contains(&count),
+            "ZASHI_PROPOSAL_COUNT must be between 1 and 15"
         );
         return speed_test_proposals(count);
     }
