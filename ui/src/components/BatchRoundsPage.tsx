@@ -70,6 +70,16 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Local-timezone value for a datetime-local input, matching RoundEditor.
+function toLocalInput(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function defaultEndTimeLocal(): string {
+  return toLocalInput(new Date(Date.now() + 24 * 60 * 60 * 1000));
+}
+
 export function BatchRoundsPage({
   wallet,
   rounds,
@@ -81,6 +91,9 @@ export function BatchRoundsPage({
   const [baseName, setBaseName] = useState("");
   const [count, setCount] = useState(3);
   const [templateId, setTemplateId] = useState("");
+  // Rounds share this end time instead of the template's, which may be stale
+  // by the time a batch runs. Defaults to 24 hours from when the page opened.
+  const [endTimeLocal, setEndTimeLocal] = useState(defaultEndTimeLocal);
   const [items, setItems] = useState<BatchRoundItem[]>([]);
   const [phase, setPhase] = useState<BatchPhase>("idle");
   const [runError, setRunError] = useState("");
@@ -128,8 +141,12 @@ export function BatchRoundsPage({
     if (snapshotHeight === 0) {
       return "The template round has no snapshot height. Set one in Round Settings.";
     }
-    if (!round.settings.endTime) {
-      return "The template round has no voting end time. Set one in Round Settings.";
+    const endTimeMs = new Date(endTimeLocal).getTime();
+    if (!endTimeLocal || Number.isNaN(endTimeMs)) {
+      return "Enter a valid voting end time.";
+    }
+    if (endTimeMs <= Date.now()) {
+      return "The voting end time must be in the future.";
     }
     if (!precomputedBaseURL) {
       return "Cannot validate the published PIR snapshot because this svoted did not expose SVOTE_PRECOMPUTED_BASE_URL.";
@@ -229,9 +246,7 @@ export function BatchRoundsPage({
       }
 
       const snapshotHeight = parseInt(template.settings.snapshotHeight, 10) || 0;
-      const voteEndTime = Math.floor(
-        new Date(template.settings.endTime).getTime() / 1000
-      );
+      const voteEndTime = Math.floor(new Date(endTimeLocal).getTime() / 1000);
       const proposals = template.proposals.map((p, i) => ({
         id: i + 1,
         title: p.title,
@@ -442,8 +457,34 @@ export function BatchRoundsPage({
               ))}
             </select>
             <p className="mt-1 text-[10px] text-text-muted">
-              Snapshot height, end time, proposals, description, and discussion
-              URL are taken from this draft; only the round titles differ.
+              Snapshot height, proposals, description, and discussion URL are
+              taken from this draft; the round titles and the end time below
+              differ.
+            </p>
+          </div>
+          <div>
+            <label className="block text-[11px] text-text-secondary mb-1">
+              Voting end time
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="datetime-local"
+                value={endTimeLocal}
+                onChange={(e) => setEndTimeLocal(e.target.value)}
+                disabled={running}
+                className="flex-1 px-3 py-2 bg-surface-2 border border-border-subtle rounded-lg text-xs text-text-primary focus:outline-none focus:border-accent/50 disabled:opacity-50 [color-scheme:dark]"
+              />
+              <button
+                onClick={() => setEndTimeLocal(defaultEndTimeLocal())}
+                disabled={running}
+                className="shrink-0 px-3 py-2 bg-surface-3 hover:bg-surface-1 text-text-secondary rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
+              >
+                +24h from now
+              </button>
+            </div>
+            <p className="mt-1 text-[10px] text-text-muted">
+              Applied to every round in the batch, overriding the template's
+              end time (which may be stale). Defaults to 24 hours from now.
             </p>
           </div>
           <div className="flex items-center justify-end gap-2">
