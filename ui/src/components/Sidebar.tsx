@@ -16,6 +16,7 @@ import {
   ClipboardCheck,
   KeyRound,
   BadgeCheck,
+  Layers,
   X,
 } from "lucide-react";
 import type { VotingRound, RoundStatus } from "../types";
@@ -69,6 +70,7 @@ interface SidebarProps {
   onDeleteRound: (id: string) => void;
   currentSection: string;
   showShareQueues: boolean;
+  showBatchRounds: boolean;
   isOpen: boolean;
   onClose: () => void;
 }
@@ -85,6 +87,7 @@ export function Sidebar({
   onDeleteRound,
   currentSection,
   showShareQueues,
+  showBatchRounds,
   isOpen,
   onClose,
 }: SidebarProps) {
@@ -260,6 +263,20 @@ export function Sidebar({
           <ShieldCheck size={15} />
           Attest round
         </button>
+
+        {showBatchRounds && (
+          <button
+            onClick={() => onNavigate("batch-rounds")}
+            className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs transition-colors cursor-pointer ${
+              currentSection === "batch-rounds"
+                ? "bg-surface-3 text-text-primary"
+                : "text-text-secondary hover:bg-surface-2 hover:text-text-primary"
+            }`}
+          >
+            <Layers size={15} />
+            Batch rounds
+          </button>
+        )}
 
         <button
           onClick={() => onNavigate("endorsers")}

@@ -727,6 +727,25 @@ export async function createConfigPr(input: {
   });
 }
 
+export interface ConfigPRBatchRoundInput {
+  round_id: string;
+  entry: ConfigRoundEntry;
+  signed_payload_hash: string;
+}
+
+export async function createConfigPrBatch(input: {
+  rounds: ConfigPRBatchRoundInput[];
+  pir_layout: PirLayout;
+  batch_name?: string;
+  auth: ConfigPRAuth;
+}): Promise<CreateConfigPRResponse> {
+  return fetchJson<CreateConfigPRResponse>("/api/config-prs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
 export async function getRound(
   roundIdHex: string
 ): Promise<{ round: ChainRound }> {

@@ -621,3 +621,255 @@ func hexString(data []byte) string {
 	}
 	return string(out)
 }
+
+func validCreateConfigPRBatchRequest(t *testing.T, n int) createConfigPRRequest {
+	t.Helper()
+	if n > 16 {
+		t.Fatalf("batch helper supports at most 16 rounds, got %d", n)
+	}
+	eaPK := bytes.Repeat([]byte{1}, 32)
+	var eaPKArray [32]byte
+	copy(eaPKArray[:], eaPK)
+	rounds := make([]configPRRoundInput, 0, n)
+	for i := 0; i < n; i++ {
+		roundID := strings.Repeat(string(rune('a'+i)), 64)
+		payload, err := votingconfig.CanonicalPayloadV2(roundID, eaPKArray, testConfigPIRLayout())
+		if err != nil {
+			t.Fatal(err)
+		}
+		hash := votingconfig.SignedPayloadHash(payload)
+		rounds = append(rounds, configPRRoundInput{
+			RoundID:           roundID,
+			Entry:             signedRoundEntry(t, roundID, eaPK, "valar-test"),
+			SignedPayloadHash: hexString(hash[:]),
+		})
+	}
+	body := createConfigPRRequest{
+		PIRLayout: testConfigPIRLayout(),
+		Rounds:    rounds,
+		BatchName: "Load test",
+	}
+	body.Auth = signedConfigPRBatchAuth(t, body)
+	return body
+}
+
+func signedConfigPRBatchAuth(t *testing.T, body createConfigPRRequest) configPRAuth {
+	t.Helper()
+	priv := secp256k1.GenPrivKey()
+	pub := priv.PubKey().(*secp256k1.PubKey)
+	address, err := pubKeyToAddress(pub.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	intentRounds := make([]configPRBatchIntentRound, 0, len(body.Rounds))
+	for _, in := range body.Rounds {
+		entryHash, err := hashRoundEntry(in.Entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		intentRounds = append(intentRounds, configPRBatchIntentRound{
+			RoundID:           in.RoundID,
+			SignedPayloadHash: in.SignedPayloadHash,
+			EntrySHA256:       entryHash,
+		})
+	}
+	payloadBytes, err := marshalConfigPRIntentPayload(configPRBatchIntentPayload{
+		Action:    configPRBatchAction,
+		Rounds:    intentRounds,
+		Timestamp: time.Now().Unix(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	signDoc := makeSignArbitraryDoc(address, string(payloadBytes))
+	sig, err := priv.Sign(signDoc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return configPRAuth{
+		SignerAddress: address,
+		Payload:       string(payloadBytes),
+		Signature:     base64.StdEncoding.EncodeToString(sig),
+		PubKey:        base64.StdEncoding.EncodeToString(pub.Bytes()),
+	}
+}
+
+func TestHandleCreateConfigPRBatchCreatesSinglePR(t *testing.T) {
+	t.Parallel()
+
+	body := validCreateConfigPRBatchRequest(t, 3)
+	roundIDs := []string{body.Rounds[0].RoundID, body.Rounds[1].RoundID, body.Rounds[2].RoundID}
+	wantBranch := testConfigPRAutomation("").batchBranchName(roundIDs)
+	dynamicConfig, staticConfig := configDocuments(t, nil)
+
+	var createRefCount, updateContentCount, createPRCount int
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		switch {
+		case r.Method == http.MethodGet && path == "/repos/valargroup/token-holder-voting-config/git/ref/heads/main":
+			writeJSON(t, w, map[string]any{"object": map[string]string{"sha": "main-sha"}})
+		case r.Method == http.MethodPost && path == "/repos/valargroup/token-holder-voting-config/git/refs":
+			createRefCount++
+			var req struct {
+				Ref string `json:"ref"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatal(err)
+			}
+			if req.Ref != "refs/heads/"+wantBranch {
+				t.Fatalf("unexpected batch branch ref: %q, want %q", req.Ref, "refs/heads/"+wantBranch)
+			}
+			writeJSON(t, w, map[string]any{"ref": req.Ref})
+		case r.Method == http.MethodGet && path == "/repos/valargroup/token-holder-voting-config/contents/prod/dynamic-voting-config.json" && r.URL.Query().Get("ref") == "main":
+			writeContent(t, w, dynamicConfig, "dynamic-main-sha")
+		case r.Method == http.MethodGet && path == "/repos/valargroup/token-holder-voting-config/contents/prod/static-voting-config.json" && r.URL.Query().Get("ref") == "main":
+			writeContent(t, w, staticConfig, "static-main-sha")
+		case r.Method == http.MethodGet && path == "/repos/valargroup/token-holder-voting-config/contents/prod/dynamic-voting-config.json" && r.URL.Query().Get("ref") == wantBranch:
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		case r.Method == http.MethodPut && path == "/repos/valargroup/token-holder-voting-config/contents/prod/dynamic-voting-config.json":
+			updateContentCount++
+			var req struct {
+				Content string `json:"content"`
+				Branch  string `json:"branch"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatal(err)
+			}
+			if req.Branch != wantBranch {
+				t.Fatalf("unexpected update branch: %q", req.Branch)
+			}
+			updated, err := base64.StdEncoding.DecodeString(req.Content)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, roundID := range roundIDs {
+				if !strings.Contains(string(updated), roundID) {
+					t.Fatalf("updated config missing round id %s: %s", roundID, updated)
+				}
+			}
+			writeJSON(t, w, map[string]any{"commit": map[string]string{"sha": "commit-sha"}})
+		case r.Method == http.MethodPost && path == "/repos/valargroup/token-holder-voting-config/pulls":
+			createPRCount++
+			var req struct {
+				Title string `json:"title"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(req.Title, "Load test") || !strings.Contains(req.Title, "3 rounds") {
+				t.Fatalf("unexpected batch PR title: %q", req.Title)
+			}
+			writeJSON(t, w, map[string]string{"html_url": "https://github.com/valargroup/token-holder-voting-config/pull/124"})
+		default:
+			t.Fatalf("unexpected GitHub request: %s %s?%s", r.Method, path, r.URL.RawQuery)
+		}
+	}))
+	defer gh.Close()
+
+	r := mux.NewRouter()
+	a := &Admin{
+		configPR:         testConfigPRAutomation(gh.URL),
+		logger:           log.NewNopLogger(),
+		checkVoteManager: func(string) bool { return true },
+	}
+	RegisterRoutes(r, func() *Admin { return a }, log.NewNopLogger())
+
+	w := serveCreateConfigPR(t, r, body)
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var resp createConfigPRResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.HTMLURL == "" || resp.Branch != wantBranch || resp.CommitSHA != "commit-sha" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+	if createRefCount != 1 || updateContentCount != 1 || createPRCount != 1 {
+		t.Fatalf("want exactly one ref/commit/PR, got ref=%d update=%d pr=%d", createRefCount, updateContentCount, createPRCount)
+	}
+}
+
+func TestHandleCreateConfigPRBatchRejectsMismatchedIntent(t *testing.T) {
+	t.Parallel()
+
+	body := validCreateConfigPRBatchRequest(t, 2)
+	// Swap the request rounds after signing so the intent no longer matches.
+	body.Rounds[0], body.Rounds[1] = body.Rounds[1], body.Rounds[0]
+
+	r := mux.NewRouter()
+	a := &Admin{
+		configPR:         testConfigPRAutomation("https://example.invalid"),
+		logger:           log.NewNopLogger(),
+		checkVoteManager: func(string) bool { return true },
+	}
+	RegisterRoutes(r, func() *Admin { return a }, log.NewNopLogger())
+
+	w := serveCreateConfigPR(t, r, body)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("want 401, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleCreateConfigPRBatchRejectsDuplicateRounds(t *testing.T) {
+	t.Parallel()
+
+	body := validCreateConfigPRBatchRequest(t, 2)
+	body.Rounds[1] = body.Rounds[0]
+	body.Auth = signedConfigPRBatchAuth(t, body)
+
+	r := mux.NewRouter()
+	a := &Admin{
+		configPR:         testConfigPRAutomation("https://example.invalid"),
+		logger:           log.NewNopLogger(),
+		checkVoteManager: func(string) bool { return true },
+	}
+	RegisterRoutes(r, func() *Admin { return a }, log.NewNopLogger())
+
+	w := serveCreateConfigPR(t, r, body)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "duplicate round_id") {
+		t.Fatalf("want 400 duplicate round_id, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleCreateConfigPRBatchRejectsMixedForms(t *testing.T) {
+	t.Parallel()
+
+	single := validCreateConfigPRRequest(t)
+	body := validCreateConfigPRBatchRequest(t, 2)
+	body.RoundID = single.RoundID
+	body.SignedPayloadHash = single.SignedPayloadHash
+
+	r := mux.NewRouter()
+	a := &Admin{
+		configPR:         testConfigPRAutomation("https://example.invalid"),
+		logger:           log.NewNopLogger(),
+		checkVoteManager: func(string) bool { return true },
+	}
+	RegisterRoutes(r, func() *Admin { return a }, log.NewNopLogger())
+
+	w := serveCreateConfigPR(t, r, body)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "must not set both") {
+		t.Fatalf("want 400 mixed forms, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestBatchBranchNameDeterministic(t *testing.T) {
+	t.Parallel()
+
+	automation := testConfigPRAutomation("")
+	roundA := strings.Repeat("a", 64)
+	roundB := strings.Repeat("b", 64)
+	got := automation.batchBranchName([]string{roundA, roundB})
+	reordered := automation.batchBranchName([]string{roundB, roundA})
+	if got != reordered {
+		t.Fatalf("batch branch name is order-dependent: %q vs %q", got, reordered)
+	}
+	if !strings.HasPrefix(got, "config-production-rounds-") {
+		t.Fatalf("unexpected batch branch name: %q", got)
+	}
+	other := automation.batchBranchName([]string{roundA})
+	if got == other {
+		t.Fatalf("different round sets produced the same branch name: %q", got)
+	}
+}
