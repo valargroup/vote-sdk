@@ -13,9 +13,14 @@ import * as votingKey from "../api/votingKey";
 import { useWallet } from "../hooks/useWallet";
 import { useDetectedChainId } from "../hooks/useDetectedChainId";
 import {
-  assertMatchingRoundAuthV2Response,
-  canonicalPayloadV2,
-} from "../utils/roundAuth";
+  AUTHORIZATION_PIR_LAYOUT,
+  base64ToBytes,
+  buildSignedRoundEntry,
+  bytesToHex,
+  normalizeRoundId,
+  sha256Hex,
+  validateEaPK,
+} from "../utils/attestEntry";
 import { CopyButton } from "./CopyButton";
 
 interface RoundOption {
@@ -42,67 +47,6 @@ interface ConfigPRIntentPayload {
   signed_payload_hash: string;
   entry_sha256: string;
   timestamp: number;
-}
-
-function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-function base64ToBytes(value: string): Uint8Array {
-  const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary);
-}
-
-function arrayBufferFromBytes(bytes: Uint8Array): ArrayBuffer {
-  return bytes.buffer.slice(
-    bytes.byteOffset,
-    bytes.byteOffset + bytes.byteLength
-  ) as ArrayBuffer;
-}
-
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", arrayBufferFromBytes(bytes));
-  return bytesToHex(new Uint8Array(digest));
-}
-
-// Intentionally fixed at the authorization point: signing must not depend on a
-// network fetch that could fail or change what the operator is authorizing.
-// Update this constant together with the published config when it changes.
-const AUTHORIZATION_PIR_LAYOUT: chainApi.PirLayout = {
-  pir_depth: 19,
-  tier0_layers: 12,
-  tier1_layers: 7,
-  poly_len: 4096,
-};
-
-function normalizeRoundId(value: string | undefined): string | null {
-  if (!value) return null;
-  const trimmed = value.trim();
-  if (/^[0-9a-f]{64}$/.test(trimmed)) return trimmed;
-  try {
-    const hex = bytesToHex(base64ToBytes(trimmed));
-    return /^[0-9a-f]{64}$/.test(hex) ? hex : null;
-  } catch {
-    return null;
-  }
-}
-
-function validateEaPK(value: string): boolean {
-  try {
-    return base64ToBytes(value.trim()).length === 32;
-  } catch {
-    return false;
-  }
 }
 
 function optionalNumber(value: string | number | undefined): number | null {
@@ -273,54 +217,14 @@ export function AttestRoundEntryPage() {
     setError("");
     setPayloadNotice("");
     try {
-      const expectedPayload = canonicalPayloadV2(
-        roundId,
-        eaPK,
-        AUTHORIZATION_PIR_LAYOUT
-      );
-      const expectedResponse: chainApi.AttestRoundEntryResponse = {
-        canonical_payload_b64: bytesToBase64(expectedPayload),
-        signed_payload_hash: await sha256Hex(expectedPayload),
-        auth_version: 2,
-      };
-      let response = expectedResponse;
-      try {
-        response = await chainApi.attestRoundEntry({
-          round_id: roundId,
-          ea_pk: eaPK,
-          auth_version: 2,
-          pir_layout: AUTHORIZATION_PIR_LAYOUT,
-        });
-        assertMatchingRoundAuthV2Response(
-          response,
-          expectedResponse.canonical_payload_b64,
-          expectedResponse.signed_payload_hash
-        );
-      } catch {
-        // Local fallback builds the same round- and layout-bound v2 preimage;
-        // it must never downgrade to the legacy raw-ea_pk (v1) payload.
-        response = expectedResponse;
+      const signed = await buildSignedRoundEntry(roundId, eaPK, key);
+      if (signed.usedLocalFallback) {
         setPayloadNotice(
           "Remote /api/sign-config-entry was unavailable or returned an incompatible payload, so this used the auth_version 2 local payload fallback (domain tag + round id + ea_pk + pir_layout including poly_len)."
         );
       }
-      const sigB64 = await votingKey.signCanonicalPayload(
-        response.canonical_payload_b64,
-        key
-      );
-      const entry = {
-        auth_version: 2,
-        ea_pk: eaPK,
-        signatures: [
-          {
-            key_id: key.signerId,
-            alg: "ed25519",
-            sig: sigB64,
-          },
-        ],
-      };
-      setHash(response.signed_payload_hash);
-      setSnippet(JSON.stringify({ [roundId]: entry }, null, 2));
+      setHash(signed.signedPayloadHash);
+      setSnippet(JSON.stringify({ [roundId]: signed.entry }, null, 2));
       setConfigPrStatus("idle");
       setConfigPrUrl("");
       setConfigPrError("");

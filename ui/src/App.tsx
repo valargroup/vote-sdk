@@ -43,6 +43,9 @@ import {
   shouldEagerlyLoadVoteSummary,
 } from "./utils/voteStatus";
 import { resolveShareQueueVisibility } from "./utils/shareQueueVisibility";
+import { resolveTestnetToolsVisibility } from "./utils/testnetToolsVisibility";
+import { buildChainOptions, isProposalValid } from "./utils/proposals";
+import { BatchRoundsPage } from "./components/BatchRoundsPage";
 import {
   startVoteManagerRefresh,
   type VoteManagerSnapshot,
@@ -84,7 +87,8 @@ type Section =
   | "endorsers"
   | "upgrades"
   | "snapshot"
-  | "vote-manager-keys";
+  | "vote-manager-keys"
+  | "batch-rounds";
 
 const SECTION_PATHS: Record<Section, string> = {
   about: "/",
@@ -104,6 +108,7 @@ const SECTION_PATHS: Record<Section, string> = {
   upgrades: "/upgrades",
   snapshot: "/snapshot",
   "vote-manager-keys": "/vote-manager-keys",
+  "batch-rounds": "/batch-rounds",
 };
 
 const PATH_TO_SECTION: Record<string, Section> = Object.fromEntries(
@@ -180,6 +185,8 @@ function App() {
         ? productionVoteManagers.addresses
         : null,
   });
+
+  const testnetToolsVisibility = resolveTestnetToolsVisibility(detectedChainId);
 
   // Sync section ↔ URL path, keeping nav instant (no full reload).
   const setSection = useCallback((s: Section) => {
@@ -441,6 +448,7 @@ function App() {
         onDeleteRound={store.deleteRound}
         currentSection={section}
         showShareQueues={shareQueueVisibility === "visible"}
+        showBatchRounds={testnetToolsVisibility === "visible"}
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
       />
@@ -628,6 +636,24 @@ function App() {
           </div>
         )}
 
+        {section === "batch-rounds" && testnetToolsVisibility === "visible" && (
+          <BatchRoundsPage wallet={wallet} rounds={store.rounds} />
+        )}
+        {section === "batch-rounds" && testnetToolsVisibility !== "visible" && (
+          <div className="flex h-full items-center justify-center px-6">
+            {testnetToolsVisibility === "loading" ? (
+              <div className="flex items-center gap-2 text-xs text-text-muted">
+                <Loader2 size={14} className="animate-spin" />
+                Detecting chain…
+              </div>
+            ) : (
+              <p className="max-w-sm text-center text-xs text-text-muted">
+                Batch round tools are not available on production.
+              </p>
+            )}
+          </div>
+        )}
+
         {/* Snapshot settings */}
         {section === "snapshot" && <SnapshotSettingsPage />}
 
@@ -656,23 +682,6 @@ function App() {
 }
 
 /* ── Unified builder view (single scrollable column) ─────────── */
-
-function isProposalValid(p: Proposal): boolean {
-  return (
-    p.title.trim().length > 0 &&
-    p.options.length >= MIN_VOTE_OPTIONS &&
-    p.options.length <= MAX_VOTE_OPTIONS &&
-    p.options.every((option) => option.label.trim().length > 0)
-  );
-}
-
-function buildChainOptions(p: Proposal): Array<{ index: number; label: string; description: string }> {
-  return p.options.map((opt, j) => ({
-    index: j,
-    label: opt.label,
-    description: opt.description ?? "",
-  }));
-}
 
 function BuilderView({
   round,

@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -21,12 +23,15 @@ import (
 
 const (
 	configPRAction       = "create_config_pr"
+	configPRBatchAction  = "create_config_pr_batch"
 	configPRRepoOwner    = "valargroup"
 	configPRRepoName     = "token-holder-voting-config"
 	configPRBaseBranch   = "main"
 	configPRGitHubAPIURL = "https://api.github.com"
 	dynamicConfigName    = "dynamic-voting-config.json"
 	staticConfigName     = "static-voting-config.json"
+
+	maxConfigPRBatchRounds = 32
 )
 
 type configPRAutomation struct {
@@ -135,6 +140,20 @@ func (c configPRAutomation) branchName(roundID string) string {
 	return fmt.Sprintf("config-%s-round-%s", env, roundID[:12])
 }
 
+// batchBranchName is deterministic over the set of round ids (order
+// independent) so a retried batch reuses the same branch and open PR.
+func (c configPRAutomation) batchBranchName(roundIDs []string) string {
+	sorted := append([]string(nil), roundIDs...)
+	sort.Strings(sorted)
+	sum := sha256.Sum256([]byte(strings.Join(sorted, ",")))
+	hash12 := hex.EncodeToString(sum[:])[:12]
+	env := strings.ReplaceAll(c.environmentLabel(), " ", "-")
+	if env == "legacy-root" {
+		return fmt.Sprintf("config-rounds-%s", hash12)
+	}
+	return fmt.Sprintf("config-%s-rounds-%s", env, hash12)
+}
+
 func (c configPRAutomation) enabled() bool {
 	return c.GitHubToken != ""
 }
@@ -146,16 +165,44 @@ type configPRAuth struct {
 	PubKey        string `json:"pub_key"`
 }
 
+type configPRRoundInput struct {
+	RoundID           string                  `json:"round_id"`
+	Entry             votingconfig.RoundEntry `json:"entry"`
+	SignedPayloadHash string                  `json:"signed_payload_hash"`
+}
+
 type createConfigPRRequest struct {
-	RoundID string                  `json:"round_id"`
-	Entry   votingconfig.RoundEntry `json:"entry"`
+	// Legacy single-round fields; still accepted when Rounds is empty.
+	RoundID string                  `json:"round_id,omitempty"`
+	Entry   votingconfig.RoundEntry `json:"entry,omitempty"`
 	// PIRLayout the signer bound into the v2 signature (including poly_len).
 	// Must match the pir_layout in the target dynamic config or the merged
-	// file would carry entries that can never verify.
+	// file would carry entries that can never verify. Shared by all batch
+	// entries.
 	PIRLayout         votingconfig.PIRLayout `json:"pir_layout"`
-	SignedPayloadHash string                 `json:"signed_payload_hash"`
+	SignedPayloadHash string                 `json:"signed_payload_hash,omitempty"`
 	Title             string                 `json:"title,omitempty"`
-	Auth              configPRAuth           `json:"auth"`
+	// Rounds selects the batch form: all entries land in a single branch,
+	// commit, and PR. When non-empty the legacy single-round fields must be
+	// empty.
+	Rounds    []configPRRoundInput `json:"rounds,omitempty"`
+	BatchName string               `json:"batch_name,omitempty"`
+	Auth      configPRAuth         `json:"auth"`
+}
+
+func (r createConfigPRRequest) isBatch() bool {
+	return len(r.Rounds) > 0
+}
+
+func (r createConfigPRRequest) roundInputs() []configPRRoundInput {
+	if r.isBatch() {
+		return r.Rounds
+	}
+	return []configPRRoundInput{{
+		RoundID:           r.RoundID,
+		Entry:             r.Entry,
+		SignedPayloadHash: r.SignedPayloadHash,
+	}}
 }
 
 type createConfigPRResponse struct {
@@ -173,7 +220,19 @@ type configPRIntentPayload struct {
 	Timestamp         int64  `json:"timestamp"`
 }
 
-func marshalConfigPRIntentPayload(payload configPRIntentPayload) ([]byte, error) {
+type configPRBatchIntentRound struct {
+	RoundID           string `json:"round_id"`
+	SignedPayloadHash string `json:"signed_payload_hash"`
+	EntrySHA256       string `json:"entry_sha256"`
+}
+
+type configPRBatchIntentPayload struct {
+	Action    string                     `json:"action"`
+	Rounds    []configPRBatchIntentRound `json:"rounds"`
+	Timestamp int64                      `json:"timestamp"`
+}
+
+func marshalConfigPRIntentPayload(payload any) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
@@ -230,28 +289,65 @@ func (h *apiHandler) handleCreateConfigPR(w http.ResponseWriter, r *http.Request
 var errConfigPRForbidden = fmt.Errorf("signer is not a current vote manager")
 
 func authorizeConfigPRRequest(a *Admin, body createConfigPRRequest) error {
-	entryHash, err := hashRoundEntry(body.Entry)
+	var verifyIntent func() (timestamp int64, canonical []byte, err error)
+	if body.isBatch() {
+		verifyIntent = func() (int64, []byte, error) {
+			var intent configPRBatchIntentPayload
+			if err := json.Unmarshal([]byte(body.Auth.Payload), &intent); err != nil {
+				return 0, nil, fmt.Errorf("invalid auth payload")
+			}
+			if intent.Action != configPRBatchAction || len(intent.Rounds) != len(body.Rounds) {
+				return 0, nil, fmt.Errorf("auth payload does not match request")
+			}
+			for i, in := range body.Rounds {
+				entryHash, err := hashRoundEntry(in.Entry)
+				if err != nil {
+					return 0, nil, err
+				}
+				got := intent.Rounds[i]
+				if got.RoundID != in.RoundID ||
+					got.SignedPayloadHash != in.SignedPayloadHash ||
+					got.EntrySHA256 != entryHash {
+					return 0, nil, fmt.Errorf("auth payload does not match request")
+				}
+			}
+			canonical, err := marshalConfigPRIntentPayload(intent)
+			if err != nil {
+				return 0, nil, fmt.Errorf("marshal auth payload: %w", err)
+			}
+			return intent.Timestamp, canonical, nil
+		}
+	} else {
+		verifyIntent = func() (int64, []byte, error) {
+			entryHash, err := hashRoundEntry(body.Entry)
+			if err != nil {
+				return 0, nil, err
+			}
+			var intent configPRIntentPayload
+			if err := json.Unmarshal([]byte(body.Auth.Payload), &intent); err != nil {
+				return 0, nil, fmt.Errorf("invalid auth payload")
+			}
+			if intent.Action != configPRAction ||
+				intent.RoundID != body.RoundID ||
+				intent.SignedPayloadHash != body.SignedPayloadHash ||
+				intent.EntrySHA256 != entryHash {
+				return 0, nil, fmt.Errorf("auth payload does not match request")
+			}
+			canonical, err := marshalConfigPRIntentPayload(intent)
+			if err != nil {
+				return 0, nil, fmt.Errorf("marshal auth payload: %w", err)
+			}
+			return intent.Timestamp, canonical, nil
+		}
+	}
+
+	timestamp, wantPayload, err := verifyIntent()
 	if err != nil {
 		return err
 	}
-
-	var intent configPRIntentPayload
-	if err := json.Unmarshal([]byte(body.Auth.Payload), &intent); err != nil {
-		return fmt.Errorf("invalid auth payload")
-	}
-	if intent.Action != configPRAction ||
-		intent.RoundID != body.RoundID ||
-		intent.SignedPayloadHash != body.SignedPayloadHash ||
-		intent.EntrySHA256 != entryHash {
-		return fmt.Errorf("auth payload does not match request")
-	}
 	now := time.Now().Unix()
-	if abs64(now-intent.Timestamp) > timestampWindowSecs {
+	if abs64(now-timestamp) > timestampWindowSecs {
 		return fmt.Errorf("timestamp too far from server time (>5min)")
-	}
-	wantPayload, err := marshalConfigPRIntentPayload(intent)
-	if err != nil {
-		return fmt.Errorf("marshal auth payload: %w", err)
 	}
 	if string(wantPayload) != body.Auth.Payload {
 		return fmt.Errorf("auth payload is not canonical")
@@ -269,25 +365,52 @@ func authorizeConfigPRRequest(a *Admin, body createConfigPRRequest) error {
 }
 
 func validateCreateConfigPRRequest(body createConfigPRRequest) error {
-	if err := votingconfig.ValidateRoundID(body.RoundID); err != nil {
+	if body.isBatch() {
+		if body.RoundID != "" || body.SignedPayloadHash != "" {
+			return fmt.Errorf("request must not set both rounds and single-round fields")
+		}
+		if len(body.Rounds) > maxConfigPRBatchRounds {
+			return fmt.Errorf("batch must not exceed %d rounds", maxConfigPRBatchRounds)
+		}
+		seen := make(map[string]bool, len(body.Rounds))
+		for _, in := range body.Rounds {
+			if seen[in.RoundID] {
+				return fmt.Errorf("duplicate round_id in batch: %s", in.RoundID)
+			}
+			seen[in.RoundID] = true
+		}
+	}
+	if err := votingconfig.ValidatePIRLayout(body.PIRLayout); err != nil {
+		return err
+	}
+	for _, in := range body.roundInputs() {
+		if err := validateConfigPRRound(in, body.PIRLayout); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateConfigPRRound(in configPRRoundInput, layout votingconfig.PIRLayout) error {
+	if err := votingconfig.ValidateRoundID(in.RoundID); err != nil {
 		return fmt.Errorf("round_id must be 64 lowercase hex characters")
 	}
 	// New entries must be auth_version 2: v1 signatures do not bind the round
 	// id and are replayable across rounds.
-	if body.Entry.AuthVersion != votingconfig.AuthVersionV2 {
+	if in.Entry.AuthVersion != votingconfig.AuthVersionV2 {
 		return fmt.Errorf("unsupported auth_version; new entries must use auth_version 2")
 	}
-	if body.Entry.EaPK == "" {
+	if in.Entry.EaPK == "" {
 		return fmt.Errorf("entry.ea_pk is required")
 	}
-	eaPKBytes, err := votingconfig.DecodeBase64Fixed(body.Entry.EaPK, 32, "entry.ea_pk")
+	eaPKBytes, err := votingconfig.DecodeBase64Fixed(in.Entry.EaPK, 32, "entry.ea_pk")
 	if err != nil {
 		return fmt.Errorf("entry.ea_pk must be base64-encoded 32 bytes")
 	}
-	if len(body.Entry.Signatures) == 0 {
+	if len(in.Entry.Signatures) == 0 {
 		return fmt.Errorf("entry.signatures must contain at least one signature")
 	}
-	for _, sig := range body.Entry.Signatures {
+	for _, sig := range in.Entry.Signatures {
 		if sig.KeyID == "" {
 			return fmt.Errorf("entry.signatures.key_id is required")
 		}
@@ -298,17 +421,14 @@ func validateCreateConfigPRRequest(body createConfigPRRequest) error {
 			return fmt.Errorf("entry.signatures.sig must be base64-encoded 64 bytes")
 		}
 	}
-	if err := votingconfig.ValidatePIRLayout(body.PIRLayout); err != nil {
-		return err
-	}
 	var eaPK [32]byte
 	copy(eaPK[:], eaPKBytes)
-	payload, err := votingconfig.CanonicalPayloadV2(body.RoundID, eaPK, body.PIRLayout)
+	payload, err := votingconfig.CanonicalPayloadV2(in.RoundID, eaPK, layout)
 	if err != nil {
 		return fmt.Errorf("failed to build canonical payload")
 	}
 	hash := votingconfig.SignedPayloadHash(payload)
-	if body.SignedPayloadHash != hex.EncodeToString(hash[:]) {
+	if in.SignedPayloadHash != hex.EncodeToString(hash[:]) {
 		return fmt.Errorf("signed_payload_hash does not match round_id, entry.ea_pk, and pir_layout")
 	}
 	return nil
@@ -325,7 +445,17 @@ func hashRoundEntry(entry votingconfig.RoundEntry) (string, error) {
 
 func (a *Admin) createConfigPR(ctx context.Context, body createConfigPRRequest) (*createConfigPRResponse, error) {
 	client := newGitHubConfigClient(a.configPR)
-	branch := a.configPR.branchName(body.RoundID)
+	rounds := body.roundInputs()
+	var branch string
+	if body.isBatch() {
+		roundIDs := make([]string, 0, len(rounds))
+		for _, in := range rounds {
+			roundIDs = append(roundIDs, in.RoundID)
+		}
+		branch = a.configPR.batchBranchName(roundIDs)
+	} else {
+		branch = a.configPR.branchName(body.RoundID)
+	}
 	dynamicPath := a.configPR.dynamicConfigPath()
 	staticPath := a.configPR.staticConfigPath()
 
@@ -351,9 +481,22 @@ func (a *Admin) createConfigPR(ctx context.Context, body createConfigPRRequest) 
 		return nil, err
 	}
 
-	mergedContent, mergedExisting, resolvedKeyIDs, err := mergeConfigPREntry(dynamicContent, staticContent, body.RoundID, body.Entry, body.PIRLayout)
-	if err != nil {
-		return nil, err
+	mergedContent := dynamicContent
+	mergedExisting := false
+	var resolvedKeyIDs []string
+	for _, in := range rounds {
+		var roundMerged bool
+		var keyIDs []string
+		mergedContent, roundMerged, keyIDs, err = mergeConfigPREntry(mergedContent, staticContent, in.RoundID, in.Entry, body.PIRLayout)
+		if err != nil {
+			return nil, err
+		}
+		mergedExisting = mergedExisting || roundMerged
+		for _, keyID := range keyIDs {
+			if !slices.Contains(resolvedKeyIDs, keyID) {
+				resolvedKeyIDs = append(resolvedKeyIDs, keyID)
+			}
+		}
 	}
 
 	_, branchFileSHA, err := client.getContent(ctx, dynamicPath, branch)
@@ -367,7 +510,10 @@ func (a *Admin) createConfigPR(ctx context.Context, body createConfigPRRequest) 
 		}
 	}
 
-	message := fmt.Sprintf("Add signed config entry for round %s", body.RoundID[:12])
+	message := fmt.Sprintf("Add signed config entry for round %s", rounds[0].RoundID[:12])
+	if body.isBatch() {
+		message = fmt.Sprintf("Add signed config entries for %d rounds", len(rounds))
+	}
 	commitSHA, err := client.updateContent(ctx, dynamicPath, branch, branchFileSHA, message, mergedContent)
 	if err != nil {
 		if ghErr, ok := err.(*githubAPIError); !ok || ghErr.Status != http.StatusUnprocessableEntity {
@@ -538,6 +684,16 @@ func mergeConfigPRSignatures(existing, incoming []votingconfig.Signature) []voti
 }
 
 func configPRTitle(body createConfigPRRequest) string {
+	if body.isBatch() {
+		name := strings.TrimSpace(body.BatchName)
+		if name == "" {
+			name = strings.TrimSpace(body.Title)
+		}
+		if name != "" {
+			return fmt.Sprintf("Add signed config entries: %s (%d rounds)", name, len(body.Rounds))
+		}
+		return fmt.Sprintf("Add signed config entries for %d rounds", len(body.Rounds))
+	}
 	if strings.TrimSpace(body.Title) != "" {
 		return fmt.Sprintf("Add signed config entry for %s", strings.TrimSpace(body.Title))
 	}
@@ -552,6 +708,24 @@ func configPRBody(body createConfigPRRequest, mergedExisting bool, trustedKeyIDs
 	mergeNote := "new round entry"
 	if mergedExisting {
 		mergeNote = "merged with existing round entry"
+	}
+	if body.isBatch() {
+		var roundLines strings.Builder
+		for _, in := range body.Rounds {
+			fmt.Fprintf(&roundLines, "- %s (signed_payload_hash %s)\n", in.RoundID, in.SignedPayloadHash)
+		}
+		return fmt.Sprintf(`## Summary
+- Add %d signed %s dynamic config entries.
+- Target file: %s.
+- Trusted key IDs (from %s) attesting these entries: %s.
+- Authenticated vote manager: %s.
+- Merge mode: %s.
+
+## Rounds
+%s
+## Reviewer check
+- CI will verify %s against %s.
+`, len(body.Rounds), automation.environmentLabel(), automation.dynamicConfigPath(), automation.staticConfigPath(), keyIDsLine, body.Auth.SignerAddress, mergeNote, roundLines.String(), automation.dynamicConfigPath(), automation.staticConfigPath())
 	}
 	return fmt.Sprintf(`## Summary
 - Add signed %s dynamic config entry for round %s.
