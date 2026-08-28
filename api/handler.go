@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	sentrysdk "github.com/getsentry/sentry-go"
@@ -55,6 +56,10 @@ const (
 	// cometStatusQueryTimeout bounds best-effort status lookups after ambiguous
 	// broadcast outcomes. The public /tx/{hash} endpoint has its own timeout.
 	cometStatusQueryTimeout = 5 * time.Second
+
+	// cometRPCIdleConnTimeout retires pooled connections before CometBFT's
+	// default 10-second server timeout can close them underneath a new request.
+	cometRPCIdleConnTimeout = 5 * time.Second
 )
 
 // HandlerConfig configures the REST API handler.
@@ -87,9 +92,14 @@ func NewHandler(cfg HandlerConfig) *Handler {
 	if endpoint == "" {
 		endpoint = "http://localhost:26657"
 	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.IdleConnTimeout = cometRPCIdleConnTimeout
 	// Individual CometBFT RPC calls use shorter per-request contexts; this
 	// client timeout is a final guardrail for any caller that forgets one.
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   30 * time.Second,
+	}
 	return &Handler{
 		cometRPC:        endpoint,
 		client:          client,
@@ -678,7 +688,11 @@ func (h *Handler) finishCometSpan(span *sentrysdk.Span, err error, elapsed time.
 // because the tx hash is deterministic and duplicate submissions are reconciled
 // through CometBFT's cache/status query behavior.
 func isUnknownBroadcastError(err error) bool {
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+	if errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, syscall.EPIPE) ||
+		errors.Is(err, syscall.ECONNRESET) {
 		return true
 	}
 
