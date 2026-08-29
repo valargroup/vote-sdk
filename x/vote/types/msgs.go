@@ -11,6 +11,10 @@ import (
 
 const MaxUpgradeInfoBytes = 4096
 
+// MaxCastVoteBatchSize bounds one atomic vote batch to the protocol's maximum
+// number of proposals.
+const MaxCastVoteBatchSize = MaxProposals
+
 // zeroPoint32 is the compressed encoding of the Pallas identity (point at
 // infinity). Used by ValidateBasic as a cheap stateless guard against the
 // identity-point signature bypass.
@@ -145,6 +149,50 @@ func (msg *MsgCastVote) ValidateBasic() error {
 	if bytes.Equal(msg.RVpk, zeroPoint32[:]) {
 		return fmt.Errorf("%w: r_vpk must not be the identity point (all zeros)", ErrInvalidField)
 	}
+	return nil
+}
+
+// ValidateBasic performs stateless validation for MsgCastVoteBatch.
+func (msg *MsgCastVoteBatch) ValidateBasic() error {
+	if msg == nil {
+		return fmt.Errorf("%w: batch cannot be nil", ErrInvalidField)
+	}
+	if len(msg.Votes) == 0 || len(msg.Votes) > MaxCastVoteBatchSize {
+		return fmt.Errorf("%w: votes count must be between 1 and %d, got %d", ErrInvalidField, MaxCastVoteBatchSize, len(msg.Votes))
+	}
+
+	first := msg.Votes[0]
+	if first == nil {
+		return fmt.Errorf("%w: votes[0] cannot be nil", ErrInvalidField)
+	}
+
+	seenProposals := make(map[uint32]struct{}, len(msg.Votes))
+	seenNullifiers := make(map[string]struct{}, len(msg.Votes))
+	for i, vote := range msg.Votes {
+		if vote == nil {
+			return fmt.Errorf("%w: votes[%d] cannot be nil", ErrInvalidField, i)
+		}
+		if err := vote.ValidateBasic(); err != nil {
+			return fmt.Errorf("votes[%d]: %w", i, err)
+		}
+		if !bytes.Equal(vote.VoteRoundId, first.VoteRoundId) {
+			return fmt.Errorf("%w: votes[%d] has a different vote_round_id", ErrInvalidField, i)
+		}
+		if vote.VoteCommTreeAnchorHeight != first.VoteCommTreeAnchorHeight {
+			return fmt.Errorf("%w: votes[%d] has a different vote_comm_tree_anchor_height", ErrInvalidField, i)
+		}
+		if _, exists := seenProposals[vote.ProposalId]; exists {
+			return fmt.Errorf("%w: duplicate proposal_id %d at votes[%d]", ErrInvalidField, vote.ProposalId, i)
+		}
+		seenProposals[vote.ProposalId] = struct{}{}
+
+		nullifierKey := string(vote.VanNullifier)
+		if _, exists := seenNullifiers[nullifierKey]; exists {
+			return fmt.Errorf("%w: duplicate van_nullifier at votes[%d]", ErrInvalidField, i)
+		}
+		seenNullifiers[nullifierKey] = struct{}{}
+	}
+
 	return nil
 }
 
@@ -384,6 +432,33 @@ func (msg *MsgCastVote) GetNullifierType() NullifierType {
 	return NullifierTypeVoteAuthorityNote
 }
 
+// GetVoteRoundId returns the shared voting round for a batch.
+func (msg *MsgCastVoteBatch) GetVoteRoundId() []byte {
+	if msg == nil || len(msg.Votes) == 0 || msg.Votes[0] == nil {
+		return nil
+	}
+	return msg.Votes[0].VoteRoundId
+}
+
+// GetNullifiers returns all VAN nullifiers in action order.
+func (msg *MsgCastVoteBatch) GetNullifiers() [][]byte {
+	if msg == nil {
+		return nil
+	}
+	nullifiers := make([][]byte, 0, len(msg.Votes))
+	for _, vote := range msg.Votes {
+		if vote != nil {
+			nullifiers = append(nullifiers, vote.VanNullifier)
+		}
+	}
+	return nullifiers
+}
+
+// GetNullifierType returns NullifierTypeVoteAuthorityNote for a vote batch.
+func (msg *MsgCastVoteBatch) GetNullifierType() NullifierType {
+	return NullifierTypeVoteAuthorityNote
+}
+
 // GetNullifiers returns the nullifiers from a MsgRevealShare.
 func (msg *MsgRevealShare) GetNullifiers() [][]byte {
 	return [][]byte{msg.ShareNullifier}
@@ -417,6 +492,9 @@ func (msg *MsgDelegateVote) AcceptsTallyingRound() bool { return false }
 
 // AcceptsTallyingRound returns false — casting votes requires ACTIVE status.
 func (msg *MsgCastVote) AcceptsTallyingRound() bool { return false }
+
+// AcceptsTallyingRound returns false — casting a vote batch requires ACTIVE status.
+func (msg *MsgCastVoteBatch) AcceptsTallyingRound() bool { return false }
 
 // AcceptsTallyingRound returns false — shares must land before the vote window
 // closes. Accepting shares during TALLYING would corrupt the tally accumulator

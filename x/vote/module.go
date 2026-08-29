@@ -53,6 +53,7 @@ func init() {
 			ProvideModule,
 			ProvideDelegateVoteSigner,
 			ProvideCastVoteSigner,
+			ProvideCastVoteBatchSigner,
 			ProvideRevealShareSigner,
 			ProvideSubmitTallySigner,
 			ProvideSubmitPartialDecryptionSigner,
@@ -143,6 +144,15 @@ func ProvideDelegateVoteSigner() signing.CustomGetSigner {
 func ProvideCastVoteSigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
 		MsgType: protoreflect.FullName("svote.v1.MsgCastVote"),
+		Fn:      noopSignerFn,
+	}
+}
+
+// ProvideCastVoteBatchSigner registers the no-op Cosmos signer used by atomic
+// vote batches, which are authenticated by their batch-wide RedPallas digest.
+func ProvideCastVoteBatchSigner() signing.CustomGetSigner {
+	return signing.CustomGetSigner{
+		MsgType: protoreflect.FullName("svote.v1.MsgCastVoteBatch"),
 		Fn:      noopSignerFn,
 	}
 }
@@ -293,7 +303,7 @@ func (AppModule) RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 // keeper via BaseApp's MsgServiceRouter.
 func (am AppModule) RegisterServices(cfg module.Configurator) {
 	types.RegisterQueryServer(cfg.QueryServer(), keeper.NewQueryServerImpl(am.keeper))
-	types.RegisterMsgServer(cfg.MsgServer(), keeper.NewMsgServerImpl(am.keeper))
+	types.RegisterMsgServerWithAtomicVoteBatchGate(cfg.MsgServer(), keeper.NewMsgServerImpl(am.keeper))
 }
 
 // AutoCLIOptions implements autocli.HasAutoCLIConfig.

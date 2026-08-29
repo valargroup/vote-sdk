@@ -37,6 +37,7 @@ stateDiagram-v2
 |---|---|---|---|---|---|
 | `MsgDelegateVote` | **Rejected** | Accepted | **Rejected** | **Rejected** | **Rejected** |
 | `MsgCastVote` | **Rejected** | Accepted | **Rejected** | **Rejected** | **Rejected** |
+| `MsgCastVoteBatch` | **Rejected** | Accepted | **Rejected** | **Rejected** | **Rejected** |
 | `MsgRevealShare` | **Rejected** | Accepted | **Rejected** | **Rejected** | **Rejected** |
 | `MsgCreateVotingSession` | N/A | N/A | N/A | N/A | N/A |
 

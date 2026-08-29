@@ -24,11 +24,11 @@ type VoteTxWrapper struct {
 	// RawBytes is the original wire-format bytes [tag || protobuf].
 	RawBytes []byte
 
-	// Tag is the message type tag (0x01–0x05 for vote-round, 0x08 for MsgAck).
+	// Tag is the message type tag (0x02–0x06 for vote-round, 0x08 for MsgAck).
 	Tag byte
 
 	// VoteMsg is the decoded vote message, used by the validation pipeline.
-	// Set for vote-round tags (0x01–0x05). Nil for ceremony messages.
+	// Set for vote-round tags (0x02–0x06). Nil for ceremony messages.
 	VoteMsg types.VoteMessage
 
 	// CeremonyMsg is the decoded ceremony message (tag 0x08 only).

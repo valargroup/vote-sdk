@@ -22,7 +22,9 @@ import (
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
+	"google.golang.org/protobuf/types/known/anypb"
 
+	voteapi "github.com/valargroup/vote-sdk/api"
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/testutil"
 	votetypes "github.com/valargroup/vote-sdk/x/vote/types"
@@ -288,6 +290,12 @@ func TestDualAnteHandler_StandardTxRestrictions(t *testing.T) {
 				},
 			},
 		}
+		if votetypes.AtomicVoteBatchesEnabled {
+			tests = append(tests, struct {
+				name string
+				msg  sdk.Msg
+			}{name: "MsgCastVoteBatch", msg: validStandardCastVoteBatch(roundID, anchorHeight)})
+		}
 
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
@@ -324,6 +332,122 @@ func TestDualAnteHandler_StandardTxRestrictions(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestDormantAtomicVoteBatchStandardTxCompatibility(t *testing.T) {
+	if votetypes.AtomicVoteBatchesEnabled {
+		t.Skip("only applies before atomic vote batch activation")
+	}
+
+	ta := testutil.SetupTestApp(t)
+	batch := validStandardCastVoteBatch(bytes.Repeat([]byte{0x55}, 32), 1)
+	signerAddr := sdk.AccAddress(ta.ValPrivKey.PubKey().Address()).String()
+	payload, err := anypb.New(batch)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name string
+		msg  sdk.Msg
+	}{
+		{name: "top-level", msg: batch},
+		{name: "nested coordinator payload", msg: &votetypes.MsgProposeCoordinatorAction{
+			Creator: signerAddr,
+			Payload: payload,
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			txBytes := buildSignedTxWithKey(t, ta, ta.ValPrivKey, 0, 0, tc.msg)
+
+			checkResp := ta.CheckTxSync(txBytes)
+			require.Equal(t, uint32(2), checkResp.Code)
+			require.Zero(t, checkResp.GasWanted)
+			require.Contains(t, checkResp.Log, "unable to resolve type URL")
+			require.Contains(t, checkResp.Log, "svote.v1.MsgCastVoteBatch")
+
+			deliverResp := ta.DeliverVoteTx(txBytes)
+			require.Equal(t, uint32(2), deliverResp.Code)
+			require.Zero(t, deliverResp.GasWanted)
+			require.Zero(t, deliverResp.GasUsed)
+		})
+	}
+}
+
+func TestDormantAtomicVoteBatchRawTxCompatibility(t *testing.T) {
+	if votetypes.AtomicVoteBatchesEnabled {
+		t.Skip("only applies before atomic vote batch activation")
+	}
+
+	ta := testutil.SetupTestApp(t)
+	roundID := ta.SeedVotingSession(testutil.ValidCreateVotingSessionAt(ta.Time))
+	batch := validStandardCastVoteBatch(roundID, uint64(ta.Height))
+	txBytes, err := voteapi.EncodeVoteTx(batch)
+	require.NoError(t, err)
+	require.Equal(t, voteapi.TagCastVoteBatch, txBytes[0])
+
+	// Before MsgCastVoteBatch existed, 0x06 followed the standard decoder path
+	// just like an unrecognized tag. Keep an in-process control with the same
+	// protobuf body so the dormant batch tag must retain that behavior.
+	unrecognizedTxBytes := append([]byte(nil), txBytes...)
+	unrecognizedTxBytes[0] = 0x07
+	require.False(t, voteapi.IsCustomTag(unrecognizedTxBytes[0]))
+
+	beforeTree := queryTreeState(t, ta, roundID)
+	require.Zero(t, beforeTree.NextIndex)
+	require.False(t, hasVoteAuthorityNullifier(t, ta, roundID, batch.Votes[0].VanNullifier))
+
+	unrecognizedCheckResp := ta.CheckTxSync(unrecognizedTxBytes)
+	checkResp := ta.CheckTxSync(txBytes)
+	require.Equal(t, uint32(2), checkResp.Code)
+	require.Equal(t, unrecognizedCheckResp.Code, checkResp.Code)
+	require.Equal(t, unrecognizedCheckResp.Codespace, checkResp.Codespace)
+	require.Equal(t, unrecognizedCheckResp.GasWanted, checkResp.GasWanted)
+	require.Equal(t, unrecognizedCheckResp.GasUsed, checkResp.GasUsed)
+	require.Equal(t, unrecognizedCheckResp.Log, checkResp.Log)
+	require.Equal(t, unrecognizedCheckResp.Data, checkResp.Data)
+	require.Equal(t, unrecognizedCheckResp.Events, checkResp.Events)
+	require.Empty(t, checkResp.Data)
+	require.Empty(t, checkResp.Events)
+
+	unrecognizedDeliverResp := ta.DeliverVoteTx(unrecognizedTxBytes)
+	deliverResp := ta.DeliverVoteTx(txBytes)
+	require.Equal(t, uint32(2), deliverResp.Code)
+	require.Equal(t, unrecognizedDeliverResp.Code, deliverResp.Code)
+	require.Equal(t, unrecognizedDeliverResp.Codespace, deliverResp.Codespace)
+	require.Equal(t, unrecognizedDeliverResp.GasWanted, deliverResp.GasWanted)
+	require.Equal(t, unrecognizedDeliverResp.GasUsed, deliverResp.GasUsed)
+	require.Equal(t, unrecognizedDeliverResp.Log, deliverResp.Log)
+	require.Equal(t, unrecognizedDeliverResp.Data, deliverResp.Data)
+	require.Equal(t, unrecognizedDeliverResp.Events, deliverResp.Events)
+	require.Empty(t, deliverResp.Data)
+	require.Empty(t, deliverResp.Events)
+
+	afterTree := queryTreeState(t, ta, roundID)
+	require.Equal(t, beforeTree, afterTree)
+	require.False(t, hasVoteAuthorityNullifier(t, ta, roundID, batch.Votes[0].VanNullifier))
+}
+
+func hasVoteAuthorityNullifier(t *testing.T, ta *testutil.TestApp, roundID, nullifier []byte) bool {
+	t.Helper()
+	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	kvStore := ta.VoteKeeper().OpenKVStore(ctx)
+	has, err := ta.VoteKeeper().HasNullifier(kvStore, votetypes.NullifierTypeVoteAuthorityNote, roundID, nullifier)
+	require.NoError(t, err)
+	return has
+}
+
+func validStandardCastVoteBatch(roundID []byte, anchorHeight uint64) *votetypes.MsgCastVoteBatch {
+	return &votetypes.MsgCastVoteBatch{Votes: []*votetypes.MsgCastVote{{
+		VanNullifier:             bytes.Repeat([]byte{0xD2}, 32),
+		VoteAuthorityNoteNew:     testutil.FpLE(0xA2A2),
+		VoteCommitment:           testutil.FpLE(0xB3B3),
+		ProposalId:               1,
+		Proof:                    []byte{0x42},
+		VoteRoundId:              roundID,
+		VoteCommTreeAnchorHeight: anchorHeight,
+		VoteAuthSig:              bytes.Repeat([]byte{0xC4}, 64),
+		RVpk:                     append([]byte(nil), testutil.DummyPallasPoint...),
+	}}}
 }
 
 // ---------------------------------------------------------------------------

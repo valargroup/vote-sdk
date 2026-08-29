@@ -228,7 +228,7 @@ ACTIVE ──> TALLYING ──> FINALIZED
 
 #### Rationale
 
-The standard Cosmos SDK `Tx` envelope requires a signer address, fee fields, and a conventional signature (secp256k1 or ed25519). Vote-round messages (`MsgDelegateVote`, `MsgCastVote`, `MsgRevealShare`) cannot use this envelope because they are authenticated via **ZKP + RedPallas spend-auth signatures** — there is no conventional Cosmos account involved. Similarly, `MsgContributeDKG`, `MsgAckExecutiveAuthorityKey`, and `MsgSubmitPartialDecryption` are **auto-injected by the block proposer** via `PrepareProposal` and are never client-signed at all.
+The standard Cosmos SDK `Tx` envelope requires a signer address, fee fields, and a conventional signature (secp256k1 or ed25519). Vote-round messages (`MsgDelegateVote`, `MsgCastVote`, `MsgCastVoteBatch`, `MsgRevealShare`) cannot use this envelope because they are authenticated via **ZKP + RedPallas spend-auth signatures** — there is no conventional Cosmos account involved. Similarly, `MsgContributeDKG`, `MsgAckExecutiveAuthorityKey`, and `MsgSubmitPartialDecryption` are **auto-injected by the block proposer** via `PrepareProposal` and are never client-signed at all.
 
 The custom wire format is the minimal encoding that satisfies both cases: a single-byte type tag lets the `TxDecoder` unambiguously identify the message type without parsing a full `TxBody`, and the tag byte acts as the sole discriminator between the custom path and the standard Cosmos SDK path. Messages that do have a conventional signer, including coordinator action proposals/approvals and validator setup messages, use the standard `Tx` envelope and flow through normal signature verification.
 
@@ -246,6 +246,7 @@ Each custom transaction is a 1-byte tag followed by a protobuf-encoded message b
 | `0x03` | `MsgCastVote`                | Voting round            | ZKP #2 + RedPallas      |
 | `0x04` | `MsgRevealShare`             | Voting round            | ZKP #3                  |
 | `0x05` | `MsgSubmitTally`             | Voting round (injected) | Proposer identity check |
+| `0x06` | `MsgCastVoteBatch`           | Voting round            | ZKP #2 + batch RedPallas |
 | `0x08` | `MsgAckExecutiveAuthorityKey` | Ceremony (injected)     | Proposer identity check |
 | `0x0D` | `MsgSubmitPartialDecryption` | Tallying (injected)     | Proposer identity check |
 | `0x0E` | `MsgContributeDKG`           | Ceremony (injected)     | Proposer identity check |
@@ -286,7 +287,20 @@ These use the custom wire format and bypass the Cosmos Tx envelope. Auth is hand
 | ----------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | `MsgDelegateVote` | Any Zcash note holder (anonymous) | `ValidateBasic` (field sizes and Ironwood action binding); round ACTIVE; gov nullifier uniqueness; RedPallas sig over the canonical digest derived from `tx1_effects`; ZKP #1 (delegation proof: note ownership, VAN encoding, nc_root, nf_imt_root) | Record gov nullifiers; append van_cmx to commitment tree                       |
 | `MsgCastVote`     | Any delegation holder (anonymous) | `ValidateBasic`; round ACTIVE; VAN nullifier uniqueness; RedPallas sig over canonical sighash; ZKP #2 (vote commitment: VAN ownership, ea_pk binding, commitment tree anchor)    | Record VAN nullifier; append vote_authority_note_new + vote_commitment to tree |
+| `MsgCastVoteBatch` | Any delegation holder (anonymous) | `ValidateBasic`; round ACTIVE; all VAN nullifiers unique; every RedPallas signature covers the same ordered batch digest; first ZKP #2 uses the real anchor and later proofs use predecessor-derived single-leaf roots | Record all VAN nullifiers; append only the final vote_authority_note_new and every vote commitment |
 | `MsgRevealShare`  | Any vote holder (anonymous)       | `ValidateBasic`; round ACTIVE or TALLYING; share nullifier uniqueness; ZKP #3 (vote share: share ownership, commitment tree anchor)                                              | Record share nullifier; HomomorphicAdd enc_share into tally accumulator        |
+
+`MsgCastVoteBatch` accepts one to fifteen actions. The digest binds the round,
+anchor, batch length, order, randomized keys, nullifiers, successor VANs, vote
+commitments, and proposal IDs. Because every action signs that same digest, a
+relay cannot truncate, reorder, or graft actions. The chain emits the digest,
+action-ordered nullifiers and proposal IDs, the final VAN position, and every
+vote-commitment position for deterministic client recovery.
+
+All actions in one batch are publicly linkable as members of that transaction.
+The batch does not reveal vote decisions, delegated notes, voting keys, or VAN
+ownership beyond the existing public commitments and nullifiers. Clients that
+need transaction-level unlinkability can continue using `MsgCastVote`.
 
 #### Proposer-injected messages (custom wire format, proposer identity auth)
 
@@ -313,7 +327,7 @@ Standard Cosmos transactions pass through a two-layer gate before reaching the d
 #### Layer 1: Pre-filter in `NewDualAnteHandler` (before any decorator runs)
 
 1. **Single-message only.** Multi-message transactions are rejected unconditionally. This eliminates the noop-signer attack class where a zero-signer message (e.g. `MsgRevealShare`) piggybacks on a legitimately-signed carrier message.
-2. **Vote/ceremony messages blocked (defense-in-depth).** `isVoteModuleMsg` rejects `MsgDelegateVote`, `MsgCastVote`, `MsgRevealShare`, `MsgContributeDKG`, `MsgAckExecutiveAuthorityKey`, `MsgSubmitPartialDecryption`, and `MsgSubmitTally`. These must enter via the custom `VoteTxWrapper` path where ZKP/RedPallas verification runs. The whitelist (Layer 2) would also catch these, but this explicit type check fires earlier and produces a more actionable error.
+2. **Vote/ceremony messages blocked (defense-in-depth).** `isVoteModuleMsg` rejects `MsgDelegateVote`, `MsgCastVote`, `MsgCastVoteBatch`, `MsgRevealShare`, `MsgContributeDKG`, `MsgAckExecutiveAuthorityKey`, `MsgSubmitPartialDecryption`, and `MsgSubmitTally`. These must enter via the custom `VoteTxWrapper` path where ZKP/RedPallas verification runs. The whitelist (Layer 2) would also catch these, but this explicit type check fires earlier and produces a more actionable error.
 3. **`MsgCreateValidator` blocked post-genesis.** At `BlockHeight > 0`, raw `MsgCreateValidator` is rejected — validators must use `MsgCreateValidatorWithPallasKey` to atomically register a Pallas key. The message is allowed at height 0 for genesis `gentx` bootstrapping.
 
 #### Layer 2: `MessageWhitelistDecorator` (inside the standard ante chain)
@@ -366,9 +380,10 @@ Vote-round messages use the custom wire format and are submitted as JSON POST re
 | ------ | --------------------------------- | ---------------------------------- |
 | POST   | `/shielded-vote/v1/delegate-vote` | Submit a delegation proof (ZKP #1) |
 | POST   | `/shielded-vote/v1/cast-vote`     | Cast an encrypted vote (ZKP #2)    |
+| POST   | `/shielded-vote/v1/cast-vote-batch` | Atomically cast ordered encrypted votes when enabled (ZKP #2) |
 | POST   | `/shielded-vote/v1/reveal-share`  | Reveal an encrypted share (ZKP #3) |
 
-These endpoints accept JSON, encode the message with the custom wire format, and broadcast via CometBFT's `broadcast_tx_sync`. `MsgSubmitTally`, `MsgContributeDKG`, `MsgAckExecutiveAuthorityKey`, and `MsgSubmitPartialDecryption` have no REST endpoints — they are proposer-only and auto-injected via PrepareProposal.
+These endpoints accept JSON, encode the message with the custom wire format, and broadcast via CometBFT's `broadcast_tx_sync`. The batch endpoint is registered only when `AtomicVoteBatchesEnabled` is true. It rejects unknown JSON fields, uses deterministic protobuf encoding, and includes `batch_digest` in its response. `MsgSubmitTally`, `MsgContributeDKG`, `MsgAckExecutiveAuthorityKey`, and `MsgSubmitPartialDecryption` have no REST endpoints — they are proposer-only and auto-injected via PrepareProposal.
 
 Validator-owned messages (`MsgRegisterPallasKey`, `MsgRotatePallasKey`,
 `MsgCreateValidatorWithPallasKey`) and coordinator action messages

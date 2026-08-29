@@ -15,6 +15,7 @@ service Msg {
   option (cosmos.msg.v1.service) = true;
   rpc DelegateVote(MsgDelegateVote) returns (MsgDelegateVoteResponse);
   rpc CastVote(MsgCastVote) returns (MsgCastVoteResponse);
+  rpc CastVoteBatch(MsgCastVoteBatch) returns (MsgCastVoteBatchResponse);
   rpc RevealShare(MsgRevealShare) returns (MsgRevealShareResponse);
   rpc SubmitTally(MsgSubmitTally) returns (MsgSubmitTallyResponse);
   rpc SubmitPartialDecryption(MsgSubmitPartialDecryption) returns (MsgSubmitPartialDecryptionResponse);
@@ -86,6 +87,19 @@ message MsgCastVote {
 }
 
 message MsgCastVoteResponse {}
+
+// MsgCastVoteBatch atomically casts an ordered sequence of votes from one VAN.
+// The first proof is anchored to vote_comm_tree_anchor_height. Each later proof
+// is anchored to the deterministic single-leaf tree containing the previous
+// action's vote_authority_note_new. Every vote_auth_sig signs one batch-wide
+// digest, preventing truncation, reordering, or grafting of actions.
+message MsgCastVoteBatch {
+  repeated MsgCastVote votes = 1;
+}
+
+message MsgCastVoteBatchResponse {
+  bytes batch_digest = 1;
+}
 
 // MsgRevealShare corresponds to ZKP #3: reveal vote share (server submits).
 message MsgRevealShare {

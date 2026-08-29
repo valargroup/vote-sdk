@@ -15,9 +15,11 @@ func TestIsVoteTag(t *testing.T) {
 	require.True(t, IsVoteTag(TagCastVote))
 	require.True(t, IsVoteTag(TagRevealShare))
 	require.True(t, IsVoteTag(TagSubmitTally))
+	require.Equal(t, types.AtomicVoteBatchesEnabled, IsVoteTag(TagCastVoteBatch))
+	require.Equal(t, types.AtomicVoteBatchesEnabled, IsCustomTag(TagCastVoteBatch))
 	require.False(t, IsVoteTag(0x00))
 	require.False(t, IsVoteTag(0x01)) // MsgCreateVotingSession — standard Cosmos Tx
-	require.False(t, IsVoteTag(0x06)) // MsgRegisterPallasKey — standard Cosmos Tx
+	require.False(t, IsVoteTag(0x07))
 	require.False(t, IsVoteTag(0x0a)) // reserved: collides with Cosmos Tx protobuf
 	require.False(t, IsVoteTag(0xff))
 }
@@ -73,6 +75,40 @@ func TestEncodeDecodeCastVote(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, msg.ProposalId, decodedMsg.ProposalId)
 	require.Equal(t, msg.VoteCommTreeAnchorHeight, decodedMsg.VoteCommTreeAnchorHeight)
+}
+
+func TestEncodeDecodeCastVoteBatchCanonical(t *testing.T) {
+	batch := &types.MsgCastVoteBatch{Votes: []*types.MsgCastVote{
+		{
+			VanNullifier:             bytes.Repeat([]byte{1}, 32),
+			VoteAuthorityNoteNew:     bytes.Repeat([]byte{2}, 32),
+			VoteCommitment:           bytes.Repeat([]byte{3}, 32),
+			ProposalId:               1,
+			Proof:                    []byte("proof-1"),
+			VoteRoundId:              bytes.Repeat([]byte{4}, 32),
+			VoteCommTreeAnchorHeight: 50,
+			VoteAuthSig:              bytes.Repeat([]byte{5}, 64),
+			RVpk:                     bytes.Repeat([]byte{6}, 32),
+		},
+	}}
+
+	raw1, err := EncodeVoteTx(batch)
+	require.NoError(t, err)
+	raw2, err := EncodeVoteTx(batch)
+	require.NoError(t, err)
+	require.Equal(t, raw1, raw2)
+	require.Equal(t, TagCastVoteBatch, raw1[0])
+
+	tag, decoded, err := DecodeVoteTx(raw1)
+	require.NoError(t, err)
+	require.Equal(t, TagCastVoteBatch, tag)
+	require.True(t, protov2.Equal(batch, decoded.(protov2.Message)))
+
+	// Field 99, varint value 1. Unknown protobuf fields are rejected for the
+	// batch format even when the rest of the encoding is canonical.
+	withUnknown := append(append([]byte(nil), raw1...), 0x98, 0x06, 0x01)
+	_, _, err = DecodeVoteTx(withUnknown)
+	require.ErrorContains(t, err, "unknown fields")
 }
 
 func TestEncodeDecodeRevealShare(t *testing.T) {
@@ -179,7 +215,7 @@ func TestIsCeremonyTag(t *testing.T) {
 	require.True(t, IsCeremonyTag(TagSubmitPartialDecryption))
 
 	// Standard Cosmos Tx ceremony messages are not ceremony tags.
-	require.False(t, IsCeremonyTag(0x06)) // MsgRegisterPallasKey
+	require.False(t, IsCeremonyTag(0x06)) // MsgCastVoteBatch is a vote tag
 	require.False(t, IsCeremonyTag(0x09)) // MsgCreateValidatorWithPallasKey
 	require.False(t, IsCeremonyTag(0x0C)) // MsgUpdateVoteManagers
 	require.False(t, IsCeremonyTag(0x00))
@@ -254,7 +290,7 @@ func TestDecodeVoteTx_InvalidTag(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid vote tx tag")
 
-	_, _, err = DecodeVoteTx([]byte{0x06, 0x00})
+	_, _, err = DecodeVoteTx([]byte{0x07, 0x00})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid vote tx tag")
 }
@@ -267,6 +303,7 @@ func TestTagForMessage(t *testing.T) {
 	}{
 		{&types.MsgDelegateVote{}, TagDelegateVote, "DelegateVote"},
 		{&types.MsgCastVote{}, TagCastVote, "CastVote"},
+		{&types.MsgCastVoteBatch{}, TagCastVoteBatch, "CastVoteBatch"},
 		{&types.MsgRevealShare{}, TagRevealShare, "RevealShare"},
 		{&types.MsgSubmitTally{}, TagSubmitTally, "SubmitTally"},
 	}

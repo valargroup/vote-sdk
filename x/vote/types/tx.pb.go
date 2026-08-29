@@ -489,6 +489,99 @@ func (*MsgCastVoteResponse) Descriptor() ([]byte, []int) {
 	return file_svote_v1_tx_proto_rawDescGZIP(), []int{5}
 }
 
+// MsgCastVoteBatch atomically casts an ordered sequence of votes from one VAN.
+// The first proof is anchored to vote_comm_tree_anchor_height. Each later proof
+// is anchored to the deterministic single-leaf tree containing the previous
+// action's vote_authority_note_new. Every vote_auth_sig signs one batch-wide
+// digest, preventing truncation, reordering, or grafting of actions.
+type MsgCastVoteBatch struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Votes         []*MsgCastVote         `protobuf:"bytes,1,rep,name=votes,proto3" json:"votes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgCastVoteBatch) Reset() {
+	*x = MsgCastVoteBatch{}
+	mi := &file_svote_v1_tx_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgCastVoteBatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgCastVoteBatch) ProtoMessage() {}
+
+func (x *MsgCastVoteBatch) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_tx_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgCastVoteBatch.ProtoReflect.Descriptor instead.
+func (*MsgCastVoteBatch) Descriptor() ([]byte, []int) {
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *MsgCastVoteBatch) GetVotes() []*MsgCastVote {
+	if x != nil {
+		return x.Votes
+	}
+	return nil
+}
+
+type MsgCastVoteBatchResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	BatchDigest   []byte                 `protobuf:"bytes,1,opt,name=batch_digest,json=batchDigest,proto3" json:"batch_digest,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgCastVoteBatchResponse) Reset() {
+	*x = MsgCastVoteBatchResponse{}
+	mi := &file_svote_v1_tx_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgCastVoteBatchResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgCastVoteBatchResponse) ProtoMessage() {}
+
+func (x *MsgCastVoteBatchResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_tx_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgCastVoteBatchResponse.ProtoReflect.Descriptor instead.
+func (*MsgCastVoteBatchResponse) Descriptor() ([]byte, []int) {
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *MsgCastVoteBatchResponse) GetBatchDigest() []byte {
+	if x != nil {
+		return x.BatchDigest
+	}
+	return nil
+}
+
 // MsgRevealShare corresponds to ZKP #3: reveal vote share (server submits).
 type MsgRevealShare struct {
 	state                    protoimpl.MessageState `protogen:"open.v1"`
@@ -505,7 +598,7 @@ type MsgRevealShare struct {
 
 func (x *MsgRevealShare) Reset() {
 	*x = MsgRevealShare{}
-	mi := &file_svote_v1_tx_proto_msgTypes[6]
+	mi := &file_svote_v1_tx_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -517,7 +610,7 @@ func (x *MsgRevealShare) String() string {
 func (*MsgRevealShare) ProtoMessage() {}
 
 func (x *MsgRevealShare) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[6]
+	mi := &file_svote_v1_tx_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -530,7 +623,7 @@ func (x *MsgRevealShare) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgRevealShare.ProtoReflect.Descriptor instead.
 func (*MsgRevealShare) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{6}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *MsgRevealShare) GetShareNullifier() []byte {
@@ -590,7 +683,7 @@ type MsgRevealShareResponse struct {
 
 func (x *MsgRevealShareResponse) Reset() {
 	*x = MsgRevealShareResponse{}
-	mi := &file_svote_v1_tx_proto_msgTypes[7]
+	mi := &file_svote_v1_tx_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -602,7 +695,7 @@ func (x *MsgRevealShareResponse) String() string {
 func (*MsgRevealShareResponse) ProtoMessage() {}
 
 func (x *MsgRevealShareResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[7]
+	mi := &file_svote_v1_tx_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -615,7 +708,7 @@ func (x *MsgRevealShareResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgRevealShareResponse.ProtoReflect.Descriptor instead.
 func (*MsgRevealShareResponse) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{7}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{9}
 }
 
 // MsgSubmitTally finalizes a voting session, transitioning it from TALLYING to FINALIZED.
@@ -632,7 +725,7 @@ type MsgSubmitTally struct {
 
 func (x *MsgSubmitTally) Reset() {
 	*x = MsgSubmitTally{}
-	mi := &file_svote_v1_tx_proto_msgTypes[8]
+	mi := &file_svote_v1_tx_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -644,7 +737,7 @@ func (x *MsgSubmitTally) String() string {
 func (*MsgSubmitTally) ProtoMessage() {}
 
 func (x *MsgSubmitTally) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[8]
+	mi := &file_svote_v1_tx_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -657,7 +750,7 @@ func (x *MsgSubmitTally) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgSubmitTally.ProtoReflect.Descriptor instead.
 func (*MsgSubmitTally) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{8}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *MsgSubmitTally) GetVoteRoundId() []byte {
@@ -694,7 +787,7 @@ type TallyEntry struct {
 
 func (x *TallyEntry) Reset() {
 	*x = TallyEntry{}
-	mi := &file_svote_v1_tx_proto_msgTypes[9]
+	mi := &file_svote_v1_tx_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -706,7 +799,7 @@ func (x *TallyEntry) String() string {
 func (*TallyEntry) ProtoMessage() {}
 
 func (x *TallyEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[9]
+	mi := &file_svote_v1_tx_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -719,7 +812,7 @@ func (x *TallyEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TallyEntry.ProtoReflect.Descriptor instead.
 func (*TallyEntry) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{9}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *TallyEntry) GetProposalId() uint32 {
@@ -759,7 +852,7 @@ type MsgSubmitTallyResponse struct {
 
 func (x *MsgSubmitTallyResponse) Reset() {
 	*x = MsgSubmitTallyResponse{}
-	mi := &file_svote_v1_tx_proto_msgTypes[10]
+	mi := &file_svote_v1_tx_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -771,7 +864,7 @@ func (x *MsgSubmitTallyResponse) String() string {
 func (*MsgSubmitTallyResponse) ProtoMessage() {}
 
 func (x *MsgSubmitTallyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[10]
+	mi := &file_svote_v1_tx_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -784,7 +877,7 @@ func (x *MsgSubmitTallyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgSubmitTallyResponse.ProtoReflect.Descriptor instead.
 func (*MsgSubmitTallyResponse) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{10}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *MsgSubmitTallyResponse) GetFinalizedEntries() uint32 {
@@ -805,7 +898,7 @@ type MsgRegisterPallasKey struct {
 
 func (x *MsgRegisterPallasKey) Reset() {
 	*x = MsgRegisterPallasKey{}
-	mi := &file_svote_v1_tx_proto_msgTypes[11]
+	mi := &file_svote_v1_tx_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -817,7 +910,7 @@ func (x *MsgRegisterPallasKey) String() string {
 func (*MsgRegisterPallasKey) ProtoMessage() {}
 
 func (x *MsgRegisterPallasKey) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[11]
+	mi := &file_svote_v1_tx_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -830,7 +923,7 @@ func (x *MsgRegisterPallasKey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgRegisterPallasKey.ProtoReflect.Descriptor instead.
 func (*MsgRegisterPallasKey) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{11}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *MsgRegisterPallasKey) GetCreator() string {
@@ -855,7 +948,7 @@ type MsgRegisterPallasKeyResponse struct {
 
 func (x *MsgRegisterPallasKeyResponse) Reset() {
 	*x = MsgRegisterPallasKeyResponse{}
-	mi := &file_svote_v1_tx_proto_msgTypes[12]
+	mi := &file_svote_v1_tx_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -867,7 +960,7 @@ func (x *MsgRegisterPallasKeyResponse) String() string {
 func (*MsgRegisterPallasKeyResponse) ProtoMessage() {}
 
 func (x *MsgRegisterPallasKeyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[12]
+	mi := &file_svote_v1_tx_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -880,7 +973,7 @@ func (x *MsgRegisterPallasKeyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgRegisterPallasKeyResponse.ProtoReflect.Descriptor instead.
 func (*MsgRegisterPallasKeyResponse) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{12}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{14}
 }
 
 // MsgRotatePallasKey replaces a validator's registered Pallas public key.
@@ -895,7 +988,7 @@ type MsgRotatePallasKey struct {
 
 func (x *MsgRotatePallasKey) Reset() {
 	*x = MsgRotatePallasKey{}
-	mi := &file_svote_v1_tx_proto_msgTypes[13]
+	mi := &file_svote_v1_tx_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -907,7 +1000,7 @@ func (x *MsgRotatePallasKey) String() string {
 func (*MsgRotatePallasKey) ProtoMessage() {}
 
 func (x *MsgRotatePallasKey) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[13]
+	mi := &file_svote_v1_tx_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -920,7 +1013,7 @@ func (x *MsgRotatePallasKey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgRotatePallasKey.ProtoReflect.Descriptor instead.
 func (*MsgRotatePallasKey) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{13}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *MsgRotatePallasKey) GetCreator() string {
@@ -945,7 +1038,7 @@ type MsgRotatePallasKeyResponse struct {
 
 func (x *MsgRotatePallasKeyResponse) Reset() {
 	*x = MsgRotatePallasKeyResponse{}
-	mi := &file_svote_v1_tx_proto_msgTypes[14]
+	mi := &file_svote_v1_tx_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -957,7 +1050,7 @@ func (x *MsgRotatePallasKeyResponse) String() string {
 func (*MsgRotatePallasKeyResponse) ProtoMessage() {}
 
 func (x *MsgRotatePallasKeyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[14]
+	mi := &file_svote_v1_tx_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -970,7 +1063,7 @@ func (x *MsgRotatePallasKeyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgRotatePallasKeyResponse.ProtoReflect.Descriptor instead.
 func (*MsgRotatePallasKeyResponse) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{14}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{16}
 }
 
 // MsgContributeDKG is a validator's contribution to the Joint-Feldman DKG.
@@ -988,7 +1081,7 @@ type MsgContributeDKG struct {
 
 func (x *MsgContributeDKG) Reset() {
 	*x = MsgContributeDKG{}
-	mi := &file_svote_v1_tx_proto_msgTypes[15]
+	mi := &file_svote_v1_tx_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1000,7 +1093,7 @@ func (x *MsgContributeDKG) String() string {
 func (*MsgContributeDKG) ProtoMessage() {}
 
 func (x *MsgContributeDKG) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[15]
+	mi := &file_svote_v1_tx_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1013,7 +1106,7 @@ func (x *MsgContributeDKG) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgContributeDKG.ProtoReflect.Descriptor instead.
 func (*MsgContributeDKG) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{15}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *MsgContributeDKG) GetCreator() string {
@@ -1052,7 +1145,7 @@ type MsgContributeDKGResponse struct {
 
 func (x *MsgContributeDKGResponse) Reset() {
 	*x = MsgContributeDKGResponse{}
-	mi := &file_svote_v1_tx_proto_msgTypes[16]
+	mi := &file_svote_v1_tx_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1064,7 +1157,7 @@ func (x *MsgContributeDKGResponse) String() string {
 func (*MsgContributeDKGResponse) ProtoMessage() {}
 
 func (x *MsgContributeDKGResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[16]
+	mi := &file_svote_v1_tx_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1077,7 +1170,7 @@ func (x *MsgContributeDKGResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgContributeDKGResponse.ProtoReflect.Descriptor instead.
 func (*MsgContributeDKGResponse) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{16}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{18}
 }
 
 // MsgAckExecutiveAuthorityKey is submitted by a validator to acknowledge receipt of their ea_sk share.
@@ -1092,7 +1185,7 @@ type MsgAckExecutiveAuthorityKey struct {
 
 func (x *MsgAckExecutiveAuthorityKey) Reset() {
 	*x = MsgAckExecutiveAuthorityKey{}
-	mi := &file_svote_v1_tx_proto_msgTypes[17]
+	mi := &file_svote_v1_tx_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1104,7 +1197,7 @@ func (x *MsgAckExecutiveAuthorityKey) String() string {
 func (*MsgAckExecutiveAuthorityKey) ProtoMessage() {}
 
 func (x *MsgAckExecutiveAuthorityKey) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[17]
+	mi := &file_svote_v1_tx_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1117,7 +1210,7 @@ func (x *MsgAckExecutiveAuthorityKey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgAckExecutiveAuthorityKey.ProtoReflect.Descriptor instead.
 func (*MsgAckExecutiveAuthorityKey) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{17}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *MsgAckExecutiveAuthorityKey) GetCreator() string {
@@ -1149,7 +1242,7 @@ type MsgAckExecutiveAuthorityKeyResponse struct {
 
 func (x *MsgAckExecutiveAuthorityKeyResponse) Reset() {
 	*x = MsgAckExecutiveAuthorityKeyResponse{}
-	mi := &file_svote_v1_tx_proto_msgTypes[18]
+	mi := &file_svote_v1_tx_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1161,7 +1254,7 @@ func (x *MsgAckExecutiveAuthorityKeyResponse) String() string {
 func (*MsgAckExecutiveAuthorityKeyResponse) ProtoMessage() {}
 
 func (x *MsgAckExecutiveAuthorityKeyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[18]
+	mi := &file_svote_v1_tx_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1174,7 +1267,7 @@ func (x *MsgAckExecutiveAuthorityKeyResponse) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use MsgAckExecutiveAuthorityKeyResponse.ProtoReflect.Descriptor instead.
 func (*MsgAckExecutiveAuthorityKeyResponse) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{18}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{20}
 }
 
 // MsgCreateValidatorWithPallasKey wraps standard MsgCreateValidator with a Pallas public key.
@@ -1190,7 +1283,7 @@ type MsgCreateValidatorWithPallasKey struct {
 
 func (x *MsgCreateValidatorWithPallasKey) Reset() {
 	*x = MsgCreateValidatorWithPallasKey{}
-	mi := &file_svote_v1_tx_proto_msgTypes[19]
+	mi := &file_svote_v1_tx_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1202,7 +1295,7 @@ func (x *MsgCreateValidatorWithPallasKey) String() string {
 func (*MsgCreateValidatorWithPallasKey) ProtoMessage() {}
 
 func (x *MsgCreateValidatorWithPallasKey) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[19]
+	mi := &file_svote_v1_tx_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1215,7 +1308,7 @@ func (x *MsgCreateValidatorWithPallasKey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgCreateValidatorWithPallasKey.ProtoReflect.Descriptor instead.
 func (*MsgCreateValidatorWithPallasKey) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{19}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *MsgCreateValidatorWithPallasKey) GetStakingMsg() []byte {
@@ -1240,7 +1333,7 @@ type MsgCreateValidatorWithPallasKeyResponse struct {
 
 func (x *MsgCreateValidatorWithPallasKeyResponse) Reset() {
 	*x = MsgCreateValidatorWithPallasKeyResponse{}
-	mi := &file_svote_v1_tx_proto_msgTypes[20]
+	mi := &file_svote_v1_tx_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1252,7 +1345,7 @@ func (x *MsgCreateValidatorWithPallasKeyResponse) String() string {
 func (*MsgCreateValidatorWithPallasKeyResponse) ProtoMessage() {}
 
 func (x *MsgCreateValidatorWithPallasKeyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[20]
+	mi := &file_svote_v1_tx_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1265,7 +1358,7 @@ func (x *MsgCreateValidatorWithPallasKeyResponse) ProtoReflect() protoreflect.Me
 
 // Deprecated: Use MsgCreateValidatorWithPallasKeyResponse.ProtoReflect.Descriptor instead.
 func (*MsgCreateValidatorWithPallasKeyResponse) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{20}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{22}
 }
 
 // MsgSubmitPartialDecryption is submitted by a validator during the TALLYING phase.
@@ -1284,7 +1377,7 @@ type MsgSubmitPartialDecryption struct {
 
 func (x *MsgSubmitPartialDecryption) Reset() {
 	*x = MsgSubmitPartialDecryption{}
-	mi := &file_svote_v1_tx_proto_msgTypes[21]
+	mi := &file_svote_v1_tx_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1296,7 +1389,7 @@ func (x *MsgSubmitPartialDecryption) String() string {
 func (*MsgSubmitPartialDecryption) ProtoMessage() {}
 
 func (x *MsgSubmitPartialDecryption) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[21]
+	mi := &file_svote_v1_tx_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1309,7 +1402,7 @@ func (x *MsgSubmitPartialDecryption) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgSubmitPartialDecryption.ProtoReflect.Descriptor instead.
 func (*MsgSubmitPartialDecryption) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{21}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *MsgSubmitPartialDecryption) GetVoteRoundId() []byte {
@@ -1355,7 +1448,7 @@ type PartialDecryptionEntry struct {
 
 func (x *PartialDecryptionEntry) Reset() {
 	*x = PartialDecryptionEntry{}
-	mi := &file_svote_v1_tx_proto_msgTypes[22]
+	mi := &file_svote_v1_tx_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1367,7 +1460,7 @@ func (x *PartialDecryptionEntry) String() string {
 func (*PartialDecryptionEntry) ProtoMessage() {}
 
 func (x *PartialDecryptionEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[22]
+	mi := &file_svote_v1_tx_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1380,7 +1473,7 @@ func (x *PartialDecryptionEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PartialDecryptionEntry.ProtoReflect.Descriptor instead.
 func (*PartialDecryptionEntry) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{22}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *PartialDecryptionEntry) GetProposalId() uint32 {
@@ -1419,7 +1512,7 @@ type MsgSubmitPartialDecryptionResponse struct {
 
 func (x *MsgSubmitPartialDecryptionResponse) Reset() {
 	*x = MsgSubmitPartialDecryptionResponse{}
-	mi := &file_svote_v1_tx_proto_msgTypes[23]
+	mi := &file_svote_v1_tx_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1431,7 +1524,7 @@ func (x *MsgSubmitPartialDecryptionResponse) String() string {
 func (*MsgSubmitPartialDecryptionResponse) ProtoMessage() {}
 
 func (x *MsgSubmitPartialDecryptionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[23]
+	mi := &file_svote_v1_tx_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1444,7 +1537,7 @@ func (x *MsgSubmitPartialDecryptionResponse) ProtoReflect() protoreflect.Message
 
 // Deprecated: Use MsgSubmitPartialDecryptionResponse.ProtoReflect.Descriptor instead.
 func (*MsgSubmitPartialDecryptionResponse) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{23}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{25}
 }
 
 // MsgUpdateVoteManagers atomically replaces the coordinator set, threshold, and
@@ -1465,7 +1558,7 @@ type MsgUpdateVoteManagers struct {
 
 func (x *MsgUpdateVoteManagers) Reset() {
 	*x = MsgUpdateVoteManagers{}
-	mi := &file_svote_v1_tx_proto_msgTypes[24]
+	mi := &file_svote_v1_tx_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1477,7 +1570,7 @@ func (x *MsgUpdateVoteManagers) String() string {
 func (*MsgUpdateVoteManagers) ProtoMessage() {}
 
 func (x *MsgUpdateVoteManagers) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[24]
+	mi := &file_svote_v1_tx_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1490,7 +1583,7 @@ func (x *MsgUpdateVoteManagers) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgUpdateVoteManagers.ProtoReflect.Descriptor instead.
 func (*MsgUpdateVoteManagers) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{24}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *MsgUpdateVoteManagers) GetCreator() string {
@@ -1529,7 +1622,7 @@ type MsgUpdateVoteManagersResponse struct {
 
 func (x *MsgUpdateVoteManagersResponse) Reset() {
 	*x = MsgUpdateVoteManagersResponse{}
-	mi := &file_svote_v1_tx_proto_msgTypes[25]
+	mi := &file_svote_v1_tx_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1541,7 +1634,7 @@ func (x *MsgUpdateVoteManagersResponse) String() string {
 func (*MsgUpdateVoteManagersResponse) ProtoMessage() {}
 
 func (x *MsgUpdateVoteManagersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[25]
+	mi := &file_svote_v1_tx_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1554,7 +1647,7 @@ func (x *MsgUpdateVoteManagersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgUpdateVoteManagersResponse.ProtoReflect.Descriptor instead.
 func (*MsgUpdateVoteManagersResponse) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{25}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{27}
 }
 
 // MsgAuthorizedSend is the only privileged coin-transfer payload on this chain.
@@ -1578,7 +1671,7 @@ type MsgAuthorizedSend struct {
 
 func (x *MsgAuthorizedSend) Reset() {
 	*x = MsgAuthorizedSend{}
-	mi := &file_svote_v1_tx_proto_msgTypes[26]
+	mi := &file_svote_v1_tx_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1590,7 +1683,7 @@ func (x *MsgAuthorizedSend) String() string {
 func (*MsgAuthorizedSend) ProtoMessage() {}
 
 func (x *MsgAuthorizedSend) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[26]
+	mi := &file_svote_v1_tx_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1603,7 +1696,7 @@ func (x *MsgAuthorizedSend) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgAuthorizedSend.ProtoReflect.Descriptor instead.
 func (*MsgAuthorizedSend) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{26}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *MsgAuthorizedSend) GetCreator() string {
@@ -1635,7 +1728,7 @@ type MsgAuthorizedSendResponse struct {
 
 func (x *MsgAuthorizedSendResponse) Reset() {
 	*x = MsgAuthorizedSendResponse{}
-	mi := &file_svote_v1_tx_proto_msgTypes[27]
+	mi := &file_svote_v1_tx_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1647,7 +1740,7 @@ func (x *MsgAuthorizedSendResponse) String() string {
 func (*MsgAuthorizedSendResponse) ProtoMessage() {}
 
 func (x *MsgAuthorizedSendResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[27]
+	mi := &file_svote_v1_tx_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1660,7 +1753,7 @@ func (x *MsgAuthorizedSendResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgAuthorizedSendResponse.ProtoReflect.Descriptor instead.
 func (*MsgAuthorizedSendResponse) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{27}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{29}
 }
 
 // MsgScheduleUpgrade schedules a software upgrade through x/upgrade. It is
@@ -1680,7 +1773,7 @@ type MsgScheduleUpgrade struct {
 
 func (x *MsgScheduleUpgrade) Reset() {
 	*x = MsgScheduleUpgrade{}
-	mi := &file_svote_v1_tx_proto_msgTypes[28]
+	mi := &file_svote_v1_tx_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1692,7 +1785,7 @@ func (x *MsgScheduleUpgrade) String() string {
 func (*MsgScheduleUpgrade) ProtoMessage() {}
 
 func (x *MsgScheduleUpgrade) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[28]
+	mi := &file_svote_v1_tx_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1705,7 +1798,7 @@ func (x *MsgScheduleUpgrade) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgScheduleUpgrade.ProtoReflect.Descriptor instead.
 func (*MsgScheduleUpgrade) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{28}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *MsgScheduleUpgrade) GetCreator() string {
@@ -1751,7 +1844,7 @@ type MsgScheduleUpgradeResponse struct {
 
 func (x *MsgScheduleUpgradeResponse) Reset() {
 	*x = MsgScheduleUpgradeResponse{}
-	mi := &file_svote_v1_tx_proto_msgTypes[29]
+	mi := &file_svote_v1_tx_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1763,7 +1856,7 @@ func (x *MsgScheduleUpgradeResponse) String() string {
 func (*MsgScheduleUpgradeResponse) ProtoMessage() {}
 
 func (x *MsgScheduleUpgradeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[29]
+	mi := &file_svote_v1_tx_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1776,7 +1869,7 @@ func (x *MsgScheduleUpgradeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgScheduleUpgradeResponse.ProtoReflect.Descriptor instead.
 func (*MsgScheduleUpgradeResponse) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{29}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{31}
 }
 
 // MsgCancelUpgrade clears the currently scheduled x/upgrade plan. It is
@@ -1790,7 +1883,7 @@ type MsgCancelUpgrade struct {
 
 func (x *MsgCancelUpgrade) Reset() {
 	*x = MsgCancelUpgrade{}
-	mi := &file_svote_v1_tx_proto_msgTypes[30]
+	mi := &file_svote_v1_tx_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1802,7 +1895,7 @@ func (x *MsgCancelUpgrade) String() string {
 func (*MsgCancelUpgrade) ProtoMessage() {}
 
 func (x *MsgCancelUpgrade) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[30]
+	mi := &file_svote_v1_tx_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1815,7 +1908,7 @@ func (x *MsgCancelUpgrade) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgCancelUpgrade.ProtoReflect.Descriptor instead.
 func (*MsgCancelUpgrade) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{30}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *MsgCancelUpgrade) GetCreator() string {
@@ -1833,7 +1926,7 @@ type MsgCancelUpgradeResponse struct {
 
 func (x *MsgCancelUpgradeResponse) Reset() {
 	*x = MsgCancelUpgradeResponse{}
-	mi := &file_svote_v1_tx_proto_msgTypes[31]
+	mi := &file_svote_v1_tx_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1845,7 +1938,7 @@ func (x *MsgCancelUpgradeResponse) String() string {
 func (*MsgCancelUpgradeResponse) ProtoMessage() {}
 
 func (x *MsgCancelUpgradeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[31]
+	mi := &file_svote_v1_tx_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1858,7 +1951,7 @@ func (x *MsgCancelUpgradeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgCancelUpgradeResponse.ProtoReflect.Descriptor instead.
 func (*MsgCancelUpgradeResponse) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{31}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{33}
 }
 
 // MsgSetEndorser creates, rotates, or clears an endorser_id -> bech32 address
@@ -1875,7 +1968,7 @@ type MsgSetEndorser struct {
 
 func (x *MsgSetEndorser) Reset() {
 	*x = MsgSetEndorser{}
-	mi := &file_svote_v1_tx_proto_msgTypes[32]
+	mi := &file_svote_v1_tx_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1887,7 +1980,7 @@ func (x *MsgSetEndorser) String() string {
 func (*MsgSetEndorser) ProtoMessage() {}
 
 func (x *MsgSetEndorser) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[32]
+	mi := &file_svote_v1_tx_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1900,7 +1993,7 @@ func (x *MsgSetEndorser) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgSetEndorser.ProtoReflect.Descriptor instead.
 func (*MsgSetEndorser) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{32}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *MsgSetEndorser) GetCreator() string {
@@ -1932,7 +2025,7 @@ type MsgSetEndorserResponse struct {
 
 func (x *MsgSetEndorserResponse) Reset() {
 	*x = MsgSetEndorserResponse{}
-	mi := &file_svote_v1_tx_proto_msgTypes[33]
+	mi := &file_svote_v1_tx_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1944,7 +2037,7 @@ func (x *MsgSetEndorserResponse) String() string {
 func (*MsgSetEndorserResponse) ProtoMessage() {}
 
 func (x *MsgSetEndorserResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[33]
+	mi := &file_svote_v1_tx_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1957,7 +2050,7 @@ func (x *MsgSetEndorserResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgSetEndorserResponse.ProtoReflect.Descriptor instead.
 func (*MsgSetEndorserResponse) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{33}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{35}
 }
 
 // MsgEndorseRound records that endorser_id endorses vote_round_id. Only the
@@ -1973,7 +2066,7 @@ type MsgEndorseRound struct {
 
 func (x *MsgEndorseRound) Reset() {
 	*x = MsgEndorseRound{}
-	mi := &file_svote_v1_tx_proto_msgTypes[34]
+	mi := &file_svote_v1_tx_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1985,7 +2078,7 @@ func (x *MsgEndorseRound) String() string {
 func (*MsgEndorseRound) ProtoMessage() {}
 
 func (x *MsgEndorseRound) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[34]
+	mi := &file_svote_v1_tx_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1998,7 +2091,7 @@ func (x *MsgEndorseRound) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgEndorseRound.ProtoReflect.Descriptor instead.
 func (*MsgEndorseRound) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{34}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *MsgEndorseRound) GetCreator() string {
@@ -2030,7 +2123,7 @@ type MsgEndorseRoundResponse struct {
 
 func (x *MsgEndorseRoundResponse) Reset() {
 	*x = MsgEndorseRoundResponse{}
-	mi := &file_svote_v1_tx_proto_msgTypes[35]
+	mi := &file_svote_v1_tx_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2042,7 +2135,7 @@ func (x *MsgEndorseRoundResponse) String() string {
 func (*MsgEndorseRoundResponse) ProtoMessage() {}
 
 func (x *MsgEndorseRoundResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[35]
+	mi := &file_svote_v1_tx_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2055,7 +2148,7 @@ func (x *MsgEndorseRoundResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgEndorseRoundResponse.ProtoReflect.Descriptor instead.
 func (*MsgEndorseRoundResponse) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{35}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{37}
 }
 
 // MsgClearRoundEndorsement clears an existing endorser_id/vote_round_id
@@ -2072,7 +2165,7 @@ type MsgClearRoundEndorsement struct {
 
 func (x *MsgClearRoundEndorsement) Reset() {
 	*x = MsgClearRoundEndorsement{}
-	mi := &file_svote_v1_tx_proto_msgTypes[36]
+	mi := &file_svote_v1_tx_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2084,7 +2177,7 @@ func (x *MsgClearRoundEndorsement) String() string {
 func (*MsgClearRoundEndorsement) ProtoMessage() {}
 
 func (x *MsgClearRoundEndorsement) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[36]
+	mi := &file_svote_v1_tx_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2097,7 +2190,7 @@ func (x *MsgClearRoundEndorsement) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgClearRoundEndorsement.ProtoReflect.Descriptor instead.
 func (*MsgClearRoundEndorsement) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{36}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *MsgClearRoundEndorsement) GetCreator() string {
@@ -2129,7 +2222,7 @@ type MsgClearRoundEndorsementResponse struct {
 
 func (x *MsgClearRoundEndorsementResponse) Reset() {
 	*x = MsgClearRoundEndorsementResponse{}
-	mi := &file_svote_v1_tx_proto_msgTypes[37]
+	mi := &file_svote_v1_tx_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2141,7 +2234,7 @@ func (x *MsgClearRoundEndorsementResponse) String() string {
 func (*MsgClearRoundEndorsementResponse) ProtoMessage() {}
 
 func (x *MsgClearRoundEndorsementResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[37]
+	mi := &file_svote_v1_tx_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2154,7 +2247,7 @@ func (x *MsgClearRoundEndorsementResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgClearRoundEndorsementResponse.ProtoReflect.Descriptor instead.
 func (*MsgClearRoundEndorsementResponse) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{37}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{39}
 }
 
 // MsgProposeCoordinatorAction creates a threshold-gated coordinator action.
@@ -2170,7 +2263,7 @@ type MsgProposeCoordinatorAction struct {
 
 func (x *MsgProposeCoordinatorAction) Reset() {
 	*x = MsgProposeCoordinatorAction{}
-	mi := &file_svote_v1_tx_proto_msgTypes[38]
+	mi := &file_svote_v1_tx_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2182,7 +2275,7 @@ func (x *MsgProposeCoordinatorAction) String() string {
 func (*MsgProposeCoordinatorAction) ProtoMessage() {}
 
 func (x *MsgProposeCoordinatorAction) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[38]
+	mi := &file_svote_v1_tx_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2195,7 +2288,7 @@ func (x *MsgProposeCoordinatorAction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgProposeCoordinatorAction.ProtoReflect.Descriptor instead.
 func (*MsgProposeCoordinatorAction) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{38}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *MsgProposeCoordinatorAction) GetCreator() string {
@@ -2222,7 +2315,7 @@ type MsgProposeCoordinatorActionResponse struct {
 
 func (x *MsgProposeCoordinatorActionResponse) Reset() {
 	*x = MsgProposeCoordinatorActionResponse{}
-	mi := &file_svote_v1_tx_proto_msgTypes[39]
+	mi := &file_svote_v1_tx_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2234,7 +2327,7 @@ func (x *MsgProposeCoordinatorActionResponse) String() string {
 func (*MsgProposeCoordinatorActionResponse) ProtoMessage() {}
 
 func (x *MsgProposeCoordinatorActionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[39]
+	mi := &file_svote_v1_tx_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2247,7 +2340,7 @@ func (x *MsgProposeCoordinatorActionResponse) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use MsgProposeCoordinatorActionResponse.ProtoReflect.Descriptor instead.
 func (*MsgProposeCoordinatorActionResponse) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{39}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *MsgProposeCoordinatorActionResponse) GetActionId() uint64 {
@@ -2275,7 +2368,7 @@ type MsgApproveCoordinatorAction struct {
 
 func (x *MsgApproveCoordinatorAction) Reset() {
 	*x = MsgApproveCoordinatorAction{}
-	mi := &file_svote_v1_tx_proto_msgTypes[40]
+	mi := &file_svote_v1_tx_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2287,7 +2380,7 @@ func (x *MsgApproveCoordinatorAction) String() string {
 func (*MsgApproveCoordinatorAction) ProtoMessage() {}
 
 func (x *MsgApproveCoordinatorAction) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[40]
+	mi := &file_svote_v1_tx_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2300,7 +2393,7 @@ func (x *MsgApproveCoordinatorAction) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgApproveCoordinatorAction.ProtoReflect.Descriptor instead.
 func (*MsgApproveCoordinatorAction) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{40}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *MsgApproveCoordinatorAction) GetCreator() string {
@@ -2327,7 +2420,7 @@ type MsgApproveCoordinatorActionResponse struct {
 
 func (x *MsgApproveCoordinatorActionResponse) Reset() {
 	*x = MsgApproveCoordinatorActionResponse{}
-	mi := &file_svote_v1_tx_proto_msgTypes[41]
+	mi := &file_svote_v1_tx_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2339,7 +2432,7 @@ func (x *MsgApproveCoordinatorActionResponse) String() string {
 func (*MsgApproveCoordinatorActionResponse) ProtoMessage() {}
 
 func (x *MsgApproveCoordinatorActionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_svote_v1_tx_proto_msgTypes[41]
+	mi := &file_svote_v1_tx_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2352,7 +2445,7 @@ func (x *MsgApproveCoordinatorActionResponse) ProtoReflect() protoreflect.Messag
 
 // Deprecated: Use MsgApproveCoordinatorActionResponse.ProtoReflect.Descriptor instead.
 func (*MsgApproveCoordinatorActionResponse) Descriptor() ([]byte, []int) {
-	return file_svote_v1_tx_proto_rawDescGZIP(), []int{41}
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *MsgApproveCoordinatorActionResponse) GetActionId() uint64 {
@@ -2414,7 +2507,11 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"\rvote_auth_sig\x18\n" +
 	" \x01(\fR\vvoteAuthSig\x12\x13\n" +
 	"\x05r_vpk\x18\f \x01(\fR\x04rVpk\"\x15\n" +
-	"\x13MsgCastVoteResponse\"\x96\x02\n" +
+	"\x13MsgCastVoteResponse\"?\n" +
+	"\x10MsgCastVoteBatch\x12+\n" +
+	"\x05votes\x18\x01 \x03(\v2\x15.svote.v1.MsgCastVoteR\x05votes\"=\n" +
+	"\x18MsgCastVoteBatchResponse\x12!\n" +
+	"\fbatch_digest\x18\x01 \x01(\fR\vbatchDigest\"\x96\x02\n" +
 	"\x0eMsgRevealShare\x12'\n" +
 	"\x0fshare_nullifier\x18\x01 \x01(\fR\x0eshareNullifier\x12\x1b\n" +
 	"\tenc_share\x18\x02 \x01(\fR\bencShare\x12\x1f\n" +
@@ -2527,11 +2624,11 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"\taction_id\x18\x02 \x01(\x04R\bactionId:\f\x82\xe7\xb0*\acreator\"^\n" +
 	"#MsgApproveCoordinatorActionResponse\x12\x1b\n" +
 	"\taction_id\x18\x01 \x01(\x04R\bactionId\x12\x1a\n" +
-	"\bexecuted\x18\x02 \x01(\bR\bexecuted2\xb1\n" +
-	"\n" +
+	"\bexecuted\x18\x02 \x01(\bR\bexecuted2\x82\v\n" +
 	"\x03Msg\x12L\n" +
 	"\fDelegateVote\x12\x19.svote.v1.MsgDelegateVote\x1a!.svote.v1.MsgDelegateVoteResponse\x12@\n" +
-	"\bCastVote\x12\x15.svote.v1.MsgCastVote\x1a\x1d.svote.v1.MsgCastVoteResponse\x12I\n" +
+	"\bCastVote\x12\x15.svote.v1.MsgCastVote\x1a\x1d.svote.v1.MsgCastVoteResponse\x12O\n" +
+	"\rCastVoteBatch\x12\x1a.svote.v1.MsgCastVoteBatch\x1a\".svote.v1.MsgCastVoteBatchResponse\x12I\n" +
 	"\vRevealShare\x12\x18.svote.v1.MsgRevealShare\x1a .svote.v1.MsgRevealShareResponse\x12I\n" +
 	"\vSubmitTally\x12\x18.svote.v1.MsgSubmitTally\x1a .svote.v1.MsgSubmitTallyResponse\x12m\n" +
 	"\x17SubmitPartialDecryption\x12$.svote.v1.MsgSubmitPartialDecryption\x1a,.svote.v1.MsgSubmitPartialDecryptionResponse\x12[\n" +
@@ -2557,7 +2654,7 @@ func file_svote_v1_tx_proto_rawDescGZIP() []byte {
 	return file_svote_v1_tx_proto_rawDescData
 }
 
-var file_svote_v1_tx_proto_msgTypes = make([]protoimpl.MessageInfo, 42)
+var file_svote_v1_tx_proto_msgTypes = make([]protoimpl.MessageInfo, 44)
 var file_svote_v1_tx_proto_goTypes = []any{
 	(*MsgCreateVotingSession)(nil),                  // 0: svote.v1.MsgCreateVotingSession
 	(*MsgCreateVotingSessionResponse)(nil),          // 1: svote.v1.MsgCreateVotingSessionResponse
@@ -2565,85 +2662,90 @@ var file_svote_v1_tx_proto_goTypes = []any{
 	(*MsgDelegateVoteResponse)(nil),                 // 3: svote.v1.MsgDelegateVoteResponse
 	(*MsgCastVote)(nil),                             // 4: svote.v1.MsgCastVote
 	(*MsgCastVoteResponse)(nil),                     // 5: svote.v1.MsgCastVoteResponse
-	(*MsgRevealShare)(nil),                          // 6: svote.v1.MsgRevealShare
-	(*MsgRevealShareResponse)(nil),                  // 7: svote.v1.MsgRevealShareResponse
-	(*MsgSubmitTally)(nil),                          // 8: svote.v1.MsgSubmitTally
-	(*TallyEntry)(nil),                              // 9: svote.v1.TallyEntry
-	(*MsgSubmitTallyResponse)(nil),                  // 10: svote.v1.MsgSubmitTallyResponse
-	(*MsgRegisterPallasKey)(nil),                    // 11: svote.v1.MsgRegisterPallasKey
-	(*MsgRegisterPallasKeyResponse)(nil),            // 12: svote.v1.MsgRegisterPallasKeyResponse
-	(*MsgRotatePallasKey)(nil),                      // 13: svote.v1.MsgRotatePallasKey
-	(*MsgRotatePallasKeyResponse)(nil),              // 14: svote.v1.MsgRotatePallasKeyResponse
-	(*MsgContributeDKG)(nil),                        // 15: svote.v1.MsgContributeDKG
-	(*MsgContributeDKGResponse)(nil),                // 16: svote.v1.MsgContributeDKGResponse
-	(*MsgAckExecutiveAuthorityKey)(nil),             // 17: svote.v1.MsgAckExecutiveAuthorityKey
-	(*MsgAckExecutiveAuthorityKeyResponse)(nil),     // 18: svote.v1.MsgAckExecutiveAuthorityKeyResponse
-	(*MsgCreateValidatorWithPallasKey)(nil),         // 19: svote.v1.MsgCreateValidatorWithPallasKey
-	(*MsgCreateValidatorWithPallasKeyResponse)(nil), // 20: svote.v1.MsgCreateValidatorWithPallasKeyResponse
-	(*MsgSubmitPartialDecryption)(nil),              // 21: svote.v1.MsgSubmitPartialDecryption
-	(*PartialDecryptionEntry)(nil),                  // 22: svote.v1.PartialDecryptionEntry
-	(*MsgSubmitPartialDecryptionResponse)(nil),      // 23: svote.v1.MsgSubmitPartialDecryptionResponse
-	(*MsgUpdateVoteManagers)(nil),                   // 24: svote.v1.MsgUpdateVoteManagers
-	(*MsgUpdateVoteManagersResponse)(nil),           // 25: svote.v1.MsgUpdateVoteManagersResponse
-	(*MsgAuthorizedSend)(nil),                       // 26: svote.v1.MsgAuthorizedSend
-	(*MsgAuthorizedSendResponse)(nil),               // 27: svote.v1.MsgAuthorizedSendResponse
-	(*MsgScheduleUpgrade)(nil),                      // 28: svote.v1.MsgScheduleUpgrade
-	(*MsgScheduleUpgradeResponse)(nil),              // 29: svote.v1.MsgScheduleUpgradeResponse
-	(*MsgCancelUpgrade)(nil),                        // 30: svote.v1.MsgCancelUpgrade
-	(*MsgCancelUpgradeResponse)(nil),                // 31: svote.v1.MsgCancelUpgradeResponse
-	(*MsgSetEndorser)(nil),                          // 32: svote.v1.MsgSetEndorser
-	(*MsgSetEndorserResponse)(nil),                  // 33: svote.v1.MsgSetEndorserResponse
-	(*MsgEndorseRound)(nil),                         // 34: svote.v1.MsgEndorseRound
-	(*MsgEndorseRoundResponse)(nil),                 // 35: svote.v1.MsgEndorseRoundResponse
-	(*MsgClearRoundEndorsement)(nil),                // 36: svote.v1.MsgClearRoundEndorsement
-	(*MsgClearRoundEndorsementResponse)(nil),        // 37: svote.v1.MsgClearRoundEndorsementResponse
-	(*MsgProposeCoordinatorAction)(nil),             // 38: svote.v1.MsgProposeCoordinatorAction
-	(*MsgProposeCoordinatorActionResponse)(nil),     // 39: svote.v1.MsgProposeCoordinatorActionResponse
-	(*MsgApproveCoordinatorAction)(nil),             // 40: svote.v1.MsgApproveCoordinatorAction
-	(*MsgApproveCoordinatorActionResponse)(nil),     // 41: svote.v1.MsgApproveCoordinatorActionResponse
-	(*Proposal)(nil),                                // 42: svote.v1.Proposal
-	(*DealerPayload)(nil),                           // 43: svote.v1.DealerPayload
-	(*anypb.Any)(nil),                               // 44: google.protobuf.Any
+	(*MsgCastVoteBatch)(nil),                        // 6: svote.v1.MsgCastVoteBatch
+	(*MsgCastVoteBatchResponse)(nil),                // 7: svote.v1.MsgCastVoteBatchResponse
+	(*MsgRevealShare)(nil),                          // 8: svote.v1.MsgRevealShare
+	(*MsgRevealShareResponse)(nil),                  // 9: svote.v1.MsgRevealShareResponse
+	(*MsgSubmitTally)(nil),                          // 10: svote.v1.MsgSubmitTally
+	(*TallyEntry)(nil),                              // 11: svote.v1.TallyEntry
+	(*MsgSubmitTallyResponse)(nil),                  // 12: svote.v1.MsgSubmitTallyResponse
+	(*MsgRegisterPallasKey)(nil),                    // 13: svote.v1.MsgRegisterPallasKey
+	(*MsgRegisterPallasKeyResponse)(nil),            // 14: svote.v1.MsgRegisterPallasKeyResponse
+	(*MsgRotatePallasKey)(nil),                      // 15: svote.v1.MsgRotatePallasKey
+	(*MsgRotatePallasKeyResponse)(nil),              // 16: svote.v1.MsgRotatePallasKeyResponse
+	(*MsgContributeDKG)(nil),                        // 17: svote.v1.MsgContributeDKG
+	(*MsgContributeDKGResponse)(nil),                // 18: svote.v1.MsgContributeDKGResponse
+	(*MsgAckExecutiveAuthorityKey)(nil),             // 19: svote.v1.MsgAckExecutiveAuthorityKey
+	(*MsgAckExecutiveAuthorityKeyResponse)(nil),     // 20: svote.v1.MsgAckExecutiveAuthorityKeyResponse
+	(*MsgCreateValidatorWithPallasKey)(nil),         // 21: svote.v1.MsgCreateValidatorWithPallasKey
+	(*MsgCreateValidatorWithPallasKeyResponse)(nil), // 22: svote.v1.MsgCreateValidatorWithPallasKeyResponse
+	(*MsgSubmitPartialDecryption)(nil),              // 23: svote.v1.MsgSubmitPartialDecryption
+	(*PartialDecryptionEntry)(nil),                  // 24: svote.v1.PartialDecryptionEntry
+	(*MsgSubmitPartialDecryptionResponse)(nil),      // 25: svote.v1.MsgSubmitPartialDecryptionResponse
+	(*MsgUpdateVoteManagers)(nil),                   // 26: svote.v1.MsgUpdateVoteManagers
+	(*MsgUpdateVoteManagersResponse)(nil),           // 27: svote.v1.MsgUpdateVoteManagersResponse
+	(*MsgAuthorizedSend)(nil),                       // 28: svote.v1.MsgAuthorizedSend
+	(*MsgAuthorizedSendResponse)(nil),               // 29: svote.v1.MsgAuthorizedSendResponse
+	(*MsgScheduleUpgrade)(nil),                      // 30: svote.v1.MsgScheduleUpgrade
+	(*MsgScheduleUpgradeResponse)(nil),              // 31: svote.v1.MsgScheduleUpgradeResponse
+	(*MsgCancelUpgrade)(nil),                        // 32: svote.v1.MsgCancelUpgrade
+	(*MsgCancelUpgradeResponse)(nil),                // 33: svote.v1.MsgCancelUpgradeResponse
+	(*MsgSetEndorser)(nil),                          // 34: svote.v1.MsgSetEndorser
+	(*MsgSetEndorserResponse)(nil),                  // 35: svote.v1.MsgSetEndorserResponse
+	(*MsgEndorseRound)(nil),                         // 36: svote.v1.MsgEndorseRound
+	(*MsgEndorseRoundResponse)(nil),                 // 37: svote.v1.MsgEndorseRoundResponse
+	(*MsgClearRoundEndorsement)(nil),                // 38: svote.v1.MsgClearRoundEndorsement
+	(*MsgClearRoundEndorsementResponse)(nil),        // 39: svote.v1.MsgClearRoundEndorsementResponse
+	(*MsgProposeCoordinatorAction)(nil),             // 40: svote.v1.MsgProposeCoordinatorAction
+	(*MsgProposeCoordinatorActionResponse)(nil),     // 41: svote.v1.MsgProposeCoordinatorActionResponse
+	(*MsgApproveCoordinatorAction)(nil),             // 42: svote.v1.MsgApproveCoordinatorAction
+	(*MsgApproveCoordinatorActionResponse)(nil),     // 43: svote.v1.MsgApproveCoordinatorActionResponse
+	(*Proposal)(nil),                                // 44: svote.v1.Proposal
+	(*DealerPayload)(nil),                           // 45: svote.v1.DealerPayload
+	(*anypb.Any)(nil),                               // 46: google.protobuf.Any
 }
 var file_svote_v1_tx_proto_depIdxs = []int32{
-	42, // 0: svote.v1.MsgCreateVotingSession.proposals:type_name -> svote.v1.Proposal
-	9,  // 1: svote.v1.MsgSubmitTally.entries:type_name -> svote.v1.TallyEntry
-	43, // 2: svote.v1.MsgContributeDKG.payloads:type_name -> svote.v1.DealerPayload
-	22, // 3: svote.v1.MsgSubmitPartialDecryption.entries:type_name -> svote.v1.PartialDecryptionEntry
-	44, // 4: svote.v1.MsgProposeCoordinatorAction.payload:type_name -> google.protobuf.Any
-	2,  // 5: svote.v1.Msg.DelegateVote:input_type -> svote.v1.MsgDelegateVote
-	4,  // 6: svote.v1.Msg.CastVote:input_type -> svote.v1.MsgCastVote
-	6,  // 7: svote.v1.Msg.RevealShare:input_type -> svote.v1.MsgRevealShare
-	8,  // 8: svote.v1.Msg.SubmitTally:input_type -> svote.v1.MsgSubmitTally
-	21, // 9: svote.v1.Msg.SubmitPartialDecryption:input_type -> svote.v1.MsgSubmitPartialDecryption
-	11, // 10: svote.v1.Msg.RegisterPallasKey:input_type -> svote.v1.MsgRegisterPallasKey
-	13, // 11: svote.v1.Msg.RotatePallasKey:input_type -> svote.v1.MsgRotatePallasKey
-	15, // 12: svote.v1.Msg.ContributeDKG:input_type -> svote.v1.MsgContributeDKG
-	17, // 13: svote.v1.Msg.AckExecutiveAuthorityKey:input_type -> svote.v1.MsgAckExecutiveAuthorityKey
-	19, // 14: svote.v1.Msg.CreateValidatorWithPallasKey:input_type -> svote.v1.MsgCreateValidatorWithPallasKey
-	34, // 15: svote.v1.Msg.EndorseRound:input_type -> svote.v1.MsgEndorseRound
-	36, // 16: svote.v1.Msg.ClearRoundEndorsement:input_type -> svote.v1.MsgClearRoundEndorsement
-	38, // 17: svote.v1.Msg.ProposeCoordinatorAction:input_type -> svote.v1.MsgProposeCoordinatorAction
-	40, // 18: svote.v1.Msg.ApproveCoordinatorAction:input_type -> svote.v1.MsgApproveCoordinatorAction
-	3,  // 19: svote.v1.Msg.DelegateVote:output_type -> svote.v1.MsgDelegateVoteResponse
-	5,  // 20: svote.v1.Msg.CastVote:output_type -> svote.v1.MsgCastVoteResponse
-	7,  // 21: svote.v1.Msg.RevealShare:output_type -> svote.v1.MsgRevealShareResponse
-	10, // 22: svote.v1.Msg.SubmitTally:output_type -> svote.v1.MsgSubmitTallyResponse
-	23, // 23: svote.v1.Msg.SubmitPartialDecryption:output_type -> svote.v1.MsgSubmitPartialDecryptionResponse
-	12, // 24: svote.v1.Msg.RegisterPallasKey:output_type -> svote.v1.MsgRegisterPallasKeyResponse
-	14, // 25: svote.v1.Msg.RotatePallasKey:output_type -> svote.v1.MsgRotatePallasKeyResponse
-	16, // 26: svote.v1.Msg.ContributeDKG:output_type -> svote.v1.MsgContributeDKGResponse
-	18, // 27: svote.v1.Msg.AckExecutiveAuthorityKey:output_type -> svote.v1.MsgAckExecutiveAuthorityKeyResponse
-	20, // 28: svote.v1.Msg.CreateValidatorWithPallasKey:output_type -> svote.v1.MsgCreateValidatorWithPallasKeyResponse
-	35, // 29: svote.v1.Msg.EndorseRound:output_type -> svote.v1.MsgEndorseRoundResponse
-	37, // 30: svote.v1.Msg.ClearRoundEndorsement:output_type -> svote.v1.MsgClearRoundEndorsementResponse
-	39, // 31: svote.v1.Msg.ProposeCoordinatorAction:output_type -> svote.v1.MsgProposeCoordinatorActionResponse
-	41, // 32: svote.v1.Msg.ApproveCoordinatorAction:output_type -> svote.v1.MsgApproveCoordinatorActionResponse
-	19, // [19:33] is the sub-list for method output_type
-	5,  // [5:19] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	44, // 0: svote.v1.MsgCreateVotingSession.proposals:type_name -> svote.v1.Proposal
+	4,  // 1: svote.v1.MsgCastVoteBatch.votes:type_name -> svote.v1.MsgCastVote
+	11, // 2: svote.v1.MsgSubmitTally.entries:type_name -> svote.v1.TallyEntry
+	45, // 3: svote.v1.MsgContributeDKG.payloads:type_name -> svote.v1.DealerPayload
+	24, // 4: svote.v1.MsgSubmitPartialDecryption.entries:type_name -> svote.v1.PartialDecryptionEntry
+	46, // 5: svote.v1.MsgProposeCoordinatorAction.payload:type_name -> google.protobuf.Any
+	2,  // 6: svote.v1.Msg.DelegateVote:input_type -> svote.v1.MsgDelegateVote
+	4,  // 7: svote.v1.Msg.CastVote:input_type -> svote.v1.MsgCastVote
+	6,  // 8: svote.v1.Msg.CastVoteBatch:input_type -> svote.v1.MsgCastVoteBatch
+	8,  // 9: svote.v1.Msg.RevealShare:input_type -> svote.v1.MsgRevealShare
+	10, // 10: svote.v1.Msg.SubmitTally:input_type -> svote.v1.MsgSubmitTally
+	23, // 11: svote.v1.Msg.SubmitPartialDecryption:input_type -> svote.v1.MsgSubmitPartialDecryption
+	13, // 12: svote.v1.Msg.RegisterPallasKey:input_type -> svote.v1.MsgRegisterPallasKey
+	15, // 13: svote.v1.Msg.RotatePallasKey:input_type -> svote.v1.MsgRotatePallasKey
+	17, // 14: svote.v1.Msg.ContributeDKG:input_type -> svote.v1.MsgContributeDKG
+	19, // 15: svote.v1.Msg.AckExecutiveAuthorityKey:input_type -> svote.v1.MsgAckExecutiveAuthorityKey
+	21, // 16: svote.v1.Msg.CreateValidatorWithPallasKey:input_type -> svote.v1.MsgCreateValidatorWithPallasKey
+	36, // 17: svote.v1.Msg.EndorseRound:input_type -> svote.v1.MsgEndorseRound
+	38, // 18: svote.v1.Msg.ClearRoundEndorsement:input_type -> svote.v1.MsgClearRoundEndorsement
+	40, // 19: svote.v1.Msg.ProposeCoordinatorAction:input_type -> svote.v1.MsgProposeCoordinatorAction
+	42, // 20: svote.v1.Msg.ApproveCoordinatorAction:input_type -> svote.v1.MsgApproveCoordinatorAction
+	3,  // 21: svote.v1.Msg.DelegateVote:output_type -> svote.v1.MsgDelegateVoteResponse
+	5,  // 22: svote.v1.Msg.CastVote:output_type -> svote.v1.MsgCastVoteResponse
+	7,  // 23: svote.v1.Msg.CastVoteBatch:output_type -> svote.v1.MsgCastVoteBatchResponse
+	9,  // 24: svote.v1.Msg.RevealShare:output_type -> svote.v1.MsgRevealShareResponse
+	12, // 25: svote.v1.Msg.SubmitTally:output_type -> svote.v1.MsgSubmitTallyResponse
+	25, // 26: svote.v1.Msg.SubmitPartialDecryption:output_type -> svote.v1.MsgSubmitPartialDecryptionResponse
+	14, // 27: svote.v1.Msg.RegisterPallasKey:output_type -> svote.v1.MsgRegisterPallasKeyResponse
+	16, // 28: svote.v1.Msg.RotatePallasKey:output_type -> svote.v1.MsgRotatePallasKeyResponse
+	18, // 29: svote.v1.Msg.ContributeDKG:output_type -> svote.v1.MsgContributeDKGResponse
+	20, // 30: svote.v1.Msg.AckExecutiveAuthorityKey:output_type -> svote.v1.MsgAckExecutiveAuthorityKeyResponse
+	22, // 31: svote.v1.Msg.CreateValidatorWithPallasKey:output_type -> svote.v1.MsgCreateValidatorWithPallasKeyResponse
+	37, // 32: svote.v1.Msg.EndorseRound:output_type -> svote.v1.MsgEndorseRoundResponse
+	39, // 33: svote.v1.Msg.ClearRoundEndorsement:output_type -> svote.v1.MsgClearRoundEndorsementResponse
+	41, // 34: svote.v1.Msg.ProposeCoordinatorAction:output_type -> svote.v1.MsgProposeCoordinatorActionResponse
+	43, // 35: svote.v1.Msg.ApproveCoordinatorAction:output_type -> svote.v1.MsgApproveCoordinatorActionResponse
+	21, // [21:36] is the sub-list for method output_type
+	6,  // [6:21] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_svote_v1_tx_proto_init() }
@@ -2658,7 +2760,7 @@ func file_svote_v1_tx_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_svote_v1_tx_proto_rawDesc), len(file_svote_v1_tx_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   42,
+			NumMessages:   44,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
