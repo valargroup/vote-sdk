@@ -8,7 +8,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
-- Add atomic cast-vote batches with one batch-wide authorization digest,
+- Prepare atomic cast-vote batches behind a coordinated activation gate, with
+  one batch-wide authorization digest,
   chained unchanged ZKP #2 proofs, deterministic wire encoding, and recovery
   events that retain every vote commitment while appending only the final VAN.
 - Preserve CometBFT transaction event attributes exactly in transaction status

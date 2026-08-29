@@ -137,7 +137,7 @@ func (s CryptoReadinessStatus) ready() bool {
 //
 //	POST /shielded-vote/v1/delegate-vote          → MsgDelegateVote
 //	POST /shielded-vote/v1/cast-vote              → MsgCastVote
-//	POST /shielded-vote/v1/cast-vote-batch        → MsgCastVoteBatch
+//	POST /shielded-vote/v1/cast-vote-batch        → MsgCastVoteBatch (when enabled)
 //	POST /shielded-vote/v1/reveal-share           → MsgRevealShare
 //
 // MsgSubmitTally is proposer-only (auto-injected via PrepareProposal) and
@@ -156,7 +156,9 @@ func (h *Handler) RegisterTxRoutes(router *mux.Router) {
 	trace := sentryhttp.New(sentryhttp.Options{Repanic: true}).Handle
 	router.Handle("/shielded-vote/v1/delegate-vote", trace(http.HandlerFunc(h.handleDelegateVote))).Methods("POST")
 	router.Handle("/shielded-vote/v1/cast-vote", trace(http.HandlerFunc(h.handleCastVote))).Methods("POST")
-	router.Handle("/shielded-vote/v1/cast-vote-batch", trace(http.HandlerFunc(h.handleCastVoteBatch))).Methods("POST")
+	if types.AtomicVoteBatchesEnabled {
+		router.Handle("/shielded-vote/v1/cast-vote-batch", trace(http.HandlerFunc(h.handleCastVoteBatch))).Methods("POST")
+	}
 	router.Handle("/shielded-vote/v1/reveal-share", trace(http.HandlerFunc(h.handleRevealShare))).Methods("POST")
 
 	router.Handle("/shielded-vote/v1/snapshot-data/{height}", trace(http.HandlerFunc(h.handleSnapshotData))).Methods("GET")

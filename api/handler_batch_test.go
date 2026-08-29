@@ -52,7 +52,16 @@ func TestDecodeAndValidateCanonicalJSONRejectsUnknownAndTrailingData(t *testing.
 	require.Contains(t, trailingRec.Body.String(), "trailing value")
 }
 
-func TestCastVoteBatchRouteReturnsStableDigest(t *testing.T) {
+func TestCastVoteBatchRouteRegistrationMatchesFeatureFlag(t *testing.T) {
+	handler := NewHandler(HandlerConfig{})
+	router := mux.NewRouter()
+	handler.RegisterTxRoutes(router)
+
+	req := httptest.NewRequest(http.MethodPost, "/shielded-vote/v1/cast-vote-batch", nil)
+	require.Equal(t, types.AtomicVoteBatchesEnabled, router.Match(req, &mux.RouteMatch{}))
+}
+
+func TestCastVoteBatchHandlerReturnsStableDigest(t *testing.T) {
 	comet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"code":0,"hash":"ABC123","log":""}}`))
@@ -60,15 +69,13 @@ func TestCastVoteBatchRouteReturnsStableDigest(t *testing.T) {
 	defer comet.Close()
 
 	handler := NewHandler(HandlerConfig{CometRPCEndpoint: comet.URL})
-	router := mux.NewRouter()
-	handler.RegisterTxRoutes(router)
 	batch := validHandlerBatch()
 	body, err := json.Marshal(batch)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodPost, "/shielded-vote/v1/cast-vote-batch", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
+	handler.handleCastVoteBatch(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
 	var response BroadcastResult
