@@ -1,7 +1,8 @@
 name: PR state compatibility
 
+# Keep this on pull_request_target so a PR cannot rewrite its own validation.
 on:
-  pull_request:
+  pull_request_target:
     branches:
       - main
       - "v*.*.x"
@@ -23,8 +24,10 @@ jobs:
       PR_BASE_REF: ${{ github.base_ref }}
       PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
     steps:
-      - name: Checkout validation script
+      - name: Checkout trusted base validator
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
       - name: Validate state and backport labels
         run: |
           labels=()

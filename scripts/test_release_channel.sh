@@ -235,6 +235,10 @@ if PR_BASE_REF=v1.4.x "$STATE_LABEL_SCRIPT" \
 fi
 grep -Eq 'types: \[[^]]*edited' "$STATE_LABEL_WORKFLOW" \
   || fail "state label validation does not run after a PR base change"
+grep -Fq '  pull_request_target:' "$STATE_LABEL_WORKFLOW" \
+  || fail "state label validation does not use the trusted base workflow"
+grep -Fq 'ref: ${{ github.event.pull_request.base.sha }}' "$STATE_LABEL_WORKFLOW" \
+  || fail "state label validation does not use the trusted base validator"
 grep -Fq '"text": "*Branch:*\n${{ github.ref_name }}"' "$CI_WORKFLOW" \
   || fail "CI failure notifications do not identify the pushed branch"
 [ "$(grep -Fc '      - "v*.*.x"' "$JOIN_WORKFLOW")" -eq 2 ] \
