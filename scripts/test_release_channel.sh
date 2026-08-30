@@ -7,6 +7,7 @@ BRANCH_SCRIPT="${REPO_ROOT}/scripts/release-branch.sh"
 BRANCH_VALIDATION_SCRIPT="${REPO_ROOT}/scripts/validate-release-branch.sh"
 STATE_LABEL_SCRIPT="${REPO_ROOT}/scripts/validate-pr-state-labels.sh"
 STATE_LABEL_WORKFLOW="${REPO_ROOT}/.github/workflows/pr-state-compatibility.yml"
+CI_WORKFLOW="${REPO_ROOT}/.github/workflows/ci.yml"
 METADATA_SCRIPT="${REPO_ROOT}/scripts/release-metadata.sh"
 POINTER_SCRIPT="${REPO_ROOT}/scripts/publish-release-pointers.sh"
 RENDER_SCRIPT="${REPO_ROOT}/scripts/render-update-chain.sh"
@@ -233,6 +234,8 @@ if PR_BASE_REF=v1.4.x "$STATE_LABEL_SCRIPT" \
 fi
 grep -Eq 'types: \[[^]]*edited' "$STATE_LABEL_WORKFLOW" \
   || fail "state label validation does not run after a PR base change"
+grep -Fq '"text": "*Branch:*\n${{ github.ref_name }}"' "$CI_WORKFLOW" \
+  || fail "CI failure notifications do not identify the pushed branch"
 
 RUNBOOK_BIN="${TMPDIR}/runbook-bin"
 RUNBOOK_EXAMPLE="${TMPDIR}/schedule-upgrade-example.sh"
