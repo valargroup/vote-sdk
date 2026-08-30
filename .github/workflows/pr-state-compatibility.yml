@@ -5,7 +5,7 @@ on:
     branches:
       - main
       - "v*.*.x"
-    types: [opened, reopened, synchronize, labeled, unlabeled, ready_for_review]
+    types: [opened, reopened, synchronize, edited, labeled, unlabeled, ready_for_review]
 
 permissions:
   contents: read

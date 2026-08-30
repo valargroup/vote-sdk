@@ -6,6 +6,7 @@ CHANNEL_SCRIPT="${REPO_ROOT}/scripts/release-channel.sh"
 BRANCH_SCRIPT="${REPO_ROOT}/scripts/release-branch.sh"
 BRANCH_VALIDATION_SCRIPT="${REPO_ROOT}/scripts/validate-release-branch.sh"
 STATE_LABEL_SCRIPT="${REPO_ROOT}/scripts/validate-pr-state-labels.sh"
+STATE_LABEL_WORKFLOW="${REPO_ROOT}/.github/workflows/pr-state-compatibility.yml"
 METADATA_SCRIPT="${REPO_ROOT}/scripts/release-metadata.sh"
 POINTER_SCRIPT="${REPO_ROOT}/scripts/publish-release-pointers.sh"
 RENDER_SCRIPT="${REPO_ROOT}/scripts/render-update-chain.sh"
@@ -230,6 +231,8 @@ if PR_BASE_REF=v1.4.x "$STATE_LABEL_SCRIPT" \
   V:state/compatible A:backport/v1.4.x >/dev/null 2>&1; then
   fail "backport target label was accepted on a maintenance PR"
 fi
+grep -Eq 'types: \[[^]]*edited' "$STATE_LABEL_WORKFLOW" \
+  || fail "state label validation does not run after a PR base change"
 
 RUNBOOK_BIN="${TMPDIR}/runbook-bin"
 RUNBOOK_EXAMPLE="${TMPDIR}/schedule-upgrade-example.sh"
