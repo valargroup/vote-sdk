@@ -303,7 +303,7 @@ func (AppModule) RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 // keeper via BaseApp's MsgServiceRouter.
 func (am AppModule) RegisterServices(cfg module.Configurator) {
 	types.RegisterQueryServer(cfg.QueryServer(), keeper.NewQueryServerImpl(am.keeper))
-	types.RegisterMsgServerWithAtomicVoteBatchGate(cfg.MsgServer(), keeper.NewMsgServerImpl(am.keeper))
+	types.RegisterMsgServer(cfg.MsgServer(), keeper.NewMsgServerImpl(am.keeper))
 }
 
 // AutoCLIOptions implements autocli.HasAutoCLIConfig.

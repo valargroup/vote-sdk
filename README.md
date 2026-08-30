@@ -380,10 +380,10 @@ Vote-round messages use the custom wire format and are submitted as JSON POST re
 | ------ | --------------------------------- | ---------------------------------- |
 | POST   | `/shielded-vote/v1/delegate-vote` | Submit a delegation proof (ZKP #1) |
 | POST   | `/shielded-vote/v1/cast-vote`     | Cast an encrypted vote (ZKP #2)    |
-| POST   | `/shielded-vote/v1/cast-vote-batch` | Atomically cast ordered encrypted votes when enabled (ZKP #2) |
+| POST   | `/shielded-vote/v1/cast-vote-batch` | Atomically cast ordered encrypted votes (ZKP #2) |
 | POST   | `/shielded-vote/v1/reveal-share`  | Reveal an encrypted share (ZKP #3) |
 
-These endpoints accept JSON, encode the message with the custom wire format, and broadcast via CometBFT's `broadcast_tx_sync`. The batch endpoint is registered only when `AtomicVoteBatchesEnabled` is true. It rejects unknown JSON fields, uses deterministic protobuf encoding, and includes `batch_digest` in its response. `MsgSubmitTally`, `MsgContributeDKG`, `MsgAckExecutiveAuthorityKey`, and `MsgSubmitPartialDecryption` have no REST endpoints — they are proposer-only and auto-injected via PrepareProposal.
+These endpoints accept JSON, encode the message with the custom wire format, and broadcast via CometBFT's `broadcast_tx_sync`. The batch endpoint rejects unknown JSON fields, uses deterministic protobuf encoding, and includes `batch_digest` in its response. `MsgSubmitTally`, `MsgContributeDKG`, `MsgAckExecutiveAuthorityKey`, and `MsgSubmitPartialDecryption` have no REST endpoints — they are proposer-only and auto-injected via PrepareProposal.
 
 Validator-owned messages (`MsgRegisterPallasKey`, `MsgRotatePallasKey`,
 `MsgCreateValidatorWithPallasKey`) and coordinator action messages

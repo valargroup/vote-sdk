@@ -121,6 +121,17 @@ curl -fsSL "https://shielded-vote.nyc3.digitaloceanspaces.com/scripts/upgrade/${
 After scheduling, rerun `verify-prestage` without `--allow-no-plan` and verify
 that every validator resumes on `v1.3.1` before starting a new vote round.
 
+## v1.5.0 coordinated cutover
+
+The `v1.5.0` release activates atomic cast-vote batches. This changes the
+transaction set accepted by validators, so it must not be installed as a
+rolling state-compatible update. The `v1.4.x` maintenance line keeps the batch
+message dormant.
+
+Use `v1.5.0` as both the release tag and plan name on testnet and mainnet. Its
+upgrade handler does not migrate stores; it coordinates the point at which all
+validators begin decoding and executing `MsgCastVoteBatch`.
+
 ## Held release and promotion
 
 Set the repository variable `RELEASE_HOLD_TAG` to a stable tag before pushing
