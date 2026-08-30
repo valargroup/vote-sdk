@@ -8,6 +8,7 @@ BRANCH_VALIDATION_SCRIPT="${REPO_ROOT}/scripts/validate-release-branch.sh"
 STATE_LABEL_SCRIPT="${REPO_ROOT}/scripts/validate-pr-state-labels.sh"
 STATE_LABEL_WORKFLOW="${REPO_ROOT}/.github/workflows/pr-state-compatibility.yml"
 CI_WORKFLOW="${REPO_ROOT}/.github/workflows/ci.yml"
+JOIN_WORKFLOW="${REPO_ROOT}/.github/workflows/test-join.yml"
 METADATA_SCRIPT="${REPO_ROOT}/scripts/release-metadata.sh"
 POINTER_SCRIPT="${REPO_ROOT}/scripts/publish-release-pointers.sh"
 RENDER_SCRIPT="${REPO_ROOT}/scripts/render-update-chain.sh"
@@ -236,6 +237,8 @@ grep -Eq 'types: \[[^]]*edited' "$STATE_LABEL_WORKFLOW" \
   || fail "state label validation does not run after a PR base change"
 grep -Fq '"text": "*Branch:*\n${{ github.ref_name }}"' "$CI_WORKFLOW" \
   || fail "CI failure notifications do not identify the pushed branch"
+[ "$(grep -Fc '      - "v*.*.x"' "$JOIN_WORKFLOW")" -eq 2 ] \
+  || fail "join smoke tests do not cover maintenance pushes and PRs"
 
 RUNBOOK_BIN="${TMPDIR}/runbook-bin"
 RUNBOOK_EXAMPLE="${TMPDIR}/schedule-upgrade-example.sh"

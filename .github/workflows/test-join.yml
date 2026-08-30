@@ -23,7 +23,9 @@ name: test-join
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - "v*.*.x"
     paths:
       - join.sh
       - scripts/svoted-wrapper.sh
@@ -42,7 +44,9 @@ on:
       - scripts/test-join-docker.sh
       - .github/workflows/test-join.yml
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - "v*.*.x"
     paths:
       - join.sh
       - scripts/svoted-wrapper.sh
