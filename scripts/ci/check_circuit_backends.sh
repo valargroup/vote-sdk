@@ -47,7 +47,7 @@ if cargo check --manifest-path "$circuit_manifest" --locked --no-default-feature
   echo "The circuit crate unexpectedly accepted no backend feature."
   exit 1
 fi
-if ! grep -Fq 'enable at least one upstream or Zakura dependency feature' "$backend_tmp/neither.log"; then
+if ! grep -Fq 'enable at least one Zakura or LRZ dependency feature' "$backend_tmp/neither.log"; then
   cat "$backend_tmp/neither.log"
   echo "The no-backend build failed for an unexpected reason."
   exit 1
@@ -58,7 +58,7 @@ if cargo check --manifest-path "$circuit_manifest" --locked --no-default-feature
   echo "The circuit crate unexpectedly accepted both backend features."
   exit 1
 fi
-if ! grep -Fq 'upstream and Zakura dependency features cannot be enabled together' "$backend_tmp/both.log"; then
+if ! grep -Fq 'Zakura and LRZ dependency features cannot be enabled together' "$backend_tmp/both.log"; then
   cat "$backend_tmp/both.log"
   echo "The dual-backend build failed for an unexpected reason."
   exit 1

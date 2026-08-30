@@ -30,24 +30,24 @@ type VoteCommitmentInputs struct {
 	VoteAuthorityNoteNew []byte // New vote authority note commitment
 	VoteCommitment       []byte // The vote commitment
 	// ProposalId is 1-indexed (matching on-chain proposal IDs). The circuit uses
-	// this value as a bit-position in the 16-bit proposal_authority bitmask;
+	// this value as a bit-position in the 51-bit proposal_authority bitmask;
 	// bit 0 is the sentinel and rejected by the circuit's non-zero gate.
-	// Valid range: [1, 15].
-	ProposalId           uint32
-	VoteRoundId          []byte // The vote round
-	AnchorHeight         uint64 // Commitment tree anchor height used by the proof
-	VoteCommTreeRoot     []byte // 32-byte Pallas Fp: tree root at AnchorHeight (from on-chain state)
-	EaPk                 []byte // 32-byte compressed Pallas point: election authority public key (from session)
+	// Valid range: [1, 50].
+	ProposalId       uint32
+	VoteRoundId      []byte // The vote round
+	AnchorHeight     uint64 // Commitment tree anchor height used by the proof
+	VoteCommTreeRoot []byte // 32-byte Pallas Fp: tree root at AnchorHeight (from on-chain state)
+	EaPk             []byte // 32-byte compressed Pallas point: election authority public key (from session)
 }
 
 // VoteShareInputs contains the public inputs for ZKP #3 (reveal vote share).
 type VoteShareInputs struct {
-	ShareNullifier  []byte // Share nullifier (prevents double-reveal)
-	EncShare        []byte // 64 bytes: ElGamal ciphertext (encrypted vote share)
-	ProposalId      uint32 // 1-indexed proposal ID (same convention as VoteCommitmentInputs)
-	VoteDecision    uint32 // The vote choice (0-indexed into the proposal's options)
-	VoteRoundId     []byte // The vote round
-	AnchorHeight    uint64 // Commitment tree anchor height used by the proof
+	ShareNullifier   []byte // Share nullifier (prevents double-reveal)
+	EncShare         []byte // 64 bytes: ElGamal ciphertext (encrypted vote share)
+	ProposalId       uint32 // 1-indexed proposal ID (same convention as VoteCommitmentInputs)
+	VoteDecision     uint32 // The vote choice (0-indexed into the proposal's options)
+	VoteRoundId      []byte // The vote round
+	AnchorHeight     uint64 // Commitment tree anchor height used by the proof
 	VoteCommTreeRoot []byte // Vote commitment tree root at AnchorHeight (32 bytes)
 }
 

@@ -236,8 +236,9 @@ fn proposals() -> serde_json::Value {
             .parse::<u32>()
             .expect("ZASHI_PROPOSAL_COUNT must be a positive integer");
         assert!(
-            (1..=15).contains(&count),
-            "ZASHI_PROPOSAL_COUNT must be between 1 and 15"
+            (1..=zcash_voting::MAX_PROPOSAL_ID).contains(&count),
+            "ZASHI_PROPOSAL_COUNT must be between 1 and {}",
+            zcash_voting::MAX_PROPOSAL_ID
         );
         return speed_test_proposals(count);
     }
@@ -292,11 +293,14 @@ fn speed_test_proposals(count: u32) -> serde_json::Value {
 
 #[test]
 fn generates_requested_speed_test_proposals() {
-    let generated = speed_test_proposals(15);
+    let generated = speed_test_proposals(zcash_voting::MAX_PROPOSAL_ID);
     let proposals = generated.as_array().unwrap();
-    assert_eq!(proposals.len(), 15);
+    assert_eq!(proposals.len(), zcash_voting::MAX_PROPOSAL_ID as usize);
     assert_eq!(proposals[0]["id"], 1);
-    assert_eq!(proposals[14]["id"], 15);
+    assert_eq!(
+        proposals[zcash_voting::MAX_PROPOSAL_ID as usize - 1]["id"],
+        zcash_voting::MAX_PROPOSAL_ID
+    );
 }
 
 fn to_base64(bytes: &[u8]) -> String {

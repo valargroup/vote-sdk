@@ -13,6 +13,8 @@ import (
 
 	"cosmossdk.io/log"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
 const (
@@ -570,9 +572,9 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	}
 
 	// Decode share_comms.
-	var shareComms [16][32]byte
-	if len(share.Payload.ShareComms) != 16 {
-		return failedShareAttemptError(failureStageDecodePayload, fmt.Errorf("expected 16 share_comms, got %d", len(share.Payload.ShareComms)))
+	var shareComms [types.VoteCommitmentShareCount][32]byte
+	if len(share.Payload.ShareComms) != types.VoteCommitmentShareCount {
+		return failedShareAttemptError(failureStageDecodePayload, fmt.Errorf("expected %d share_comms, got %d", types.VoteCommitmentShareCount, len(share.Payload.ShareComms)))
 	}
 	for i, c := range share.Payload.ShareComms {
 		cBytes, err := base64.StdEncoding.DecodeString(c)

@@ -99,9 +99,9 @@ func (s *ValidateBasicTestSuite) TestCreateVotingSession_NewFieldsValidation() {
 			errContains: "proposals count",
 		},
 		{
-			name: "invalid: 16 proposals (exceeds max; circuit bit 0 is sentinel, only 1-15 usable)",
+			name: "invalid: 51 proposals (exceeds max; circuit bit 0 is sentinel, only 1-50 usable)",
 			modify: func(m *types.MsgCreateVotingSession) {
-				m.Proposals = make([]*types.Proposal, 16)
+				m.Proposals = make([]*types.Proposal, types.MaxProposals+1)
 				for i := range m.Proposals {
 					m.Proposals[i] = &types.Proposal{Id: uint32(i + 1), Title: "P", Options: svtest.DefaultOptions()}
 				}
@@ -139,9 +139,9 @@ func (s *ValidateBasicTestSuite) TestCreateVotingSession_NewFieldsValidation() {
 			},
 		},
 		{
-			name: "valid: 15 proposals (max; circuit supports bit positions 1-15)",
+			name: "valid: 50 proposals (max; circuit supports bit positions 1-50)",
 			modify: func(m *types.MsgCreateVotingSession) {
-				m.Proposals = make([]*types.Proposal, 15)
+				m.Proposals = make([]*types.Proposal, types.MaxProposals)
 				for i := range m.Proposals {
 					m.Proposals[i] = &types.Proposal{Id: uint32(i + 1), Title: "P", Options: svtest.DefaultOptions()}
 				}
@@ -313,6 +313,22 @@ func (s *ValidateBasicTestSuite) TestValidateVoteChoice() {
 			}
 		})
 	}
+}
+
+func (s *ValidateBasicTestSuite) TestProposalIDBounds() {
+	roundID := bytes.Repeat([]byte{0x42}, types.RoundIDLen)
+
+	castVote := svtest.ValidCastVote(roundID, 1, 1)
+	castVote.ProposalId = types.MaxProposals
+	s.Require().NoError(castVote.ValidateBasic())
+	castVote.ProposalId = types.MaxProposals + 1
+	s.Require().ErrorContains(castVote.ValidateBasic(), "proposal_id")
+
+	revealShare := svtest.ValidRevealShare(roundID, 1, 1)
+	revealShare.ProposalId = types.MaxProposals
+	s.Require().NoError(revealShare.ValidateBasic())
+	revealShare.ProposalId = types.MaxProposals + 1
+	s.Require().ErrorContains(revealShare.ValidateBasic(), "proposal_id")
 }
 
 // ---------------------------------------------------------------------------

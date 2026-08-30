@@ -531,7 +531,7 @@ All byte fields are hex-encoded in the JSON.  Required fields:
   vote_end_time       (int64)  — Unix timestamp after which voting closes
   nullifier_imt_root  (hex)    — Root of the incremental Merkle tree of nullifiers
   nc_root             (hex)    — Note commitment tree root at snapshot_height
-  proposals           (array)  — 1-15 proposals, each with id (1-based uint32),
+  proposals           (array)  — 1-50 proposals, each with id (1-based uint32),
                                  title (string), optional description (string),
                                  optional zip_number (string), optional forum_url
                                  (string), and options (2-8 elements with index

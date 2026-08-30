@@ -11,9 +11,9 @@ import (
 
 const MaxUpgradeInfoBytes = 4096
 
-// MaxCastVoteBatchSize bounds one atomic vote batch to the protocol's maximum
-// number of proposals.
-const MaxCastVoteBatchSize = MaxProposals
+// MaxCastVoteBatchSize bounds one atomic vote batch independently of the
+// number of proposals in a round.
+const MaxCastVoteBatchSize = 15
 
 // zeroPoint32 is the compressed encoding of the Pallas identity (point at
 // infinity). Used by ValidateBasic as a cheap stateless guard against the

@@ -6,6 +6,8 @@
 // leaves directly from the vote keeper's KV store.
 package helper
 
+import votetypes "github.com/valargroup/vote-sdk/x/vote/types"
+
 // Config holds the helper server configuration, read from app.toml [helper].
 type Config struct {
 	// Disable turns off the helper server entirely.
@@ -93,7 +95,7 @@ type VCHashFunc func(roundID, sharesHash [32]byte, proposalID, voteDecision uint
 // share. A false result with no error means the payload is inconsistent.
 type SharePayloadValidator func(
 	sharesHash [32]byte,
-	shareComms [16][32]byte,
+	shareComms [votetypes.VoteCommitmentShareCount][32]byte,
 	primaryBlind [32]byte,
 	encC1 [32]byte,
 	encC2 [32]byte,
@@ -257,7 +259,7 @@ type ProofGenerator interface {
 	// Returns proof bytes, nullifier (32 bytes), tree root (32 bytes).
 	GenerateShareRevealProof(
 		merklePath []byte,
-		shareComms [16][32]byte,
+		shareComms [votetypes.VoteCommitmentShareCount][32]byte,
 		primaryBlind [32]byte,
 		encC1 [32]byte,
 		encC2 [32]byte,

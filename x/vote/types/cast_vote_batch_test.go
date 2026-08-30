@@ -20,6 +20,8 @@ func validCastVoteBatch() *types.MsgCastVoteBatch {
 }
 
 func TestMsgCastVoteBatchValidateBasic(t *testing.T) {
+	require.Equal(t, 15, types.MaxCastVoteBatchSize)
+	require.Less(t, types.MaxCastVoteBatchSize, types.MaxProposals)
 	require.NoError(t, validCastVoteBatch().ValidateBasic())
 
 	tests := []struct {
