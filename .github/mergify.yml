@@ -1,0 +1,20 @@
+defaults:
+  actions:
+    backport:
+      assignees:
+        - "{{ author }}"
+      ignore_conflicts: true
+      label_conflicts: A:backport/conflict
+
+pull_request_rules:
+  - name: backport state-compatible changes to v1.4.x
+    conditions:
+      - base=main
+      - label=V:state/compatible
+      - label=A:backport/v1.4.x
+    actions:
+      backport:
+        branches:
+          - v1.4.x
+        labels:
+          - V:state/compatible

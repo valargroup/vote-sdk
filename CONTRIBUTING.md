@@ -2,6 +2,11 @@
 
 Project overview, protocol notes, and architecture live in the [README](README.md). This document covers **working from a source checkout**: toolchains, mise tasks, local chain runs, and exercising the validator join path with binaries you built locally.
 
+Release development happens on `main`; state-compatible patch releases use
+versioned maintenance branches and reviewed automated backports. See
+[Release branches and backports](docs/release-branches.md) before classifying or
+backporting a change.
+
 ## Prerequisites
 
 - [mise](https://mise.jdx.dev/) — installs Go, Rust, Node, buf, and jq from `mise.toml`, runs repo tasks, and puts `$GOBIN` (default `~/go/bin`) on `PATH` when the shell is activated.
