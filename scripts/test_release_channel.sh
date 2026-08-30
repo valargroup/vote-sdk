@@ -3,6 +3,9 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CHANNEL_SCRIPT="${REPO_ROOT}/scripts/release-channel.sh"
+BRANCH_SCRIPT="${REPO_ROOT}/scripts/release-branch.sh"
+BRANCH_VALIDATION_SCRIPT="${REPO_ROOT}/scripts/validate-release-branch.sh"
+STATE_LABEL_SCRIPT="${REPO_ROOT}/scripts/validate-pr-state-labels.sh"
 METADATA_SCRIPT="${REPO_ROOT}/scripts/release-metadata.sh"
 POINTER_SCRIPT="${REPO_ROOT}/scripts/publish-release-pointers.sh"
 RENDER_SCRIPT="${REPO_ROOT}/scripts/render-update-chain.sh"
@@ -23,6 +26,8 @@ fail() {
 
 [ "$($CHANNEL_SCRIPT v1.2.3)" = "stable" ] || fail "stable tag classification"
 [ "$($CHANNEL_SCRIPT v1.2.3-rc.4)" = "rc" ] || fail "RC tag classification"
+[ "$($BRANCH_SCRIPT v1.2.3)" = "v1.2.x" ] || fail "stable release branch"
+[ "$($BRANCH_SCRIPT v10.27.3-rc.14)" = "v10.27.x" ] || fail "RC release branch"
 for tag in v1.2 v1.2.3-rc v1.2.3-beta.1 v1.2.3.4; do
   if "$CHANNEL_SCRIPT" "$tag" >/dev/null 2>&1; then
     fail "invalid tag accepted: $tag"
@@ -47,6 +52,10 @@ if grep -Fq 'softprops/action-gh-release' "$RELEASE_WORKFLOW"; then
 fi
 grep -Fq -- '--latest=false --verify-tag' "$RELEASE_WORKFLOW" \
   || fail "new GitHub releases are not created outside Latest"
+grep -Fq 'scripts/validate-release-branch.sh' "$RELEASE_WORKFLOW" \
+  || fail "release workflow does not validate its maintenance branch"
+grep -Fq 'needs: release-branch' "$RELEASE_WORKFLOW" \
+  || fail "release metadata is not gated on maintenance branch validation"
 github_repo_pattern='GH_REPO: $''{{ github.repository }}'
 grep -Fq "$github_repo_pattern" "$RELEASE_WORKFLOW" \
   || fail "release creation has no explicit GitHub repository context"
@@ -175,6 +184,52 @@ fi
 
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
+
+RELEASE_REPO="${TMPDIR}/release-repo"
+git init -q -b main "$RELEASE_REPO"
+git -C "$RELEASE_REPO" config user.name "Release test"
+git -C "$RELEASE_REPO" config user.email "release-test@example.invalid"
+git -C "$RELEASE_REPO" -c commit.gpgSign=false commit -q --allow-empty -m base
+RELEASE_BASE_SHA="$(git -C "$RELEASE_REPO" rev-parse HEAD)"
+git -C "$RELEASE_REPO" branch v1.2.x "$RELEASE_BASE_SHA"
+git -C "$RELEASE_REPO" -c commit.gpgSign=false commit -q --allow-empty -m main-only
+RELEASE_MAIN_SHA="$(git -C "$RELEASE_REPO" rev-parse HEAD)"
+
+"$BRANCH_VALIDATION_SCRIPT" v1.2.3 "$RELEASE_BASE_SHA" "$RELEASE_REPO" >/dev/null \
+  || fail "release branch rejected a reachable stable commit"
+"$BRANCH_VALIDATION_SCRIPT" v1.2.4-rc.2 "$RELEASE_BASE_SHA" "$RELEASE_REPO" >/dev/null \
+  || fail "release branch rejected a reachable RC commit"
+if "$BRANCH_VALIDATION_SCRIPT" v1.2.3 "$RELEASE_MAIN_SHA" "$RELEASE_REPO" \
+  >/dev/null 2>&1; then
+  fail "release branch accepted a main-only commit"
+fi
+if "$BRANCH_VALIDATION_SCRIPT" v2.0.0 "$RELEASE_BASE_SHA" "$RELEASE_REPO" \
+  >/dev/null 2>&1; then
+  fail "release branch accepted a missing maintenance branch"
+fi
+
+"$STATE_LABEL_SCRIPT" V:state/compatible >/dev/null \
+  || fail "compatible state label was rejected"
+"$STATE_LABEL_SCRIPT" V:state/breaking >/dev/null \
+  || fail "breaking state label was rejected on main"
+"$STATE_LABEL_SCRIPT" V:state/compatible A:backport/v1.4.x >/dev/null \
+  || fail "compatible backport labels were rejected"
+if "$STATE_LABEL_SCRIPT" >/dev/null 2>&1; then
+  fail "missing state label was accepted"
+fi
+if "$STATE_LABEL_SCRIPT" V:state/compatible V:state/breaking >/dev/null 2>&1; then
+  fail "conflicting state labels were accepted"
+fi
+if "$STATE_LABEL_SCRIPT" V:state/breaking A:backport/v1.4.x >/dev/null 2>&1; then
+  fail "state-breaking backport was accepted"
+fi
+if PR_BASE_REF=v1.4.x "$STATE_LABEL_SCRIPT" V:state/breaking >/dev/null 2>&1; then
+  fail "state-breaking maintenance PR was accepted"
+fi
+if PR_BASE_REF=v1.4.x "$STATE_LABEL_SCRIPT" \
+  V:state/compatible A:backport/v1.4.x >/dev/null 2>&1; then
+  fail "backport target label was accepted on a maintenance PR"
+fi
 
 RUNBOOK_BIN="${TMPDIR}/runbook-bin"
 RUNBOOK_EXAMPLE="${TMPDIR}/schedule-upgrade-example.sh"
