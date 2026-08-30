@@ -11,6 +11,10 @@ permissions:
   contents: read
   pull-requests: read
 
+concurrency:
+  group: pr-state-compatibility-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   validate-labels:
     name: Validate state labels
