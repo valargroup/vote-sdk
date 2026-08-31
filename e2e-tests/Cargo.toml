@@ -48,6 +48,7 @@ incrementalmerkletree = "0.8"
 [dev-dependencies]
 rand = "0.8"
 rand_chacha = "0.3"
+reddsa = "0.5"
 
 # Temporary until the coordinated 50-proposal wallet release is tagged.
 [patch.crates-io]

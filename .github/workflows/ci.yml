@@ -199,7 +199,6 @@ jobs:
 
   test-e2e:
     name: E2E API Tests
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     env:
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
@@ -320,6 +319,7 @@ jobs:
           curl -sf http://localhost:1418/api/voting-config | jq -e '.vote_servers' > /dev/null || { echo "Admin API not responding"; exit 1; }
           echo "  Admin API: OK"
       - name: Run E2E test (round_activation)
+        if: github.event_name != 'pull_request'
         run: |
           export SVOTE_HOME="$HOME/.svoted-val1"
           export SVOTE_PALLAS_PK_PATH="$HOME/.svoted-val1/pallas.pk"
@@ -329,6 +329,7 @@ jobs:
           SVOTE_NODE_URL: tcp://localhost:26157
           VM_PRIVKEYS: ${{ secrets.VM_PRIVKEYS }}
       - name: Run E2E test (voting_flow_zcash_voting)
+        if: github.event_name != 'pull_request'
         run: |
           export SVOTE_HOME="$HOME/.svoted-val1"
           export SVOTE_PALLAS_PK_PATH="$HOME/.svoted-val1/pallas.pk"
@@ -338,6 +339,16 @@ jobs:
           SVOTE_NODE_URL: tcp://localhost:26157
           HELPER_SERVER_URL: http://localhost:1418
           SVOTE_E2E_VOTE_WINDOW_SECS: "420"
+          VM_PRIVKEYS: ${{ secrets.VM_PRIVKEYS }}
+      - name: Run E2E test (atomic_delegate_cast)
+        run: |
+          export SVOTE_HOME="$HOME/.svoted-val1"
+          export SVOTE_PALLAS_PK_PATH="$HOME/.svoted-val1/pallas.pk"
+          cargo test --release --manifest-path e2e-tests/Cargo.toml --test atomic_delegate_cast -- --nocapture --ignored --test-threads=1
+        env:
+          SVOTE_API_URL: http://localhost:1418
+          SVOTE_NODE_URL: tcp://localhost:26157
+          HELPER_SERVER_URL: http://localhost:1418
           VM_PRIVKEYS: ${{ secrets.VM_PRIVKEYS }}
       - name: Upload chain logs on failure
         if: failure()

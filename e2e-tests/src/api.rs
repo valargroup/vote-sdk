@@ -406,6 +406,58 @@ fn event_attr(events: &[Value], event_type: &str, key: &str) -> Option<String> {
     None
 }
 
+fn event_attr_text(events: &[Value], event_type: &str, key: &str) -> Option<String> {
+    for event in events {
+        if event.get("type").and_then(Value::as_str) != Some(event_type) {
+            continue;
+        }
+        let attributes = event.get("attributes").and_then(Value::as_array)?;
+        for attribute in attributes {
+            let attribute_key = attribute
+                .get("key")
+                .and_then(Value::as_str)
+                .map(decode_event_attr_text)?;
+            if attribute_key == key {
+                return attribute
+                    .get("value")
+                    .and_then(Value::as_str)
+                    .map(decode_event_attr_text);
+            }
+        }
+    }
+    None
+}
+
+pub fn wait_for_committed_event_attr(
+    tx_hash: &str,
+    event_type: &str,
+    key: &str,
+    timeout_secs: u64,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+    while std::time::Instant::now() < deadline {
+        let path = format!("/shielded-vote/v1/tx/{tx_hash}");
+        match get_json(&path) {
+            Ok((200, tx)) => {
+                let events = tx
+                    .get("events")
+                    .and_then(Value::as_array)
+                    .ok_or("committed transaction response omitted events")?;
+                return event_attr_text(events, event_type, key).ok_or_else(|| {
+                    format!("committed transaction omitted {event_type}.{key}").into()
+                });
+            }
+            Ok((404, _)) => {}
+            Ok((status, body)) => {
+                return Err(format!("transaction status returned HTTP {status}: {body:?}").into());
+            }
+            Err(err) => eprintln!("[E2E] transaction status query failed: {err}"),
+        }
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+    Err(format!("timed out waiting for transaction {tx_hash}").into())
+}
+
 fn create_round_id_from_tx_json(json: &Value) -> Option<String> {
     if let Some(events) = json.get("events").and_then(|v| v.as_array()) {
         if let Some(round_id) = event_attr(events, "create_voting_session", "vote_round_id")

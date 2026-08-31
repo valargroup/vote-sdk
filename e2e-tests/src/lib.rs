@@ -10,4 +10,5 @@ pub mod elgamal;
 pub mod metrics;
 pub mod payloads;
 pub mod setup;
+pub mod sighash;
 pub mod tree_transport;

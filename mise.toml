@@ -104,7 +104,7 @@ description = "VC/VAN in-process determinism stress tests (debug_tree)"
 run = "go test -tags debug_tree -count=1 -run TestTreeStress ./app"
 
 [tasks."test:e2e"]
-description = "E2E API tests against running chain (round_activation + voting_flow)"
+description = "E2E API tests against running chain, including atomic delegation/cast"
 run = "make test-api"
 
 [tasks."test:e2e:ceremony"]

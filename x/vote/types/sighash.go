@@ -15,6 +15,10 @@ const CastVoteSighashDomain = "SVOTE_CAST_VOTE_SIGHASH_V0"
 // legacy single-vote signature scheme.
 const CastVoteBatchSighashDomain = "SVOTE_CAST_VOTE_BATCH_SIGHASH_V1"
 
+// DelegateAndCastVoteBatchSighashDomain separates authorization for a batch
+// whose initial VAN is created by the delegation in the same transaction.
+const DelegateAndCastVoteBatchSighashDomain = "SVOTE_DELEGATE_AND_CAST_VOTE_BATCH_SIGHASH_V1"
+
 // AckDigestDomain is the domain prefix for the ceremony ack commitment digest:
 // SHA256(AckDigestDomain || ea_pk || validator_address).
 //
@@ -81,6 +85,36 @@ func ComputeCastVoteBatchSighash(msg *MsgCastVoteBatch) []byte {
 	writeU64As32(h, msg.Votes[0].VoteCommTreeAnchorHeight)
 	writeU32As32(h, uint32(len(msg.Votes)))
 	for i, vote := range msg.Votes {
+		writeU32As32(h, uint32(i))
+		if vote == nil {
+			for range 5 {
+				write32(h, nil)
+			}
+			continue
+		}
+		write32(h, vote.RVpk)
+		write32(h, vote.VanNullifier)
+		write32(h, vote.VoteAuthorityNoteNew)
+		write32(h, vote.VoteCommitment)
+		writeU32As32(h, vote.ProposalId)
+	}
+	return h.Sum(nil)
+}
+
+// ComputeDelegateAndCastVoteBatchSighash binds every cast authorization to the
+// delegation-created VAN and the complete ordered set of cast effects. The
+// delegation proof and signature are excluded because they have their own
+// canonical authorization and proof verification.
+func ComputeDelegateAndCastVoteBatchSighash(msg *MsgDelegateAndCastVoteBatch) []byte {
+	if msg == nil || msg.Delegation == nil || msg.Batch == nil || len(msg.Batch.Votes) == 0 {
+		return nil
+	}
+	h, _ := blake2b.New256(nil)
+	h.Write([]byte(DelegateAndCastVoteBatchSighashDomain))
+	write32(h, msg.Delegation.VoteRoundId)
+	write32(h, msg.Delegation.VanCmx)
+	writeU32As32(h, uint32(len(msg.Batch.Votes)))
+	for i, vote := range msg.Batch.Votes {
 		writeU32As32(h, uint32(i))
 		if vote == nil {
 			for range 5 {

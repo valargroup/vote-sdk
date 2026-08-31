@@ -16,6 +16,7 @@ service Msg {
   rpc DelegateVote(MsgDelegateVote) returns (MsgDelegateVoteResponse);
   rpc CastVote(MsgCastVote) returns (MsgCastVoteResponse);
   rpc CastVoteBatch(MsgCastVoteBatch) returns (MsgCastVoteBatchResponse);
+  rpc DelegateAndCastVoteBatch(MsgDelegateAndCastVoteBatch) returns (MsgDelegateAndCastVoteBatchResponse);
   rpc RevealShare(MsgRevealShare) returns (MsgRevealShareResponse);
   rpc SubmitTally(MsgSubmitTally) returns (MsgSubmitTallyResponse);
   rpc SubmitPartialDecryption(MsgSubmitPartialDecryption) returns (MsgSubmitPartialDecryptionResponse);
@@ -98,6 +99,20 @@ message MsgCastVoteBatch {
 }
 
 message MsgCastVoteBatchResponse {
+  bytes batch_digest = 1;
+}
+
+// MsgDelegateAndCastVoteBatch atomically creates a VAN with a delegation
+// proof and immediately consumes it through an ordered cast-vote batch. The
+// batch uses synthetic anchor height zero: the first proof is anchored to the
+// deterministic single-leaf tree containing delegation.van_cmx, and each
+// later proof is anchored to its predecessor's successor VAN.
+message MsgDelegateAndCastVoteBatch {
+  MsgDelegateVote delegation = 1;
+  MsgCastVoteBatch batch      = 2;
+}
+
+message MsgDelegateAndCastVoteBatchResponse {
   bytes batch_digest = 1;
 }
 

@@ -315,6 +315,53 @@ func (s *ABCIIntegrationSuite) TestFullVotingLifecycle() {
 	s.Require().True(has, "share nullifier should be recorded")
 }
 
+// TestDelegateAndCastVoteBatchFullPipeline covers the consensus path from raw
+// canonical bytes through decoding, ante validation, MsgServer execution, and
+// committed tree/nullifier state. Cryptography is mocked by TestApp; real
+// signature agreement is covered by the redpallas-tagged ante tests.
+func (s *ABCIIntegrationSuite) TestDelegateAndCastVoteBatchFullPipeline() {
+	setupMsg := testutil.ValidCreateVotingSessionAt(s.app.Time)
+	roundID := s.app.SeedVotingSession(setupMsg)
+	delegation := testutil.ValidDelegation(roundID, 0x61)
+	votes := testutil.ValidCastVoteN(roundID, 0, 2, 0x70)
+	votes[0].ProposalId = 1
+	votes[1].ProposalId = 2
+	msg := &types.MsgDelegateAndCastVoteBatch{
+		Delegation: delegation,
+		Batch:      &types.MsgCastVoteBatch{Votes: votes},
+	}
+
+	result := s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(msg))
+	s.Require().Equal(uint32(0), result.Code, result.Log)
+
+	ctx := s.queryCtx()
+	kvStore := s.app.VoteKeeper().OpenKVStore(ctx)
+	state, err := s.app.VoteKeeper().GetCommitmentTreeState(kvStore, roundID)
+	s.Require().NoError(err)
+	s.Require().Equal(uint64(3), state.NextIndex)
+
+	wantLeaves := [][]byte{
+		votes[1].VoteAuthorityNoteNew,
+		votes[0].VoteCommitment,
+		votes[1].VoteCommitment,
+	}
+	for index, want := range wantLeaves {
+		leaf, getErr := kvStore.Get(types.CommitmentLeafKey(roundID, uint64(index)))
+		s.Require().NoError(getErr)
+		s.Require().Equal(want, leaf)
+	}
+	for _, nullifier := range delegation.GovNullifiers {
+		spent, hasErr := s.app.VoteKeeper().HasNullifier(kvStore, types.NullifierTypeGov, roundID, nullifier)
+		s.Require().NoError(hasErr)
+		s.Require().True(spent)
+	}
+	for _, vote := range votes {
+		spent, hasErr := s.app.VoteKeeper().HasNullifier(kvStore, types.NullifierTypeVoteAuthorityNote, roundID, vote.VanNullifier)
+		s.Require().NoError(hasErr)
+		s.Require().True(spent)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // 6.2.2: Nullifier Double-Spend Prevention
 // ---------------------------------------------------------------------------
