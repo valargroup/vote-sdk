@@ -18,13 +18,30 @@ use e2e_tests::{
 use ff::{Field, PrimeField};
 use group::{Curve, GroupEncoding};
 use incrementalmerkletree::{Hashable, Level};
-use orchard::keys::SpendAuthorizingKey;
+use orchard::keys::{FullViewingKey, SpendAuthorizingKey, SpendingKey};
 use pasta_curves::pallas;
 use rand::rngs::OsRng;
 use serde_json::Value;
 use vote_commitment_tree::{MerkleHashVote, TREE_DEPTH};
 use voting_circuits::vote_proof::{build_vote_proof_from_delegation, VoteProofBundle};
+use zcash_keys::keys::UnifiedSpendingKey;
 use zcash_voting::{Network, VotingHotkey};
+use zip32::{AccountId, Scope};
+
+fn spending_key_for_hotkey(hotkey: &VotingHotkey) -> SpendingKey {
+    let spending_key =
+        *UnifiedSpendingKey::from_seed(&hotkey.network(), hotkey.stored_secret(), AccountId::ZERO)
+            .expect("derive voting hotkey spending key")
+            .orchard();
+    let address = FullViewingKey::from(&spending_key)
+        .address_at(u64::from(hotkey.address_index()), Scope::External);
+    assert_eq!(
+        address.to_raw_address_bytes(),
+        *hotkey.raw_orchard_address(),
+        "derived voting key must own the delegated VAN"
+    );
+    spending_key
+}
 
 fn composite_digest(
     round_id: &[u8],
@@ -83,6 +100,7 @@ fn atomic_delegate_cast_real_proofs_helper_and_tally() {
     let tx_config = default_cosmos_tx_config();
     let manager = import_first_vote_manager_key(&tx_config.home_dir);
     let hotkey = VotingHotkey::from_stored_secret(&[0x6a; 64], Network::Testnet).expect("hotkey");
+    let vote_sk = spending_key_for_hotkey(&hotkey);
     let vote_end = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -102,6 +120,11 @@ fn atomic_delegate_cast_real_proofs_helper_and_tally() {
     let (status, create_result) =
         broadcast_cosmos_msg(&create, &manager_config).expect("create round");
     assert_eq!(status, 200, "create round: {create_result:?}");
+    assert_eq!(
+        create_result.get("code").and_then(Value::as_i64),
+        Some(0),
+        "create round: {create_result:?}"
+    );
     let round_hex = wait_for_create_round_id(&create_result).expect("round id");
     let round_id = hex::decode(&round_hex).expect("round hex");
     let (delegation, proof_data) = prepared
@@ -126,7 +149,7 @@ fn atomic_delegate_cast_real_proofs_helper_and_tally() {
             initial_authority - (1u64 << proposals[0])
         };
         let bundle = build_vote_proof_from_delegation(
-            &proof_data.sk,
+            &vote_sk,
             hotkey.address_index(),
             proof_data.total_note_value,
             proof_data.van_comm_rand,
@@ -158,18 +181,20 @@ fn atomic_delegate_cast_real_proofs_helper_and_tally() {
     }
 
     let digest = composite_digest(&round_id, &delegation.van_cmx, &proposals, &bundles);
-    let ask = SpendAuthorizingKey::from(&proof_data.sk);
-    let votes = bundles
-        .iter()
-        .zip(alphas.iter())
-        .zip(proposals)
-        .map(|((bundle, alpha), proposal_id)| {
-            let signature = ask.randomize(alpha).sign(&mut OsRng, &digest);
-            let signature: [u8; 64] = (&signature).into();
-            cast_json(&round_id, proposal_id, bundle, &signature)
-        })
-        .collect();
-    let request = delegate_and_cast_vote_batch_payload(&round_id, &delegation, votes);
+    let ask = SpendAuthorizingKey::from(&vote_sk);
+    let signed_votes = || {
+        bundles
+            .iter()
+            .zip(alphas.iter())
+            .zip(proposals)
+            .map(|((bundle, alpha), proposal_id)| {
+                let signature = ask.randomize(alpha).sign(&mut OsRng, &digest);
+                let signature: [u8; 64] = (&signature).into();
+                cast_json(&round_id, proposal_id, bundle, &signature)
+            })
+            .collect()
+    };
+    let request = delegate_and_cast_vote_batch_payload(&round_id, &delegation, signed_votes());
     let pre_index = commitment_tree_next_index(&round_hex).unwrap_or(0);
     let (status, result) = post_json("/shielded-vote/v1/delegate-and-cast-vote-batch", &request)
         .expect("submit atomic delegation/cast");
@@ -240,10 +265,16 @@ fn atomic_delegate_cast_real_proofs_helper_and_tally() {
         );
     }
 
-    // Replaying the exact transaction must be rejected by both nullifier scopes.
-    let (replay_status, replay) =
-        e2e_tests::api::post_json("/shielded-vote/v1/delegate-and-cast-vote-batch", &request)
-            .expect("replay request");
+    // Re-sign the same effects so this is a distinct transaction rather than an
+    // idempotent rebroadcast of the already-committed transaction hash.
+    let replay_request =
+        delegate_and_cast_vote_batch_payload(&round_id, &delegation, signed_votes());
+    assert_ne!(replay_request, request);
+    let (replay_status, replay) = e2e_tests::api::post_json(
+        "/shielded-vote/v1/delegate-and-cast-vote-batch",
+        &replay_request,
+    )
+    .expect("replay request");
     assert_ne!(replay.get("code").and_then(Value::as_i64), Some(0));
     assert!(
         replay_status == 422 || replay_status == 200,

@@ -49,6 +49,8 @@ incrementalmerkletree = "0.8"
 rand = "0.8"
 rand_chacha = "0.3"
 reddsa = "0.5"
+zcash_keys = { version = "0.16.1", features = ["orchard"] }
+zip32 = "0.2.1"
 
 # Temporary until the coordinated 50-proposal wallet release is tagged.
 [patch.crates-io]

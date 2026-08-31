@@ -677,7 +677,9 @@ dependencies = [
  "vote-commitment-tree",
  "vote-commitment-tree-client",
  "voting-circuits",
+ "zcash_keys",
  "zcash_voting",
+ "zip32",
 ]
 
 [[package]]
