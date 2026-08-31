@@ -8,8 +8,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
-- Support up to 50 proposals per voting round while retaining the independent
-  15-action atomic vote-batch limit and 16 encrypted shares per commitment.
+- Support up to 50 proposals per voting round, with the atomic vote-batch limit
+  matching the round proposal limit and 16 encrypted shares per commitment.
 - Prepare atomic cast-vote batches behind a coordinated activation gate, with
   one batch-wide authorization digest,
   chained unchanged ZKP #2 proofs, deterministic wire encoding, and recovery
