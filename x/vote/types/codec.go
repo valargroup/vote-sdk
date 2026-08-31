@@ -30,14 +30,11 @@ func init() {
 // because our protobuf types are generated with protoc-gen-go v2, which uses a
 // different file descriptor registry than what RegisterMsgServiceDesc expects.
 func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
-	registerInterfaces(registry, AtomicVoteBatchesEnabled)
-}
-
-func registerInterfaces(registry codectypes.InterfaceRegistry, atomicVoteBatchesEnabled bool) {
 	registry.RegisterImplementations((*sdk.Msg)(nil),
 		&MsgCreateVotingSession{},
 		&MsgDelegateVote{},
 		&MsgCastVote{},
+		&MsgCastVoteBatch{},
 		&MsgRevealShare{},
 		&MsgSubmitTally{},
 		&MsgSubmitPartialDecryption{},
@@ -56,11 +53,4 @@ func registerInterfaces(registry codectypes.InterfaceRegistry, atomicVoteBatches
 		&MsgProposeCoordinatorAction{},
 		&MsgApproveCoordinatorAction{},
 	)
-
-	// Old binaries cannot resolve this type URL. Keep it out of the standard
-	// Cosmos decoder until the coordinated activation to preserve identical
-	// transaction results during a mixed-version rollout.
-	if atomicVoteBatchesEnabled {
-		registry.RegisterImplementations((*sdk.Msg)(nil), &MsgCastVoteBatch{})
-	}
 }

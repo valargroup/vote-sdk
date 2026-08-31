@@ -54,10 +54,7 @@ func IsCustomTag(b byte) bool {
 // IsVoteTag returns true if b is a vote-round transaction type tag (0x02–0x06).
 // MsgCreateVotingSession is submitted through coordinator action approval.
 func IsVoteTag(b byte) bool {
-	if b == TagCastVoteBatch {
-		return types.AtomicVoteBatchesEnabled
-	}
-	return b >= TagDelegateVote && b <= TagSubmitTally
+	return b >= TagDelegateVote && b <= TagCastVoteBatch
 }
 
 // IsCeremonyTag returns true if b is an auto-injected ceremony/tally

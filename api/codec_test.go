@@ -15,8 +15,8 @@ func TestIsVoteTag(t *testing.T) {
 	require.True(t, IsVoteTag(TagCastVote))
 	require.True(t, IsVoteTag(TagRevealShare))
 	require.True(t, IsVoteTag(TagSubmitTally))
-	require.Equal(t, types.AtomicVoteBatchesEnabled, IsVoteTag(TagCastVoteBatch))
-	require.Equal(t, types.AtomicVoteBatchesEnabled, IsCustomTag(TagCastVoteBatch))
+	require.True(t, IsVoteTag(TagCastVoteBatch))
+	require.True(t, IsCustomTag(TagCastVoteBatch))
 	require.False(t, IsVoteTag(0x00))
 	require.False(t, IsVoteTag(0x01)) // MsgCreateVotingSession — standard Cosmos Tx
 	require.False(t, IsVoteTag(0x07))
