@@ -3,6 +3,9 @@
 package ante_test
 
 import (
+	"bytes"
+	"encoding/binary"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -35,6 +38,58 @@ func mustReadFixture(t *testing.T, name string) []byte {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err, "failed to read fixture %s", path)
 	return data
+}
+
+type voteMaxProposalFixture struct {
+	proof                []byte
+	vanNullifier         []byte
+	rVpk                 []byte
+	voteAuthorityNoteNew []byte
+	voteCommitment       []byte
+	voteCommTreeRoot     []byte
+	anchorHeight         uint64
+	proposalID           uint32
+	voteRoundID          []byte
+	eaPk                 []byte
+}
+
+func mustReadVoteMaxProposalFixture(t *testing.T) voteMaxProposalFixture {
+	t.Helper()
+	reader := bytes.NewReader(mustReadFixture(t, "vote_max_proposal.bin"))
+
+	magic := make([]byte, 8)
+	_, err := io.ReadFull(reader, magic)
+	require.NoError(t, err)
+	require.Equal(t, []byte("SVZKP2M1"), magic)
+
+	var proofLen uint32
+	require.NoError(t, binary.Read(reader, binary.LittleEndian, &proofLen))
+	require.LessOrEqual(t, int(proofLen), types.MaxProofSize)
+	proof := make([]byte, proofLen)
+	_, err = io.ReadFull(reader, proof)
+	require.NoError(t, err)
+
+	read32 := func(name string) []byte {
+		value := make([]byte, 32)
+		_, readErr := io.ReadFull(reader, value)
+		require.NoError(t, readErr, name)
+		return value
+	}
+
+	fixture := voteMaxProposalFixture{
+		proof:                proof,
+		vanNullifier:         read32("van_nullifier"),
+		rVpk:                 read32("r_vpk"),
+		voteAuthorityNoteNew: read32("vote_authority_note_new"),
+		voteCommitment:       read32("vote_commitment"),
+		voteCommTreeRoot:     read32("vote_comm_tree_root"),
+	}
+	require.NoError(t, binary.Read(reader, binary.LittleEndian, &fixture.anchorHeight))
+	require.NoError(t, binary.Read(reader, binary.LittleEndian, &fixture.proposalID))
+	fixture.voteRoundID = read32("voting_round_id")
+	fixture.eaPk = read32("ea_pk")
+	require.Zero(t, reader.Len(), "unexpected trailing fixture bytes")
+	return fixture
 }
 
 // toyAsDelegationVerifier uses the toy circuit verifier for delegation so that
@@ -132,4 +187,85 @@ func TestHalo2DelegationWrongInput(t *testing.T) {
 	err := ante.ValidateVoteTx(s.ctx, msg, s.keeper, opts)
 	require.Error(t, err, "wrong public input should fail verification")
 	require.ErrorIs(t, err, types.ErrInvalidProof, "should wrap ErrInvalidProof")
+}
+
+func TestHalo2VoteMaxProposalThroughAnte(t *testing.T) {
+	require.False(t, halo2.IsMock, "this test requires the real Halo2 verifier")
+	fixture := mustReadVoteMaxProposalFixture(t)
+	require.Equal(t, uint32(types.MaxProposals), fixture.proposalID)
+
+	inputs := zkp.VoteCommitmentInputs{
+		VanNullifier:         fixture.vanNullifier,
+		RVpk:                 fixture.rVpk,
+		VoteAuthorityNoteNew: fixture.voteAuthorityNoteNew,
+		VoteCommitment:       fixture.voteCommitment,
+		ProposalId:           fixture.proposalID,
+		VoteRoundId:          fixture.voteRoundID,
+		AnchorHeight:         fixture.anchorHeight,
+		VoteCommTreeRoot:     fixture.voteCommTreeRoot,
+		EaPk:                 fixture.eaPk,
+	}
+	require.NoError(t, halo2.VerifyVoteProof(fixture.proof, inputs))
+
+	wrongProposal := inputs
+	wrongProposal.ProposalId--
+	require.Error(t, halo2.VerifyVoteProof(fixture.proof, wrongProposal))
+
+	proposals := make([]*types.Proposal, types.MaxProposals)
+	for i := range proposals {
+		proposals[i] = &types.Proposal{
+			Id:          uint32(i + 1),
+			Title:       "Proposal",
+			Description: "Boundary proof test",
+			Options:     svtest.DefaultOptions(),
+		}
+	}
+	round := &types.VoteRound{
+		VoteRoundId:       fixture.voteRoundID,
+		SnapshotHeight:    100,
+		SnapshotBlockhash: bytes.Repeat([]byte{0x01}, 32),
+		ProposalsHash:     bytes.Repeat([]byte{0x02}, 32),
+		VoteEndTime:       activeEndTime,
+		NullifierImtRoot:  bytes.Repeat([]byte{0x03}, 32),
+		NcRoot:            bytes.Repeat([]byte{0x04}, 32),
+		Creator:           "sv1testcreator",
+		Status:            types.SessionStatus_SESSION_STATUS_ACTIVE,
+		EaPk:              fixture.eaPk,
+		Proposals:         proposals,
+	}
+
+	s := new(ValidateTestSuite)
+	s.SetT(t)
+	s.SetupTest()
+	kvStore := s.keeper.OpenKVStore(s.ctx)
+	require.NoError(t, s.keeper.SetVoteRound(kvStore, round))
+	require.NoError(t, s.keeper.SetCommitmentRootAtHeight(
+		kvStore,
+		fixture.voteRoundID,
+		fixture.anchorHeight,
+		fixture.voteCommTreeRoot,
+	))
+
+	msg := &types.MsgCastVote{
+		VanNullifier:             fixture.vanNullifier,
+		RVpk:                     fixture.rVpk,
+		VoteAuthSig:              make([]byte, 64),
+		VoteAuthorityNoteNew:     fixture.voteAuthorityNoteNew,
+		VoteCommitment:           fixture.voteCommitment,
+		ProposalId:               fixture.proposalID,
+		Proof:                    fixture.proof,
+		VoteRoundId:              fixture.voteRoundID,
+		VoteCommTreeAnchorHeight: fixture.anchorHeight,
+	}
+	opts := ante.ValidateOpts{
+		SigVerifier: redpallas.NewMockVerifier(),
+		ZKPVerifier: halo2.NewVerifier(),
+	}
+
+	msg.ProposalId--
+	err := ante.ValidateVoteTx(s.ctx, msg, s.keeper, opts)
+	require.ErrorIs(t, err, types.ErrInvalidProof)
+
+	msg.ProposalId++
+	require.NoError(t, ante.ValidateVoteTx(s.ctx, msg, s.keeper, opts))
 }
