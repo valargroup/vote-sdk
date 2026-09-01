@@ -272,6 +272,7 @@ func TestDefaultAllowedMessages_ContainsExpectedTypes(t *testing.T) {
 	require.False(t, allowed["/svote.v1.MsgDelegateVote"])
 	require.False(t, allowed["/svote.v1.MsgCastVote"])
 	require.False(t, allowed["/svote.v1.MsgCastVoteBatch"])
+	require.False(t, allowed["/svote.v1.MsgDelegateAndCastVoteBatch"])
 	require.False(t, allowed["/svote.v1.MsgRevealShare"])
 	require.False(t, allowed["/svote.v1.MsgCreateVotingSession"])
 	require.False(t, allowed["/svote.v1.MsgUpdateVoteManagers"])
