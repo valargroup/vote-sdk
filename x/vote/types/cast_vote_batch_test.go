@@ -20,7 +20,19 @@ func validCastVoteBatch() *types.MsgCastVoteBatch {
 }
 
 func TestMsgCastVoteBatchValidateBasic(t *testing.T) {
+	require.Equal(t, types.MaxProposals, types.MaxCastVoteBatchSize)
 	require.NoError(t, validCastVoteBatch().ValidateBasic())
+
+	maxVotes := svtest.ValidCastVoteN(
+		bytes.Repeat([]byte{0x42}, types.RoundIDLen),
+		77,
+		types.MaxCastVoteBatchSize,
+		20,
+	)
+	for i := range maxVotes {
+		maxVotes[i].ProposalId = uint32(i + 1)
+	}
+	require.NoError(t, (&types.MsgCastVoteBatch{Votes: maxVotes}).ValidateBasic())
 
 	tests := []struct {
 		name string

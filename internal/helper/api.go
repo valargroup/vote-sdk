@@ -669,7 +669,7 @@ func checkPayloadConsistency(p *SharePayload, validator SharePayloadValidator) e
 	if err != nil {
 		return fmt.Errorf("decode validated enc_share.c2: %w", err)
 	}
-	var shareComms [16][32]byte
+	var shareComms [types.VoteCommitmentShareCount][32]byte
 	for i, encoded := range p.ShareComms {
 		shareComms[i], err = decodeBase64Array32(encoded, fmt.Sprintf("share_comms[%d]", i))
 		if err != nil {
@@ -721,8 +721,8 @@ func validatePayload(p *SharePayload) error {
 	if ciphertext.C1.IsIdentity() || ciphertext.C2.IsIdentity() {
 		return fmt.Errorf("enc_share: identity points are not valid reveal inputs")
 	}
-	if p.EncShare.ShareIndex > types.MaxProposals {
-		return fmt.Errorf("enc_share.share_index must be 0..%d", types.MaxProposals)
+	if p.EncShare.ShareIndex > types.MaxShareIndex {
+		return fmt.Errorf("enc_share.share_index must be 0..%d", types.MaxShareIndex)
 	}
 	// Protocol allows up to 8 options per proposal (indices 0-7).
 	// The chain keeper validates the exact range per-proposal.
@@ -751,9 +751,9 @@ func validatePayload(p *SharePayload) error {
 	}
 	p.VoteRoundID = hex.EncodeToString(roundBytes)
 
-	// share_comms: exactly 16 entries, each base64-decodable to 32 bytes.
-	if len(p.ShareComms) != 16 {
-		return fmt.Errorf("share_comms: expected 16 entries, got %d", len(p.ShareComms))
+	// share_comms: one entry per encrypted share, each base64-decodable to 32 bytes.
+	if len(p.ShareComms) != types.VoteCommitmentShareCount {
+		return fmt.Errorf("share_comms: expected %d entries, got %d", types.VoteCommitmentShareCount, len(p.ShareComms))
 	}
 	for i, c := range p.ShareComms {
 		if err := validateB64Field(c, 32, fmt.Sprintf("share_comms[%d]", i)); err != nil {

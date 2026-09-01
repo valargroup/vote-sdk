@@ -43,9 +43,16 @@ const RoundIDLen = 32
 const MinProposalID = 1
 
 // MaxProposals is the maximum number of proposals per voting round.
-// The circuit's proposal_authority bitmask is 16 bits with bit 0 reserved
-// as a sentinel (rejected by the non-zero gate), leaving bits 1-15 usable.
-const MaxProposals = 15
+// The circuit's proposal_authority bitmask is 51 bits with bit 0 reserved
+// as a sentinel (rejected by the non-zero gate), leaving bits 1-50 usable.
+const MaxProposals = 50
+
+// VoteCommitmentShareCount is the fixed number of encrypted shares in a vote
+// commitment. It is independent of the number of proposals in a round.
+const VoteCommitmentShareCount = 16
+
+// MaxShareIndex is the largest valid zero-based encrypted-share index.
+const MaxShareIndex = VoteCommitmentShareCount - 1
 
 // MinVoteOptions is the minimum number of options per proposal.
 const MinVoteOptions = 2

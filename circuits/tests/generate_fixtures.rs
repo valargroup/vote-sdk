@@ -6,6 +6,7 @@
 //!   ffi/zkp/testdata/toy_valid_proof.bin      - valid Halo2 proof bytes
 //!   ffi/zkp/testdata/toy_valid_input.bin      - correct public input (Fp, 32-byte LE)
 //!   ffi/zkp/testdata/toy_wrong_input.bin      - wrong public input for negative tests
+//!   ffi/zkp/testdata/vote_max_proposal.bin    - real ZKP #2 proof and public inputs for proposal 50
 //!   ffi/redpallas/testdata/valid_rk.bin       - 32-byte RedPallas verification key
 //!   ffi/redpallas/testdata/valid_sighash.bin  - 32-byte sighash (message)
 //!   ffi/redpallas/testdata/valid_sig.bin      - 64-byte valid RedPallas signature
@@ -33,9 +34,23 @@ use shielded_vote_circuits::toy;
 #[ignore]
 fn generate_fixtures() {
     generate_halo2_fixtures();
+    write_vote_max_proposal_fixture();
     generate_redpallas_fixtures();
     generate_share_reveal_fixtures();
     println!("\nAll fixtures generated and validated successfully.");
+}
+
+/// Regenerate only the proposal-50 ZKP #2 fixture used by Go FFI and ante tests.
+#[test]
+#[ignore]
+fn generate_vote_max_proposal_fixture() {
+    write_vote_max_proposal_fixture();
+}
+
+/// Generate and verify a proposal-50 ZKP #2 proof in the normal CI test suite.
+#[test]
+fn vote_max_proposal_proves_and_verifies() {
+    build_vote_max_proposal_fixture();
 }
 
 /// Generate Halo2 toy circuit proof fixtures.
@@ -309,6 +324,79 @@ fn generate_cast_vote_redpallas_fixtures(testdata_dir: &std::path::Path) {
     );
 
     println!("RedPallas CastVote fixtures generated and validated.");
+}
+
+/// Generate a real ZKP #2 proof at the maximum proposal ID.
+///
+/// Binary layout:
+///   magic[8] || proof_len(u32 LE) || proof || van_nullifier[32] ||
+///   r_vpk[32] || vote_authority_note_new[32] || vote_commitment[32] ||
+///   vote_comm_tree_root[32] || anchor_height(u64 LE) || proposal_id(u32 LE) ||
+///   voting_round_id[32] || ea_pk[32]
+fn build_vote_max_proposal_fixture() -> Vec<u8> {
+    use voting_circuits::vote_proof::{build_vote_proof_from_delegation, verify_vote_proof};
+    use voting_crypto_deps::orchard::keys::SpendingKey;
+    use voting_crypto_deps::pasta_curves::{
+        group::{Curve, GroupEncoding},
+        pallas,
+    };
+
+    const MAGIC: &[u8; 8] = b"SVZKP2M1";
+    const ANCHOR_HEIGHT: u64 = 123;
+    const PROPOSAL_ID: u32 = 50;
+
+    let sk = SpendingKey::from_bytes([0x42; 32]).expect("valid test spending key");
+    let ea_pk = (voting_circuits::spend_auth_g_affine() * pallas::Scalar::from(42u64)).to_affine();
+    let voting_round_id = pallas::Base::from(0xCAFE_u64);
+    let bundle = build_vote_proof_from_delegation(
+        &sk,
+        1,
+        12_500_000,
+        pallas::Base::from(0xDEAD_u64),
+        voting_round_id,
+        [pallas::Base::zero(); voting_circuits::VOTE_COMM_TREE_DEPTH],
+        0,
+        ANCHOR_HEIGHT as u32,
+        u64::from(PROPOSAL_ID),
+        1,
+        ea_pk,
+        pallas::Scalar::from(7u64),
+        voting_circuits::MAX_PROPOSAL_AUTHORITY,
+        true,
+    )
+    .expect("proposal-50 vote proof should build");
+    verify_vote_proof(&bundle.proof, &bundle.instance)
+        .expect("proposal-50 vote proof should verify");
+
+    let mut fixture = Vec::with_capacity(12 + bundle.proof.len() + 236);
+    fixture.extend_from_slice(MAGIC);
+    fixture.extend_from_slice(&(bundle.proof.len() as u32).to_le_bytes());
+    fixture.extend_from_slice(&bundle.proof);
+    fixture.extend_from_slice(&bundle.instance.van_nullifier.to_repr());
+    fixture.extend_from_slice(&bundle.r_vpk_bytes);
+    fixture.extend_from_slice(&bundle.instance.vote_authority_note_new.to_repr());
+    fixture.extend_from_slice(&bundle.instance.vote_commitment.to_repr());
+    fixture.extend_from_slice(&bundle.instance.vote_comm_tree_root.to_repr());
+    fixture.extend_from_slice(&ANCHOR_HEIGHT.to_le_bytes());
+    fixture.extend_from_slice(&PROPOSAL_ID.to_le_bytes());
+    fixture.extend_from_slice(&bundle.instance.voting_round_id.to_repr());
+    fixture.extend_from_slice(ea_pk.to_bytes().as_ref());
+
+    fixture
+}
+
+fn write_vote_max_proposal_fixture() {
+    let fixture = build_vote_max_proposal_fixture();
+    let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join("ffi/zkp/testdata/vote_max_proposal.bin");
+    fs::write(&fixture_path, &fixture).expect("failed to write proposal-50 vote proof fixture");
+    println!(
+        "Wrote proposal-50 vote proof fixture ({} bytes) to {}",
+        fixture.len(),
+        fixture_path.display()
+    );
 }
 
 /// Generate share reveal (ZKP #3) proof generation fixture for the Go round-trip test.

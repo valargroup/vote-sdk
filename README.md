@@ -290,7 +290,8 @@ These use the custom wire format and bypass the Cosmos Tx envelope. Auth is hand
 | `MsgCastVoteBatch` | Any delegation holder (anonymous) | `ValidateBasic`; round ACTIVE; all VAN nullifiers unique; every RedPallas signature covers the same ordered batch digest; first ZKP #2 uses the real anchor and later proofs use predecessor-derived single-leaf roots | Record all VAN nullifiers; append only the final vote_authority_note_new and every vote commitment |
 | `MsgRevealShare`  | Any vote holder (anonymous)       | `ValidateBasic`; round ACTIVE or TALLYING; share nullifier uniqueness; ZKP #3 (vote share: share ownership, commitment tree anchor)                                              | Record share nullifier; HomomorphicAdd enc_share into tally accumulator        |
 
-`MsgCastVoteBatch` accepts one to fifteen actions. The digest binds the round,
+`MsgCastVoteBatch` accepts one to fifty actions, matching the maximum number of
+proposals in a round. The digest binds the round,
 anchor, batch length, order, randomized keys, nullifiers, successor VANs, vote
 commitments, and proposal IDs. Because every action signs that same digest, a
 relay cannot truncate, reorder, or graft actions. The chain emits the digest,

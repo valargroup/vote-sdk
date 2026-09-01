@@ -16,6 +16,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"cosmossdk.io/log"
+
+	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
 const apiTestRoundID = "0100000000000000000000000000000000000000000000000000000000000000"
@@ -106,7 +108,10 @@ func validPayloadJSON() string {
 func TestSubmitShare_Success(t *testing.T) {
 	router, store := newTestRouter(t)
 
-	req := httptest.NewRequest("POST", "/shielded-vote/v1/shares", strings.NewReader(validPayloadJSON()))
+	payload := testPayload(apiTestRoundID, types.MaxShareIndex)
+	body, err := json.Marshal(payload)
+	require.NoError(t, err)
+	req := httptest.NewRequest("POST", "/shielded-vote/v1/shares", strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -360,7 +365,7 @@ func TestSubmitShare_ValidationErrors(t *testing.T) {
 		},
 		{
 			name:    "share_index out of range",
-			modify:  func(p *SharePayload) { p.EncShare.ShareIndex = 16 },
+			modify:  func(p *SharePayload) { p.EncShare.ShareIndex = types.MaxShareIndex + 1 },
 			errPart: "share_index",
 		},
 		{
