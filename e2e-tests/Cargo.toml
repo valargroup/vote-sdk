@@ -9,7 +9,7 @@ description = "Rust E2E API tests for Shielded-Vote voting flow (replaces TypeSc
 shielded-vote-circuits = { path = "../circuits", default-features = false, features = ["upstream"] }
 
 orchard = { version = "0.15", features = ["unstable-voting-circuits"] }
-voting-circuits = { version = "=0.11.2", default-features = false, features = ["lrz"] }
+voting-circuits = { version = "=0.12.0-rc.1", default-features = false, features = ["lrz"] }
 vote-commitment-tree = { version = "=0.6.0", default-features = false, features = ["lrz"] }
 vote-commitment-tree-client = { version = "=0.8.0", default-features = false, features = ["http", "lrz"] }
 zcash_voting = { version = "=3.1.0-rc.13", default-features = false, features = ["lrz"] }
@@ -49,12 +49,10 @@ incrementalmerkletree = "0.8"
 rand = "0.8"
 rand_chacha = "0.3"
 
-# Temporary until the coordinated 50-proposal circuit and wallet releases are tagged.
+# Temporary until the coordinated 50-proposal wallet release is tagged.
 [patch.crates-io]
-voting-circuits = { git = "https://github.com/valargroup/voting-circuits", rev = "8ab3a5f3a8b63209cc1e7c1a013dbf8875fe57f7" }
-voting-crypto-deps = { git = "https://github.com/valargroup/voting-circuits", rev = "8ab3a5f3a8b63209cc1e7c1a013dbf8875fe57f7" }
-vote-commitment-tree = { git = "https://github.com/valargroup/zcash_voting", rev = "cd16ae922ef4b56fac3995e6ad4be3e3d89bd1cd" }
-vote-commitment-tree-client = { git = "https://github.com/valargroup/zcash_voting", rev = "cd16ae922ef4b56fac3995e6ad4be3e3d89bd1cd" }
-zcash_voting = { git = "https://github.com/valargroup/zcash_voting", rev = "cd16ae922ef4b56fac3995e6ad4be3e3d89bd1cd" }
+vote-commitment-tree = { git = "https://github.com/valargroup/zcash_voting", rev = "0d209d4c1be59a21f014d21dfc71634a0d942c51" }
+vote-commitment-tree-client = { git = "https://github.com/valargroup/zcash_voting", rev = "0d209d4c1be59a21f014d21dfc71634a0d942c51" }
+zcash_voting = { git = "https://github.com/valargroup/zcash_voting", rev = "0d209d4c1be59a21f014d21dfc71634a0d942c51" }
 
 [workspace]

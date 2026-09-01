@@ -25,7 +25,7 @@ zakura = [
 [dependencies]
 voting-crypto-deps = { version = "=0.2.2", default-features = false }
 vote-commitment-tree = { version = "=0.6.0", default-features = false }
-voting-circuits = { version = "=0.11.2", default-features = false }
+voting-circuits = { version = "=0.12.0-rc.1", default-features = false }
 imt-tree = { version = "=0.5.2", default-features = false }
 incrementalmerkletree = "0.8"
 nonempty = "0.11"
@@ -37,10 +37,5 @@ blake2b_simd = "1"
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-
-# Temporary until the 50-proposal voting-circuits release is tagged.
-[patch.crates-io]
-voting-circuits = { git = "https://github.com/valargroup/voting-circuits", rev = "8ab3a5f3a8b63209cc1e7c1a013dbf8875fe57f7" }
-voting-crypto-deps = { git = "https://github.com/valargroup/voting-circuits", rev = "8ab3a5f3a8b63209cc1e7c1a013dbf8875fe57f7" }
 
 [workspace]

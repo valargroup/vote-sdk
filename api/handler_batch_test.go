@@ -52,13 +52,13 @@ func TestDecodeAndValidateCanonicalJSONRejectsUnknownAndTrailingData(t *testing.
 	require.Contains(t, trailingRec.Body.String(), "trailing value")
 }
 
-func TestCastVoteBatchRouteRegistrationMatchesFeatureFlag(t *testing.T) {
+func TestCastVoteBatchRouteRegistered(t *testing.T) {
 	handler := NewHandler(HandlerConfig{})
 	router := mux.NewRouter()
 	handler.RegisterTxRoutes(router)
 
 	req := httptest.NewRequest(http.MethodPost, "/shielded-vote/v1/cast-vote-batch", nil)
-	require.Equal(t, types.AtomicVoteBatchesEnabled, router.Match(req, &mux.RouteMatch{}))
+	require.True(t, router.Match(req, &mux.RouteMatch{}))
 }
 
 func TestCastVoteBatchHandlerReturnsStableDigest(t *testing.T) {
