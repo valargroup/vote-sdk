@@ -125,6 +125,10 @@ ceremony:
 test-api:
 	SVOTE_API_URL=http://localhost:1317 HELPER_SERVER_URL=http://127.0.0.1:1317 cargo test --release --manifest-path e2e-tests/Cargo.toml -- --nocapture --ignored
 
+## test-atomic-delegate-cast: Dedicated real-proof atomic delegation/cast E2E
+test-atomic-delegate-cast:
+	SVOTE_API_URL=http://localhost:1317 HELPER_SERVER_URL=http://127.0.0.1:1317 cargo test --release --manifest-path e2e-tests/Cargo.toml --test atomic_delegate_cast -- --nocapture --ignored --test-threads=1
+
 ## test-e2e: Alias for test-api (Rust E2E tests)
 test-e2e: test-api
 

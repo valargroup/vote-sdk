@@ -239,7 +239,7 @@ func buildStandardAnteHandler(options ante.HandlerOptions, voteKeeper *votekeepe
 // and produces a more actionable error message.
 func isVoteModuleMsg(msg sdk.Msg) bool {
 	switch msg.(type) {
-	case *types.MsgDelegateVote, *types.MsgCastVote, *types.MsgCastVoteBatch, *types.MsgRevealShare:
+	case *types.MsgDelegateVote, *types.MsgCastVote, *types.MsgCastVoteBatch, *types.MsgDelegateAndCastVoteBatch, *types.MsgRevealShare:
 		return true
 	case *types.MsgContributeDKG, *types.MsgAckExecutiveAuthorityKey, *types.MsgSubmitPartialDecryption, *types.MsgSubmitTally:
 		return true

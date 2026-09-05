@@ -3,7 +3,9 @@
 package ante_test
 
 import (
+	"bytes"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -17,6 +19,13 @@ import (
 	"github.com/valargroup/vote-sdk/x/vote/ante"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
+
+func rpMustDecodeHex(t *testing.T, value string) []byte {
+	t.Helper()
+	decoded, err := hex.DecodeString(value)
+	require.NoError(t, err)
+	return decoded
+}
 
 // rpRepoRoot returns the absolute path to the repository root by walking up
 // from this test file's location (x/vote/ante/).
@@ -213,4 +222,30 @@ func TestRedPallasCastVoteWrongSig(t *testing.T) {
 	err := ante.ValidateVoteTx(s.ctx, msg, s.keeper, opts)
 	require.Error(t, err, "wrong signature should fail verification")
 	require.ErrorIs(t, err, types.ErrInvalidSignature, "should wrap ErrInvalidSignature")
+}
+
+// TestRedPallasDelegateAndCastDigestAuthenticatesEffects consumes a signature
+// produced by the Rust wallet-side frozen fixture in e2e-tests/src/sighash.rs.
+// It proves the Go digest agrees cross-language and rejects a post-signing edit.
+func TestRedPallasDelegateAndCastDigestAuthenticatesEffects(t *testing.T) {
+	rVpk := rpMustDecodeHex(t, "eccd7a0045727bbf2ddb854442a300485e5c74f8da7d5ece7c2ed7ddbe7b4022")
+	sig := rpMustDecodeHex(t, "9d0f50a84e68efb23fce19443ec876d2c124f451a185520dc56c06f71ae9ac00d510f720bdbffa365ad8ca9c6a7c05fb3cff575fcfcc6dc1008d5b89d4029d1b")
+	msg := &types.MsgDelegateAndCastVoteBatch{
+		Delegation: &types.MsgDelegateVote{
+			VoteRoundId: bytes.Repeat([]byte{1}, 32),
+			VanCmx:      bytes.Repeat([]byte{9}, 32),
+		},
+		Batch: &types.MsgCastVoteBatch{Votes: []*types.MsgCastVote{{
+			RVpk:                 rVpk,
+			VanNullifier:         bytes.Repeat([]byte{3}, 32),
+			VoteAuthorityNoteNew: bytes.Repeat([]byte{4}, 32),
+			VoteCommitment:       bytes.Repeat([]byte{5}, 32),
+			ProposalId:           1,
+		}}},
+	}
+	verifier := redpallas.NewVerifier()
+	require.NoError(t, verifier.Verify(rVpk, types.ComputeDelegateAndCastVoteBatchSighash(msg), sig))
+
+	msg.Batch.Votes[0].VoteCommitment[0] ^= 1
+	require.Error(t, verifier.Verify(rVpk, types.ComputeDelegateAndCastVoteBatchSighash(msg), sig))
 }

@@ -82,7 +82,14 @@ func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper
 	// 3. Nullifier uniqueness (ALWAYS runs, even on RecheckTx).
 	// Nullifiers may have been consumed by the block that was just committed,
 	// so we must re-check every time. Nullifiers are scoped by type + round.
-	if nullifiers := msg.GetNullifiers(); len(nullifiers) > 0 {
+	if composite, ok := msg.(*types.MsgDelegateAndCastVoteBatch); ok {
+		if err := k.CheckNullifiersUnique(ctx, types.NullifierTypeGov, composite.GetVoteRoundId(), composite.Delegation.GovNullifiers); err != nil {
+			return err
+		}
+		if err := k.CheckNullifiersUnique(ctx, types.NullifierTypeVoteAuthorityNote, composite.GetVoteRoundId(), composite.Batch.GetNullifiers()); err != nil {
+			return err
+		}
+	} else if nullifiers := msg.GetNullifiers(); len(nullifiers) > 0 {
 		if err := k.CheckNullifiersUnique(ctx, msg.GetNullifierType(), msg.GetVoteRoundId(), nullifiers); err != nil {
 			return err
 		}
@@ -114,6 +121,9 @@ func verifyProofs(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper, 
 	case *types.MsgCastVoteBatch:
 		return verifyCastVoteBatch(ctx, m, k, opts)
 
+	case *types.MsgDelegateAndCastVoteBatch:
+		return verifyDelegateAndCastVoteBatch(ctx, m, k, opts)
+
 	case *types.MsgRevealShare:
 		return verifyRevealShare(ctx, m, k, opts)
 
@@ -125,6 +135,48 @@ func verifyProofs(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper, 
 	default:
 		return fmt.Errorf("unknown vote message type: %T", msg)
 	}
+}
+
+// verifyDelegateAndCastVoteBatch verifies the delegation and then anchors the
+// first cast proof to the one-leaf tree containing the delegation's VAN. Later
+// cast proofs are chained through their predecessor's successor VAN exactly as
+// in an ordinary atomic cast batch.
+func verifyDelegateAndCastVoteBatch(ctx context.Context, msg *types.MsgDelegateAndCastVoteBatch, k *keeper.Keeper, opts ValidateOpts) error {
+	digest := types.ComputeDelegateAndCastVoteBatchSighash(msg)
+	for i, vote := range msg.Batch.Votes {
+		if _, err := elgamal.UnmarshalPublicKey(vote.RVpk); err != nil {
+			return fmt.Errorf("%w: batch votes[%d] r_vpk: %v", types.ErrInvalidSignature, i, err)
+		}
+		if err := opts.SigVerifier.Verify(vote.RVpk, digest, vote.VoteAuthSig); err != nil {
+			return fmt.Errorf("%w: batch votes[%d]: %v", types.ErrInvalidSignature, i, err)
+		}
+	}
+
+	if err := verifyDelegation(ctx, msg.Delegation, k, opts); err != nil {
+		return fmt.Errorf("delegation: %w", err)
+	}
+
+	kvStore := k.OpenKVStore(ctx)
+	round, err := k.GetVoteRound(kvStore, msg.GetVoteRoundId())
+	if err != nil {
+		return fmt.Errorf("failed to look up round for ZKP inputs: %w", err)
+	}
+	proofRoot, err := votetree.SingleLeafRoot(msg.Delegation.VanCmx)
+	if err != nil {
+		return fmt.Errorf("derive delegation synthetic root: %w", err)
+	}
+	for i, vote := range msg.Batch.Votes {
+		if err := verifyVoteCommitmentProof(vote, proofRoot, round.EaPk, opts.ZKPVerifier); err != nil {
+			return fmt.Errorf("batch votes[%d]: %w", i, err)
+		}
+		if i+1 < len(msg.Batch.Votes) {
+			proofRoot, err = votetree.SingleLeafRoot(vote.VoteAuthorityNoteNew)
+			if err != nil {
+				return fmt.Errorf("derive synthetic root after batch votes[%d]: %w", i, err)
+			}
+		}
+	}
+	return nil
 }
 
 // verifyDelegation verifies both the RedPallas signature and ZKP #1 for

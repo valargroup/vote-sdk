@@ -13,7 +13,7 @@ import (
 )
 
 // Vote transaction type tags. The first byte of the wire format identifies
-// the message type. Tags 0x02–0x06 are vote-round transactions that use
+// the message type. Tags 0x02–0x07 are vote-round transactions that use
 // ZKP/RedPallas authentication. Tags 0x08, 0x0D, and 0x0E are ceremony/tally
 // tags auto-injected by PrepareProposal that also use the custom wire format.
 //
@@ -25,11 +25,12 @@ import (
 // Tag 0x0A is deliberately absent: it collides with the standard Cosmos Tx
 // protobuf encoding (field 1, wire type 2).
 const (
-	TagDelegateVote  byte = 0x02
-	TagCastVote      byte = 0x03
-	TagRevealShare   byte = 0x04
-	TagSubmitTally   byte = 0x05
-	TagCastVoteBatch byte = 0x06
+	TagDelegateVote             byte = 0x02
+	TagCastVote                 byte = 0x03
+	TagRevealShare              byte = 0x04
+	TagSubmitTally              byte = 0x05
+	TagCastVoteBatch            byte = 0x06
+	TagDelegateAndCastVoteBatch byte = 0x07
 
 	// Auto-injected by PrepareProposal; never client-signed.
 	TagAckExecutiveAuthorityKey byte = 0x08
@@ -45,16 +46,16 @@ const (
 )
 
 // IsCustomTag returns true if b is a valid custom transaction type tag
-// (vote-round 0x02–0x06 or ceremony 0x08/0x0D/0x0E). Other ceremony
+// (vote-round 0x02–0x07 or ceremony 0x08/0x0D/0x0E). Other ceremony
 // messages use standard Cosmos SDK transactions.
 func IsCustomTag(b byte) bool {
 	return IsVoteTag(b) || IsCeremonyTag(b)
 }
 
-// IsVoteTag returns true if b is a vote-round transaction type tag (0x02–0x06).
+// IsVoteTag returns true if b is a vote-round transaction type tag (0x02–0x07).
 // MsgCreateVotingSession is submitted through coordinator action approval.
 func IsVoteTag(b byte) bool {
-	return b >= TagDelegateVote && b <= TagCastVoteBatch
+	return b >= TagDelegateVote && b <= TagDelegateAndCastVoteBatch
 }
 
 // IsCeremonyTag returns true if b is an auto-injected ceremony/tally
@@ -76,6 +77,8 @@ func TagForMessage(msg types.VoteMessage) (byte, error) {
 		return TagCastVote, nil
 	case *types.MsgCastVoteBatch:
 		return TagCastVoteBatch, nil
+	case *types.MsgDelegateAndCastVoteBatch:
+		return TagDelegateAndCastVoteBatch, nil
 	case *types.MsgRevealShare:
 		return TagRevealShare, nil
 	case *types.MsgSubmitTally:
@@ -124,6 +127,8 @@ func DecodeVoteTx(raw []byte) (byte, types.VoteMessage, error) {
 		msg = &types.MsgCastVote{}
 	case TagCastVoteBatch:
 		msg = &types.MsgCastVoteBatch{}
+	case TagDelegateAndCastVoteBatch:
+		msg = &types.MsgDelegateAndCastVoteBatch{}
 	case TagRevealShare:
 		msg = &types.MsgRevealShare{}
 	case TagSubmitTally:
@@ -135,16 +140,16 @@ func DecodeVoteTx(raw []byte) (byte, types.VoteMessage, error) {
 	if err := proto.Unmarshal(body, msg); err != nil {
 		return 0, nil, fmt.Errorf("protobuf unmarshal failed for tag 0x%02x: %w", tag, err)
 	}
-	if tag == TagCastVoteBatch {
+	if tag == TagCastVoteBatch || tag == TagDelegateAndCastVoteBatch {
 		if err := rejectUnknownProtoFields(msg.ProtoReflect()); err != nil {
-			return 0, nil, fmt.Errorf("non-canonical vote batch: %w", err)
+			return 0, nil, fmt.Errorf("non-canonical atomic vote message: %w", err)
 		}
 		canonical, err := (proto.MarshalOptions{Deterministic: true}).Marshal(msg)
 		if err != nil {
-			return 0, nil, fmt.Errorf("canonical protobuf marshal failed for vote batch: %w", err)
+			return 0, nil, fmt.Errorf("canonical protobuf marshal failed for atomic vote message: %w", err)
 		}
 		if !bytes.Equal(body, canonical) {
-			return 0, nil, fmt.Errorf("non-canonical vote batch protobuf encoding")
+			return 0, nil, fmt.Errorf("non-canonical atomic vote message protobuf encoding")
 		}
 	}
 
