@@ -10,8 +10,9 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 - Support up to 50 proposals per voting round, with the atomic vote-batch limit
   matching the round proposal limit and 16 encrypted shares per commitment.
-- Activate atomic cast-vote batches through the `v1.5.0` coordinated binary
-  cutover, with one batch-wide authorization digest,
+- Prepare `v1.5.0-rc.0` as the first candidate for the `v1.5.0` coordinated
+  binary cutover, activating atomic cast-vote batches with one batch-wide
+  authorization digest,
   chained unchanged ZKP #2 proofs, deterministic wire encoding, and recovery
   events that retain every vote commitment while appending only the final VAN.
 - Preserve CometBFT transaction event attributes exactly in transaction status
