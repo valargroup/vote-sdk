@@ -128,7 +128,8 @@ transaction set accepted by validators, so it must not be installed as a
 rolling state-compatible update. The `v1.4.x` maintenance line keeps the batch
 message dormant.
 
-Use `v1.5.0` as both the release tag and plan name on testnet and mainnet. Its
+Use `v1.5.0` as the plan name on testnet and mainnet. Candidate binaries retain
+their `v1.5.0-rc.N` release tag, while the stable release tag is `v1.5.0`. The
 upgrade handler does not migrate stores; it coordinates the point at which all
 validators begin decoding and executing `MsgCastVoteBatch`.
 
