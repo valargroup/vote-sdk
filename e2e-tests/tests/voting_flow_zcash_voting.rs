@@ -246,63 +246,68 @@ fn voting_flow_zcash_voting_path() {
         "tree never included delegated VAN leaf after delegation"
     );
 
-    // ---- Step 4: Create VotingDb and persist delegation data ----
-    log_step("Step 4", "creating VotingDb, persisting delegation data");
-    let db = zcash_voting::storage::VotingDb::open(":memory:").expect("open VotingDb");
-    db.set_wallet_id("test");
-    db.init_round(
-        Network::Testnet,
-        &VotingRoundParams {
-            vote_round_id: round_id_hex.clone(),
-            snapshot_height: fields_for_db.snapshot_height,
-            ea_pk: ea_pk_bytes.to_vec(),
-            nc_root: fields_for_db.nc_root.to_vec(),
-            nullifier_imt_root: fields_for_db.nullifier_imt_root.to_vec(),
-        },
-        None,
-    )
-    .expect("init_round");
-
-    // Create a single bundle (bundle_index = 0) and store ZKP #2 fields.
-    // Other store_delegation_data fields (rho_signed, alpha, etc.) are only needed
-    // for delegation proof reconstruction, not ZKP #2.
     let tx1_sighash = shielded_vote_circuits::tx1::sighash(&delegation_bundle.tx1_effects)
         .expect("delegation TX1 effects should be canonical");
-    {
-        let conn = db.conn();
-        zcash_voting::storage::queries::insert_bundle(&conn, &round_id_hex, "test", 0, &[])
-            .expect("insert_bundle");
-        zcash_voting::storage::queries::store_delegation_data(
-            &conn,
-            &round_id_hex,
-            "test", // wallet_id
-            0,      // bundle_index
-            vote_proof_data.van_comm_rand.to_repr().as_ref(),
-            &[],        // dummy_nullifiers (not needed for ZKP #2)
-            &[0u8; 32], // rho_signed
-            &[],        // padded_cmx
-            &[0u8; 32], // nf_signed
-            &delegation_bundle.cmx_new,
-            &[0u8; 32], // alpha
-            &[0u8; 32], // rseed_signed
-            &[0u8; 32], // rseed_output
-            &delegation_bundle.van_cmx,
-            vote_proof_data.total_note_value,
-            hotkey.address_index(),
-            &[], // padded_note_secrets (not needed for ZKP #2 test)
-            &tx1_sighash,
-            &delegation_bundle.tx1_effects,
+    let create_voting_db = || {
+        let db = zcash_voting::storage::VotingDb::open(":memory:").expect("open VotingDb");
+        db.set_wallet_id("test");
+        db.init_round(
+            Network::Testnet,
+            &VotingRoundParams {
+                vote_round_id: round_id_hex.clone(),
+                snapshot_height: fields_for_db.snapshot_height,
+                ea_pk: ea_pk_bytes.to_vec(),
+                nc_root: fields_for_db.nc_root.to_vec(),
+                nullifier_imt_root: fields_for_db.nullifier_imt_root.to_vec(),
+            },
+            None,
         )
-        .expect("store_delegation_data");
-    }
+        .expect("init_round");
 
-    // VAN position is global tree index captured before delegation.
-    db.store_van_position(
-        &round_id_hex,
-        0, // bundle_index
-        u32::try_from(van_position).expect("van_position fits in u32"),
-    )
-    .expect("store_van_position");
+        // Create a single bundle (bundle_index = 0) and store ZKP #2 fields.
+        // Other store_delegation_data fields (rho_signed, alpha, etc.) are only needed
+        // for delegation proof reconstruction, not ZKP #2.
+        {
+            let conn = db.conn();
+            zcash_voting::storage::queries::insert_bundle(&conn, &round_id_hex, "test", 0, &[])
+                .expect("insert_bundle");
+            zcash_voting::storage::queries::store_delegation_data(
+                &conn,
+                &round_id_hex,
+                "test", // wallet_id
+                0,      // bundle_index
+                vote_proof_data.van_comm_rand.to_repr().as_ref(),
+                &[],        // dummy_nullifiers (not needed for ZKP #2)
+                &[0u8; 32], // rho_signed
+                &[],        // padded_cmx
+                &[0u8; 32], // nf_signed
+                &delegation_bundle.cmx_new,
+                &[0u8; 32], // alpha
+                &[0u8; 32], // rseed_signed
+                &[0u8; 32], // rseed_output
+                &delegation_bundle.van_cmx,
+                vote_proof_data.total_note_value,
+                hotkey.address_index(),
+                &[], // padded_note_secrets (not needed for ZKP #2 test)
+                &tx1_sighash,
+                &delegation_bundle.tx1_effects,
+            )
+            .expect("store_delegation_data");
+        }
+
+        // VAN position is global tree index captured before delegation.
+        db.store_van_position(
+            &round_id_hex,
+            0, // bundle_index
+            u32::try_from(van_position).expect("van_position fits in u32"),
+        )
+        .expect("store_van_position");
+        db
+    };
+
+    // ---- Step 4: Create VotingDb and persist delegation data ----
+    log_step("Step 4", "creating VotingDb, persisting delegation data");
+    let db = create_voting_db();
 
     // ---- Step 5: Sync tree via TreeClient + HttpTreeSyncApi ----
     log_step("Step 5", "syncing vote commitment tree from chain");
@@ -561,12 +566,16 @@ fn voting_flow_zcash_voting_path() {
     // ---- Step 9b: Verify single_share=true produces valid proof + 1 payload ----
     // In single-share mode, all voting weight goes into share 0 ([num_ballots, 0, ..., 0])
     // instead of splitting evenly across 16 shares. The ZKP #2 circuit accepts both.
-    // We can't submit this to chain (same VAN nullifier as above), but we verify the
-    // proof is valid and the public API returns exactly 1 payload.
+    // We can't submit this to chain (same VAN nullifier as above), so use an isolated
+    // DB. The primary DB intentionally retains proposal 1's pending recovery state
+    // because this test broadcasts directly instead of recording SDK confirmation.
+    // The isolated DB lets us verify the proof and payload without creating a
+    // competing pending vote chain in that primary state.
     log_step(
         "Step 9b",
         "building vote commitment with single_share=true (K=11 proof)...",
     );
+    let single_share_db = create_voting_db();
     let single_draft = DraftVote {
         proposal_id: 2,
         choice: 1,
@@ -575,7 +584,7 @@ fn voting_flow_zcash_voting_path() {
         single_share: true,
     };
     let single_bundle = commit_vote(
-        &db,
+        &single_share_db,
         &round_id_hex,
         0,
         &single_draft,
