@@ -132,6 +132,19 @@ Use `v1.5.0` as both the release tag and plan name on testnet and mainnet. Its
 upgrade handler does not migrate stores; it coordinates the point at which all
 validators begin decoding and executing `MsgCastVoteBatch`.
 
+## v1.6.0 coordinated cutover
+
+The `v1.6.0` release activates atomic delegation-and-cast vote batches. This
+adds a transaction wire tag and state transition, so validators must switch
+binaries together rather than install it as a rolling state-compatible update.
+
+Use `v1.6.0` as the plan name on testnet and mainnet. The upgrade handler does
+not migrate stores; it coordinates the point at which all validators begin
+decoding and executing `MsgDelegateAndCastVoteBatch`. Chains may schedule this
+plan directly after an applied `v1.4.0` plan because the skipped `v1.5.0`
+handler has no store migration. The `v1.6.0` binary includes both atomic vote
+batch capabilities.
+
 ## Held release and promotion
 
 Set the repository variable `RELEASE_HOLD_TAG` to a stable tag before pushing
