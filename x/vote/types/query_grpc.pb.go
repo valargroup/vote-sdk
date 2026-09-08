@@ -37,6 +37,7 @@ const (
 	Query_CoordinatorAction_FullMethodName         = "/svote.v1.Query/CoordinatorAction"
 	Query_PendingCoordinatorActions_FullMethodName = "/svote.v1.Query/PendingCoordinatorActions"
 	Query_RoundOverview_FullMethodName             = "/svote.v1.Query/RoundOverview"
+	Query_ProtocolCapabilities_FullMethodName      = "/svote.v1.Query/ProtocolCapabilities"
 )
 
 // QueryClient is the client API for Query service.
@@ -84,6 +85,8 @@ type QueryClient interface {
 	PendingCoordinatorActions(ctx context.Context, in *QueryPendingCoordinatorActionsRequest, opts ...grpc.CallOption) (*QueryPendingCoordinatorActionsResponse, error)
 	// RoundOverview returns nonterminal rounds and the number of completed rounds.
 	RoundOverview(ctx context.Context, in *QueryRoundOverviewRequest, opts ...grpc.CallOption) (*QueryRoundOverviewResponse, error)
+	// ProtocolCapabilities advertises transaction features supported by this binary.
+	ProtocolCapabilities(ctx context.Context, in *QueryProtocolCapabilitiesRequest, opts ...grpc.CallOption) (*QueryProtocolCapabilitiesResponse, error)
 }
 
 type queryClient struct {
@@ -274,6 +277,16 @@ func (c *queryClient) RoundOverview(ctx context.Context, in *QueryRoundOverviewR
 	return out, nil
 }
 
+func (c *queryClient) ProtocolCapabilities(ctx context.Context, in *QueryProtocolCapabilitiesRequest, opts ...grpc.CallOption) (*QueryProtocolCapabilitiesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(QueryProtocolCapabilitiesResponse)
+	err := c.cc.Invoke(ctx, Query_ProtocolCapabilities_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // QueryServer is the server API for Query service.
 // All implementations must embed UnimplementedQueryServer
 // for forward compatibility.
@@ -319,6 +332,8 @@ type QueryServer interface {
 	PendingCoordinatorActions(context.Context, *QueryPendingCoordinatorActionsRequest) (*QueryPendingCoordinatorActionsResponse, error)
 	// RoundOverview returns nonterminal rounds and the number of completed rounds.
 	RoundOverview(context.Context, *QueryRoundOverviewRequest) (*QueryRoundOverviewResponse, error)
+	// ProtocolCapabilities advertises transaction features supported by this binary.
+	ProtocolCapabilities(context.Context, *QueryProtocolCapabilitiesRequest) (*QueryProtocolCapabilitiesResponse, error)
 	mustEmbedUnimplementedQueryServer()
 }
 
@@ -382,6 +397,9 @@ func (UnimplementedQueryServer) PendingCoordinatorActions(context.Context, *Quer
 }
 func (UnimplementedQueryServer) RoundOverview(context.Context, *QueryRoundOverviewRequest) (*QueryRoundOverviewResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RoundOverview not implemented")
+}
+func (UnimplementedQueryServer) ProtocolCapabilities(context.Context, *QueryProtocolCapabilitiesRequest) (*QueryProtocolCapabilitiesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ProtocolCapabilities not implemented")
 }
 func (UnimplementedQueryServer) mustEmbedUnimplementedQueryServer() {}
 func (UnimplementedQueryServer) testEmbeddedByValue()               {}
@@ -728,6 +746,24 @@ func _Query_RoundOverview_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Query_ProtocolCapabilities_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryProtocolCapabilitiesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).ProtocolCapabilities(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Query_ProtocolCapabilities_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).ProtocolCapabilities(ctx, req.(*QueryProtocolCapabilitiesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Query_ServiceDesc is the grpc.ServiceDesc for Query service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -806,6 +842,10 @@ var Query_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RoundOverview",
 			Handler:    _Query_RoundOverview_Handler,
+		},
+		{
+			MethodName: "ProtocolCapabilities",
+			Handler:    _Query_ProtocolCapabilities_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

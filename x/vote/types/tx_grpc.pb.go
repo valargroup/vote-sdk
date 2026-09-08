@@ -22,6 +22,7 @@ const (
 	Msg_DelegateVote_FullMethodName                 = "/svote.v1.Msg/DelegateVote"
 	Msg_CastVote_FullMethodName                     = "/svote.v1.Msg/CastVote"
 	Msg_CastVoteBatch_FullMethodName                = "/svote.v1.Msg/CastVoteBatch"
+	Msg_DelegateAndCastVoteBatch_FullMethodName     = "/svote.v1.Msg/DelegateAndCastVoteBatch"
 	Msg_RevealShare_FullMethodName                  = "/svote.v1.Msg/RevealShare"
 	Msg_SubmitTally_FullMethodName                  = "/svote.v1.Msg/SubmitTally"
 	Msg_SubmitPartialDecryption_FullMethodName      = "/svote.v1.Msg/SubmitPartialDecryption"
@@ -48,6 +49,7 @@ type MsgClient interface {
 	DelegateVote(ctx context.Context, in *MsgDelegateVote, opts ...grpc.CallOption) (*MsgDelegateVoteResponse, error)
 	CastVote(ctx context.Context, in *MsgCastVote, opts ...grpc.CallOption) (*MsgCastVoteResponse, error)
 	CastVoteBatch(ctx context.Context, in *MsgCastVoteBatch, opts ...grpc.CallOption) (*MsgCastVoteBatchResponse, error)
+	DelegateAndCastVoteBatch(ctx context.Context, in *MsgDelegateAndCastVoteBatch, opts ...grpc.CallOption) (*MsgDelegateAndCastVoteBatchResponse, error)
 	RevealShare(ctx context.Context, in *MsgRevealShare, opts ...grpc.CallOption) (*MsgRevealShareResponse, error)
 	SubmitTally(ctx context.Context, in *MsgSubmitTally, opts ...grpc.CallOption) (*MsgSubmitTallyResponse, error)
 	SubmitPartialDecryption(ctx context.Context, in *MsgSubmitPartialDecryption, opts ...grpc.CallOption) (*MsgSubmitPartialDecryptionResponse, error)
@@ -94,6 +96,16 @@ func (c *msgClient) CastVoteBatch(ctx context.Context, in *MsgCastVoteBatch, opt
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MsgCastVoteBatchResponse)
 	err := c.cc.Invoke(ctx, Msg_CastVoteBatch_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) DelegateAndCastVoteBatch(ctx context.Context, in *MsgDelegateAndCastVoteBatch, opts ...grpc.CallOption) (*MsgDelegateAndCastVoteBatchResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MsgDelegateAndCastVoteBatchResponse)
+	err := c.cc.Invoke(ctx, Msg_DelegateAndCastVoteBatch_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -232,6 +244,7 @@ type MsgServer interface {
 	DelegateVote(context.Context, *MsgDelegateVote) (*MsgDelegateVoteResponse, error)
 	CastVote(context.Context, *MsgCastVote) (*MsgCastVoteResponse, error)
 	CastVoteBatch(context.Context, *MsgCastVoteBatch) (*MsgCastVoteBatchResponse, error)
+	DelegateAndCastVoteBatch(context.Context, *MsgDelegateAndCastVoteBatch) (*MsgDelegateAndCastVoteBatchResponse, error)
 	RevealShare(context.Context, *MsgRevealShare) (*MsgRevealShareResponse, error)
 	SubmitTally(context.Context, *MsgSubmitTally) (*MsgSubmitTallyResponse, error)
 	SubmitPartialDecryption(context.Context, *MsgSubmitPartialDecryption) (*MsgSubmitPartialDecryptionResponse, error)
@@ -262,6 +275,9 @@ func (UnimplementedMsgServer) CastVote(context.Context, *MsgCastVote) (*MsgCastV
 }
 func (UnimplementedMsgServer) CastVoteBatch(context.Context, *MsgCastVoteBatch) (*MsgCastVoteBatchResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CastVoteBatch not implemented")
+}
+func (UnimplementedMsgServer) DelegateAndCastVoteBatch(context.Context, *MsgDelegateAndCastVoteBatch) (*MsgDelegateAndCastVoteBatchResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DelegateAndCastVoteBatch not implemented")
 }
 func (UnimplementedMsgServer) RevealShare(context.Context, *MsgRevealShare) (*MsgRevealShareResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RevealShare not implemented")
@@ -370,6 +386,24 @@ func _Msg_CastVoteBatch_Handler(srv interface{}, ctx context.Context, dec func(i
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(MsgServer).CastVoteBatch(ctx, req.(*MsgCastVoteBatch))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_DelegateAndCastVoteBatch_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgDelegateAndCastVoteBatch)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).DelegateAndCastVoteBatch(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Msg_DelegateAndCastVoteBatch_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).DelegateAndCastVoteBatch(ctx, req.(*MsgDelegateAndCastVoteBatch))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -608,6 +642,10 @@ var Msg_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CastVoteBatch",
 			Handler:    _Msg_CastVoteBatch_Handler,
+		},
+		{
+			MethodName: "DelegateAndCastVoteBatch",
+			Handler:    _Msg_DelegateAndCastVoteBatch_Handler,
 		},
 		{
 			MethodName: "RevealShare",

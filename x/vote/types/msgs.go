@@ -118,6 +118,14 @@ func (msg *MsgDelegateVote) ValidateBasic() error {
 
 // ValidateBasic performs stateless validation for MsgCastVote.
 func (msg *MsgCastVote) ValidateBasic() error {
+	return msg.validateBasic(false)
+}
+
+// validateBasic permits the zero anchor only for a cast nested in
+// MsgDelegateAndCastVoteBatch. A standalone cast can never safely use a
+// synthetic root because there is no delegation commitment in the same
+// atomic state transition to bind it to.
+func (msg *MsgCastVote) validateBasic(allowSyntheticAnchor bool) error {
 	if len(msg.VanNullifier) != 32 {
 		return fmt.Errorf("%w: van_nullifier must be 32 bytes, got %d", ErrInvalidField, len(msg.VanNullifier))
 	}
@@ -136,7 +144,7 @@ func (msg *MsgCastVote) ValidateBasic() error {
 	if len(msg.VoteRoundId) != RoundIDLen {
 		return fmt.Errorf("%w: vote_round_id must be exactly %d bytes, got %d", ErrInvalidField, RoundIDLen, len(msg.VoteRoundId))
 	}
-	if msg.VoteCommTreeAnchorHeight == 0 {
+	if msg.VoteCommTreeAnchorHeight == 0 && !allowSyntheticAnchor {
 		return fmt.Errorf("%w: vote_comm_tree_anchor_height cannot be zero", ErrInvalidField)
 	}
 	if len(msg.VoteAuthSig) != 64 {
@@ -153,6 +161,10 @@ func (msg *MsgCastVote) ValidateBasic() error {
 
 // ValidateBasic performs stateless validation for MsgCastVoteBatch.
 func (msg *MsgCastVoteBatch) ValidateBasic() error {
+	return msg.validateBasic(false)
+}
+
+func (msg *MsgCastVoteBatch) validateBasic(allowSyntheticAnchor bool) error {
 	if msg == nil {
 		return fmt.Errorf("%w: batch cannot be nil", ErrInvalidField)
 	}
@@ -171,7 +183,7 @@ func (msg *MsgCastVoteBatch) ValidateBasic() error {
 		if vote == nil {
 			return fmt.Errorf("%w: votes[%d] cannot be nil", ErrInvalidField, i)
 		}
-		if err := vote.ValidateBasic(); err != nil {
+		if err := vote.validateBasic(allowSyntheticAnchor); err != nil {
 			return fmt.Errorf("votes[%d]: %w", i, err)
 		}
 		if !bytes.Equal(vote.VoteRoundId, first.VoteRoundId) {
@@ -192,6 +204,33 @@ func (msg *MsgCastVoteBatch) ValidateBasic() error {
 		seenNullifiers[nullifierKey] = struct{}{}
 	}
 
+	return nil
+}
+
+// ValidateBasic validates an atomic delegation followed by one or more casts.
+// Every nested cast must use anchor height zero, the protocol marker meaning
+// that its first proof is anchored to SingleLeafRoot(delegation.van_cmx).
+func (msg *MsgDelegateAndCastVoteBatch) ValidateBasic() error {
+	if msg == nil || msg.Delegation == nil {
+		return fmt.Errorf("%w: delegation cannot be nil", ErrInvalidField)
+	}
+	if msg.Batch == nil {
+		return fmt.Errorf("%w: batch cannot be nil", ErrInvalidField)
+	}
+	if err := msg.Delegation.ValidateBasic(); err != nil {
+		return fmt.Errorf("delegation: %w", err)
+	}
+	if err := msg.Batch.validateBasic(true); err != nil {
+		return fmt.Errorf("batch: %w", err)
+	}
+	if !bytes.Equal(msg.Delegation.VoteRoundId, msg.Batch.GetVoteRoundId()) {
+		return fmt.Errorf("%w: delegation and batch have different vote_round_id", ErrInvalidField)
+	}
+	for i, vote := range msg.Batch.Votes {
+		if vote.VoteCommTreeAnchorHeight != 0 {
+			return fmt.Errorf("%w: batch votes[%d] must use synthetic anchor height zero", ErrInvalidField, i)
+		}
+	}
 	return nil
 }
 
@@ -458,6 +497,20 @@ func (msg *MsgCastVoteBatch) GetNullifierType() NullifierType {
 	return NullifierTypeVoteAuthorityNote
 }
 
+// GetVoteRoundId returns the round shared by the delegation and cast batch.
+func (msg *MsgDelegateAndCastVoteBatch) GetVoteRoundId() []byte {
+	if msg == nil || msg.Delegation == nil {
+		return nil
+	}
+	return msg.Delegation.VoteRoundId
+}
+
+// Composite messages contain two separately scoped nullifier families. The
+// validation pipeline handles them explicitly instead of flattening them into
+// this single-family interface.
+func (msg *MsgDelegateAndCastVoteBatch) GetNullifiers() [][]byte         { return nil }
+func (msg *MsgDelegateAndCastVoteBatch) GetNullifierType() NullifierType { return 0 }
+
 // GetNullifiers returns the nullifiers from a MsgRevealShare.
 func (msg *MsgRevealShare) GetNullifiers() [][]byte {
 	return [][]byte{msg.ShareNullifier}
@@ -494,6 +547,9 @@ func (msg *MsgCastVote) AcceptsTallyingRound() bool { return false }
 
 // AcceptsTallyingRound returns false — casting a vote batch requires ACTIVE status.
 func (msg *MsgCastVoteBatch) AcceptsTallyingRound() bool { return false }
+
+// AcceptsTallyingRound returns false — both delegation and casting require ACTIVE status.
+func (msg *MsgDelegateAndCastVoteBatch) AcceptsTallyingRound() bool { return false }
 
 // AcceptsTallyingRound returns false — shares must land before the vote window
 // closes. Accepting shares during TALLYING would corrupt the tally accumulator

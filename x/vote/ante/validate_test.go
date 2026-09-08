@@ -188,6 +188,17 @@ func newValidMsgCastVoteBatch() *types.MsgCastVoteBatch {
 	return &types.MsgCastVoteBatch{Votes: votes}
 }
 
+func newValidMsgDelegateAndCastVoteBatch() *types.MsgDelegateAndCastVoteBatch {
+	batch := newValidMsgCastVoteBatch()
+	for _, vote := range batch.Votes {
+		vote.VoteCommTreeAnchorHeight = 0
+	}
+	return &types.MsgDelegateAndCastVoteBatch{
+		Delegation: newValidMsgDelegateVote(),
+		Batch:      batch,
+	}
+}
+
 func newValidMsgRevealShare() *types.MsgRevealShare {
 	return &types.MsgRevealShare{
 		ShareNullifier:           bytes.Repeat([]byte{0x77}, 32),
@@ -921,6 +932,32 @@ func (s *ValidateTestSuite) TestValidateVoteTx_CastVoteBatchChecksAllSignaturesB
 	s.Require().ErrorContains(err, "votes[1]")
 	s.Require().Len(sigVerifier.digests, 2)
 	s.Require().Empty(zkpVerifier.capturedVoteInputs)
+}
+
+func (s *ValidateTestSuite) TestValidateVoteTx_DelegateAndCastUsesDelegationSyntheticRoot() {
+	s.setupActiveRound()
+	msg := newValidMsgDelegateAndCastVoteBatch()
+	sigVerifier := &spySigVerifier{failAt: -1}
+	zkpVerifier := &spyZKPVerifier{}
+
+	err := ante.ValidateVoteTx(s.ctx, msg, s.keeper, ante.ValidateOpts{
+		SigVerifier: sigVerifier,
+		ZKPVerifier: zkpVerifier,
+	})
+	s.Require().NoError(err)
+	// Two cast signatures plus the independent delegation signature.
+	s.Require().Len(sigVerifier.digests, 3)
+	wantDigest := types.ComputeDelegateAndCastVoteBatchSighash(msg)
+	s.Require().Equal(wantDigest, sigVerifier.digests[0])
+	s.Require().Equal(wantDigest, sigVerifier.digests[1])
+	s.Require().Len(zkpVerifier.capturedVoteInputs, 2)
+	wantFirstRoot, rootErr := votetree.SingleLeafRoot(msg.Delegation.VanCmx)
+	s.Require().NoError(rootErr)
+	s.Require().Equal(wantFirstRoot, zkpVerifier.capturedVoteInputs[0].VoteCommTreeRoot)
+	wantSecondRoot, rootErr := votetree.SingleLeafRoot(msg.Batch.Votes[0].VoteAuthorityNoteNew)
+	s.Require().NoError(rootErr)
+	s.Require().Equal(wantSecondRoot, zkpVerifier.capturedVoteInputs[1].VoteCommTreeRoot)
+	s.Require().Zero(zkpVerifier.capturedVoteInputs[0].AnchorHeight)
 }
 
 // ---------------------------------------------------------------------------

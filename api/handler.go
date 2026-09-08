@@ -138,6 +138,7 @@ func (s CryptoReadinessStatus) ready() bool {
 //	POST /shielded-vote/v1/delegate-vote          → MsgDelegateVote
 //	POST /shielded-vote/v1/cast-vote              → MsgCastVote
 //	POST /shielded-vote/v1/cast-vote-batch        → MsgCastVoteBatch
+//	POST /shielded-vote/v1/delegate-and-cast-vote-batch → MsgDelegateAndCastVoteBatch
 //	POST /shielded-vote/v1/reveal-share           → MsgRevealShare
 //
 // MsgSubmitTally is proposer-only (auto-injected via PrepareProposal) and
@@ -157,6 +158,7 @@ func (h *Handler) RegisterTxRoutes(router *mux.Router) {
 	router.Handle("/shielded-vote/v1/delegate-vote", trace(http.HandlerFunc(h.handleDelegateVote))).Methods("POST")
 	router.Handle("/shielded-vote/v1/cast-vote", trace(http.HandlerFunc(h.handleCastVote))).Methods("POST")
 	router.Handle("/shielded-vote/v1/cast-vote-batch", trace(http.HandlerFunc(h.handleCastVoteBatch))).Methods("POST")
+	router.Handle("/shielded-vote/v1/delegate-and-cast-vote-batch", trace(http.HandlerFunc(h.handleDelegateAndCastVoteBatch))).Methods("POST")
 	router.Handle("/shielded-vote/v1/reveal-share", trace(http.HandlerFunc(h.handleRevealShare))).Methods("POST")
 
 	router.Handle("/shielded-vote/v1/snapshot-data/{height}", trace(http.HandlerFunc(h.handleSnapshotData))).Methods("GET")
@@ -194,6 +196,17 @@ func (h *Handler) handleCastVoteBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	msg := &types.MsgCastVoteBatch{}
+	if !h.decodeAndValidateCanonicalJSON(w, r, msg) {
+		return
+	}
+	h.broadcastVoteTx(r.Context(), w, msg)
+}
+
+func (h *Handler) handleDelegateAndCastVoteBatch(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureCryptoReady(w) {
+		return
+	}
+	msg := &types.MsgDelegateAndCastVoteBatch{}
 	if !h.decodeAndValidateCanonicalJSON(w, r, msg) {
 		return
 	}
@@ -468,6 +481,9 @@ func (h *Handler) broadcastVoteTx(ctx context.Context, w http.ResponseWriter, ms
 	}
 	if batch, ok := msg.(*types.MsgCastVoteBatch); ok {
 		result.BatchDigest = hex.EncodeToString(types.ComputeCastVoteBatchSighash(batch))
+	}
+	if composite, ok := msg.(*types.MsgDelegateAndCastVoteBatch); ok {
+		result.BatchDigest = hex.EncodeToString(types.ComputeDelegateAndCastVoteBatchSighash(composite))
 	}
 
 	if result.Code != 0 {

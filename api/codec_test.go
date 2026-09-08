@@ -16,10 +16,10 @@ func TestIsVoteTag(t *testing.T) {
 	require.True(t, IsVoteTag(TagRevealShare))
 	require.True(t, IsVoteTag(TagSubmitTally))
 	require.True(t, IsVoteTag(TagCastVoteBatch))
+	require.True(t, IsVoteTag(TagDelegateAndCastVoteBatch))
 	require.True(t, IsCustomTag(TagCastVoteBatch))
 	require.False(t, IsVoteTag(0x00))
 	require.False(t, IsVoteTag(0x01)) // MsgCreateVotingSession — standard Cosmos Tx
-	require.False(t, IsVoteTag(0x07))
 	require.False(t, IsVoteTag(0x0a)) // reserved: collides with Cosmos Tx protobuf
 	require.False(t, IsVoteTag(0xff))
 }
@@ -107,6 +107,26 @@ func TestEncodeDecodeCastVoteBatchCanonical(t *testing.T) {
 	// Field 99, varint value 1. Unknown protobuf fields are rejected for the
 	// batch format even when the rest of the encoding is canonical.
 	withUnknown := append(append([]byte(nil), raw1...), 0x98, 0x06, 0x01)
+	_, _, err = DecodeVoteTx(withUnknown)
+	require.ErrorContains(t, err, "unknown fields")
+}
+
+func TestEncodeDecodeDelegateAndCastVoteBatchCanonical(t *testing.T) {
+	roundID := bytes.Repeat([]byte{7}, 32)
+	msg := &types.MsgDelegateAndCastVoteBatch{
+		Delegation: &types.MsgDelegateVote{VoteRoundId: roundID, VanCmx: bytes.Repeat([]byte{8}, 32)},
+		Batch: &types.MsgCastVoteBatch{Votes: []*types.MsgCastVote{{
+			VoteRoundId: roundID, ProposalId: 1, VanNullifier: bytes.Repeat([]byte{9}, 32),
+		}}},
+	}
+	raw, err := EncodeVoteTx(msg)
+	require.NoError(t, err)
+	require.Equal(t, TagDelegateAndCastVoteBatch, raw[0])
+	tag, decoded, err := DecodeVoteTx(raw)
+	require.NoError(t, err)
+	require.Equal(t, TagDelegateAndCastVoteBatch, tag)
+	require.True(t, protov2.Equal(msg, decoded.(protov2.Message)))
+	withUnknown := append(append([]byte(nil), raw...), 0x98, 0x06, 0x01)
 	_, _, err = DecodeVoteTx(withUnknown)
 	require.ErrorContains(t, err, "unknown fields")
 }
@@ -290,7 +310,7 @@ func TestDecodeVoteTx_InvalidTag(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid vote tx tag")
 
-	_, _, err = DecodeVoteTx([]byte{0x07, 0x00})
+	_, _, err = DecodeVoteTx([]byte{0x09, 0x00})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid vote tx tag")
 }
@@ -304,6 +324,7 @@ func TestTagForMessage(t *testing.T) {
 		{&types.MsgDelegateVote{}, TagDelegateVote, "DelegateVote"},
 		{&types.MsgCastVote{}, TagCastVote, "CastVote"},
 		{&types.MsgCastVoteBatch{}, TagCastVoteBatch, "CastVoteBatch"},
+		{&types.MsgDelegateAndCastVoteBatch{}, TagDelegateAndCastVoteBatch, "DelegateAndCastVoteBatch"},
 		{&types.MsgRevealShare{}, TagRevealShare, "RevealShare"},
 		{&types.MsgSubmitTally{}, TagSubmitTally, "SubmitTally"},
 	}

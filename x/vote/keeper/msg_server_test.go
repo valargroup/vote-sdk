@@ -836,6 +836,43 @@ func (s *MsgServerTestSuite) TestCastVoteBatchValidatesWholeBatchBeforeMutation(
 	}
 }
 
+func (s *MsgServerTestSuite) TestDelegateAndCastVoteBatchAppendsThreeLeavesAndBothNullifierFamilies() {
+	roundID := bytes.Repeat([]byte{0x23}, 32)
+	s.setupActiveRound(roundID)
+	delegation := svtest.ValidDelegation(roundID, 0x41)
+	votes := svtest.ValidCastVoteN(roundID, 0, 2, 50)
+	votes[0].ProposalId = 1
+	votes[1].ProposalId = 2
+	msg := &types.MsgDelegateAndCastVoteBatch{Delegation: delegation, Batch: &types.MsgCastVoteBatch{Votes: votes}}
+
+	response, err := s.msgServer.DelegateAndCastVoteBatch(s.ctx, msg)
+	s.Require().NoError(err)
+	s.Require().Equal(types.ComputeDelegateAndCastVoteBatchSighash(msg), response.BatchDigest)
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	state, err := s.keeper.GetCommitmentTreeState(kv, roundID)
+	s.Require().NoError(err)
+	s.Require().Equal(uint64(3), state.NextIndex)
+	wantLeaves := [][]byte{votes[1].VoteAuthorityNoteNew, votes[0].VoteCommitment, votes[1].VoteCommitment}
+	for i, want := range wantLeaves {
+		leaf, getErr := kv.Get(types.CommitmentLeafKey(roundID, uint64(i)))
+		s.Require().NoError(getErr)
+		s.Require().Equal(want, leaf)
+	}
+	// The ephemeral delegation VAN proves the first cast but is never persisted.
+	s.Require().NotEqual(delegation.VanCmx, wantLeaves[0])
+	for _, nf := range delegation.GovNullifiers {
+		has, hasErr := s.keeper.HasNullifier(kv, types.NullifierTypeGov, roundID, nf)
+		s.Require().NoError(hasErr)
+		s.Require().True(has)
+	}
+	for _, vote := range votes {
+		has, hasErr := s.keeper.HasNullifier(kv, types.NullifierTypeVoteAuthorityNote, roundID, vote.VanNullifier)
+		s.Require().NoError(hasErr)
+		s.Require().True(has)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // UpdateVoteManagers policy validation and atomic replace; no balance transfer.
 // ---------------------------------------------------------------------------

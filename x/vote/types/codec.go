@@ -21,6 +21,8 @@ func init() {
 	gogoproto.RegisterType((*TallyEntry)(nil), "svote.v1.TallyEntry")
 	gogoproto.RegisterType((*PartialDecryptionEntry)(nil), "svote.v1.PartialDecryptionEntry")
 	gogoproto.RegisterType((*MsgCastVote)(nil), "svote.v1.MsgCastVote")
+	gogoproto.RegisterType((*MsgDelegateVote)(nil), "svote.v1.MsgDelegateVote")
+	gogoproto.RegisterType((*MsgCastVoteBatch)(nil), "svote.v1.MsgCastVoteBatch")
 }
 
 // RegisterInterfaces registers public vote transaction messages and coordinator
@@ -35,6 +37,7 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgDelegateVote{},
 		&MsgCastVote{},
 		&MsgCastVoteBatch{},
+		&MsgDelegateAndCastVoteBatch{},
 		&MsgRevealShare{},
 		&MsgSubmitTally{},
 		&MsgSubmitPartialDecryption{},

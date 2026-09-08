@@ -415,6 +415,19 @@ pub fn cast_vote_payload_real(
     })
 }
 
+/// Build the additive atomic delegation-and-cast request. Nested cast actions
+/// must already carry signatures over the composite digest and use anchor 0.
+pub fn delegate_and_cast_vote_batch_payload(
+    round_id: &[u8],
+    delegation: &DelegationBundlePayload,
+    votes: Vec<Value>,
+) -> Value {
+    json!({
+        "delegation": delegate_vote_payload(round_id, delegation),
+        "batch": { "votes": votes },
+    })
+}
+
 /// Tally entry for MsgSubmitTally.
 pub struct TallyEntry {
     pub proposal_id: u32,

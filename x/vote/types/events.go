@@ -6,6 +6,7 @@ const (
 	EventTypeDelegateVote             = "delegate_vote"
 	EventTypeCastVote                 = "cast_vote"
 	EventTypeCastVoteBatch            = "cast_vote_batch"
+	EventTypeDelegateAndCastVoteBatch = "delegate_and_cast_vote_batch"
 	EventTypeRevealShare              = "reveal_share"
 	EventTypeCommitmentTreeRoot       = "commitment_tree_root"
 	EventTypeRoundStatusChange        = "round_status_change"

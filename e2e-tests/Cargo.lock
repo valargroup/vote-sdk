@@ -668,6 +668,7 @@ dependencies = [
  "rand",
  "rand_chacha",
  "rand_core",
+ "reddsa",
  "reqwest",
  "serde",
  "serde_json",
@@ -676,7 +677,9 @@ dependencies = [
  "vote-commitment-tree",
  "vote-commitment-tree-client",
  "voting-circuits",
+ "zcash_keys",
  "zcash_voting",
+ "zip32",
 ]
 
 [[package]]

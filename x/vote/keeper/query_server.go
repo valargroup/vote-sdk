@@ -24,6 +24,17 @@ func NewQueryServerImpl(keeper *Keeper) types.QueryServer {
 	return &queryServer{k: keeper}
 }
 
+// ProtocolCapabilities advertises additive wire features. Upgrade coordination
+// still controls when operators deploy this binary; clients use this query to
+// avoid attempting the new transaction against an older node.
+func (qs queryServer) ProtocolCapabilities(_ context.Context, _ *types.QueryProtocolCapabilitiesRequest) (*types.QueryProtocolCapabilitiesResponse, error) {
+	return &types.QueryProtocolCapabilitiesResponse{
+		AtomicCastVoteBatch:                   true,
+		AtomicDelegateAndCastVoteBatch:        true,
+		AtomicDelegateAndCastVoteBatchWireTag: 0x07,
+	}, nil
+}
+
 // CommitmentTreeAtHeight returns the commitment tree root at a specific anchor height for a round.
 func (qs queryServer) CommitmentTreeAtHeight(goCtx context.Context, req *types.QueryCommitmentTreeRequest) (*types.QueryCommitmentTreeResponse, error) {
 	if req == nil {

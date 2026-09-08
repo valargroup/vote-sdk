@@ -42,6 +42,7 @@ import (
 //	GET /shielded-vote/v1/endorsers
 //	GET /shielded-vote/v1/endorsed-rounds/{id}
 //	GET /shielded-vote/v1/genesis
+//	GET /shielded-vote/v1/protocol-capabilities
 func (h *Handler) RegisterQueryRoutes(router *mux.Router, clientCtx client.Context) {
 	qh := &queryHandler{clientCtx: clientCtx}
 	trace := sentryhttp.New(sentryhttp.Options{Repanic: true}).Handle
@@ -67,6 +68,7 @@ func (h *Handler) RegisterQueryRoutes(router *mux.Router, clientCtx client.Conte
 	router.Handle("/shielded-vote/v1/endorsers", trace(http.HandlerFunc(qh.handleEndorsers))).Methods("GET")
 	router.Handle("/shielded-vote/v1/endorsed-rounds/{id}", trace(http.HandlerFunc(qh.handleEndorsedRounds))).Methods("GET")
 	router.Handle("/shielded-vote/v1/genesis", trace(http.HandlerFunc(qh.handleGenesis))).Methods("GET")
+	router.Handle("/shielded-vote/v1/protocol-capabilities", trace(http.HandlerFunc(qh.handleProtocolCapabilities))).Methods("GET")
 }
 
 // queryHandler handles query REST endpoints by delegating to the gRPC query
@@ -336,6 +338,16 @@ func (qh *queryHandler) handleRoundOverview(w http.ResponseWriter, _ *http.Reque
 		return
 	}
 
+	writeProtoJSON(w, resp)
+}
+
+func (qh *queryHandler) handleProtocolCapabilities(w http.ResponseWriter, _ *http.Request) {
+	req := &types.QueryProtocolCapabilitiesRequest{}
+	resp := &types.QueryProtocolCapabilitiesResponse{}
+	if err := qh.abciQuery("/svote.v1.Query/ProtocolCapabilities", req, resp); err != nil {
+		writeQueryError(w, err)
+		return
+	}
 	writeProtoJSON(w, resp)
 }
 

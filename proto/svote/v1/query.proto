@@ -63,6 +63,17 @@ service Query {
 
   // RoundOverview returns nonterminal rounds and the number of completed rounds.
   rpc RoundOverview(QueryRoundOverviewRequest) returns (QueryRoundOverviewResponse);
+
+  // ProtocolCapabilities advertises transaction features supported by this binary.
+  rpc ProtocolCapabilities(QueryProtocolCapabilitiesRequest) returns (QueryProtocolCapabilitiesResponse);
+}
+
+message QueryProtocolCapabilitiesRequest {}
+
+message QueryProtocolCapabilitiesResponse {
+  bool atomic_cast_vote_batch = 1;
+  bool atomic_delegate_and_cast_vote_batch = 2;
+  uint32 atomic_delegate_and_cast_vote_batch_wire_tag = 3;
 }
 
 message QueryCommitmentTreeRequest {

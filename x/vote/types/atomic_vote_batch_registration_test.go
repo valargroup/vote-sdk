@@ -21,11 +21,13 @@ func TestAtomicVoteBatchRegistrations(t *testing.T) {
 	registry := codectypes.NewInterfaceRegistry()
 	RegisterInterfaces(registry)
 	require.NoError(t, registry.EnsureRegistered(&MsgCastVoteBatch{}))
+	require.NoError(t, registry.EnsureRegistered(&MsgDelegateAndCastVoteBatch{}))
 
 	registrar := &recordingServiceRegistrar{}
 	RegisterMsgServer(registrar, UnimplementedMsgServer{})
 	require.NotNil(t, registrar.desc)
 	require.True(t, serviceHasMethod(registrar.desc, "CastVoteBatch"))
+	require.True(t, serviceHasMethod(registrar.desc, "DelegateAndCastVoteBatch"))
 }
 
 func serviceHasMethod(desc *grpc.ServiceDesc, name string) bool {

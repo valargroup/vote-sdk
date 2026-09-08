@@ -54,6 +54,7 @@ func init() {
 			ProvideDelegateVoteSigner,
 			ProvideCastVoteSigner,
 			ProvideCastVoteBatchSigner,
+			ProvideDelegateAndCastVoteBatchSigner,
 			ProvideRevealShareSigner,
 			ProvideSubmitTallySigner,
 			ProvideSubmitPartialDecryptionSigner,
@@ -153,6 +154,13 @@ func ProvideCastVoteSigner() signing.CustomGetSigner {
 func ProvideCastVoteBatchSigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
 		MsgType: protoreflect.FullName("svote.v1.MsgCastVoteBatch"),
+		Fn:      noopSignerFn,
+	}
+}
+
+func ProvideDelegateAndCastVoteBatchSigner() signing.CustomGetSigner {
+	return signing.CustomGetSigner{
+		MsgType: protoreflect.FullName("svote.v1.MsgDelegateAndCastVoteBatch"),
 		Fn:      noopSignerFn,
 	}
 }

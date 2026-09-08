@@ -56,3 +56,54 @@ func TestComputeCastVoteBatchSighashBindsWholeOrderedBatch(t *testing.T) {
 		t.Fatal("proof and signature bytes are not effecting fields")
 	}
 }
+
+func frozenDelegateAndCastVoteBatch() *MsgDelegateAndCastVoteBatch {
+	first := frozenBatchVote(2, 1)
+	second := frozenBatchVote(6, 2)
+	first.VoteCommTreeAnchorHeight = 0
+	second.VoteCommTreeAnchorHeight = 0
+	return &MsgDelegateAndCastVoteBatch{
+		Delegation: &MsgDelegateVote{
+			VoteRoundId: bytes.Repeat([]byte{1}, 32),
+			VanCmx:      bytes.Repeat([]byte{9}, 32),
+		},
+		Batch: &MsgCastVoteBatch{Votes: []*MsgCastVote{first, second}},
+	}
+}
+
+func TestComputeDelegateAndCastVoteBatchSighashFrozenVector(t *testing.T) {
+	got := hex.EncodeToString(ComputeDelegateAndCastVoteBatchSighash(frozenDelegateAndCastVoteBatch()))
+	const want = "1b884143da3d43cd2834a1f347c60d76b2d9a5b0ba5da6f91a4b2b09511f6e23"
+	if got != want {
+		t.Fatalf("composite digest mismatch\n got: %s\nwant: %s", got, want)
+	}
+}
+
+func TestComputeDelegateAndCastVoteBatchSighashBindsWholeTransaction(t *testing.T) {
+	base := ComputeDelegateAndCastVoteBatchSighash(frozenDelegateAndCastVoteBatch())
+	tests := []struct {
+		name string
+		edit func(*MsgDelegateAndCastVoteBatch)
+	}{
+		{"round", func(msg *MsgDelegateAndCastVoteBatch) { msg.Delegation.VoteRoundId[0] ^= 1 }},
+		{"delegation VAN", func(msg *MsgDelegateAndCastVoteBatch) { msg.Delegation.VanCmx[0] ^= 1 }},
+		{"order", func(msg *MsgDelegateAndCastVoteBatch) {
+			msg.Batch.Votes[0], msg.Batch.Votes[1] = msg.Batch.Votes[1], msg.Batch.Votes[0]
+		}},
+		{"length", func(msg *MsgDelegateAndCastVoteBatch) { msg.Batch.Votes = msg.Batch.Votes[:1] }},
+		{"r_vpk", func(msg *MsgDelegateAndCastVoteBatch) { msg.Batch.Votes[0].RVpk[0] ^= 1 }},
+		{"VAN nullifier", func(msg *MsgDelegateAndCastVoteBatch) { msg.Batch.Votes[0].VanNullifier[0] ^= 1 }},
+		{"successor VAN", func(msg *MsgDelegateAndCastVoteBatch) { msg.Batch.Votes[0].VoteAuthorityNoteNew[0] ^= 1 }},
+		{"vote commitment", func(msg *MsgDelegateAndCastVoteBatch) { msg.Batch.Votes[0].VoteCommitment[0] ^= 1 }},
+		{"proposal", func(msg *MsgDelegateAndCastVoteBatch) { msg.Batch.Votes[0].ProposalId++ }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			msg := frozenDelegateAndCastVoteBatch()
+			test.edit(msg)
+			if bytes.Equal(base, ComputeDelegateAndCastVoteBatchSighash(msg)) {
+				t.Fatalf("changing %s must change the digest", test.name)
+			}
+		})
+	}
+}

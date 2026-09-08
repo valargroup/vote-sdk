@@ -8,6 +8,15 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+## v1.6.0-rc.0
+
+- Add atomic delegation-and-cast transactions through the `v1.6.0` coordinated
+  binary cutover, binding dependent cast proofs to the delegation-created VAN
+  and ordered batch while committing only the final successor VAN and vote
+  commitments.
+
+## v1.5.0-rc.0
+
 - Support up to 50 proposals per voting round, with the atomic vote-batch limit
   matching the round proposal limit and 16 encrypted shares per commitment.
 - Prepare `v1.5.0-rc.0` as the first candidate for the `v1.5.0` coordinated
