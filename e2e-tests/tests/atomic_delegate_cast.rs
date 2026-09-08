@@ -137,7 +137,7 @@ fn atomic_delegate_cast_real_proofs_helper_and_tally() {
         .expect("ea point")
         .to_affine();
 
-    let initial_authority = (1u64 << 16) - 1;
+    let initial_authority = voting_circuits::MAX_PROPOSAL_AUTHORITY;
     let proposals = [1u32, 2u32];
     let mut alphas = Vec::new();
     let mut bundles: Vec<VoteProofBundle> = Vec::new();
