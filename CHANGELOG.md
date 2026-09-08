@@ -10,10 +10,10 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## v1.6.0-rc.0
 
-- Add atomic delegation-and-cast transactions through the `v1.6.0` coordinated
-  binary cutover, binding dependent cast proofs to the delegation-created VAN
-  and ordered batch while committing only the final successor VAN and vote
-  commitments.
+- Prepare `v1.6.0-rc.0` as the first candidate for the `v1.6.0` coordinated
+  binary cutover, activating atomic delegation-and-cast transactions that bind
+  dependent cast proofs to the delegation-created VAN and ordered batch while
+  committing only the final successor VAN and vote commitments.
 
 ## v1.5.0-rc.0
 
