@@ -8,9 +8,10 @@
 // Validation order:
 //  1. Basic field validation (stateless)
 //  2. Vote round existence and liveness check (stateful, KV read)
-//  3. Nullifier uniqueness check (stateful, KV read) — runs even on RecheckTx
-//  4. RedPallas signature verification — skipped on RecheckTx
-//  5. ZKP verification — skipped on RecheckTx
+//  3. Cast proposal existence check (stateful, KV read) — runs even on RecheckTx
+//  4. Nullifier uniqueness check (stateful, KV read) — runs even on RecheckTx
+//  5. RedPallas signature verification — skipped on RecheckTx
+//  6. ZKP verification — skipped on RecheckTx
 package ante
 
 import (
@@ -31,8 +32,7 @@ import (
 type ValidateOpts struct {
 	// IsRecheck is true when running RecheckTx (mempool re-validation after
 	// a new block commit). When true, expensive signature and ZKP checks are
-	// skipped — only nullifier uniqueness is re-verified since nullifiers may
-	// have been consumed by the newly committed block.
+	// skipped. Round, proposal, and nullifier checks still run.
 	IsRecheck bool
 
 	// SigVerifier is the RedPallas signature verifier.
@@ -49,8 +49,8 @@ type ValidateOpts struct {
 // ValidateVoteTx runs the full validation pipeline for a vote module transaction.
 //
 // The pipeline is designed to be called from:
-//   - CheckTx: full validation (basic + round + nullifiers + sig + ZKP)
-//   - RecheckTx: lightweight re-validation (basic + round + nullifiers only)
+//   - CheckTx: full validation (basic + round + proposals + nullifiers + sig + ZKP)
+//   - RecheckTx: lightweight re-validation (basic + round + proposals + nullifiers)
 //   - FinalizeBlock: full validation before keeper execution
 func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper, opts ValidateOpts) error {
 	// 1. Basic field validation (stateless).
@@ -79,7 +79,28 @@ func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper
 		}
 	}
 
-	// 3. Nullifier uniqueness (ALWAYS runs, even on RecheckTx).
+	// 3. Reject nonexistent cast proposals before paying for any signatures or
+	// proofs. Late rejection in the message server leaves authorization unspent
+	// and lets fresh signatures repeatedly admit the same proofs to the mempool.
+	var votes []*types.MsgCastVote
+	switch m := msg.(type) {
+	case *types.MsgCastVote:
+		votes = []*types.MsgCastVote{m}
+	case *types.MsgCastVoteBatch:
+		votes = m.Votes
+	case *types.MsgDelegateAndCastVoteBatch:
+		votes = m.Batch.Votes
+	}
+	if len(votes) > 0 {
+		kvStore := k.OpenKVStore(ctx)
+		for _, vote := range votes {
+			if err := k.ValidateProposalId(kvStore, vote.VoteRoundId, vote.ProposalId); err != nil {
+				return err
+			}
+		}
+	}
+
+	// 4. Nullifier uniqueness (ALWAYS runs, even on RecheckTx).
 	// Nullifiers may have been consumed by the block that was just committed,
 	// so we must re-check every time. Nullifiers are scoped by type + round.
 	if composite, ok := msg.(*types.MsgDelegateAndCastVoteBatch); ok {
@@ -95,12 +116,12 @@ func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper
 		}
 	}
 
-	// 4. Skip expensive cryptographic checks on RecheckTx.
+	// Skip expensive cryptographic checks on RecheckTx.
 	if opts.IsRecheck {
 		return nil
 	}
 
-	// 5. Per-message-type signature and ZKP verification.
+	// 5–6. Per-message-type signature and ZKP verification.
 	return verifyProofs(ctx, msg, k, opts)
 }
 

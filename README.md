@@ -283,11 +283,17 @@ coordinator approval.
 
 These use the custom wire format and bypass the Cosmos Tx envelope. Auth is handled by the `ValidateVoteTx` pipeline in `x/vote/ante`.
 
+Single casts, cast batches, and delegation-and-cast batches check every cast's
+proposal ID against the round's configured proposals before signature or proof
+verification. This check runs during mempool admission, rechecks, and block
+execution. A proof for an ID in the global range 1–50 is insufficient when that
+proposal does not exist in the round.
+
 | Message           | Who can submit                    | Ante checks                                                                                                                                                                      | MsgServer checks                                                               |
 | ----------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | `MsgDelegateVote` | Any Zcash note holder (anonymous) | `ValidateBasic` (field sizes and Ironwood action binding); round ACTIVE; gov nullifier uniqueness; RedPallas sig over the canonical digest derived from `tx1_effects`; ZKP #1 (delegation proof: note ownership, VAN encoding, nc_root, nf_imt_root) | Record gov nullifiers; append van_cmx to commitment tree                       |
-| `MsgCastVote`     | Any delegation holder (anonymous) | `ValidateBasic`; round ACTIVE; VAN nullifier uniqueness; RedPallas sig over canonical sighash; ZKP #2 (vote commitment: VAN ownership, ea_pk binding, commitment tree anchor)    | Record VAN nullifier; append vote_authority_note_new + vote_commitment to tree |
-| `MsgCastVoteBatch` | Any delegation holder (anonymous) | `ValidateBasic`; round ACTIVE; all VAN nullifiers unique; every RedPallas signature covers the same ordered batch digest; first ZKP #2 uses the real anchor and later proofs use predecessor-derived single-leaf roots | Record all VAN nullifiers; append only the final vote_authority_note_new and every vote commitment |
+| `MsgCastVote`     | Any delegation holder (anonymous) | `ValidateBasic`; round ACTIVE; proposal exists in round; VAN nullifier uniqueness; RedPallas sig over canonical sighash; ZKP #2 (vote commitment: VAN ownership, ea_pk binding, commitment tree anchor)    | Record VAN nullifier; append vote_authority_note_new + vote_commitment to tree |
+| `MsgCastVoteBatch` | Any delegation holder (anonymous) | `ValidateBasic`; round ACTIVE; every proposal exists in round; all VAN nullifiers unique; every RedPallas signature covers the same ordered batch digest; first ZKP #2 uses the real anchor and later proofs use predecessor-derived single-leaf roots | Record all VAN nullifiers; append only the final vote_authority_note_new and every vote commitment |
 | `MsgRevealShare`  | Any vote holder (anonymous)       | `ValidateBasic`; round ACTIVE or TALLYING; share nullifier uniqueness; ZKP #3 (vote share: share ownership, commitment tree anchor)                                              | Record share nullifier; HomomorphicAdd enc_share into tally accumulator        |
 
 `MsgCastVoteBatch` accepts one to fifty actions, matching the maximum number of

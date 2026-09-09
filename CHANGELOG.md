@@ -8,6 +8,11 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Reject casts for nonexistent round proposals before signature and proof
+  verification, including atomic batches and mempool rechecks, preventing
+  repeated verification of votes that cannot execute. Requires a coordinated
+  validator upgrade because transaction validation and gas accounting change.
+
 - Speed up block processing by scanning and decoding voting rounds once per
   block while preserving round transitions and persisted state.
 - Speed up archive catch-up and empty-block processing by reusing unchanged
