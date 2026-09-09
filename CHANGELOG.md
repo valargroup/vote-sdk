@@ -8,6 +8,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Speed up block processing by scanning and decoding voting rounds once per
+  block while preserving round transitions and persisted state.
 - Speed up archive catch-up and empty-block processing by reusing unchanged
   voting commitment tree roots in memory, without changing persisted state.
 
