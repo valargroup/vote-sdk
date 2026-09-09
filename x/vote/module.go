@@ -413,11 +413,26 @@ func (AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 	}
 }
 
-// EndBlock computes the commitment tree root and transitions expired ACTIVE
-// rounds to TALLYING.
+// EndBlock updates commitment roots and processes round and ceremony timeouts.
 func (am AppModule) EndBlock(goCtx context.Context) error {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := am.keeper.OpenKVStore(ctx)
+
+	// Decode each stored round once, closing the iterator before any writes.
+	// Keep key order and share these objects across phases so later phases see
+	// status changes made earlier in this block. Terminal rounds need no work.
+	var rounds []*types.VoteRound
+	if err := am.keeper.IterateAllRounds(kvStore, func(round *types.VoteRound) bool {
+		switch round.Status {
+		case types.SessionStatus_SESSION_STATUS_ACTIVE,
+			types.SessionStatus_SESSION_STATUS_PENDING,
+			types.SessionStatus_SESSION_STATUS_TALLYING:
+			rounds = append(rounds, round)
+		}
+		return false
+	}); err != nil {
+		return err
+	}
 
 	// --- 1. Per-round commitment tree root computation ---
 	blockHeight := uint64(ctx.BlockHeight())
@@ -425,37 +440,35 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 	// Compute roots for every active round whose tree has leaves.
 	// Errors must halt the node rather than be swallowed: a partial
 	// state update on some nodes would produce divergent app hashes.
-	var treeErr error
-	if err := am.keeper.IterateActiveRounds(kvStore, func(round *types.VoteRound) bool {
+	for _, round := range rounds {
+		if round.Status != types.SessionStatus_SESSION_STATUS_ACTIVE {
+			continue
+		}
 		roundID := round.VoteRoundId
 
 		state, err := am.keeper.GetCommitmentTreeState(kvStore, roundID)
 		if err != nil {
-			treeErr = fmt.Errorf("EndBlocker: read tree state for round %x: %w", roundID, err)
-			return true
+			return fmt.Errorf("EndBlocker: read tree state for round %x: %w", roundID, err)
 		}
 		if state.NextIndex == 0 {
-			return false
+			continue
 		}
 
 		root, err := am.keeper.ComputeTreeRoot(kvStore, roundID, state.NextIndex, blockHeight)
 		if err != nil {
-			treeErr = fmt.Errorf("EndBlocker: compute tree root for round %x: %w", roundID, err)
-			return true
+			return fmt.Errorf("EndBlocker: compute tree root for round %x: %w", roundID, err)
 		}
 
 		if !bytes.Equal(root, state.Root) {
 			if err := am.keeper.SetCommitmentRootAtHeight(kvStore, roundID, blockHeight, root); err != nil {
-				treeErr = fmt.Errorf("EndBlocker: set root for round %x: %w", roundID, err)
-				return true
+				return fmt.Errorf("EndBlocker: set root for round %x: %w", roundID, err)
 			}
 
 			leafStart := state.NextIndexAtRoot
 			leafCount := state.NextIndex - leafStart
 			if leafCount > 0 {
 				if err := am.keeper.SetBlockLeafIndex(kvStore, roundID, blockHeight, leafStart, leafCount); err != nil {
-					treeErr = fmt.Errorf("EndBlocker: set block leaf index for round %x: %w", roundID, err)
-					return true
+					return fmt.Errorf("EndBlocker: set block leaf index for round %x: %w", roundID, err)
 				}
 			}
 
@@ -463,8 +476,7 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 			state.Height = blockHeight
 			state.NextIndexAtRoot = state.NextIndex
 			if err := am.keeper.SetCommitmentTreeState(kvStore, roundID, state); err != nil {
-				treeErr = fmt.Errorf("EndBlocker: set tree state for round %x: %w", roundID, err)
-				return true
+				return fmt.Errorf("EndBlocker: set tree state for round %x: %w", roundID, err)
 			}
 
 			ctx.EventManager().EmitEvent(sdk.NewEvent(
@@ -474,36 +486,16 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 				sdk.NewAttribute(types.AttributeKeyBlockHeight, strconv.FormatUint(blockHeight, 10)),
 			))
 		}
-		return false
-	}); err != nil {
-		return err
-	}
-	if treeErr != nil {
-		return treeErr
 	}
 
 	// --- 2. Transition expired ACTIVE rounds to TALLYING ---
 	blockTime := uint64(ctx.BlockTime().Unix())
 
-	// Collect round IDs to transition (avoid mutating store during iteration).
-	var expiredRoundIDs [][]byte
-	if err := am.keeper.IterateActiveRounds(kvStore, func(round *types.VoteRound) bool {
-		if blockTime >= round.VoteEndTime {
-			// Copy the round ID since the iterator value may be reused.
-			id := make([]byte, len(round.VoteRoundId))
-			copy(id, round.VoteRoundId)
-			expiredRoundIDs = append(expiredRoundIDs, id)
+	for _, round := range rounds {
+		if round.Status != types.SessionStatus_SESSION_STATUS_ACTIVE || blockTime < round.VoteEndTime {
+			continue
 		}
-		return false // continue iterating
-	}); err != nil {
-		return err
-	}
-
-	for _, roundID := range expiredRoundIDs {
-		round, err := am.keeper.GetVoteRound(kvStore, roundID)
-		if err != nil {
-			return err
-		}
+		roundID := round.VoteRoundId
 		round.Status = types.SessionStatus_SESSION_STATUS_TALLYING
 		round.TallyPhaseStart = blockTime
 		round.TallyPhaseTimeout = types.DefaultTallyTimeout
@@ -523,26 +515,11 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 	// If a REGISTERING round has not collected all n contributions within its
 	// timeout, finalize the pending round so a new round can be created with a
 	// fresh validator snapshot.
-	var contribTimeoutIDs [][]byte
-	if err := am.keeper.IteratePendingRounds(kvStore, func(round *types.VoteRound) bool {
-		if round.CeremonyStatus == types.CeremonyStatus_CEREMONY_STATUS_REGISTERING &&
-			round.CeremonyPhaseTimeout > 0 &&
-			blockTime >= round.CeremonyPhaseStart+round.CeremonyPhaseTimeout {
-			id := make([]byte, len(round.VoteRoundId))
-			copy(id, round.VoteRoundId)
-			contribTimeoutIDs = append(contribTimeoutIDs, id)
-		}
-		return false
-	}); err != nil {
-		return err
-	}
-
-	for _, roundID := range contribTimeoutIDs {
-		round, err := am.keeper.GetVoteRound(kvStore, roundID)
-		if err != nil {
-			return err
-		}
-		if round == nil {
+	for _, round := range rounds {
+		if round.Status != types.SessionStatus_SESSION_STATUS_PENDING ||
+			round.CeremonyStatus != types.CeremonyStatus_CEREMONY_STATUS_REGISTERING ||
+			round.CeremonyPhaseTimeout == 0 ||
+			blockTime < round.CeremonyPhaseStart+round.CeremonyPhaseTimeout {
 			continue
 		}
 
@@ -580,27 +557,11 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 	// withholding.
 	// On DEALT timeout with too few acks, finalize the pending round so a new
 	// round can be created.
-	// Collect round IDs with expired ceremony deadlines (avoid mutating store during iteration).
-	var ceremonyTimeoutIDs [][]byte
-	if err := am.keeper.IteratePendingRounds(kvStore, func(round *types.VoteRound) bool {
-		if round.CeremonyStatus == types.CeremonyStatus_CEREMONY_STATUS_DEALT &&
-			round.CeremonyPhaseTimeout > 0 &&
-			blockTime >= round.CeremonyPhaseStart+round.CeremonyPhaseTimeout {
-			id := make([]byte, len(round.VoteRoundId))
-			copy(id, round.VoteRoundId)
-			ceremonyTimeoutIDs = append(ceremonyTimeoutIDs, id)
-		}
-		return false // continue iterating
-	}); err != nil {
-		return err
-	}
-
-	for _, roundID := range ceremonyTimeoutIDs {
-		round, err := am.keeper.GetVoteRound(kvStore, roundID)
-		if err != nil {
-			return err
-		}
-		if round == nil {
+	for _, round := range rounds {
+		if round.Status != types.SessionStatus_SESSION_STATUS_PENDING ||
+			round.CeremonyStatus != types.CeremonyStatus_CEREMONY_STATUS_DEALT ||
+			round.CeremonyPhaseTimeout == 0 ||
+			blockTime < round.CeremonyPhaseStart+round.CeremonyPhaseTimeout {
 			continue
 		}
 		oldCeremonyStatus := round.CeremonyStatus
@@ -677,29 +638,14 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 		}
 	}
 
-	// --- 4. Tally phase timeout ---
+	// --- 5. Tally phase timeout ---
 	// If a round has been in TALLYING longer than its timeout, finalize it
 	// with tally_timed_out=true and empty results. This prevents permanent
 	// liveness loss when the decryption threshold cannot be reached.
-	var tallyTimeoutIDs [][]byte
-	if err := am.keeper.IterateTallyingRounds(kvStore, func(round *types.VoteRound) bool {
-		if round.TallyPhaseTimeout > 0 &&
-			blockTime >= round.TallyPhaseStart+round.TallyPhaseTimeout {
-			id := make([]byte, len(round.VoteRoundId))
-			copy(id, round.VoteRoundId)
-			tallyTimeoutIDs = append(tallyTimeoutIDs, id)
-		}
-		return false // continue iterating
-	}); err != nil {
-		return err
-	}
-
-	for _, roundID := range tallyTimeoutIDs {
-		round, err := am.keeper.GetVoteRound(kvStore, roundID)
-		if err != nil {
-			return err
-		}
-		if round == nil {
+	for _, round := range rounds {
+		if round.Status != types.SessionStatus_SESSION_STATUS_TALLYING ||
+			round.TallyPhaseTimeout == 0 ||
+			blockTime < round.TallyPhaseStart+round.TallyPhaseTimeout {
 			continue
 		}
 

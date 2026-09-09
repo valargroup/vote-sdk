@@ -8,6 +8,9 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Speed up block processing by scanning and decoding voting rounds once per
+  block while preserving round transitions and persisted state.
+
 ## v1.6.0-rc.0
 
 - Prepare `v1.6.0-rc.0` as the first candidate for the `v1.6.0` coordinated
