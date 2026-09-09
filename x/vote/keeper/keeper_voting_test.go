@@ -647,6 +647,32 @@ func (s *KeeperTestSuite) TestComputeTreeRoot_DeterministicAndDistinct() {
 	s.Require().NotEqual(root1, root2)
 }
 
+func (s *KeeperTestSuite) TestComputeTreeRoot_ReturnedRootIsIndependent() {
+	kv := s.keeper.OpenKVStore(s.ctx)
+	roundID := bytes.Repeat([]byte{0xAB}, 32)
+	_, err := s.keeper.AppendCommitment(kv, roundID, fpLE(1))
+	s.Require().NoError(err)
+	root, err := s.keeper.ComputeTreeRoot(kv, roundID, 1, 10)
+	s.Require().NoError(err)
+	want := bytes.Clone(root)
+	root[0] ^= 0xff
+
+	for height := uint64(11); height < 14; height++ {
+		root, err = s.keeper.ComputeTreeRoot(kv, roundID, 1, height)
+		s.Require().NoError(err)
+		s.Require().Equal(want, root)
+		root[0] ^= 0xff
+	}
+
+	_, err = s.keeper.AppendCommitment(kv, roundID, fpLE(2))
+	s.Require().NoError(err)
+	root, err = s.keeper.ComputeTreeRoot(kv, roundID, 2, 14)
+	s.Require().NoError(err)
+	s.Require().NotEqual(want, root)
+	_, err = s.keeper.ComputeTreeRoot(kv, roundID, 1, 15)
+	s.Require().ErrorContains(err, "tree size 2 > nextIndex 1")
+}
+
 // ---------------------------------------------------------------------------
 // Incremental tree handle tests
 // ---------------------------------------------------------------------------

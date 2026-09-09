@@ -6,6 +6,8 @@ package keeper
 //	cargo build --release --manifest-path sdk/circuits/Cargo.toml
 
 import (
+	"bytes"
+
 	"cosmossdk.io/core/store"
 )
 
@@ -25,6 +27,8 @@ import (
 // A checkpoint is created only when delta leaves were actually appended.
 // No-new-leaves restart blocks skip the checkpoint; latest_checkpoint is
 // restored from KV on handle creation so Root() is still correct.
+// An unchanged tree reuses its last computed root in memory. A new keeper
+// computes the root from the checkpoint before populating this cache.
 func (k *Keeper) ComputeTreeRoot(kvStore store.KVStore, roundID []byte, nextIndex, blockHeight uint64) ([]byte, error) {
 	if nextIndex == 0 {
 		return nil, nil
@@ -42,12 +46,18 @@ func (k *Keeper) ComputeTreeRoot(kvStore store.KVStore, roundID []byte, nextInde
 			return nil, err
 		}
 	}
-	root, err := rt.handle.Root()
-	if err != nil {
-		return nil, err
+	root := rt.root
+	if appended || root == nil || rt.rootLeafCount != nextIndex {
+		root, err = rt.handle.Root()
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err := k.debugVerifyConsistency(kvStore, roundID, nextIndex, root); err != nil {
 		return nil, err
 	}
-	return root, nil
+	rt.root = root
+	rt.rootLeafCount = nextIndex
+	// Callers can mutate the result without changing the cached root.
+	return bytes.Clone(root), nil
 }
