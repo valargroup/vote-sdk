@@ -234,6 +234,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Staging may run an untagged development binary. Use the latest
+          # published artifact while testing staging-specific discovery.
+          export SVOTE_RELEASE_VERSION
+          SVOTE_RELEASE_VERSION="$(curl -fsSL https://shielded-vote.nyc3.digitaloceanspaces.com/version.txt | tr -d '[:space:]')"
           bash join.sh 2>&1 | tee join-stage-output.log
           if grep -Eq 'Mnemonic:|Write down the mnemonic' join-stage-output.log; then
             echo "join.sh printed validator mnemonic material"
