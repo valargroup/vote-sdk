@@ -96,7 +96,7 @@ func helperPostSetup(
 			kvStore := (*svoteApp).VoteKeeper.OpenKVStore(ctx)
 			return (*svoteApp).VoteKeeper.HasNullifier(kvStore, votetypes.NullifierTypeShare, roundBytes, shareNullifier)
 		}
-		h, err := helper.New(cfg, treeReader, prover, treeReader.GetRoundInfo, treeReader.GetRoundIsActive, (*svoteApp).HelperNodeReady, votecommitment.VoteCommitmentHash, votecommitment.ValidateSharePayload, treeReader.ValidateShareChoice, sharetracking.ShareNullifierHash, shareNullifierChecker, homeDir, logger)
+		h, err := helper.New(cfg, treeReader, prover, treeReader.GetRoundInfo, treeReader.GetRoundIsActive, treeReader.GetRoundIsClosed, (*svoteApp).HelperNodeReady, votecommitment.VoteCommitmentHash, votecommitment.ValidateSharePayload, treeReader.ValidateShareChoice, sharetracking.ShareNullifierHash, shareNullifierChecker, homeDir, logger)
 		if err != nil {
 			helper.CaptureErr(err, map[string]string{"stage": "helper_new"})
 			return fmt.Errorf("helper: %w", err)
@@ -336,24 +336,47 @@ func (r *keeperTreeReader) ValidateShareChoice(roundID string, proposalID, voteD
 
 // GetRoundIsActive returns true if CheckTx is ready and the round has ACTIVE status.
 func (r *keeperTreeReader) GetRoundIsActive(roundID string) (bool, error) {
+	status, err := r.getRoundStatus(roundID)
+	return status == votetypes.SessionStatus_SESSION_STATUS_ACTIVE, err
+}
+
+// GetRoundIsClosed requires a committed terminal or tallying status. An inactive
+// pending round, missing round, or unavailable post-restart state is not closure.
+func (r *keeperTreeReader) GetRoundIsClosed(roundID string) (bool, error) {
+	status, err := r.getRoundStatus(roundID)
+	if err != nil {
+		return false, err
+	}
+	switch status {
+	case votetypes.SessionStatus_SESSION_STATUS_TALLYING,
+		votetypes.SessionStatus_SESSION_STATUS_FINALIZED,
+		votetypes.SessionStatus_SESSION_STATUS_CEREMONY_FAILED:
+		return true, nil
+	default:
+		return false, nil
+	}
+}
+
+// getRoundStatus reads committed state only after the post-restart readiness gate.
+func (r *keeperTreeReader) getRoundStatus(roundID string) (votetypes.SessionStatus, error) {
 	if !r.app.CheckTxBlockTimeReady() {
-		return false, helper.ErrCheckTxNotReady
+		return votetypes.SessionStatus_SESSION_STATUS_UNSPECIFIED, helper.ErrCheckTxNotReady
 	}
 
 	roundBytes, err := hex.DecodeString(roundID)
 	if err != nil {
-		return false, fmt.Errorf("invalid round_id hex: %v", err)
+		return votetypes.SessionStatus_SESSION_STATUS_UNSPECIFIED, fmt.Errorf("invalid round_id hex: %v", err)
 	}
 	ctx := r.app.NewUncachedContext(false, cmtproto.Header{})
 	kvStore := r.app.VoteKeeper.OpenKVStore(ctx)
 	round, err := r.app.VoteKeeper.GetVoteRound(kvStore, roundBytes)
 	if err != nil {
 		if errors.Is(err, votetypes.ErrRoundNotFound) {
-			return false, fmt.Errorf("%w: %s", helper.ErrUnknownRound, roundID)
+			return votetypes.SessionStatus_SESSION_STATUS_UNSPECIFIED, fmt.Errorf("%w: %s", helper.ErrUnknownRound, roundID)
 		}
-		return false, err
+		return votetypes.SessionStatus_SESSION_STATUS_UNSPECIFIED, err
 	}
-	return round.Status == votetypes.SessionStatus_SESSION_STATUS_ACTIVE, nil
+	return round.Status, nil
 }
 
 // halo2Prover wraps the CGo proof generation function.

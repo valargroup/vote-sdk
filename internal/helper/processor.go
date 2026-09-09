@@ -144,6 +144,7 @@ type Processor struct {
 	logger            log.Logger
 	maxConcurrent     int
 	isRoundActive     RoundStatusChecker
+	isRoundClosed     RoundClosureChecker
 	isNodeReady       func() bool
 	preProofDedupe    *preProofShareDeduper
 	submitHeightMu    sync.Mutex
@@ -153,6 +154,12 @@ type Processor struct {
 }
 
 type ProcessorOption func(*Processor)
+
+// WithRoundClosureCheck enables cleanup only after committed round closure.
+// Without a checker, the processor retains queued data and emits no close alerts.
+func WithRoundClosureCheck(isRoundClosed RoundClosureChecker) ProcessorOption {
+	return func(p *Processor) { p.isRoundClosed = isRoundClosed }
+}
 
 type preProofShareDeduper struct {
 	vcHash      VCHashFunc
@@ -231,11 +238,10 @@ func NewProcessor(
 
 // Run starts the processing loop. Blocks until ctx is cancelled.
 // Each cycle processes ready shares and purges share data for rounds whose
-// voting window has ended.
+// committed state confirms voting has ended.
 func (p *Processor) Run(ctx context.Context) error {
 	for {
-		p.alertExpiredUnsubmittedShares()
-		p.store.PurgeExpiredRounds()
+		p.cleanupClosedRounds()
 		if !p.processBatch(ctx) {
 			if err := waitForProcessingReadiness(ctx); err != nil {
 				return err
@@ -285,13 +291,40 @@ func (p *Processor) waitForSchedule(ctx context.Context) error {
 	}
 }
 
-func (p *Processor) alertExpiredUnsubmittedShares() {
-	summaries, err := p.store.ExpiredRoundSummaries(time.Now())
+// cleanupClosedRounds uses wall time only to select candidates. A fresh node
+// and positive committed closure are required before alerts or deletion.
+func (p *Processor) cleanupClosedRounds() {
+	if p.isRoundClosed == nil || p.isNodeReady == nil || !p.isNodeReady() {
+		return
+	}
+	now := time.Now()
+	roundIDs, err := p.store.ExpiredRoundIDs(now)
+	if err != nil {
+		CaptureErr(err, map[string]string{"stage": "expired_round_candidates"})
+		return
+	}
+	closed := make(map[string]bool, len(roundIDs))
+	confirmed := make([]string, 0, len(roundIDs))
+	for _, roundID := range roundIDs {
+		isClosed, err := p.isRoundClosed(roundID)
+		if err != nil {
+			p.logger.Warn("retaining shares: round closure unavailable", "round_id", roundID, "error", err)
+			continue
+		}
+		if isClosed {
+			closed[roundID] = true
+			confirmed = append(confirmed, roundID)
+		}
+	}
+	summaries, err := p.store.ExpiredRoundSummaries(now)
 	if err != nil {
 		CaptureErr(err, map[string]string{"stage": "expired_round_summary"})
 		return
 	}
 	for _, summary := range summaries {
+		if !closed[summary.RoundID] {
+			continue
+		}
 		unsubmitted := summary.Unsubmitted()
 		if unsubmitted == 0 {
 			continue
@@ -316,6 +349,7 @@ func (p *Processor) alertExpiredUnsubmittedShares() {
 			"unsubmitted", unsubmitted,
 		)
 	}
+	p.store.PurgeRounds(confirmed)
 }
 
 // processBatch takes one worker-sized batch of ready shares and processes it.

@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/hex"
@@ -1444,4 +1445,109 @@ func TestValidatePayload(t *testing.T) {
 		assert.Contains(t, err.Error(), "vote_round_id")
 	})
 
+}
+
+func TestProcessorCleanupRequiresCommittedClosure(t *testing.T) {
+	for _, tc := range []struct {
+		name                          string
+		ready, closed, missingChecker bool
+		missingReadiness              bool
+		statusErr                     error
+		wantDeleted                   bool
+	}{
+		{name: "active", ready: true},
+		{name: "closed", ready: true, closed: true, wantDeleted: true},
+		{name: "node_paused", closed: true},
+		{name: "status_unavailable", ready: true, statusErr: assert.AnError},
+		{name: "round_unknown", ready: true, statusErr: ErrUnknownRound},
+		{name: "restart_not_ready", ready: true, statusErr: ErrCheckTxNotReady},
+		{name: "missing_checker", ready: true, missingChecker: true},
+		{name: "missing_readiness", closed: true, missingReadiness: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			end := uint64(time.Now().Add(-time.Minute).Unix())
+			store, err := NewShareStore(":memory:", func(string) (RoundInfo, error) { return RoundInfo{CreatedAtTime: end - 3600, VoteEndTime: end}, nil })
+			require.NoError(t, err)
+			defer store.Close()
+			immediate := testPayload("aabbccdd", 0)
+			scheduled := testPayload("aabbccdd", 1)
+			scheduled.SubmitAt = end - 10
+			enqueueAndRequireInserted(t, store, immediate)
+			enqueueAndRequireInserted(t, store, scheduled)
+			_, err = store.db.Exec("UPDATE shares SET received_at = ?", end-20)
+			require.NoError(t, err)
+			var logs bytes.Buffer
+			checks := 0
+			var checker RoundClosureChecker
+			if !tc.missingChecker {
+				checker = func(string) (bool, error) { checks++; return tc.closed, tc.statusErr }
+			}
+			var readiness func() bool
+			if !tc.missingReadiness {
+				readiness = func() bool { return tc.ready }
+			}
+			proc := NewProcessor(store, nil, nil, nil, log.NewLogger(&logs), 1, nil,
+				WithProcessingReadinessCheck(readiness), WithRoundClosureCheck(checker))
+			proc.cleanupClosedRounds()
+			if tc.wantDeleted {
+				require.Zero(t, store.Status()["aabbccdd"].Total)
+				require.Empty(t, store.schedule)
+				require.Empty(t, store.roundCache)
+				require.Contains(t, logs.String(), "round closed with unsubmitted shares")
+			} else {
+				require.Equal(t, 2, store.Status()["aabbccdd"].Pending)
+				require.Len(t, store.schedule, 2)
+				require.Contains(t, store.roundCache, "aabbccdd")
+				require.NotContains(t, logs.String(), "round closed with unsubmitted shares")
+			}
+			if !tc.ready || tc.missingChecker {
+				require.Zero(t, checks)
+			}
+		})
+	}
+}
+
+func TestProcessorRunRetainsExpiredQueueWhilePaused(t *testing.T) {
+	end := uint64(time.Now().Add(-time.Minute).Unix())
+	store, err := NewShareStore(":memory:", func(string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: end - 3600, VoteEndTime: end}, nil
+	})
+	require.NoError(t, err)
+	defer store.Close()
+	enqueueAndRequireInserted(t, store, testPayload("aabbccdd", 0))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	proc := NewProcessor(store, nil, nil, nil, log.NewNopLogger(), 1, nil,
+		WithProcessingReadinessCheck(func() bool { cancel(); return false }),
+		WithRoundClosureCheck(func(string) (bool, error) {
+			t.Fatal("paused nodes must not check round closure")
+			return false, nil
+		}))
+	require.ErrorIs(t, proc.Run(ctx), context.Canceled)
+	require.Equal(t, 1, store.Status()["aabbccdd"].Pending)
+	require.Len(t, store.schedule, 1)
+}
+
+func TestProcessorCleanupAfterRestartAndClosure(t *testing.T) {
+	end := uint64(time.Now().Add(-time.Minute).Unix())
+	fetcher := func(string) (RoundInfo, error) { return RoundInfo{CreatedAtTime: end - 3600, VoteEndTime: end}, nil }
+	path := filepath.Join(t.TempDir(), "helper.db")
+	store, err := NewShareStore(path, fetcher)
+	require.NoError(t, err)
+	enqueueAndRequireInserted(t, store, testPayload("aabbccdd", 0))
+	require.NoError(t, store.Close())
+	store, err = NewShareStore(path, fetcher)
+	require.NoError(t, err)
+	defer store.Close()
+	closed := false
+	proc := NewProcessor(store, nil, nil, nil, log.NewNopLogger(), 1, nil,
+		WithProcessingReadinessCheck(func() bool { return true }),
+		WithRoundClosureCheck(func(string) (bool, error) { return closed, nil }))
+	proc.cleanupClosedRounds()
+	require.Equal(t, 1, store.Status()["aabbccdd"].Pending)
+	require.Len(t, store.schedule, 1)
+	closed = true
+	proc.cleanupClosedRounds()
+	require.Zero(t, store.Status()["aabbccdd"].Total, "late-received shares must also be cleaned once closure is confirmed")
+	require.Empty(t, store.schedule)
 }

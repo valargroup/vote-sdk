@@ -76,6 +76,10 @@ type RoundInfoFetcher func(roundID string) (RoundInfo, error)
 // that have transitioned to TALLYING or beyond, avoiding wasted ZKP computation.
 type RoundStatusChecker func(roundID string) (isActive bool, err error)
 
+// RoundClosureChecker confirms from committed chain state that a round can no
+// longer accept shares. Missing rounds and unavailable state must return errors.
+type RoundClosureChecker func(roundID string) (isClosed bool, err error)
+
 // ShareChoiceValidator checks that a proposal and vote decision exist in the
 // authenticated configuration for a voting round.
 type ShareChoiceValidator func(roundID string, proposalID, voteDecision uint32) error
@@ -217,7 +221,7 @@ type QueueExportRound struct {
 // QueueExportRow is one persisted share queue row. Terminal rows are exported
 // for debugging, but import skips them so they cannot be processed again.
 // Submitted rows should have witness material cleared. Failed rows can retain
-// it until the helper purges the round after vote_end_time.
+// it until the helper confirms committed round closure and purges the queue.
 type QueueExportRow struct {
 	ShareIndex       uint32             `json:"share_index"`
 	SharesHash       string             `json:"shares_hash,omitempty"`

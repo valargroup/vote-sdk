@@ -28,14 +28,16 @@ the wallet's intended schedule exactly.
 
 `Processor.Run()` is deterministic:
 
-1. emit alerts for expired rounds with unsubmitted shares,
-2. purge expired round data,
+1. when the node is caught up and fresh, check committed closure for rounds past
+   their local deadline and emit alerts for closed rounds with unsubmitted shares,
+2. purge data only for those confirmed closed rounds,
 3. process all ready shares,
 4. wait for the earliest scheduled `submit_at`, a schedule-change notification,
    cancellation, or a 30 second maintenance wake.
 
-The maintenance wake exists only so expiry alerts and purging still run when no
-shares are scheduled. Enqueue and retry scheduling changes signal the processor
+Active rounds and unavailable chain state retain their data even after the local
+deadline. The maintenance wake lets closure checks and purging run when no shares
+are scheduled. Enqueue and retry scheduling changes signal the processor
 through a buffered channel so new immediate shares do not wait for the
 maintenance wake.
 
