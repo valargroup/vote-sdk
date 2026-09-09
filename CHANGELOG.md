@@ -8,6 +8,9 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Speed up archive catch-up and empty-block processing by reusing unchanged
+  voting commitment tree roots in memory, without changing persisted state.
+
 ## v1.6.0-rc.0
 
 - Prepare `v1.6.0-rc.0` as the first candidate for the `v1.6.0` coordinated

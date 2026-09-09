@@ -62,6 +62,9 @@ type UpgradeScheduler interface {
 type roundTree struct {
 	handle *votetree.TreeHandle   // lazy-initialized; nil until first EndBlock for this round
 	proxy  *votetree.KvStoreProxy // Prefix = RoundTreeKey(roundID)
+	// Cache only roots computed by this handle, never persisted state.Root.
+	root          []byte
+	rootLeafCount uint64
 }
 
 // Keeper of the vote module store.
