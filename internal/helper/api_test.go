@@ -474,6 +474,9 @@ func TestQueueStatus_RequiresTokenWhenEnabled(t *testing.T) {
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Equal(t, 1, resp[roundID].Total)
 		assert.Equal(t, 1, resp[roundID].Pending)
+		assert.Equal(t, 1, resp[roundID].Ready)
+		assert.Equal(t, 0, resp[roundID].NotYetDue)
+		assert.Equal(t, 0, resp[roundID].Processing)
 	})
 }
 
@@ -502,6 +505,9 @@ func TestQueueSummary_PublicNoToken(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	assert.Equal(t, roundID, resp.RoundID)
 	assert.Equal(t, uint64(60), resp.BucketSeconds)
+	assert.Equal(t, 1, resp.Ready)
+	assert.Equal(t, 0, resp.NotYetDue)
+	assert.Equal(t, 0, resp.Processing)
 	assert.Equal(t, 1, resp.Buckets[1].OverduePending)
 }
 

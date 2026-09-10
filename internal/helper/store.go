@@ -848,6 +848,8 @@ func (s *ShareStore) logError(msg string, keyvals ...any) {
 
 // Status returns per-round queue statistics.
 func (s *ShareStore) Status() map[string]QueueStatus {
+	now := time.Now()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -869,12 +871,34 @@ func (s *ShareStore) Status() map[string]QueueStatus {
 		entry := result[roundID]
 		entry.Total += count
 		switch state {
-		case 0, 1:
+		case 0:
 			entry.Pending += count
+		case 1:
+			entry.Pending += count
+			entry.Processing += count
 		case 2:
 			entry.Submitted += count
 		case 3:
 			entry.Failed += count
+		}
+		result[roundID] = entry
+	}
+
+	// Readiness follows the effective in-memory schedule rather than persisted
+	// submit_at. This keeps retry backoff out of the ready count.
+	for key, scheduledAt := range s.schedule {
+		roundID, _, ok := strings.Cut(key, ":")
+		if !ok {
+			continue
+		}
+		entry, exists := result[roundID]
+		if !exists {
+			continue
+		}
+		if scheduledAt.After(now) {
+			entry.NotYetDue++
+		} else {
+			entry.Ready++
 		}
 		result[roundID] = entry
 	}
@@ -1311,10 +1335,9 @@ func (s *ShareStore) QueueSummary(roundID string, now time.Time) (QueueSummary, 
 	defer s.mu.Unlock()
 
 	rows, err := s.db.Query(
-		`SELECT state, submit_at, received_at, COUNT(*)
+		`SELECT state, submit_at, received_at, share_index, proposal_id, tree_position
 		   FROM shares
-		  WHERE round_id = ?
-		  GROUP BY state, submit_at, received_at`,
+		  WHERE round_id = ?`,
 		roundID,
 	)
 	if err != nil {
@@ -1325,8 +1348,9 @@ func (s *ShareStore) QueueSummary(roundID string, now time.Time) (QueueSummary, 
 	for rows.Next() {
 		var state int
 		var submitAt, receivedAt uint64
-		var count int
-		if err := rows.Scan(&state, &submitAt, &receivedAt, &count); err != nil {
+		var shareIndex, proposalID uint32
+		var treePosition uint64
+		if err := rows.Scan(&state, &submitAt, &receivedAt, &shareIndex, &proposalID, &treePosition); err != nil {
 			return QueueSummary{}, err
 		}
 
@@ -1343,18 +1367,26 @@ func (s *ShareStore) QueueSummary(roundID string, now time.Time) (QueueSummary, 
 		switch ShareState(state) {
 		case ShareStateReceived:
 			if effectiveTime <= generatedAt {
-				bucket.OverduePending += count
+				bucket.OverduePending++
 			} else {
-				bucket.PendingFuture += count
+				bucket.PendingFuture++
+			}
+			if scheduledAt, ok := s.schedule[schedKey(roundID, shareIndex, proposalID, treePosition)]; ok {
+				if scheduledAt.After(now) {
+					summary.NotYetDue++
+				} else {
+					summary.Ready++
+				}
 			}
 		case ShareStateWitnessed:
-			bucket.Processing += count
+			bucket.Processing++
+			summary.Processing++
 		case ShareStateSubmitted:
-			bucket.Submitted += count
+			bucket.Submitted++
 		case ShareStateFailed:
-			bucket.Failed += count
+			bucket.Failed++
 		}
-		bucket.Total += count
+		bucket.Total++
 	}
 	if err := rows.Err(); err != nil {
 		return QueueSummary{}, err

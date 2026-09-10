@@ -81,6 +81,21 @@ export function queueSummaryTotals(summary: QueueSummaryResponse): Record<QueueS
   );
 }
 
+export interface QueueDepth {
+  ready: number;
+  not_yet_due: number;
+  processing: number;
+}
+
+export function queueSummaryDepth(summary: QueueSummaryResponse): QueueDepth {
+  const totals = queueSummaryTotals(summary);
+  return {
+    ready: Number.isFinite(summary.ready) ? summary.ready! : totals.overdue_pending,
+    not_yet_due: Number.isFinite(summary.not_yet_due) ? summary.not_yet_due! : totals.pending_future,
+    processing: Number.isFinite(summary.processing) ? summary.processing! : totals.processing,
+  };
+}
+
 export function queueSummaryMaxBucketTotal(summaries: QueueSummaryResponse[]): number {
   return Math.max(1, ...summaries.flatMap((summary) => summary.buckets.map((bucket) => bucket.total)));
 }

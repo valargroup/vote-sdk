@@ -956,6 +956,9 @@ pub fn broadcast_cosmos_msg_with_retries(
 pub struct HelperQueueStatus {
     pub total: u64,
     pub pending: u64,
+    pub ready: u64,
+    pub not_yet_due: u64,
+    pub processing: u64,
     pub submitted: u64,
     pub failed: u64,
 }
@@ -976,6 +979,9 @@ pub fn get_helper_queue_status(round_id_hex: &str) -> Option<HelperQueueStatus> 
     Some(HelperQueueStatus {
         total: round.get("total")?.as_u64()?,
         pending: round.get("pending")?.as_u64()?,
+        ready: round.get("ready")?.as_u64()?,
+        not_yet_due: round.get("not_yet_due")?.as_u64()?,
+        processing: round.get("processing")?.as_u64()?,
         submitted: round.get("submitted")?.as_u64()?,
         failed: round.get("failed")?.as_u64()?,
     })
