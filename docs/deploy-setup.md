@@ -155,7 +155,7 @@ the REST API port. It is configured in `app.toml` under `[helper]` (written by
 | `expose_queue_summary` | `true` | Enables public coarse round-level queue summaries at `/shielded-vote/v1/queue-summary/{round_id}`. |
 | `db_path` | `""` | Path to SQLite database. Empty = `$HOME/helper.db`. |
 | `chain_api_port` | `1418` | Port of the REST API (for `MsgRevealShare` submission). In production this is `1317`. |
-| `max_concurrent_proofs_v2` | `8` | Maximum parallel proof generation goroutines (~500 MB RAM each, so ~4 GB at eight). |
+| `max_concurrent_proofs_v2` | `2` | Maximum parallel proof generation goroutines (~500 MB RAM each, so ~1 GB at two). |
 
 The v1.4 binary ignores the legacy `max_concurrent_proofs` key. Existing
 validators that have only that key fall back to a single worker, which the
@@ -166,7 +166,7 @@ wide ballot's shares queued for hours behind a backlog. Set the v2 key
 explicitly on any validator still running on the fallback.
 
 Size it against the host rather than copying the number. Each worker holds
-about 500 MB while proving, so eight wants roughly 4 GB free beyond the
+about 500 MB while proving, so two wants roughly 1 GB free beyond the
 validator's own footprint; a host without that should set a lower value.
 
 The queue summary endpoint reports only per-round bucketed counts across all

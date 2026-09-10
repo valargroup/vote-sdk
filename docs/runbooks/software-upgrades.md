@@ -429,12 +429,12 @@ worker. That fallback has since been measured on staging and is too low to
 keep up with a wide ballot: one worker drains about 0.58 shares per second —
 roughly 1.7 seconds per share — so a 37-proposal round's 1,776 shares take
 about fifty minutes to clear on their own, and any queue ahead of them is
-served first. Fresh validator configs now emit the v2 key with value eight,
+served first. Fresh validator configs now emit the v2 key with value two,
 which is the separately benchmarked value this section previously anticipated.
 
-Eight is a starting point sized for a validator host with room, not a
-universal constant. Each worker holds roughly 500 MB while proving, so eight
-wants about 4 GB free beyond the validator's own footprint. Set a lower value
+Two is a starting point sized for a validator host with room, not a
+universal constant. Each worker holds roughly 500 MB while proving, so two
+wants about 1 GB free beyond the validator's own footprint. Set a lower value
 where that is not available, and raise it only against a measurement.
 
 Pre-stage the binary on every validator under the exact `v1.4.0` Cosmovisor
