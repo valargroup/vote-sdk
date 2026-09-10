@@ -6,6 +6,10 @@ Helper server.
 
 ## Prometheus metrics
 
+For optional staging-only client/proxy/helper latency captures,
+see [the helper latency runbook](runbooks/helper-latency.md). Diagnostic request
+IDs are optional, random per attempt, and never Prometheus labels.
+
 `svoted` exposes Prometheus text on the REST API listener at:
 
 ```

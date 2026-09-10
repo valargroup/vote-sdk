@@ -38,6 +38,7 @@ var ErrInvalidRoundInfo = errors.New("invalid voting round metadata")
 // worker ownership. Payload data and terminal outcomes are persisted; effective
 // submit_at timestamps control when each share is eligible for proof generation.
 type ShareStore struct {
+	metrics           *storeMetrics // immutable after construction; nil outside opted-in staging
 	db                *sql.DB
 	lockFile          *os.File
 	mu                sync.Mutex
@@ -62,6 +63,7 @@ type inFlightShare struct {
 	roundID     string
 	voteEndTime uint64
 	attemptID   uint64
+	receivedAt  uint64
 }
 
 // EnqueueResult reports how an enqueue attempt was handled.
@@ -123,6 +125,10 @@ func NewShareStore(dbPath string, fetcher RoundInfoFetcher) (*ShareStore, error)
 		fetchRoundInfo:   fetcher,
 		schedulingSecret: schedulingSecret,
 		now:              time.Now,
+	}
+
+	if helperDiagnosticsEnabled() {
+		s.metrics = stagingStoreMetrics()
 	}
 
 	// Recover non-terminal shares from SQLite.
@@ -470,10 +476,10 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 	if effectiveSubmitAt != 0 && effectiveSubmitAt < receivedAt && receivedAt < roundInfo.VoteEndTime {
 		effectiveSubmitAt = receivedAt
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	unlock := s.lockMeasured("Enqueue")
+	defer unlock()
 
-	res, err := s.db.Exec(
+	res, err := s.execWrite(
 		`INSERT INTO shares
 		 (round_id, share_index, shares_hash, proposal_id, vote_decision,
 		  enc_share_c1, enc_share_c2, tree_position, share_comms, primary_blind, state, attempts, vote_end_time, submit_at, original_submit_at, received_at)
@@ -567,7 +573,7 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 		return EnqueueDuplicate, nil
 	}
 
-	replaced, err := s.db.Exec(
+	replaced, err := s.execWrite(
 		`UPDATE shares SET
 		   shares_hash = ?, vote_decision = ?, enc_share_c1 = ?, enc_share_c2 = ?,
 		   share_comms = ?, primary_blind = ?, state = 0, attempts = 0,
@@ -640,8 +646,9 @@ func (s *ShareStore) notifyScheduleChangedLocked() {
 // NextScheduledTime returns the earliest scheduled share time, delayed by a
 // common backoff after a store-wide dequeue failure.
 func (s *ShareStore) NextScheduledTime() (time.Time, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	unlock := s.lockMeasured("NextScheduledTime")
+	defer unlock()
+	defer s.measureScan("NextScheduledTime")()
 
 	var next time.Time
 	for _, scheduledAt := range s.schedule {
@@ -672,8 +679,9 @@ func (s *ShareStore) TakeReadyBatch(limit int) []QueuedShare {
 func (s *ShareStore) takeReady(limit int) []QueuedShare {
 	now := s.now()
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	unlock := s.lockMeasured("takeReady")
+	defer unlock()
+	defer s.measureScan("takeReady")()
 	if now.Before(s.dequeueRetryUntil) {
 		return nil
 	}
@@ -818,6 +826,7 @@ candidateLoop:
 			roundID:     candidate.roundID,
 			voteEndTime: share.VoteEndTime,
 			attemptID:   share.attemptID,
+			receivedAt:  share.receivedAt,
 		}
 		delete(s.schedule, candidate.key)
 	}
@@ -851,7 +860,7 @@ func (s *ShareStore) handleCorruptCandidateLocked(roundID string, shareIndex, pr
 }
 
 func (s *ShareStore) failCorruptCandidateLocked(roundID string, shareIndex, proposalID uint32, treePosition uint64, key string) error {
-	res, err := s.db.Exec(
+	res, err := s.execWrite(
 		`UPDATE shares SET state = 3, attempts = attempts + 1,
 		        enc_share_c1 = CASE WHEN vote_end_time = 0 THEN '' ELSE enc_share_c1 END,
 		        enc_share_c2 = CASE WHEN vote_end_time = 0 THEN '' ELSE enc_share_c2 END,
@@ -882,15 +891,15 @@ func (s *ShareStore) failCorruptCandidateLocked(roundID string, shareIndex, prop
 
 // MarkSubmitted marks a share as successfully submitted to the chain.
 func (s *ShareStore) MarkSubmitted(roundID string, shareIndex, proposalID uint32, treePosition uint64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	unlock := s.lockMeasured("MarkSubmitted")
+	defer unlock()
 
 	key := schedKey(roundID, shareIndex, proposalID, treePosition)
 	if _, ok := s.inFlight[key]; !ok {
 		s.logError("MarkSubmitted: completion has no active owner", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition)
 		return
 	}
-	res, err := s.db.Exec(
+	res, err := s.execWrite(
 		`UPDATE shares SET state = 2,
 		        enc_share_c1 = '', enc_share_c2 = '',
 		        share_comms = '[]', primary_blind = ''
@@ -911,6 +920,9 @@ func (s *ShareStore) MarkSubmitted(roundID string, shareIndex, proposalID uint32
 	if affected == 0 {
 		s.requeueInFlightAfterStoreFailureLocked("MarkSubmitted: unresolved update", key, errors.New("submitted update affected no rows"))
 		return
+	}
+	if received := s.inFlight[key].receivedAt; s.metrics != nil && received > 0 && received <= uint64(s.now().Unix()) {
+		s.metrics.confirmation.Observe(float64(uint64(s.now().Unix()) - received))
 	}
 	delete(s.inFlight, key)
 }
@@ -937,8 +949,8 @@ func (s *ShareStore) MarkStalledRetry(roundID string, shareIndex, proposalID uin
 }
 
 func (s *ShareStore) markRetry(roundID string, shareIndex, proposalID uint32, treePosition uint64, stalledRetryCount uint8) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	unlock := s.lockMeasured("markRetry")
+	defer unlock()
 
 	key := schedKey(roundID, shareIndex, proposalID, treePosition)
 	active, ok := s.inFlight[key]
@@ -1046,8 +1058,8 @@ func (s *ShareStore) requeueInFlightAfterStoreFailureLocked(stage, key string, e
 // it reached the end of processing without recording an outcome. A stale
 // attempt cannot release ownership acquired by a later retry.
 func (s *ShareStore) requeueInFlightIfOwned(roundID string, shareIndex, proposalID uint32, treePosition, attemptID uint64) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	unlock := s.lockMeasured("requeueInFlightIfOwned")
+	defer unlock()
 
 	key := schedKey(roundID, shareIndex, proposalID, treePosition)
 	active, ok := s.inFlight[key]
@@ -1122,8 +1134,8 @@ func (s *ShareStore) recordFailedAttemptLocked(roundID string, shareIndex, propo
 // MarkFailed marks a share processing attempt as failed, with retry or
 // permanent failure after max attempts.
 func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, treePosition uint64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	unlock := s.lockMeasured("MarkFailed")
+	defer unlock()
 
 	key := schedKey(roundID, shareIndex, proposalID, treePosition)
 	if _, ok := s.inFlight[key]; !ok {
@@ -1182,8 +1194,8 @@ func (s *ShareStore) logError(msg string, keyvals ...any) {
 func (s *ShareStore) Status() map[string]QueueStatus {
 	now := s.now()
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	unlock := s.lockMeasured("Status")
+	defer unlock()
 
 	rows, err := s.db.Query(
 		"SELECT round_id, state, COUNT(*) FROM shares GROUP BY round_id, state",
@@ -1255,8 +1267,8 @@ func (s *ShareStore) ExportQueue(roundID string, now time.Time) (QueueExport, er
 		ExportedAt: uint64(now.Unix()),
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	unlock := s.lockMeasured("ExportQueue")
+	defer unlock()
 	for _, active := range s.inFlight {
 		if active.roundID == roundID {
 			return QueueExport{}, fmt.Errorf("cannot export round %s while a worker is active", roundID)
@@ -1349,8 +1361,8 @@ func (s *ShareStore) ImportQueue(export QueueExport, opts QueueImportOptions) (Q
 	schedule := make(map[string]time.Time)
 	immediateBucket := time.Unix(s.now().Unix(), 0)
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	unlock := s.lockMeasured("ImportQueue")
+	defer unlock()
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -1681,8 +1693,8 @@ func (s *ShareStore) QueueSummary(roundID string, now time.Time) (QueueSummary, 
 		}
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	unlock := s.lockMeasured("QueueSummary")
+	defer unlock()
 
 	rows, err := s.db.Query(
 		`SELECT state, submit_at, received_at, share_index, proposal_id, tree_position
@@ -1757,8 +1769,8 @@ func (s *ShareStore) QueueSummary(roundID string, now time.Time) (QueueSummary, 
 // this alert. Call this before PurgeRounds so unsubmitted share alerts
 // can be emitted without retaining witness data.
 func (s *ShareStore) ExpiredRoundSummaries(now time.Time) ([]ExpiredRoundSummary, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	unlock := s.lockMeasured("ExpiredRoundSummaries")
+	defer unlock()
 
 	rows, err := s.db.Query(
 		`SELECT round_id, state, COUNT(*)
@@ -1816,8 +1828,8 @@ func (s *ShareStore) ExpiredRoundSummaries(now time.Time) ([]ExpiredRoundSummary
 // for pending and failed rows counted by ExpiredRoundSummaries. Submitted rows
 // have no witness left, and shares received after closure are not reported.
 func (s *ShareStore) unsubmittedSharesBeforeClose(roundID string, now time.Time) ([]QueuedShare, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	unlock := s.lockMeasured("unsubmittedSharesBeforeClose")
+	defer unlock()
 	rows, err := s.db.Query(`SELECT share_index, shares_hash, proposal_id,
 		vote_decision, primary_blind, tree_position, state
 		FROM shares WHERE round_id = ? AND state IN (0, 1, 3)
@@ -1843,14 +1855,17 @@ func (s *ShareStore) unsubmittedSharesBeforeClose(roundID string, now time.Time)
 
 // Close closes the database connection.
 func (s *ShareStore) Close() error {
+	if s.metrics != nil {
+		s.metrics.store.CompareAndSwap(s, nil)
+	}
 	return errors.Join(s.db.Close(), releaseShareStoreLock(s.lockFile))
 }
 
 // ExpiredRoundIDs lists wall-clock expiry candidates, including rounds whose
 // shares were received after the deadline. Callers must confirm chain closure.
 func (s *ShareStore) ExpiredRoundIDs(now time.Time) ([]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	unlock := s.lockMeasured("ExpiredRoundIDs")
+	defer unlock()
 	rows, err := s.db.Query(`SELECT round_id FROM shares WHERE vote_end_time > 0 AND vote_end_time < ?
  UNION SELECT round_id FROM rounds WHERE vote_end_time > 0 AND vote_end_time < ?`, now.Unix(), now.Unix())
 	if err != nil {
@@ -1872,8 +1887,8 @@ func (s *ShareStore) ExpiredRoundIDs(now time.Time) ([]string, error) {
 // The caller must positively confirm committed closure before including a round.
 // An empty list still retries WAL cleanup from an earlier blocked checkpoint.
 func (s *ShareStore) PurgeRounds(roundIDs []string) int64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	unlock := s.lockMeasured("PurgeRounds")
+	defer unlock()
 	var deleted int64
 	activeRounds := make(map[string]bool)
 	for _, active := range s.inFlight {
@@ -1962,7 +1977,7 @@ func (s *ShareStore) truncateWALAfterWitnessCleanup(stage string) {
 func (s *ShareStore) recover() error {
 	immediateBucket := time.Unix(s.now().Unix(), 0)
 	// Current workers remain Received; reset Witnessed rows left by older binaries.
-	if _, err := s.db.Exec("UPDATE shares SET state = 0 WHERE state = 1"); err != nil {
+	if _, err := s.execWrite("UPDATE shares SET state = 0 WHERE state = 1"); err != nil {
 		return fmt.Errorf("reset witnessed shares: %w", err)
 	}
 
@@ -2020,11 +2035,11 @@ func loadShareFrom(queryer shareRowQuerier, roundID string, shareIndex, proposal
 	var share QueuedShare
 	var sharesHash, voteDecision, encC1, encC2 any
 	var commsJSON, primaryBlind, stateValue, attemptsValue any
-	var voteEndTime, submitAt, retryState any
+	var voteEndTime, submitAt, retryState, receivedAt any
 
 	err := queryer.QueryRow(
 		`SELECT shares_hash, vote_decision, enc_share_c1, enc_share_c2,
-		        share_comms, primary_blind, state, attempts, vote_end_time, submit_at, retry_state
+		        share_comms, primary_blind, state, attempts, vote_end_time, submit_at, retry_state, received_at
 		 FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
 		roundID, shareIndex, proposalID, treePosition,
 	).Scan(
@@ -2039,6 +2054,7 @@ func loadShareFrom(queryer shareRowQuerier, roundID string, shareIndex, proposal
 		&voteEndTime,
 		&submitAt,
 		&retryState,
+		&receivedAt,
 	)
 	if err != nil {
 		return share, fmt.Errorf("scan share row: %w", err)
@@ -2094,6 +2110,8 @@ func loadShareFrom(queryer shareRowQuerier, roundID string, shareIndex, proposal
 		return share, err
 	}
 
+	// Diagnostics cannot make a legacy or malformed timestamp reject a share.
+	share.receivedAt, _ = decodeRowUint64("received_at", receivedAt)
 	share.Payload.VoteRoundID = roundID
 	share.Payload.ProposalID = proposalID
 	share.Payload.TreePosition = treePosition
@@ -2188,10 +2206,10 @@ func payloadEqual(existing, incoming SharePayload) bool {
 // getRoundInfo returns cached round metadata, fetching from SQLite or the
 // keeper if not in memory. Returns an error if the round is unknown.
 func (s *ShareStore) getRoundInfo(roundID string) (RoundInfo, error) {
-	s.mu.Lock()
+	unlockLookup := s.lockMeasured("round_cache_lookup")
 	if info, ok := s.roundCache[roundID]; ok {
 		if info.CreatedAtTime != 0 || s.fetchRoundInfo == nil {
-			s.mu.Unlock()
+			unlockLookup()
 			return info, nil
 		}
 		// Older helper DBs may have recovered a cache entry that only had
@@ -2208,13 +2226,13 @@ func (s *ShareStore) getRoundInfo(roundID string) (RoundInfo, error) {
 	if err == nil {
 		if info.CreatedAtTime != 0 || s.fetchRoundInfo == nil {
 			s.roundCache[roundID] = info
-			s.mu.Unlock()
+			unlockLookup()
 			return info, nil
 		}
 		// Older helper DBs may have only vote_end_time cached. Refresh from the
 		// keeper so the public summary can cover the full round window.
 	}
-	s.mu.Unlock()
+	unlockLookup()
 
 	// Fetch from keeper (outside lock — direct KV read).
 	if s.fetchRoundInfo == nil {
@@ -2228,14 +2246,14 @@ func (s *ShareStore) getRoundInfo(roundID string) (RoundInfo, error) {
 	// Another request may have populated the round while this request fetched it.
 	// Recheck under the store lock so only one request writes a cold round and so
 	// the rounds upsert cannot race the serialized share writes.
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	unlock := s.lockMeasured("getRoundInfo")
+	defer unlock()
 	if cached, ok := s.roundCache[roundID]; ok && (cached.CreatedAtTime != 0 || s.fetchRoundInfo == nil) {
 		return cached, nil
 	}
 
 	s.roundCache[roundID] = info
-	if _, err := s.db.Exec(
+	if _, err := s.execWrite(
 		`INSERT INTO rounds (round_id, vote_end_time, created_at_time)
 		 VALUES (?, ?, ?)
 		 ON CONFLICT(round_id) DO UPDATE SET

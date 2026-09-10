@@ -156,7 +156,7 @@ func RegisterRoutesWithValidationGetters(
 		metrics:               defaultHelperMetrics,
 	}
 	recover := sentryhttp.New(sentryhttp.Options{Repanic: false}).Handle
-	router.Handle("/shielded-vote/v1/shares", recover(http.HandlerFunc(h.handleSubmitShare))).Methods("POST")
+	router.Handle("/shielded-vote/v1/shares", ingressDiagnostics(recover(http.HandlerFunc(h.handleSubmitShare)), logger)).Methods("POST")
 	router.Handle("/shielded-vote/v1/share-status/{roundId}/{nullifier}", recover(http.HandlerFunc(h.handleShareStatus))).Methods("GET")
 	router.Handle("/shielded-vote/v1/status", recover(http.HandlerFunc(h.handleStatus))).Methods("GET")
 	router.Handle("/shielded-vote/v1/queue-summary/{roundId}", recover(http.HandlerFunc(h.handleQueueSummary))).Methods("GET")

@@ -1,0 +1,34 @@
+# Diagnostic-only overlay source. scripts/helper-diagnostics-caddy.py adapts
+# this dummy site and merges its logging routes into the existing live config.
+{
+	metrics
+}
+http://127.0.0.1:18088 {
+	log helper_diagnostics {
+		output stderr
+		format filter {
+			request delete
+			resp_headers delete
+			user_id delete
+		}
+	}
+	@diagnostic {
+		method POST
+		path /shielded-vote/v1/shares
+		header_regexp X-Vote-Request-ID ^[0-9a-f]{32}$
+	}
+	@ordinary {
+		not {
+			method POST
+			path /shielded-vote/v1/shares
+			header_regexp X-Vote-Request-ID ^[0-9a-f]{32}$
+		}
+	}
+	log_skip @ordinary
+	log_append @diagnostic request_id {http.request.header.X-Vote-Request-ID}
+	log_append @diagnostic route shares
+	log_append @diagnostic method POST
+	log_append @diagnostic protocol {http.request.proto}
+	log_append @diagnostic upstream_duration_ms {http.reverse_proxy.upstream.duration_ms}
+	log_append @diagnostic upstream_headers_ms {http.reverse_proxy.upstream.latency_ms}
+}

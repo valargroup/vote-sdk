@@ -86,6 +86,10 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundI
 		logger.Info(msg, keyvals...)
 	}
 	store.captureErr = CaptureErr
+	if store.metrics != nil {
+		store.metrics.store.Store(store)
+	}
+	enableDiagnosticProfiling(logger)
 
 	if cfg.MaxConcurrentProofs < 1 {
 		logger.Info(

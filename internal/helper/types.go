@@ -144,6 +144,7 @@ const (
 
 // QueuedShare is a share payload with processing metadata.
 type QueuedShare struct {
+	receivedAt  uint64 // diagnostic durable receipt time; never used for scheduling
 	retryState  string // persisted retry inputs and progress
 	attemptID   uint64 // process-local ownership generation
 	Payload     SharePayload
