@@ -46,7 +46,7 @@ sudo scripts/retry-failed-helper-shares.py \
 ```
 
 The script stops `svoted`, resets all failed rows for the round to `received`
-with zero attempts and a fresh relay schedule in one transaction, and restarts
+with zero attempts and a fresh retry schedule in one transaction, and restarts
 the service. This explicitly grants a new proof-attempt budget. It preserves
 their witness and original submission time. The helper then checks committed
 nullifiers before proof generation: already revealed shares become submitted
@@ -60,10 +60,15 @@ database update fails.
 
 ## Export
 
-Relay schedules are local to each helper and are not transferred by export.
-Importing into a new helper creates a fresh schedule at its first proof attempt.
-Duplicate imports into the same helper preserve the existing relay budget, even
-with `--force-ready`.
+The wallet's original submission time is stored and included in exports.
+Normal imports preserve it. `--force-ready` makes the share eligible immediately
+while keeping the original time for reference.
+
+The helper's retry schedule and consumed proof-attempt slots are not exported.
+A new helper starts its own attempt budget and retry schedule when it first
+processes the imported share, so its retry times can differ from the source
+helper's. Duplicate imports into the same helper preserve that helper's existing
+retry schedule and attempt budget, even with `--force-ready`.
 
 On the overloaded helper:
 

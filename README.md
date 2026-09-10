@@ -460,12 +460,13 @@ persisted budget of at most five proof-and-broadcast attempts, including failed
 proofs and interrupted submissions. The helper reserves a slot before proving,
 so a crash can consume an attempt but cannot reset the budget.
 
-The preferred offsets from the first proof attempt are immediate, one minute,
-ten minutes, and two days, followed by a final attempt randomly scheduled before
-the closing safety buffer. The buffer is one eighth of the remaining window,
+The first attempt honors the wallet-provided `submit_at` time. After that,
+retries target one minute, ten minutes, and two days after the first proof
+attempt, followed by a final retry randomly scheduled before the closing safety
+buffer. The buffer is one eighth of the remaining window,
 bounded between 30 seconds and five minutes. Final jitter covers up to ten
 minutes before that buffer, reduced to one eighth of the window for short
-rounds. Each helper draws and persists a separate schedule for each share.
+rounds. Each helper draws and persists its own retry schedule for each share.
 The buffer allows time for proving, submission, and block inclusion but does
 not guarantee inclusion under congestion.
 
