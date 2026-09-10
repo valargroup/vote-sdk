@@ -897,6 +897,60 @@ func (s *ValidateTestSuite) TestValidateVoteTx_CastVote() {
 	}
 }
 
+func (s *ValidateTestSuite) TestValidateVoteTx_CastProposalsCheckedBeforeVerification() {
+	for _, tc := range []struct {
+		name    string
+		makeMsg func(uint32) types.VoteMessage
+	}{
+		{"single", func(proposalID uint32) types.VoteMessage {
+			msg := newValidMsgCastVote()
+			msg.ProposalId = proposalID
+			return msg
+		}},
+		{"batch", func(proposalID uint32) types.VoteMessage {
+			msg := newValidMsgCastVoteBatch()
+			msg.Votes[1].ProposalId = proposalID
+			return msg
+		}},
+		{"delegate_and_cast", func(proposalID uint32) types.VoteMessage {
+			msg := newValidMsgDelegateAndCastVoteBatch()
+			msg.Batch.Votes[1].ProposalId = proposalID
+			return msg
+		}},
+	} {
+		for _, recheck := range []bool{false, true} {
+			for _, proposalID := range []uint32{2, 3, types.MaxProposals} {
+				s.Run(fmt.Sprintf("%s/recheck=%t/proposal=%d", tc.name, recheck, proposalID), func() {
+					s.SetupTest()
+					s.setupActiveRound() // Only proposals 1 and 2 exist.
+					sigVerifier := &spySigVerifier{failAt: -1}
+					zkpVerifier := &spyZKPVerifier{}
+					msg := tc.makeMsg(proposalID)
+					s.Require().NoError(msg.ValidateBasic())
+					err := ante.ValidateVoteTx(s.ctx, msg, s.keeper, ante.ValidateOpts{
+						IsRecheck:   recheck,
+						SigVerifier: sigVerifier,
+						ZKPVerifier: zkpVerifier,
+					})
+					if proposalID > 2 {
+						s.Require().ErrorIs(err, types.ErrInvalidProposalID)
+					} else {
+						s.Require().NoError(err)
+					}
+					if proposalID > 2 || recheck {
+						s.Require().Empty(sigVerifier.digests)
+						s.Require().Empty(zkpVerifier.capturedVoteInputs)
+						s.Require().Nil(zkpVerifier.capturedDelegationInputs)
+					} else {
+						s.Require().NotEmpty(sigVerifier.digests)
+						s.Require().NotEmpty(zkpVerifier.capturedVoteInputs)
+					}
+				})
+			}
+		}
+	}
+}
+
 func (s *ValidateTestSuite) TestValidateVoteTx_CastVoteBatchUsesSharedDigestAndSyntheticRoot() {
 	s.setupActiveRound()
 	batch := newValidMsgCastVoteBatch()

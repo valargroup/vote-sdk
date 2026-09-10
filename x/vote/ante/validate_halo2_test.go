@@ -268,4 +268,13 @@ func TestHalo2VoteMaxProposalThroughAnte(t *testing.T) {
 
 	msg.ProposalId++
 	require.NoError(t, ante.ValidateVoteTx(s.ctx, msg, s.keeper, opts))
+
+	// The proof remains valid, but proposal 50 no longer exists in this round.
+	// Round configuration must reject it before cryptographic verification.
+	round.Proposals = round.Proposals[:1]
+	require.NoError(t, s.keeper.SetVoteRound(kvStore, round))
+	sigVerifier := &spySigVerifier{failAt: -1}
+	opts.SigVerifier = sigVerifier
+	require.ErrorIs(t, ante.ValidateVoteTx(s.ctx, msg, s.keeper, opts), types.ErrInvalidProposalID)
+	require.Empty(t, sigVerifier.digests)
 }

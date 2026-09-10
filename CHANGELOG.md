@@ -8,6 +8,10 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Reject casts for nonexistent round proposals before signature and proof
+  verification, including atomic batches and mempool rechecks, preventing
+  repeated verification of votes that cannot execute. Requires a coordinated
+  validator upgrade because transaction validation and gas accounting change.
 - Retain helper shares until a fresh node confirms committed round closure,
   preventing clock skew or stalled-chain cleanup from deleting active-round
   queues or emitting premature round-closed alerts.

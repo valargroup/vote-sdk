@@ -797,9 +797,16 @@ func (s *ABCIIntegrationSuite) TestProposalIdValidation() {
 	// CastVote with invalid proposal_id (5) should fail.
 	badCastVote := testutil.ValidCastVote(roundID, anchorHeight, 0x40)
 	badCastVote.ProposalId = 5
-	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(badCastVote))
+	badCastTx := testutil.MustEncodeVoteTx(badCastVote)
+	check := s.app.CheckTxSync(badCastTx)
+	s.Require().NotZero(check.Code)
+	s.Require().Contains(check.Log, "proposal_id 5 out of range [1, 2]")
+	result = s.app.DeliverVoteTx(badCastTx)
 	s.Require().NotEqual(uint32(0), result.Code, "cast vote with invalid proposal_id should fail")
 	s.Require().Contains(result.Log, "invalid proposal ID")
+	check = s.app.CheckTxSync(badCastTx)
+	s.Require().NotZero(check.Code, "failed execution must not enable mempool replay")
+	s.Require().Contains(check.Log, "proposal_id 5 out of range [1, 2]")
 
 	// RevealShare with valid proposal_id (1) should succeed.
 	revealMsg := testutil.ValidRevealShare(roundID, revealAnchor, 0x50)
