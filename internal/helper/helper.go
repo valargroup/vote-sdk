@@ -32,6 +32,7 @@ type Helper struct {
 //   - prover: generates ZKP #3 proofs (real FFI or mock)
 //   - roundFetcher: queries the chain for round metadata (direct keeper access)
 //   - isRoundActive: checks if a round is still ACTIVE
+//   - isRoundClosed: confirms committed closure before deleting queued data
 //   - isNodeReady: checks that the local Comet node is caught up and fresh
 //   - vcHash: computes vote commitment Poseidon hash
 //   - payloadValidator: checks caller-controlled share commitment relationships
@@ -39,7 +40,7 @@ type Helper struct {
 //   - shareNFHash: computes share nullifier Poseidon hash before proof generation
 //   - homeDir: the chain's home directory (for default DB path)
 //   - logger: module logger
-func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundInfoFetcher, isRoundActive RoundStatusChecker, isNodeReady func() bool, vcHash VCHashFunc, payloadValidator SharePayloadValidator, choiceValidator ShareChoiceValidator, shareNFHash ShareNullifierHashFunc, shareNF ShareNullifierChecker, homeDir string, logger log.Logger) (*Helper, error) {
+func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundInfoFetcher, isRoundActive RoundStatusChecker, isRoundClosed RoundClosureChecker, isNodeReady func() bool, vcHash VCHashFunc, payloadValidator SharePayloadValidator, choiceValidator ShareChoiceValidator, shareNFHash ShareNullifierHashFunc, shareNF ShareNullifierChecker, homeDir string, logger log.Logger) (*Helper, error) {
 	logger = logger.With("module", "helper")
 
 	if cfg.Disable {
@@ -52,6 +53,7 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundI
 	}{
 		{name: "commitment tree", unavailable: tree == nil},
 		{name: "round status checker", unavailable: isRoundActive == nil},
+		{name: "round closure checker", unavailable: isRoundClosed == nil},
 		{name: "vote commitment hash", unavailable: vcHash == nil},
 		{name: "share payload validator", unavailable: payloadValidator == nil},
 		{name: "share choice validator", unavailable: choiceValidator == nil},
@@ -103,6 +105,7 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundI
 		cfg.MaxConcurrentProofs,
 		isRoundActive,
 		WithProcessingReadinessCheck(isNodeReady),
+		WithRoundClosureCheck(isRoundClosed),
 		WithPreProofShareDeduper(vcHash, shareNFHash, shareNF),
 	)
 

@@ -12,7 +12,9 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
   verification, including atomic batches and mempool rechecks, preventing
   repeated verification of votes that cannot execute. Requires a coordinated
   validator upgrade because transaction validation and gas accounting change.
-
+- Retain helper shares until a fresh node confirms committed round closure,
+  preventing clock skew or stalled-chain cleanup from deleting active-round
+  queues or emitting premature round-closed alerts.
 - Speed up block processing by scanning and decoding voting rounds once per
   block while preserving round transitions and persisted state.
 - Speed up archive catch-up and empty-block processing by reusing unchanged

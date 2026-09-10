@@ -1364,9 +1364,10 @@ func (s *ShareStore) QueueSummary(roundID string, now time.Time) (QueueSummary, 
 }
 
 // ExpiredRoundSummaries returns per-round queue counts for rounds whose voting
-// window has ended. It excludes shares first received at or after the round's
+// deadline has passed by wall time; this does not establish chain closure.
+// It excludes shares first received at or after the round's
 // close time, since they were not pending before close and should not trigger
-// this alert. Call this before PurgeExpiredRounds so unsubmitted share alerts
+// this alert. Call this before PurgeRounds so unsubmitted share alerts
 // can be emitted without retaining witness data.
 func (s *ShareStore) ExpiredRoundSummaries(now time.Time) ([]ExpiredRoundSummary, error) {
 	s.mu.Lock()
@@ -1429,47 +1430,74 @@ func (s *ShareStore) Close() error {
 	return errors.Join(s.db.Close(), releaseShareStoreLock(s.lockFile))
 }
 
-// PurgeExpiredRounds deletes all share data for rounds whose vote_end_time
-// has passed, checkpoints the WAL after deleting expired share rows, and
-// removes the corresponding entries from the in-memory schedule and round
-// cache. Returns the number of rows deleted.
-func (s *ShareStore) PurgeExpiredRounds() int64 {
+// ExpiredRoundIDs lists wall-clock expiry candidates, including rounds whose
+// shares were received after the deadline. Callers must confirm chain closure.
+func (s *ShareStore) ExpiredRoundIDs(now time.Time) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	now := time.Now().Unix()
-
-	res, err := s.db.Exec(
-		"DELETE FROM shares WHERE vote_end_time > 0 AND vote_end_time < ?", now,
-	)
+	rows, err := s.db.Query(`SELECT round_id FROM shares WHERE vote_end_time > 0 AND vote_end_time < ?
+ UNION SELECT round_id FROM rounds WHERE vote_end_time > 0 AND vote_end_time < ?`, now.Unix(), now.Unix())
 	if err != nil {
-		s.logError("PurgeExpiredRounds: delete shares failed", "error", err)
-		return 0
+		return nil, err
 	}
-	deleted, _ := res.RowsAffected()
-
-	// Also clean the rounds metadata table.
-	if _, err := s.db.Exec(
-		"DELETE FROM rounds WHERE vote_end_time > 0 AND vote_end_time < ?", now,
-	); err != nil {
-		s.logError("PurgeExpiredRounds: delete rounds failed", "error", err)
-	}
-	s.truncateWALAfterWitnessCleanup("PurgeExpiredRounds")
-
-	// Prune in-memory caches for expired rounds.
-	for roundID, info := range s.roundCache {
-		if info.VoteEndTime > 0 && info.VoteEndTime < uint64(now) {
-			delete(s.roundCache, roundID)
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
 		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// PurgeRounds deletes share data and metadata only for the supplied rounds.
+// The caller must positively confirm committed closure before including a round.
+// An empty list still retries WAL cleanup from an earlier blocked checkpoint.
+func (s *ShareStore) PurgeRounds(roundIDs []string) int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var deleted int64
+	if len(roundIDs) > 0 {
+		tx, err := s.db.Begin()
+		if err != nil {
+			s.logError("PurgeRounds: begin failed", "error", err)
+			return 0
+		}
+		defer tx.Rollback()
+		for _, roundID := range roundIDs {
+			res, err := tx.Exec("DELETE FROM shares WHERE round_id = ?", roundID)
+			if err != nil {
+				s.logError("PurgeRounds: delete shares failed", "error", err)
+				return 0
+			}
+			count, err := res.RowsAffected()
+			if err != nil {
+				s.logError("PurgeRounds: row count failed", "error", err)
+				return 0
+			}
+			deleted += count
+			if _, err := tx.Exec("DELETE FROM rounds WHERE round_id = ?", roundID); err != nil {
+				s.logError("PurgeRounds: delete metadata failed", "error", err)
+				return 0
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			s.logError("PurgeRounds: commit failed", "error", err)
+			return 0
+		}
+	}
+	s.truncateWALAfterWitnessCleanup("PurgeRounds")
+	closed := make(map[string]bool, len(roundIDs))
+	for _, roundID := range roundIDs {
+		closed[roundID] = true
+		delete(s.roundCache, roundID)
 	}
 	schedulePruned := false
 	for key := range s.schedule {
-		parts := strings.SplitN(key, ":", 4)
-		if len(parts) < 1 {
-			continue
-		}
-		roundID := parts[0]
-		if _, ok := s.roundCache[roundID]; !ok {
+		roundID := strings.SplitN(key, ":", 2)[0]
+		if closed[roundID] {
 			delete(s.schedule, key)
 			schedulePruned = true
 		}
@@ -1477,11 +1505,8 @@ func (s *ShareStore) PurgeExpiredRounds() int64 {
 	if schedulePruned {
 		s.notifyScheduleChangedLocked()
 	}
-
-	if deleted > 0 {
-		if s.logInfo != nil {
-			s.logInfo("purged expired round data", "rows_deleted", deleted)
-		}
+	if deleted > 0 && s.logInfo != nil {
+		s.logInfo("purged closed round data", "rows_deleted", deleted)
 	}
 	return deleted
 }
