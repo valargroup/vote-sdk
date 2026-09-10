@@ -141,11 +141,10 @@ configuration, and saves the currently active overlay as the rollback target.
 
 ## Correlated report and coverage
 
-The collector exports only whitelisted structured `vote HTTP timing` and
-`vote HTTP phase` records from the `svoted` journal. Configure the diagnostic
-server with JSON logging. If it emits text logs, the collector counts those
-unstructured diagnostic records but does not copy their contents or attempt
-unsafe free-text parsing. Server redeployment and the two staging diagnostic
+The collector exports only whitelisted `vote HTTP timing` and
+`vote HTTP phase` records from the `svoted` journal. Its strict projector accepts
+JSON and console logs, validates numeric and enum fields, and counts rejected
+diagnostic records. It never exports arbitrary journal messages. Server redeployment and the two staging diagnostic
 environment flags are required for these records. Caddy configuration is separate.
 
 The analyzer includes every `*.observability.json` invocation in each `--run`

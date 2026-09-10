@@ -93,6 +93,19 @@ class DiagnosticsTests(unittest.TestCase):
         collector = module('collect-helper-diagnostics')
         compile(collector.REMOTE, '<remote collector>', 'exec')
 
+    def test_log_projection_excludes_sensitive_fields(self):
+        project = module('helper-diagnostic-records').application_record
+        identifier = 'd'*32
+        for message in (json.dumps({'msg':'vote HTTP timing', 'request_id':identifier,
+                                    'route':'shares', 'duration_us':123, 'token':'private',
+                                    'body':'private', 'method':'POST'}),
+                        'INF vote HTTP timing request_id='+identifier+' route=shares duration_us=123 token=private method=POST'):
+            record = project(message)
+            self.assertEqual(record['duration_us'], 123)
+            self.assertNotIn('private', json.dumps(record))
+            self.assertNotIn('token', record)
+        self.assertIsNone(project('ordinary journal message token=private'))
+
 
 if __name__ == '__main__':
     unittest.main()
