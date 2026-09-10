@@ -11,9 +11,11 @@ are intentionally not exposed over HTTP.
   encrypted share payloads, share commitments, and blind material.
 - Move export files only over a trusted channel. Delete them after the rescue is
   complete.
-- Queue data is purged after vote end time by the helper processor. Export
-  before the vote closes if the queue may need rescue. The purge also truncates
-  the helper DB WAL after expired share rows are deleted.
+- Queue data is purged after the local deadline only when a caught-up, fresh
+  node confirms committed round closure. Active rounds and unavailable chain
+  state retain their queued shares, even if the helper clock is ahead. Export
+  before the round closes if the queue may need rescue. The purge also truncates
+  the helper DB WAL after closed-round share rows are deleted.
 
 ## Retry failed shares in an active round
 
@@ -74,8 +76,8 @@ falls back to `<home>/helper.db`. Use `--db-path` to override both.
 
 The export includes every row for the round. `received`, `witnessed`, and
 permanently `failed` rows can include full payload material until the helper
-purges the round after vote end time. `submitted` rows should have witness
-material cleared already.
+confirms committed round closure and purges its queue. `submitted` rows should
+have witness material cleared already.
 
 ## Import
 

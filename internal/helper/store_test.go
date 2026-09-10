@@ -910,21 +910,17 @@ func TestEnqueue_SubmitAtValidation(t *testing.T) {
 	})
 }
 
-func TestPurgeExpiredRounds(t *testing.T) {
-	fetcher := func(roundID string) (RoundInfo, error) {
-		if roundID == "expired_round" {
-			end := uint64(time.Now().Add(-time.Hour).Unix())
-			return RoundInfo{CreatedAtTime: end - oneHourSecs, VoteEndTime: end}, nil
-		}
-		now := uint64(time.Now().Unix())
-		return RoundInfo{CreatedAtTime: now - oneHourSecs, VoteEndTime: now + oneHourSecs}, nil
+func TestPurgeRounds(t *testing.T) {
+	end := uint64(time.Now().Add(-time.Hour).Unix())
+	fetcher := func(string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: end - oneHourSecs, VoteEndTime: end}, nil
 	}
 
 	s, err := NewShareStore(":memory:", fetcher)
 	require.NoError(t, err)
 	defer s.Close()
 
-	// Enqueue a share for an expired round and an active round.
+	// Both rounds are past the local deadline; only one is confirmed closed.
 	enqueueAndRequireInserted(t, s, testPayload("expired_round", 0))
 	enqueueAndRequireInserted(t, s, testPayload("active_round", 0))
 
@@ -932,7 +928,12 @@ func TestPurgeExpiredRounds(t *testing.T) {
 	assert.Equal(t, 1, status["expired_round"].Total)
 	assert.Equal(t, 1, status["active_round"].Total)
 
-	deleted := s.PurgeExpiredRounds()
+	candidates, err := s.ExpiredRoundIDs(time.Now())
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"expired_round", "active_round"}, candidates)
+	require.Zero(t, s.PurgeRounds(nil))
+	require.Len(t, s.schedule, 2)
+	deleted := s.PurgeRounds([]string{"expired_round"})
 	assert.Equal(t, int64(1), deleted)
 
 	status = s.Status()
@@ -940,7 +941,7 @@ func TestPurgeExpiredRounds(t *testing.T) {
 	assert.Equal(t, 1, status["active_round"].Total)
 }
 
-func TestPurgeExpiredRoundsTruncatesWALWithFailedWitnessMaterial(t *testing.T) {
+func TestPurgeRoundsTruncatesWALWithFailedWitnessMaterial(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "helper.db")
 	end := uint64(time.Now().Add(-time.Hour).Unix())
 	fetcher := func(roundID string) (RoundInfo, error) {
@@ -969,7 +970,7 @@ func TestPurgeExpiredRoundsTruncatesWALWithFailedWitnessMaterial(t *testing.T) {
 	require.NoError(t, blockerTx.QueryRow("SELECT COUNT(*) FROM shares").Scan(&rowCount))
 	require.Equal(t, 1, rowCount)
 
-	deleted := s.PurgeExpiredRounds()
+	deleted := s.PurgeRounds([]string{"expired_round"})
 	assert.Equal(t, int64(1), deleted)
 	_, ok := s.loadShare(failed.VoteRoundID, failed.EncShare.ShareIndex, failed.ProposalID, failed.TreePosition)
 	assert.False(t, ok)
@@ -979,7 +980,7 @@ func TestPurgeExpiredRoundsTruncatesWALWithFailedWitnessMaterial(t *testing.T) {
 	assert.True(t, containsSensitiveField(walAfterBlockedCheckpoint, failed), "blocked checkpoint should leave cleanup for a later purge pass")
 	require.NoError(t, blockerTx.Rollback())
 
-	deleted = s.PurgeExpiredRounds()
+	deleted = s.PurgeRounds(nil)
 	assert.Equal(t, int64(0), deleted)
 
 	walAfter, err := os.ReadFile(walPath)
@@ -1673,4 +1674,15 @@ func queueExportRowFromPayload(payload SharePayload, state ShareState, voteEndTi
 		OriginalSubmitAt: payload.SubmitAt,
 		Processable:      isProcessableShareState(state),
 	}
+}
+
+func TestPurgeRoundsRollsBackOnMetadataFailure(t *testing.T) {
+	store := newTestStore(t)
+	enqueueAndRequireInserted(t, store, testPayload("aabbccdd", 0))
+	_, err := store.db.Exec(`CREATE TRIGGER fail_round_delete BEFORE DELETE ON rounds BEGIN SELECT RAISE(FAIL, 'injected delete failure'); END`)
+	require.NoError(t, err)
+	require.Zero(t, store.PurgeRounds([]string{"aabbccdd"}))
+	require.Equal(t, 1, store.Status()["aabbccdd"].Pending)
+	require.Len(t, store.schedule, 1)
+	require.Contains(t, store.roundCache, "aabbccdd")
 }
