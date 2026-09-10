@@ -439,8 +439,11 @@ tag that identifies the helper code path that emitted the error, such as
 events describe only the helper instance running this process; they do not
 monitor other helper servers.
 
-When a voting round closes, the helper summarizes queued shares before purging
-expired witness data. If any shares for that round are still pending or failed,
+When a voting round closes, the helper reconciles queued shares against committed
+nullifiers before reporting and purging expired witness data. This includes
+failed shares that committed before closure but missed the final queue check.
+An unavailable commitment check defers that round's reporting and cleanup.
+If any shares for that round are still pending or failed,
 it emits a Sentry error with `stage=round_closed_unsubmitted_shares` and tags
 for `alert=helper_round_closed`, `round_id`, `total_shares`, `pending_shares`,
 `failed_shares`, `submitted_shares`, and `unsubmitted_shares`. Configure Sentry
@@ -503,7 +506,8 @@ Retries still require a newer committed block height. The helper skips missed
 slots after delays and keeps checking commitment between attempts and after the
 last slot, without generating more proofs. A passed local deadline does not
 terminalize or delete a share. Committed round closure controls cleanup and
-unsubmitted-share alerts. Deterministic failures still spend the existing
+unsubmitted-share alerts. A queued share still checks commitment before being
+rejected for an inactive round. Deterministic failures still spend the existing
 failure budget and can terminalize the share earlier. Existing terminal rows
 are not automatically revived by this change.
 

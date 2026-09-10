@@ -1480,6 +1480,35 @@ func (s *ShareStore) ExpiredRoundSummaries(now time.Time) ([]ExpiredRoundSummary
 	return summaries, nil
 }
 
+// unsubmittedSharesBeforeClose loads only the inputs needed to check commitment
+// for pending and failed rows counted by ExpiredRoundSummaries. Submitted rows
+// have no witness left, and shares received after closure are not reported.
+func (s *ShareStore) unsubmittedSharesBeforeClose(roundID string, now time.Time) ([]QueuedShare, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rows, err := s.db.Query(`SELECT share_index, shares_hash, proposal_id,
+		vote_decision, primary_blind, tree_position, state
+		FROM shares WHERE round_id = ? AND state IN (0, 1, 3)
+		AND vote_end_time > 0 AND vote_end_time < ?
+		AND (received_at = 0 OR received_at < vote_end_time)`, roundID, now.Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var shares []QueuedShare
+	for rows.Next() {
+		var share QueuedShare
+		share.Payload.VoteRoundID = roundID
+		if err := rows.Scan(&share.Payload.EncShare.ShareIndex, &share.Payload.SharesHash,
+			&share.Payload.ProposalID, &share.Payload.VoteDecision, &share.Payload.PrimaryBlind,
+			&share.Payload.TreePosition, &share.State); err != nil {
+			return nil, err
+		}
+		shares = append(shares, share)
+	}
+	return shares, rows.Err()
+}
+
 // Close closes the database connection.
 func (s *ShareStore) Close() error {
 	return errors.Join(s.db.Close(), releaseShareStoreLock(s.lockFile))

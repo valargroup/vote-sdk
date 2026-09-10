@@ -425,6 +425,18 @@ func (p *Processor) processQueuedShare(ctx context.Context, share QueuedShare) {
 			return
 		}
 		if !active {
+			committed, err := p.shareAlreadyRevealed(shareCtx, share)
+			if err != nil {
+				spanErr = err
+				p.logger.Warn("waiting to reconcile share in inactive round", "round_id", share.Payload.VoteRoundID, "error", err)
+				p.store.MarkRetry(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+				return
+			}
+			if committed {
+				shareSpan.SetData("outcome", "submitted")
+				p.markShareSubmitted(share)
+				return
+			}
 			shareSpan.SetData("outcome", "round_inactive")
 			p.logger.Info("round no longer active, skipping share",
 				"round_id", share.Payload.VoteRoundID,
@@ -475,6 +487,10 @@ func (p *Processor) processQueuedShare(ctx context.Context, share QueuedShare) {
 	}
 
 	shareSpan.SetData("outcome", "submitted")
+	p.markShareSubmitted(share)
+}
+
+func (p *Processor) markShareSubmitted(share QueuedShare) {
 	p.store.MarkSubmitted(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
 	p.clearSubmitHeight(share)
 	p.logger.Info("share submitted",
@@ -496,7 +512,6 @@ func (p *Processor) cleanupClosedRounds() {
 		return
 	}
 	closed := make(map[string]bool, len(roundIDs))
-	confirmed := make([]string, 0, len(roundIDs))
 	for _, roundID := range roundIDs {
 		isClosed, err := p.isRoundClosed(roundID)
 		if err != nil {
@@ -505,7 +520,6 @@ func (p *Processor) cleanupClosedRounds() {
 		}
 		if isClosed {
 			closed[roundID] = true
-			confirmed = append(confirmed, roundID)
 		}
 	}
 	summaries, err := p.store.ExpiredRoundSummaries(now)
@@ -515,6 +529,11 @@ func (p *Processor) cleanupClosedRounds() {
 	}
 	for _, summary := range summaries {
 		if !closed[summary.RoundID] {
+			continue
+		}
+		if err := p.reconcileClosedRoundSummary(&summary, now); err != nil {
+			delete(closed, summary.RoundID)
+			p.logger.Warn("retaining shares: commitment reconciliation unavailable", "round_id", summary.RoundID, "error", err)
 			continue
 		}
 		unsubmitted := summary.Unsubmitted()
@@ -541,7 +560,42 @@ func (p *Processor) cleanupClosedRounds() {
 			"unsubmitted", unsubmitted,
 		)
 	}
+	confirmed := make([]string, 0, len(closed))
+	for _, roundID := range roundIDs {
+		if closed[roundID] {
+			confirmed = append(confirmed, roundID)
+		}
+	}
 	p.store.PurgeRounds(confirmed)
+}
+
+// reconcileClosedRoundSummary accounts for commits missed by queue polling,
+// including failed rows. The rows are purged after reporting, so only the
+// summary needs updating. An unavailable check defers this round's cleanup.
+func (p *Processor) reconcileClosedRoundSummary(summary *ExpiredRoundSummary, now time.Time) error {
+	if p.preProofDedupe == nil || summary.Unsubmitted() == 0 {
+		return nil
+	}
+	shares, err := p.store.unsubmittedSharesBeforeClose(summary.RoundID, now)
+	if err != nil {
+		return err
+	}
+	for _, share := range shares {
+		committed, err := p.shareAlreadyRevealed(context.Background(), share)
+		if err != nil {
+			return err
+		}
+		if !committed {
+			continue
+		}
+		if share.State == ShareStateFailed {
+			summary.Failed--
+		} else {
+			summary.Pending--
+		}
+		summary.Submitted++
+	}
+	return nil
 }
 
 // captureShareProcessingFailure groups repeated attempts from the local helper
@@ -580,15 +634,11 @@ func (p *Processor) markShareFailure(share QueuedShare, err error) {
 // processShare handles a single share: Merkle path → proof → submit.
 func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	// Scope the tree reader to this share's voting round.
-	roundBytes, err := hex.DecodeString(share.Payload.VoteRoundID)
+	roundID, err := decodeShareRoundID(share.Payload.VoteRoundID)
 	if err != nil {
-		return failedShareAttemptError(failureStageDecodeRoundID, fmt.Errorf("decode vote_round_id: %w", err))
+		return err
 	}
-	var roundID [32]byte
-	if len(roundBytes) != 32 {
-		return failedShareAttemptError(failureStageDecodeRoundID, fmt.Errorf("vote_round_id must be 32 bytes, got %d", len(roundBytes)))
-	}
-	copy(roundID[:], roundBytes)
+	roundBytes := roundID[:]
 
 	if p.preProofDedupe != nil {
 		alreadyRevealed, err := p.preProofDedupe.shareAlreadyRevealed(ctx, share, roundID)
@@ -888,6 +938,32 @@ func shareScheduleKey(share QueuedShare) string {
 		share.Payload.ProposalID,
 		share.Payload.TreePosition,
 	)
+}
+
+// shareAlreadyRevealed checks commitment without requiring an active round or
+// a due proof slot. Production helpers always have a deduper configured.
+func (p *Processor) shareAlreadyRevealed(ctx context.Context, share QueuedShare) (bool, error) {
+	if p.preProofDedupe == nil {
+		return false, nil
+	}
+	roundID, err := decodeShareRoundID(share.Payload.VoteRoundID)
+	if err != nil {
+		return false, err
+	}
+	return p.preProofDedupe.shareAlreadyRevealed(ctx, share, roundID)
+}
+
+func decodeShareRoundID(value string) ([32]byte, error) {
+	var roundID [32]byte
+	raw, err := hex.DecodeString(value)
+	if err != nil {
+		return roundID, failedShareAttemptError(failureStageDecodeRoundID, fmt.Errorf("decode vote_round_id: %w", err))
+	}
+	if len(raw) != len(roundID) {
+		return roundID, failedShareAttemptError(failureStageDecodeRoundID, fmt.Errorf("vote_round_id must be 32 bytes, got %d", len(raw)))
+	}
+	copy(roundID[:], raw)
+	return roundID, nil
 }
 
 // shareAlreadyRevealed computes the queued share's nullifier and checks whether
