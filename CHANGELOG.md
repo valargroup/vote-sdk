@@ -23,6 +23,12 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 - Expose Prometheus latency, stage, outcome, in-flight, and batch-size metrics
   for vote transaction verification, including delegation, cast batches, and
   atomic delegation-and-cast signature and proof stages.
+- Schedule helper shares fairly across voting rounds, isolate malformed rows,
+  keep SQLite failures from spending share attempts or spinning the processor,
+  give unresolved worker attempts a positive retry delay, prevent force-ready
+  imports from duplicating active worker attempts, allow validated wallet retries
+  to repair corrupt queued rows, and avoid exposing same-second request arrival
+  order through FIFO dispatch.
 - Reject casts for nonexistent round proposals before signature and proof
   verification, including atomic batches and mempool rechecks, preventing
   repeated verification of votes that cannot execute. Requires a coordinated

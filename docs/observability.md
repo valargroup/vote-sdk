@@ -318,8 +318,13 @@ waiting in the helper DB even though its `submit_at` time has passed.
 The response also reports top-level `ready`, `not_yet_due`, and `processing`
 queue depth. These fields use the helper's effective in-memory schedule, so a
 share delayed by retry backoff is `not_yet_due` even when its original
-`submit_at` has passed. Histogram placement remains based on the persisted
-submit time and does not move during retries.
+`submit_at` has passed. `processing` comes from process-local worker ownership;
+the durable row remains `Received` until its outcome is recorded. Histogram
+placement remains based on the persisted
+effective submit time and does not move during retries. Queue rescue exports
+retain a clamped caller value separately as `original_submit_at`.
+Retry due times use Unix-second buckets, so multiple retries for one round can
+share the same opaque scheduling rank boundary.
 
 `last_minute_start` marks the final 40% of the round, capped at six hours.
 Older shares target their final retry around the earlier of this boundary or

@@ -2,11 +2,15 @@ package helper
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -140,6 +144,558 @@ func TestEnqueueAndTakeReady(t *testing.T) {
 	assert.Empty(t, ready)
 }
 
+func TestTakeReadyBatch_OldestFirstWithinRound(t *testing.T) {
+	s := newTestStore(t)
+	base := time.Now().Add(-time.Minute)
+	for i := range uint32(3) {
+		payload := testPayload("round-a", i)
+		payload.TreePosition = uint64(i)
+		enqueueAndRequireInserted(t, s, payload)
+	}
+
+	s.mu.Lock()
+	s.schedule[schedKey("round-a", 0, 1, 0)] = base.Add(-2 * time.Second)
+	s.schedule[schedKey("round-a", 1, 1, 1)] = base
+	s.schedule[schedKey("round-a", 2, 1, 2)] = base.Add(-time.Second)
+	s.mu.Unlock()
+
+	ready := s.TakeReadyBatch(3)
+	require.Len(t, ready, 3)
+	assert.Equal(t, []uint32{0, 2, 1}, []uint32{
+		ready[0].Payload.EncShare.ShareIndex,
+		ready[1].Payload.EncShare.ShareIndex,
+		ready[2].Payload.EncShare.ShareIndex,
+	})
+}
+
+func TestTakeReadyBatch_CorruptOldestFailsOnlyThatShare(t *testing.T) {
+	s := newTestStore(t)
+	for i := range uint32(3) {
+		payload := testPayload("round-a", i)
+		payload.TreePosition = uint64(i)
+		enqueueAndRequireInserted(t, s, payload)
+	}
+	_, err := s.db.Exec(
+		"UPDATE shares SET share_comms = ? WHERE round_id = ? AND share_index = ?",
+		"{invalid", "round-a", 0,
+	)
+	require.NoError(t, err)
+
+	s.mu.Lock()
+	base := time.Now().Add(-time.Minute)
+	s.schedule[schedKey("round-a", 0, 1, 0)] = base
+	s.schedule[schedKey("round-a", 1, 1, 1)] = base.Add(time.Second)
+	s.schedule[schedKey("round-a", 2, 1, 2)] = base.Add(2 * time.Second)
+	s.mu.Unlock()
+
+	ready := s.TakeReadyBatch(3)
+	require.Len(t, ready, 2)
+	assert.Equal(t, []uint32{1, 2}, []uint32{
+		ready[0].Payload.EncShare.ShareIndex,
+		ready[1].Payload.EncShare.ShareIndex,
+	})
+
+	var state, attempts int
+	err = s.db.QueryRow(
+		"SELECT state, attempts FROM shares WHERE round_id = ? AND share_index = ?",
+		"round-a", 0,
+	).Scan(&state, &attempts)
+	require.NoError(t, err)
+	assert.Equal(t, int(ShareStateFailed), state)
+	assert.Equal(t, 1, attempts)
+
+	for range 10 {
+		assert.Empty(t, s.TakeReadyBatch(3))
+	}
+	_, scheduled := s.NextScheduledTime()
+	assert.False(t, scheduled, "terminal poison row must not keep the processor timer due")
+	for _, share := range ready {
+		s.MarkRetry(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+	}
+
+	exported, err := s.ExportQueue("round-a", time.Now())
+	require.NoError(t, err)
+	require.Len(t, exported.Rows, 3)
+	var corrupt QueueExportRow
+	for _, row := range exported.Rows {
+		if row.ShareIndex == 0 {
+			corrupt = row
+		}
+	}
+	assert.True(t, corrupt.Corrupt)
+	assert.Equal(t, "invalid_share_comms_json", corrupt.CorruptionReason)
+	require.NotNil(t, corrupt.RawShareCommsBase64)
+	assert.Equal(t, base64.StdEncoding.EncodeToString([]byte("{invalid")), *corrupt.RawShareCommsBase64)
+	assert.False(t, corrupt.Processable)
+	assert.Empty(t, corrupt.ShareComms)
+
+	dest := newTestStore(t)
+	imported, err := dest.ImportQueue(exported, QueueImportOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 2, imported.Inserted)
+	assert.Equal(t, 1, imported.SkippedTerminal)
+}
+
+func TestExportQueue_IncludesUnclassifiedCorruptDiagnostic(t *testing.T) {
+	s := newTestStore(t)
+	corruptPayload := testPayload("round-a", 0)
+	corruptPayload.SubmitAt = uint64(time.Now().Add(time.Hour).Unix())
+	enqueueAndRequireInserted(t, s, corruptPayload)
+	healthyPayload := testPayload("round-a", 1)
+	healthyPayload.TreePosition = 1
+	enqueueAndRequireInserted(t, s, healthyPayload)
+	_, err := s.db.Exec("UPDATE shares SET share_comms = ? WHERE round_id = ? AND share_index = ?", "{invalid", "round-a", 0)
+	require.NoError(t, err)
+
+	exported, err := s.ExportQueue("round-a", time.Now())
+	require.NoError(t, err)
+	require.Len(t, exported.Rows, 2)
+	assert.True(t, exported.Rows[1].Corrupt)
+	assert.False(t, exported.Rows[1].Processable)
+	require.NotNil(t, exported.Rows[1].RawShareCommsBase64)
+	assert.Equal(t, base64.StdEncoding.EncodeToString([]byte("{invalid")), *exported.Rows[1].RawShareCommsBase64)
+
+	dest := newTestStore(t)
+	result, err := dest.ImportQueue(exported, QueueImportOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.Inserted)
+	assert.Equal(t, 1, result.SkippedTerminal)
+}
+
+func TestExportQueue_CorruptEmptyShareCommsRetainsRawField(t *testing.T) {
+	s := newTestStore(t)
+	enqueueAndRequireInserted(t, s, testPayload("round-a", 0))
+	_, err := s.db.Exec("UPDATE shares SET share_comms = '' WHERE round_id = ?", "round-a")
+	require.NoError(t, err)
+
+	exported, err := s.ExportQueue("round-a", time.Now())
+	require.NoError(t, err)
+	require.Len(t, exported.Rows, 1)
+	require.NotNil(t, exported.Rows[0].RawShareCommsBase64)
+	assert.Empty(t, *exported.Rows[0].RawShareCommsBase64)
+	wire, err := json.Marshal(exported.Rows[0])
+	require.NoError(t, err)
+	assert.Contains(t, string(wire), `"raw_share_comms_base64":""`)
+}
+
+func TestTakeReadyBatch_ValueTypeCorruptionIsTerminal(t *testing.T) {
+	s := newTestStore(t)
+	for i := range uint32(2) {
+		payload := testPayload("round-a", i)
+		payload.TreePosition = uint64(i)
+		enqueueAndRequireInserted(t, s, payload)
+	}
+	_, err := s.db.Exec(
+		"UPDATE shares SET vote_decision = ? WHERE round_id = ? AND share_index = ?",
+		"not-an-integer", "round-a", 0,
+	)
+	require.NoError(t, err)
+	s.mu.Lock()
+	s.schedule[schedKey("round-a", 0, 1, 0)] = time.Now().Add(-time.Minute)
+	s.schedule[schedKey("round-a", 1, 1, 1)] = time.Now().Add(-time.Minute + time.Second)
+	s.mu.Unlock()
+
+	ready := s.TakeReadyBatch(2)
+	require.Len(t, ready, 1)
+	assert.Equal(t, uint32(1), ready[0].Payload.EncShare.ShareIndex)
+	var state, attempts int
+	err = s.db.QueryRow(
+		"SELECT state, attempts FROM shares WHERE round_id = ? AND share_index = ?",
+		"round-a", 0,
+	).Scan(&state, &attempts)
+	require.NoError(t, err)
+	assert.Equal(t, int(ShareStateFailed), state)
+	assert.Equal(t, 1, attempts)
+}
+
+func TestTakeReadyBatch_StateValueCorruptionIsTerminal(t *testing.T) {
+	s := newTestStore(t)
+	payload := testPayload("round-a", 0)
+	enqueueAndRequireInserted(t, s, payload)
+	_, err := s.db.Exec(
+		"UPDATE shares SET state = ? WHERE round_id = ? AND share_index = ?",
+		"not-an-integer", "round-a", 0,
+	)
+	require.NoError(t, err)
+
+	assert.Empty(t, s.TakeReadyBatch(1))
+	var state, attempts int
+	err = s.db.QueryRow(
+		"SELECT state, attempts FROM shares WHERE round_id = ? AND share_index = ?",
+		"round-a", 0,
+	).Scan(&state, &attempts)
+	require.NoError(t, err)
+	assert.Equal(t, int(ShareStateFailed), state)
+	assert.Equal(t, 1, attempts)
+	assert.NotContains(t, s.schedule, schedKey("round-a", 0, 1, 0))
+}
+
+func TestTakeReadyBatch_TerminalizationFailureRetainsSchedule(t *testing.T) {
+	s := newTestStore(t)
+	now := time.Unix(2_000_000_000, 0)
+	s.now = func() time.Time { return now }
+	payload := testPayload("round-a", 0)
+	enqueueAndRequireInserted(t, s, payload)
+	_, err := s.db.Exec("UPDATE shares SET share_comms = ? WHERE round_id = ?", "{invalid", "round-a")
+	require.NoError(t, err)
+	_, err = s.db.Exec(`CREATE TRIGGER fail_terminalization BEFORE UPDATE OF state ON shares
+		WHEN NEW.state = 3 BEGIN SELECT RAISE(FAIL, 'injected terminalization failure'); END`)
+	require.NoError(t, err)
+
+	assert.Empty(t, s.TakeReadyBatch(1))
+	key := schedKey("round-a", 0, 1, 0)
+	assert.Contains(t, s.schedule, key)
+	next, ok := s.NextScheduledTime()
+	require.True(t, ok)
+	assert.Equal(t, now.Add(shareSystemRetryBackoff), next)
+
+	_, err = s.db.Exec("DROP TRIGGER fail_terminalization")
+	require.NoError(t, err)
+	now = now.Add(shareSystemRetryBackoff + time.Second)
+	assert.Empty(t, s.TakeReadyBatch(1))
+	assert.NotContains(t, s.schedule, key)
+}
+
+func TestTakeReadyBatch_StoreFailureAppliesGlobalBackoff(t *testing.T) {
+	s := newTestStore(t)
+	now := time.Unix(2_000_000_000, 500)
+	s.now = func() time.Time { return now }
+	enqueueAndRequireInserted(t, s, testPayload("round-a", 0))
+	enqueueAndRequireInserted(t, s, testPayload("round-b", 0))
+	require.NoError(t, s.db.Close())
+
+	assert.Empty(t, s.TakeReadyBatch(2))
+	assert.Len(t, s.schedule, 2)
+	next, ok := s.NextScheduledTime()
+	require.True(t, ok)
+	assert.Equal(t, now.Add(shareSystemRetryBackoff), next)
+	assert.Empty(t, s.TakeReadyBatch(2), "common backoff must avoid hammering every candidate")
+}
+
+func TestTakeReadyBatch_MissingSchemaRetainsReceivedShare(t *testing.T) {
+	s := newTestStore(t)
+	now := time.Unix(2_000_000_000, 0)
+	s.now = func() time.Time { return now }
+	enqueueAndRequireInserted(t, s, testPayload("round-a", 0))
+	key := schedKey("round-a", 0, 1, 0)
+
+	_, err := s.db.Exec("ALTER TABLE shares RENAME TO shares_unavailable")
+	require.NoError(t, err)
+	assert.Empty(t, s.TakeReadyBatch(1))
+	assert.Contains(t, s.schedule, key)
+	assert.Empty(t, s.inFlight)
+	next, ok := s.NextScheduledTime()
+	require.True(t, ok)
+	assert.Equal(t, now.Add(shareSystemRetryBackoff), next)
+
+	_, err = s.db.Exec("ALTER TABLE shares_unavailable RENAME TO shares")
+	require.NoError(t, err)
+	now = now.Add(shareSystemRetryBackoff + time.Second)
+	ready := s.TakeReadyBatch(1)
+	require.Len(t, ready, 1)
+	assert.Zero(t, ready[0].Attempts)
+	var state, attempts int
+	err = s.db.QueryRow("SELECT state, attempts FROM shares WHERE round_id = ?", "round-a").Scan(&state, &attempts)
+	require.NoError(t, err)
+	assert.Equal(t, int(ShareStateReceived), state)
+	assert.Zero(t, attempts)
+}
+
+func TestTakeReadyBatch_LoadFailureNeverDispatchesZeroShare(t *testing.T) {
+	s := newTestStore(t)
+	base := time.Unix(2_000_000_000, 0)
+	s.now = func() time.Time { return base }
+	enqueueAndRequireInserted(t, s, testPayload("round-a", 0))
+
+	_, err := s.db.Exec("ALTER TABLE shares RENAME TO shares_unavailable")
+	require.NoError(t, err)
+	calls := 0
+	s.now = func() time.Time {
+		calls++
+		if calls == 1 {
+			return base
+		}
+		return base.Add(-20 * time.Second)
+	}
+
+	assert.Empty(t, s.TakeReadyBatch(1), "load failure must exit before dispatch regardless of clock movement")
+	assert.Empty(t, s.inFlight)
+	assert.Contains(t, s.schedule, schedKey("round-a", 0, 1, 0))
+}
+
+func TestMarkSubmitted_WriteLockRestoresScheduleAndBacksOff(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "helper.db")
+	now := uint64(time.Now().Unix())
+	s, err := NewShareStore(dbPath, func(string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: now, VoteEndTime: now + testVoteEndOffset}, nil
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { s.Close() })
+	clock := time.Now().Truncate(time.Second)
+	s.now = func() time.Time { return clock }
+	enqueueAndRequireInserted(t, s, testPayload("round-a", 0))
+
+	blocker, err := sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { blocker.Close() })
+	blocker.SetMaxOpenConns(1)
+	_, err = blocker.Exec("PRAGMA busy_timeout=0")
+	require.NoError(t, err)
+	_, err = blocker.Exec("BEGIN IMMEDIATE")
+	require.NoError(t, err)
+	defer blocker.Exec("ROLLBACK")
+
+	require.Len(t, s.TakeReadyBatch(1), 1)
+	s.MarkSubmitted("round-a", 0, 1, 0)
+	key := schedKey("round-a", 0, 1, 0)
+	assert.Contains(t, s.schedule, key)
+	assert.NotContains(t, s.inFlight, key)
+	next, ok := s.NextScheduledTime()
+	require.True(t, ok)
+	assert.Equal(t, clock.Add(shareSystemRetryBackoff), next)
+}
+
+func TestTakeReadyBatch_UsesProcessLocalOwnership(t *testing.T) {
+	s := newTestStore(t)
+	payload := testPayload("round-a", 0)
+	enqueueAndRequireInserted(t, s, payload)
+	ready := s.TakeReadyBatch(1)
+	require.Len(t, ready, 1)
+	key := schedKey("round-a", 0, 1, 0)
+	assert.NotContains(t, s.schedule, key)
+	assert.Contains(t, s.inFlight, key)
+	assert.Empty(t, s.TakeReadyBatch(1), "an active share must not be dispatched twice")
+
+	var state, attempts int
+	err := s.db.QueryRow("SELECT state, attempts FROM shares WHERE round_id = ?", "round-a").Scan(&state, &attempts)
+	require.NoError(t, err)
+	assert.Equal(t, int(ShareStateReceived), state)
+	assert.Zero(t, attempts)
+	status := s.Status()["round-a"]
+	assert.Equal(t, 1, status.Pending)
+	assert.Equal(t, 1, status.Processing)
+	summary, err := s.QueueSummary("round-a", time.Now())
+	require.NoError(t, err)
+	assert.Equal(t, 1, summary.Processing)
+	assert.Zero(t, summary.Ready)
+}
+
+func TestTakeReadyBatch_DropsScheduleEntryForInFlightShare(t *testing.T) {
+	s := newTestStore(t)
+	payload := testPayload("round-a", 0)
+	enqueueAndRequireInserted(t, s, payload)
+	require.Len(t, s.TakeReadyBatch(1), 1)
+
+	key := schedKey("round-a", 0, 1, 0)
+	s.mu.Lock()
+	s.schedule[key] = s.now().Add(-time.Second)
+	s.mu.Unlock()
+
+	assert.Empty(t, s.TakeReadyBatch(1))
+	assert.NotContains(t, s.schedule, key)
+	assert.Contains(t, s.inFlight, key)
+	_, scheduled := s.NextScheduledTime()
+	assert.False(t, scheduled, "an active duplicate must not keep the scheduler awake")
+}
+
+func TestRequeueInFlightIfOwned(t *testing.T) {
+	s := newTestStore(t)
+	now := time.Now().Truncate(time.Second)
+	s.now = func() time.Time { return now }
+	enqueueAndRequireInserted(t, s, testPayload("round-a", 0))
+	ready := s.TakeReadyBatch(1)
+	require.Len(t, ready, 1)
+
+	key := schedKey("round-a", 0, 1, 0)
+	require.True(t, s.requeueInFlightIfOwned("round-a", 0, 1, 0, ready[0].attemptID))
+	assert.NotContains(t, s.inFlight, key)
+	assert.Equal(t, scheduleSecond(now.Add(shareSystemRetryBackoff)), s.schedule[key])
+	assert.False(t, s.requeueInFlightIfOwned("round-a", 0, 1, 0, ready[0].attemptID), "fallback must be idempotent")
+
+	var state, attempts int
+	err := s.db.QueryRow("SELECT state, attempts FROM shares WHERE round_id = ?", "round-a").Scan(&state, &attempts)
+	require.NoError(t, err)
+	assert.Equal(t, int(ShareStateReceived), state)
+	assert.Zero(t, attempts)
+}
+
+func TestRequeueInFlightIfOwned_ExpiredRoundUsesBackoff(t *testing.T) {
+	s := newTestStore(t)
+	now := time.Now().Truncate(time.Second)
+	s.now = func() time.Time { return now }
+	enqueueAndRequireInserted(t, s, testPayload("round-a", 0))
+	_, err := s.db.Exec(
+		"UPDATE shares SET vote_end_time = ? WHERE round_id = ?",
+		uint64(now.Add(-time.Minute).Unix()), "round-a",
+	)
+	require.NoError(t, err)
+
+	key := schedKey("round-a", 0, 1, 0)
+	for cycle := range 3 {
+		ready := s.TakeReadyBatch(1)
+		require.Len(t, ready, 1, "cycle %d", cycle)
+		require.True(t, s.requeueInFlightIfOwned("round-a", 0, 1, 0, ready[0].attemptID), "cycle %d", cycle)
+
+		next, ok := s.NextScheduledTime()
+		require.True(t, ok, "cycle %d", cycle)
+		expected := scheduleSecond(now.Add(shareSystemRetryBackoff))
+		assert.Equal(t, expected, next, "cycle %d", cycle)
+		assert.True(t, next.After(now), "cycle %d must not remain immediately due", cycle)
+		assert.NotContains(t, s.inFlight, key)
+
+		now = next.Add(time.Second)
+	}
+
+	var state, attempts int
+	err = s.db.QueryRow("SELECT state, attempts FROM shares WHERE round_id = ?", "round-a").Scan(&state, &attempts)
+	require.NoError(t, err)
+	assert.Equal(t, int(ShareStateReceived), state)
+	assert.Zero(t, attempts)
+}
+
+func TestRequeueInFlightIfOwned_DoesNotReleaseLaterAttempt(t *testing.T) {
+	s := newTestStore(t)
+	now := time.Now().Truncate(time.Second)
+	s.now = func() time.Time { return now }
+	enqueueAndRequireInserted(t, s, testPayload("round-a", 0))
+
+	first := s.TakeReadyBatch(1)
+	require.Len(t, first, 1)
+	s.MarkRetry("round-a", 0, 1, 0)
+
+	now = now.Add(shareSystemRetryBackoff + time.Second)
+	second := s.TakeReadyBatch(1)
+	require.Len(t, second, 1)
+	require.NotEqual(t, first[0].attemptID, second[0].attemptID)
+
+	key := schedKey("round-a", 0, 1, 0)
+	assert.False(t, s.requeueInFlightIfOwned("round-a", 0, 1, 0, first[0].attemptID))
+	assert.Equal(t, second[0].attemptID, s.inFlight[key].attemptID)
+	assert.NotContains(t, s.schedule, key)
+
+	assert.True(t, s.requeueInFlightIfOwned("round-a", 0, 1, 0, second[0].attemptID))
+	assert.NotContains(t, s.inFlight, key)
+	assert.Contains(t, s.schedule, key)
+}
+
+func TestWorkerCompletionWithoutOwnerIsIgnored(t *testing.T) {
+	s := newTestStore(t)
+	enqueueAndRequireInserted(t, s, testPayload("round-a", 0))
+	require.Len(t, s.TakeReadyBatch(1), 1)
+	s.MarkRetry("round-a", 0, 1, 0)
+
+	// Duplicate and stale completions from the released ownership must not
+	// mutate or terminalize the pending row.
+	s.MarkSubmitted("round-a", 0, 1, 0)
+	s.MarkFailed("round-a", 0, 1, 0)
+	s.MarkRetry("round-a", 0, 1, 0)
+
+	var state, attempts int
+	err := s.db.QueryRow("SELECT state, attempts FROM shares WHERE round_id = ?", "round-a").Scan(&state, &attempts)
+	require.NoError(t, err)
+	assert.Equal(t, int(ShareStateReceived), state)
+	assert.Zero(t, attempts)
+	assert.Contains(t, s.schedule, schedKey("round-a", 0, 1, 0))
+}
+
+func TestTakeReadyBatch_RoundRobinAcrossCalls(t *testing.T) {
+	s := newTestStore(t)
+	for _, roundID := range []string{"round-a", "round-b", "round-c"} {
+		for i := range uint32(3) {
+			payload := testPayload(roundID, i)
+			payload.TreePosition = uint64(i)
+			enqueueAndRequireInserted(t, s, payload)
+		}
+	}
+
+	var got []string
+	seen := make(map[string]struct{})
+	for range 9 {
+		ready := s.TakeReadyBatch(1)
+		require.Len(t, ready, 1)
+		got = append(got, ready[0].Payload.VoteRoundID)
+		key := schedKey(
+			ready[0].Payload.VoteRoundID,
+			ready[0].Payload.EncShare.ShareIndex,
+			ready[0].Payload.ProposalID,
+			ready[0].Payload.TreePosition,
+		)
+		_, duplicate := seen[key]
+		assert.False(t, duplicate, "share dequeued more than once")
+		seen[key] = struct{}{}
+	}
+
+	assert.Equal(t, []string{
+		"round-a", "round-b", "round-c",
+		"round-a", "round-b", "round-c",
+		"round-a", "round-b", "round-c",
+	}, got)
+	assert.Len(t, seen, 9)
+	assert.Empty(t, s.TakeReady())
+}
+
+func TestTakeReadyBatch_RoundRobinWithinLargeBatch(t *testing.T) {
+	s := newTestStore(t)
+	for _, roundID := range []string{"round-a", "round-b", "round-c"} {
+		for i := range uint32(2) {
+			payload := testPayload(roundID, i)
+			payload.TreePosition = uint64(i)
+			enqueueAndRequireInserted(t, s, payload)
+		}
+	}
+
+	ready := s.TakeReadyBatch(5)
+	require.Len(t, ready, 5)
+	assert.Equal(t, []string{"round-a", "round-b", "round-c", "round-a", "round-b"}, []string{
+		ready[0].Payload.VoteRoundID,
+		ready[1].Payload.VoteRoundID,
+		ready[2].Payload.VoteRoundID,
+		ready[3].Payload.VoteRoundID,
+		ready[4].Payload.VoteRoundID,
+	})
+}
+
+func TestTakeReadyBatch_FreshRoundWithinOneRotation(t *testing.T) {
+	s := newTestStore(t)
+	for _, roundID := range []string{"round-a", "round-b"} {
+		for i := range uint32(3) {
+			payload := testPayload(roundID, i)
+			payload.TreePosition = uint64(i)
+			enqueueAndRequireInserted(t, s, payload)
+		}
+	}
+
+	first := s.TakeReadyBatch(1)
+	require.Len(t, first, 1)
+	require.Equal(t, "round-a", first[0].Payload.VoteRoundID)
+
+	fresh := testPayload("round-c", 0)
+	enqueueAndRequireInserted(t, s, fresh)
+	next := s.TakeReadyBatch(2)
+	require.Len(t, next, 2)
+	assert.Equal(t, "round-b", next[0].Payload.VoteRoundID)
+	assert.Equal(t, "round-c", next[1].Payload.VoteRoundID)
+}
+
+func TestTakeReadyBatch_ExcludesFutureRoundUntilDue(t *testing.T) {
+	s := newTestStore(t)
+	enqueueAndRequireInserted(t, s, testPayload("round-a", 0))
+	future := testPayload("round-b", 0)
+	future.SubmitAt = uint64(time.Now().Add(time.Hour).Unix())
+	enqueueAndRequireInserted(t, s, future)
+
+	ready := s.TakeReadyBatch(2)
+	require.Len(t, ready, 1)
+	assert.Equal(t, "round-a", ready[0].Payload.VoteRoundID)
+
+	s.mu.Lock()
+	s.schedule[schedKey("round-b", 0, 1, 0)] = time.Now().Add(-time.Second)
+	s.mu.Unlock()
+	ready = s.TakeReadyBatch(1)
+	require.Len(t, ready, 1)
+	assert.Equal(t, "round-b", ready[0].Payload.VoteRoundID)
+}
+
 func TestConcurrentEnqueueColdRound(t *testing.T) {
 	const enqueueCount = 100
 
@@ -220,6 +776,33 @@ func TestMarkSubmitted(t *testing.T) {
 	assert.Empty(t, blind, "primary_blind should be cleared")
 }
 
+func TestMarkSubmittedUpdateFailureRestoresReceivedSchedule(t *testing.T) {
+	s := newTestStore(t)
+	now := time.Now().Truncate(time.Second)
+	s.now = func() time.Time { return now }
+	enqueueAndRequireInserted(t, s, testPayload("round1", 0))
+	require.Len(t, s.TakeReadyBatch(1), 1)
+	_, err := s.db.Exec(`CREATE TRIGGER fail_completion BEFORE UPDATE OF state ON shares
+		WHEN OLD.state = 0 AND NEW.state = 2
+		BEGIN SELECT RAISE(ABORT, 'injected completion failure'); END`)
+	require.NoError(t, err)
+
+	s.MarkSubmitted("round1", 0, 1, 0)
+	key := schedKey("round1", 0, 1, 0)
+	assert.Equal(t, scheduleSecond(now.Add(shareSystemRetryBackoff)), s.schedule[key])
+	assert.NotContains(t, s.inFlight, key)
+	var state, attempts int
+	err = s.db.QueryRow("SELECT state, attempts FROM shares WHERE round_id = ?", "round1").Scan(&state, &attempts)
+	require.NoError(t, err)
+	assert.Equal(t, int(ShareStateReceived), state)
+	assert.Zero(t, attempts)
+
+	_, err = s.db.Exec("DROP TRIGGER fail_completion")
+	require.NoError(t, err)
+	now = now.Add(shareSystemRetryBackoff + time.Second)
+	require.Len(t, s.TakeReadyBatch(1), 1)
+}
+
 func TestMarkFailed_RetryAndPermanent(t *testing.T) {
 	s := newTestStore(t)
 
@@ -285,6 +868,8 @@ func TestMarkStalledRetry_BacksOffWithoutSpendingFailedAttempts(t *testing.T) {
 	s := newTestStore(t)
 	enqueueAndRequireInserted(t, s, testPayload("round1", 0))
 	key := schedKey("round1", 0, 1, 0)
+	now := time.Now()
+	s.now = func() time.Time { return now }
 
 	for retryCount, expected := range []time.Duration{
 		shareSystemRetryBackoff,
@@ -302,7 +887,7 @@ func TestMarkStalledRetry_BacksOffWithoutSpendingFailedAttempts(t *testing.T) {
 		next, ok := s.schedule[key]
 		s.mu.Unlock()
 		require.True(t, ok)
-		assert.WithinDuration(t, time.Now().Add(expected), next, 300*time.Millisecond)
+		assert.Equal(t, scheduleSecond(now.Add(expected)), next)
 
 		s.mu.Lock()
 		s.schedule[key] = time.Now().Add(-time.Second)
@@ -367,6 +952,63 @@ func TestMarkRetry_PreservesFailedAttempts(t *testing.T) {
 	assert.Equal(t, 5, share.Attempts)
 }
 
+func TestRetrySchedulesUseCommonSecondBucket(t *testing.T) {
+	s := newTestStore(t)
+	now := time.Now().Truncate(time.Second).Add(900 * time.Millisecond)
+	for i := range uint32(4) {
+		payload := testPayload("round1", i)
+		payload.TreePosition = uint64(i)
+		enqueueAndRequireInserted(t, s, payload)
+	}
+	ready := s.TakeReadyBatch(4)
+	require.Len(t, ready, 4)
+	s.now = func() time.Time { return now }
+
+	for _, share := range ready[:2] {
+		s.MarkRetry("round1", share.Payload.EncShare.ShareIndex, 1, share.Payload.TreePosition)
+	}
+	for _, share := range ready[2:] {
+		s.MarkFailed("round1", share.Payload.EncShare.ShareIndex, 1, share.Payload.TreePosition)
+	}
+
+	assert.Equal(t,
+		s.schedule[schedKey("round1", ready[0].Payload.EncShare.ShareIndex, 1, ready[0].Payload.TreePosition)],
+		s.schedule[schedKey("round1", ready[1].Payload.EncShare.ShareIndex, 1, ready[1].Payload.TreePosition)],
+	)
+	assert.Equal(t,
+		s.schedule[schedKey("round1", ready[2].Payload.EncShare.ShareIndex, 1, ready[2].Payload.TreePosition)],
+		s.schedule[schedKey("round1", ready[3].Payload.EncShare.ShareIndex, 1, ready[3].Payload.TreePosition)],
+	)
+}
+
+func TestMarkFailed_UpdateFailureRestoresReceivedSchedule(t *testing.T) {
+	s := newTestStore(t)
+	now := time.Now().Truncate(time.Second)
+	s.now = func() time.Time { return now }
+	payload := testPayload("round1", 0)
+	enqueueAndRequireInserted(t, s, payload)
+	require.Len(t, s.TakeReadyBatch(1), 1)
+	_, err := s.db.Exec(`CREATE TRIGGER fail_mark_failed BEFORE UPDATE OF state ON shares
+		WHEN OLD.state = 0 AND NEW.state = 0
+		BEGIN SELECT RAISE(ABORT, 'injected failure accounting error'); END`)
+	require.NoError(t, err)
+
+	s.MarkFailed("round1", 0, 1, 0)
+	key := schedKey("round1", 0, 1, 0)
+	assert.Equal(t, scheduleSecond(now.Add(shareSystemRetryBackoff)), s.schedule[key])
+	var state, attempts int
+	err = s.db.QueryRow("SELECT state, attempts FROM shares WHERE round_id = ?", "round1").Scan(&state, &attempts)
+	require.NoError(t, err)
+	assert.Equal(t, int(ShareStateReceived), state)
+	assert.Zero(t, attempts)
+	assert.NotContains(t, s.inFlight, key)
+
+	_, err = s.db.Exec("DROP TRIGGER fail_mark_failed")
+	require.NoError(t, err)
+	now = now.Add(shareSystemRetryBackoff + time.Second)
+	require.Len(t, s.TakeReadyBatch(1), 1, "retained received row must be taken again")
+}
+
 func TestMarkRetry_SchedulesUrgentlyNearVoteEnd(t *testing.T) {
 	now := time.Now()
 	voteEndTime := uint64(now.Add(5 * time.Second).Unix())
@@ -376,6 +1018,7 @@ func TestMarkRetry_SchedulesUrgentlyNearVoteEnd(t *testing.T) {
 	s, err := NewShareStore(":memory:", fetcher)
 	require.NoError(t, err)
 	defer s.Close()
+	s.now = func() time.Time { return now }
 
 	enqueueAndRequireInserted(t, s, testPayload("round1", 0))
 	ready := s.TakeReady()
@@ -386,7 +1029,7 @@ func TestMarkRetry_SchedulesUrgentlyNearVoteEnd(t *testing.T) {
 	next, ok := s.schedule[schedKey("round1", 0, 1, 0)]
 	s.mu.Unlock()
 	require.True(t, ok)
-	assert.WithinDuration(t, time.Now().Add(shareSystemRetryUrgentBackoff), next, 300*time.Millisecond)
+	assert.Equal(t, scheduleSecond(nextShareSystemRetryTime(now, voteEndTime)), next)
 }
 
 func TestMarkRetry_SchedulesUrgentlyWhenBackoffWouldLeaveLittleTime(t *testing.T) {
@@ -398,6 +1041,7 @@ func TestMarkRetry_SchedulesUrgentlyWhenBackoffWouldLeaveLittleTime(t *testing.T
 	s, err := NewShareStore(":memory:", fetcher)
 	require.NoError(t, err)
 	defer s.Close()
+	s.now = func() time.Time { return now }
 
 	enqueueAndRequireInserted(t, s, testPayload("round1", 0))
 	ready := s.TakeReady()
@@ -408,25 +1052,64 @@ func TestMarkRetry_SchedulesUrgentlyWhenBackoffWouldLeaveLittleTime(t *testing.T
 	next, ok := s.schedule[schedKey("round1", 0, 1, 0)]
 	s.mu.Unlock()
 	require.True(t, ok)
-	assert.WithinDuration(t, time.Now().Add(shareSystemRetryUrgentBackoff), next, 300*time.Millisecond)
+	assert.Equal(t, scheduleSecond(nextShareSystemRetryTime(now, voteEndTime)), next)
 }
 
 func TestMarkRetry_UsesBackoffBeforeVoteEnd(t *testing.T) {
 	s := newTestStore(t)
+	now := time.Now()
+	s.now = func() time.Time { return now }
 
 	enqueueAndRequireInserted(t, s, testPayload("round1", 0))
 	ready := s.TakeReady()
 	require.Len(t, ready, 1)
 
-	before := time.Now()
 	s.MarkRetry("round1", 0, 1, 0)
 
 	s.mu.Lock()
 	next, ok := s.schedule[schedKey("round1", 0, 1, 0)]
 	s.mu.Unlock()
 	require.True(t, ok)
-	assert.True(t, next.After(before.Add(shareSystemRetryBackoff-200*time.Millisecond)))
-	assert.True(t, next.Before(before.Add(shareSystemRetryBackoff+200*time.Millisecond)))
+	assert.Equal(t, scheduleSecond(now.Add(shareSystemRetryBackoff)), next)
+}
+
+func TestMarkRetry_PreservesSubsecondBackoffNearVoteEnd(t *testing.T) {
+	now := time.Unix(1000, 900*int64(time.Millisecond))
+	voteEndTime := uint64(now.Add(100 * time.Millisecond).Unix())
+	fetcher := func(roundID string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: uint64(now.Add(-time.Hour).Unix()), VoteEndTime: voteEndTime}, nil
+	}
+
+	tests := []struct {
+		name              string
+		stalledRetryCount uint8
+	}{
+		{name: "system retry"},
+		{name: "stalled retry", stalledRetryCount: 1},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			s, err := NewShareStore(":memory:", fetcher)
+			require.NoError(t, err)
+			defer s.Close()
+			s.now = func() time.Time { return now }
+
+			enqueueAndRequireInserted(t, s, testPayload("round1", 0))
+			require.Len(t, s.TakeReady(), 1)
+			if test.stalledRetryCount == 0 {
+				s.MarkRetry("round1", 0, 1, 0)
+			} else {
+				s.MarkStalledRetry("round1", 0, 1, 0, test.stalledRetryCount)
+			}
+
+			next, ok := s.NextScheduledTime()
+			require.True(t, ok)
+			assert.True(t, next.After(now), "retry must retain a positive backoff")
+			assert.Equal(t, now.Add(50*time.Millisecond), next)
+			assert.Empty(t, s.TakeReady(), "retry must not be immediately redispatched")
+		})
+	}
 }
 
 func TestNextShareSystemRetryTime_StaysBeforeDeadline(t *testing.T) {
@@ -844,6 +1527,141 @@ func TestConflictingDuplicateEnqueue(t *testing.T) {
 	assert.Equal(t, 1, status["round1"].Total)
 }
 
+func TestEnqueue_ReplacesUnownedCorruptRow(t *testing.T) {
+	s := newTestStore(t)
+	payload := testPayload("round1", 0)
+	enqueueAndRequireInserted(t, s, payload)
+	_, err := s.db.Exec(
+		"UPDATE shares SET share_comms = 'not-json', attempts = 4 WHERE round_id = ?",
+		payload.VoteRoundID,
+	)
+	require.NoError(t, err)
+
+	result, err := s.Enqueue(payload)
+	require.NoError(t, err)
+	assert.Equal(t, EnqueueInserted, result)
+	assert.Len(t, s.Status(), 1)
+	assert.Equal(t, 1, s.Status()[payload.VoteRoundID].Total)
+
+	repaired, ok := s.loadShare(payload.VoteRoundID, payload.EncShare.ShareIndex, payload.ProposalID, payload.TreePosition)
+	require.True(t, ok)
+	assert.True(t, payloadEqual(repaired.Payload, payload))
+	assert.Equal(t, ShareStateReceived, repaired.State)
+	assert.Zero(t, repaired.Attempts)
+	assert.Contains(t, s.schedule, schedKey("round1", 0, 1, 0))
+}
+
+func TestEnqueue_ReplacesTerminalizedCorruptRow(t *testing.T) {
+	s := newTestStore(t)
+	payload := testPayload("round1", 0)
+	enqueueAndRequireInserted(t, s, payload)
+	_, err := s.db.Exec("UPDATE shares SET share_comms = 'not-json' WHERE round_id = ?", payload.VoteRoundID)
+	require.NoError(t, err)
+	assert.Empty(t, s.TakeReadyBatch(1))
+
+	var state int
+	err = s.db.QueryRow("SELECT state FROM shares WHERE round_id = ?", payload.VoteRoundID).Scan(&state)
+	require.NoError(t, err)
+	require.Equal(t, int(ShareStateFailed), state)
+
+	result, err := s.Enqueue(payload)
+	require.NoError(t, err)
+	assert.Equal(t, EnqueueInserted, result)
+	ready := s.TakeReadyBatch(1)
+	require.Len(t, ready, 1)
+	assert.True(t, payloadEqual(ready[0].Payload, payload))
+	assert.Zero(t, ready[0].Attempts)
+}
+
+func TestEnqueue_DoesNotReplaceActiveCorruptRow(t *testing.T) {
+	s := newTestStore(t)
+	payload := testPayload("round1", 0)
+	enqueueAndRequireInserted(t, s, payload)
+	require.Len(t, s.TakeReadyBatch(1), 1)
+	key := schedKey("round1", 0, 1, 0)
+	_, err := s.db.Exec("UPDATE shares SET share_comms = 'not-json' WHERE round_id = ?", payload.VoteRoundID)
+	require.NoError(t, err)
+
+	result, err := s.Enqueue(payload)
+	require.NoError(t, err)
+	assert.Equal(t, EnqueueDuplicate, result)
+	assert.Contains(t, s.inFlight, key)
+	assert.NotContains(t, s.schedule, key)
+
+	s.MarkSubmitted("round1", 0, 1, 0)
+	var state int
+	err = s.db.QueryRow("SELECT state FROM shares WHERE round_id = ?", payload.VoteRoundID).Scan(&state)
+	require.NoError(t, err)
+	assert.Equal(t, int(ShareStateSubmitted), state)
+}
+
+func TestEnqueue_DoesNotResurrectSubmittedCorruptRow(t *testing.T) {
+	s := newTestStore(t)
+	payload := testPayload("round1", 0)
+	enqueueAndRequireInserted(t, s, payload)
+	require.Len(t, s.TakeReadyBatch(1), 1)
+	s.MarkSubmitted("round1", 0, 1, 0)
+	_, err := s.db.Exec("UPDATE shares SET share_comms = 'not-json' WHERE round_id = ?", payload.VoteRoundID)
+	require.NoError(t, err)
+
+	result, err := s.Enqueue(payload)
+	require.NoError(t, err)
+	assert.Equal(t, EnqueueDuplicate, result)
+	assert.NotContains(t, s.schedule, schedKey("round1", 0, 1, 0))
+	assert.Equal(t, 1, s.Status()[payload.VoteRoundID].Submitted)
+}
+
+func TestEnqueue_DoesNotReplaceCorruptRowWithUnreadableState(t *testing.T) {
+	s := newTestStore(t)
+	payload := testPayload("round1", 0)
+	enqueueAndRequireInserted(t, s, payload)
+	key := schedKey("round1", 0, 1, 0)
+	scheduledBefore := s.schedule[key]
+	_, err := s.db.Exec(
+		"UPDATE shares SET share_comms = 'not-json', state = '2x' WHERE round_id = ?",
+		payload.VoteRoundID,
+	)
+	require.NoError(t, err)
+
+	result, err := s.Enqueue(payload)
+	require.NoError(t, err)
+	assert.Equal(t, EnqueueConflict, result)
+	assert.Equal(t, scheduledBefore, s.schedule[key])
+	assert.Empty(t, s.inFlight)
+
+	var state, comms string
+	err = s.db.QueryRow("SELECT state, share_comms FROM shares WHERE round_id = ?", payload.VoteRoundID).Scan(&state, &comms)
+	require.NoError(t, err)
+	assert.Equal(t, "2x", state)
+	assert.Equal(t, "not-json", comms)
+}
+
+func TestEnqueue_CorruptRowReplacementFailurePreservesRow(t *testing.T) {
+	s := newTestStore(t)
+	payload := testPayload("round1", 0)
+	enqueueAndRequireInserted(t, s, payload)
+	_, err := s.db.Exec("UPDATE shares SET share_comms = 'not-json' WHERE round_id = ?", payload.VoteRoundID)
+	require.NoError(t, err)
+	assert.Empty(t, s.TakeReadyBatch(1))
+	_, err = s.db.Exec(`CREATE TRIGGER fail_corrupt_replacement BEFORE UPDATE ON shares
+		WHEN OLD.state = 3 AND NEW.state = 0
+		BEGIN SELECT RAISE(ABORT, 'injected replacement failure'); END`)
+	require.NoError(t, err)
+
+	result, err := s.Enqueue(payload)
+	require.Error(t, err)
+	assert.Equal(t, EnqueueConflict, result)
+	assert.Contains(t, err.Error(), "replace corrupt share")
+	assert.NotContains(t, s.schedule, schedKey("round1", 0, 1, 0))
+
+	var state int
+	var comms string
+	err = s.db.QueryRow("SELECT state, share_comms FROM shares WHERE round_id = ?", payload.VoteRoundID).Scan(&state, &comms)
+	require.NoError(t, err)
+	assert.Equal(t, int(ShareStateFailed), state)
+	assert.Equal(t, "not-json", comms)
+}
+
 func TestSameShareIndexDifferentProposals(t *testing.T) {
 	s := newTestStore(t)
 
@@ -910,20 +1728,45 @@ func TestRecovery(t *testing.T) {
 
 	enqueueAndRequireInserted(t, s1, testPayload("round1", 0))
 
-	// Take the share (moves to Witnessed state).
+	// Take the share. Ownership is process-local and durable state stays Received.
 	ready := s1.TakeReady()
 	require.Len(t, ready, 1)
+	share, ok := s1.loadShare("round1", 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, ShareStateReceived, share.State)
 
 	// Close without marking submitted (simulates crash).
 	s1.Close()
 
-	// Reopen: recovery should reset Witnessed → Received with same submit_at.
+	// Reopen: recovery schedules the still-Received row with the same submit_at.
 	s2, err := NewShareStore(dbPath, fetcher)
 	require.NoError(t, err)
 	defer s2.Close()
 
 	ready = s2.TakeReady()
 	assert.Len(t, ready, 1, "recovered share should be ready again")
+}
+
+func TestRecovery_ScanFailureDoesNotSilentlyStrandShare(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "helper_test.db")
+	now := uint64(time.Now().Unix())
+	fetcher := func(string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: now, VoteEndTime: now + testVoteEndOffset}, nil
+	}
+	s, err := NewShareStore(dbPath, fetcher)
+	require.NoError(t, err)
+	enqueueAndRequireInserted(t, s, testPayload("round1", 0))
+	require.NoError(t, s.Close())
+
+	db, err := sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+	_, err = db.Exec("UPDATE shares SET submit_at = 'invalid'")
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	_, err = NewShareStore(dbPath, fetcher)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "scan recoverable share")
 }
 
 func TestRecovery_FutureSubmitAt(t *testing.T) {
@@ -950,6 +1793,41 @@ func TestRecovery_FutureSubmitAt(t *testing.T) {
 
 	ready := s2.TakeReady()
 	assert.Empty(t, ready, "share with future submit_at should not be ready")
+}
+
+func TestRecovery_PreservesClampedAndOriginalSubmitAt(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "helper_test.db")
+	now := uint64(time.Now().Unix())
+	requested := now - 600
+	fetcher := func(string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: now - oneHourSecs, VoteEndTime: now + oneHourSecs}, nil
+	}
+
+	s1, err := NewShareStore(dbPath, fetcher)
+	require.NoError(t, err)
+	payload := testPayload("round1", 0)
+	payload.SubmitAt = requested
+	enqueueAndRequireInserted(t, s1, payload)
+
+	var effective uint64
+	err = s1.db.QueryRow("SELECT submit_at FROM shares WHERE round_id = ?", payload.VoteRoundID).Scan(&effective)
+	require.NoError(t, err)
+	require.Greater(t, effective, requested)
+	require.NoError(t, s1.Close())
+
+	s2, err := NewShareStore(dbPath, fetcher)
+	require.NoError(t, err)
+	defer s2.Close()
+
+	ready := s2.TakeReadyBatch(1)
+	require.Len(t, ready, 1)
+	assert.Equal(t, effective, ready[0].Payload.SubmitAt)
+	s2.MarkRetry(payload.VoteRoundID, payload.EncShare.ShareIndex, payload.ProposalID, payload.TreePosition)
+	exported, err := s2.ExportQueue(payload.VoteRoundID, time.Now())
+	require.NoError(t, err)
+	require.Len(t, exported.Rows, 1)
+	assert.Equal(t, effective, exported.Rows[0].SubmitAt)
+	assert.Equal(t, requested, exported.Rows[0].OriginalSubmitAt)
 }
 
 func TestEnqueue_SubmitAtValidation(t *testing.T) {
@@ -991,7 +1869,154 @@ func TestEnqueue_SubmitAtValidation(t *testing.T) {
 		result, err := s.Enqueue(p)
 		require.NoError(t, err)
 		assert.Equal(t, EnqueueInserted, result)
+
+		var submitAt, originalSubmitAt uint64
+		err = s.db.QueryRow(
+			"SELECT submit_at, original_submit_at FROM shares WHERE round_id = ?",
+			p.VoteRoundID,
+		).Scan(&submitAt, &originalSubmitAt)
+		require.NoError(t, err)
+		assert.Equal(t, p.SubmitAt, submitAt)
+		assert.Equal(t, p.SubmitAt, originalSubmitAt)
 	})
+}
+
+func TestEnqueue_ClampsPastSubmitAtToArrival(t *testing.T) {
+	now := uint64(time.Now().Unix())
+	requested := now - 600
+	store, err := NewShareStore(":memory:", func(string) (RoundInfo, error) {
+		return RoundInfo{CreatedAtTime: now - oneHourSecs, VoteEndTime: now + oneHourSecs}, nil
+	})
+	require.NoError(t, err)
+	defer store.Close()
+
+	payload := testPayload("round-past", 0)
+	payload.SubmitAt = requested
+	result, err := store.Enqueue(payload)
+	require.NoError(t, err)
+	require.Equal(t, EnqueueInserted, result)
+
+	var submitAt, originalSubmitAt, receivedAt uint64
+	err = store.db.QueryRow(
+		"SELECT submit_at, original_submit_at, received_at FROM shares WHERE round_id = ?",
+		payload.VoteRoundID,
+	).Scan(&submitAt, &originalSubmitAt, &receivedAt)
+	require.NoError(t, err)
+	assert.Equal(t, requested, originalSubmitAt)
+	assert.Equal(t, receivedAt, submitAt)
+	assert.GreaterOrEqual(t, receivedAt, now)
+
+	ready := store.TakeReadyBatch(1)
+	require.Len(t, ready, 1)
+	assert.Equal(t, submitAt, ready[0].Payload.SubmitAt)
+
+	// The stored effective timestamp differs from the request, but an exact
+	// payload retry remains idempotent.
+	result, err = store.Enqueue(payload)
+	require.NoError(t, err)
+	assert.Equal(t, EnqueueDuplicate, result)
+}
+
+func TestEnqueue_ImmediateAndClampedShareScheduleBucket(t *testing.T) {
+	s := newTestStore(t)
+	now := time.Now().Add(time.Second).Truncate(time.Second).Add(987_654_321)
+	s.now = func() time.Time { return now }
+	immediate := testPayload("round-a", 0)
+	clamped := testPayload("round-a", 1)
+	clamped.TreePosition = 1
+	clamped.SubmitAt = uint64(now.Add(-time.Hour).Unix())
+	enqueueAndRequireInserted(t, s, immediate)
+	enqueueAndRequireInserted(t, s, clamped)
+
+	s.mu.Lock()
+	immediateAt := s.schedule[schedKey("round-a", 0, 1, 0)]
+	clampedAt := s.schedule[schedKey("round-a", 1, 1, 1)]
+	s.mu.Unlock()
+	assert.Equal(t, time.Unix(now.Unix(), 0), immediateAt)
+	assert.Equal(t, immediateAt, clampedAt)
+}
+
+func TestTakeReadyBatch_EqualSecondUsesOpaqueRank(t *testing.T) {
+	s := newTestStore(t)
+	s.schedulingSecret = [32]byte{1, 2, 3, 4}
+	now := time.Unix(2_000_000_000, 500)
+	s.now = func() time.Time { return now }
+
+	const count = 12
+	keys := make([]string, 0, count)
+	for i := range uint32(count) {
+		payload := testPayload("round-a", i)
+		payload.TreePosition = uint64(i)
+		enqueueAndRequireInserted(t, s, payload)
+		keys = append(keys, schedKey("round-a", i, 1, uint64(i)))
+	}
+	insertionOrder := append([]string(nil), keys...)
+	sort.Slice(keys, func(i, j int) bool {
+		macI := hmac.New(sha256.New, s.schedulingSecret[:])
+		_, err := macI.Write([]byte("helper-schedule-v1:" + keys[i]))
+		require.NoError(t, err)
+		macJ := hmac.New(sha256.New, s.schedulingSecret[:])
+		_, err = macJ.Write([]byte("helper-schedule-v1:" + keys[j]))
+		require.NoError(t, err)
+		return bytes.Compare(macI.Sum(nil), macJ.Sum(nil)) < 0
+	})
+	assert.NotEqual(t, insertionOrder, keys, "fixed secret must not restore insertion order")
+
+	ready := s.TakeReadyBatch(count)
+	require.Len(t, ready, count)
+	for i, share := range ready {
+		assert.Equal(t, keys[i], schedKey(
+			share.Payload.VoteRoundID,
+			share.Payload.EncShare.ShareIndex,
+			share.Payload.ProposalID,
+			share.Payload.TreePosition,
+		))
+	}
+}
+
+func TestEnqueue_LaterSecondCannotJumpEarlierImmediate(t *testing.T) {
+	s := newTestStore(t)
+	now := time.Now().Truncate(time.Second)
+	s.now = func() time.Time { return now }
+	first := testPayload("round-a", 0)
+	enqueueAndRequireInserted(t, s, first)
+
+	now = now.Add(time.Second)
+	second := testPayload("round-a", 1)
+	second.TreePosition = 1
+	second.SubmitAt = uint64(now.Add(-time.Hour).Unix())
+	enqueueAndRequireInserted(t, s, second)
+
+	ready := s.TakeReadyBatch(2)
+	require.Len(t, ready, 2)
+	assert.Equal(t, uint32(0), ready[0].Payload.EncShare.ShareIndex)
+	assert.Equal(t, uint32(1), ready[1].Payload.EncShare.ShareIndex)
+}
+
+func TestRecovery_ImmediateRowsShareOneOpaqueBucket(t *testing.T) {
+	s := newTestStore(t)
+	for i := range uint32(3) {
+		payload := testPayload("round-a", i)
+		payload.TreePosition = uint64(i)
+		enqueueAndRequireInserted(t, s, payload)
+	}
+	s.schedule = make(map[string]time.Time)
+	base := time.Unix(2_000_000_000, 0)
+	calls := 0
+	s.now = func() time.Time {
+		calls++
+		return base.Add(time.Duration(calls) * time.Second)
+	}
+	require.NoError(t, s.recover())
+	require.Equal(t, 1, calls)
+
+	var bucket time.Time
+	for _, at := range s.schedule {
+		if bucket.IsZero() {
+			bucket = at
+		}
+		assert.Equal(t, bucket, at)
+	}
 }
 
 func TestPurgeRounds(t *testing.T) {
@@ -1417,6 +2442,17 @@ func TestExportQueueIncludesTerminalRows(t *testing.T) {
 	assert.True(t, sawSubmitted)
 }
 
+func TestExportQueueRejectsActiveRound(t *testing.T) {
+	s := newTestStore(t)
+	enqueueAndRequireInserted(t, s, testPayload("round1", 0))
+	require.Len(t, s.TakeReadyBatch(1), 1)
+
+	_, err := s.ExportQueue("round1", time.Now())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "worker is active")
+	assert.Equal(t, 1, s.Status()["round1"].Processing)
+}
+
 func TestExportQueueIncludesFailedRowsWithWitnessMaterial(t *testing.T) {
 	s := newTestStore(t)
 
@@ -1740,6 +2776,63 @@ func TestImportQueueForceReadyReschedulesDuplicate(t *testing.T) {
 	assert.Equal(t, 0, result.Inserted)
 	assert.Equal(t, 1, result.Duplicates)
 	assert.Equal(t, 0, result.Conflicts)
+}
+
+func TestImportQueueForceReadyPreservesInFlightOwnership(t *testing.T) {
+	payload := testPayload("round1", 0)
+	export := QueueExport{
+		Version: QueueExportVersion,
+		RoundID: "round1",
+		Rows: []QueueExportRow{
+			queueExportRowFromPayload(payload, ShareStateReceived, 0),
+		},
+	}
+	dest := newTestStore(t)
+
+	result, err := dest.ImportQueue(export, QueueImportOptions{})
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Inserted)
+	require.Len(t, dest.TakeReadyBatch(1), 1)
+	key := schedKey("round1", 0, 1, 0)
+	owner := dest.inFlight[key]
+
+	result, err = dest.ImportQueue(export, QueueImportOptions{ForceReady: true})
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.Duplicates)
+	assert.Equal(t, owner, dest.inFlight[key])
+	assert.NotContains(t, dest.schedule, key)
+	assert.Empty(t, dest.TakeReadyBatch(1), "force-ready must not dispatch an active share twice")
+
+	dest.MarkSubmitted("round1", 0, 1, 0)
+	share, ok := dest.loadShare("round1", 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, ShareStateSubmitted, share.State)
+}
+
+func TestImportQueue_ImmediateRowsShareOneOpaqueBucket(t *testing.T) {
+	payload0 := testPayload("round1", 0)
+	payload1 := testPayload("round1", 1)
+	payload1.TreePosition = 1
+	export := QueueExport{
+		Version: QueueExportVersion,
+		RoundID: "round1",
+		Rows: []QueueExportRow{
+			queueExportRowFromPayload(payload0, ShareStateReceived, 0),
+			queueExportRowFromPayload(payload1, ShareStateReceived, 0),
+		},
+	}
+	dest := newTestStore(t)
+	now := time.Unix(2_000_000_000, 987_654_321)
+	dest.now = func() time.Time { return now }
+
+	result, err := dest.ImportQueue(export, QueueImportOptions{})
+	require.NoError(t, err)
+	require.Equal(t, 2, result.Inserted)
+	assert.Equal(t,
+		dest.schedule[schedKey("round1", 0, 1, 0)],
+		dest.schedule[schedKey("round1", 1, 1, 1)],
+	)
+	assert.Equal(t, time.Unix(now.Unix(), 0), dest.schedule[schedKey("round1", 0, 1, 0)])
 }
 
 func queueExportRowFromPayload(payload SharePayload, state ShareState, voteEndTime uint64) QueueExportRow {

@@ -203,8 +203,14 @@ func TestProcessorCleanupReconcilesCommitment(t *testing.T) {
 				for index := range uint32(3) {
 					enqueueAndRequireInserted(t, store, testPayload(roundID, index))
 				}
-				require.Len(t, store.TakeReady(), 3)
+				ready := store.TakeReady()
+				require.Len(t, ready, 3)
 				store.MarkSubmitted(roundID, 1, 1, 0)
+				for _, share := range ready {
+					if share.Payload.EncShare.ShareIndex != 1 {
+						store.MarkRetry(roundID, share.Payload.EncShare.ShareIndex, 1, 0)
+					}
+				}
 				_, err = store.db.Exec("UPDATE shares SET state = ?, received_at = ? WHERE share_index = 0", queue.state, end-20)
 				require.NoError(t, err)
 				// The submitted row is already scrubbed. The third row arrived

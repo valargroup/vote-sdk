@@ -23,6 +23,7 @@ import (
 type mockProver struct {
 	callCount atomic.Int32
 	err       error
+	panic     bool
 }
 
 func (m *mockProver) GenerateShareRevealProof(
@@ -36,6 +37,9 @@ func (m *mockProver) GenerateShareRevealProof(
 	roundID [32]byte,
 ) (proof []byte, nullifier [32]byte, treeRoot [32]byte, err error) {
 	m.callCount.Add(1)
+	if m.panic {
+		panic("injected prover panic")
+	}
 	if m.err != nil {
 		return nil, nullifier, treeRoot, m.err
 	}
@@ -706,6 +710,29 @@ func TestProcessor_ProcessBatch_ProofFailureSpendsFailedAttempt(t *testing.T) {
 	}
 }
 
+func TestProcessor_ProcessBatch_PanicResolvesOwnershipOnce(t *testing.T) {
+	store := newTestStore(t)
+	prover := &mockProver{panic: true}
+	tree := newMockTreeReader()
+	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("should not submit when proof generation panics")
+	}))
+	defer chainServer.Close()
+	proc := NewProcessor(store, tree, prover, NewChainSubmitter(chainServer.URL), log.NewNopLogger(), 1, nil)
+
+	roundID := hex.EncodeToString(make([]byte, 32))
+	enqueueAndRequireInserted(t, store, testPayload(roundID, 0))
+	proc.processBatch(context.Background())
+
+	key := schedKey(roundID, 0, 1, 0)
+	assert.NotContains(t, store.inFlight, key)
+	assert.Contains(t, store.schedule, key)
+	share, ok := store.loadShare(roundID, 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, ShareStateReceived, share.State)
+	assert.Equal(t, 1, share.Attempts, "panic recovery must spend exactly one failed attempt")
+}
+
 func TestHelperShareFailureFingerprintSeparatesQueueActions(t *testing.T) {
 	retry := helperShareFailureFingerprint("round-1", failureStageSubmitHTTP, "retry")
 	failed := helperShareFailureFingerprint("round-1", failureStageSubmitHTTP, "failed")
@@ -1049,6 +1076,7 @@ func TestProcessor_ProcessBatch_SystemSubmitErrorNearVoteEndRetriesUrgently(t *t
 	store, err := NewShareStore(":memory:", fetcher)
 	require.NoError(t, err)
 	defer store.Close()
+	store.now = func() time.Time { return now }
 
 	prover := &mockProver{}
 	tree := newMockTreeReader()
@@ -1080,7 +1108,7 @@ func TestProcessor_ProcessBatch_SystemSubmitErrorNearVoteEndRetriesUrgently(t *t
 	next, ok := store.schedule[schedKey(roundID, 0, 1, 0)]
 	store.mu.Unlock()
 	require.True(t, ok)
-	assert.WithinDuration(t, time.Now().Add(shareSystemRetryUrgentBackoff), next, 300*time.Millisecond)
+	assert.Equal(t, scheduleSecond(nextShareSystemRetryTime(now, voteEndTime)), next)
 }
 
 func TestProcessor_ProcessBatch_BadRequestSpendsFailedAttempt(t *testing.T) {
@@ -1647,17 +1675,19 @@ func TestProcessor_Run_MaintenanceWaitsForActiveWorkerBeforePurge(t *testing.T) 
 	go func() { done <- proc.Run(ctx) }()
 
 	// The share is active and still owns its witness when the round becomes
-	// closed. Maintenance must not purge it until the worker has completed.
+	// closed. Durable state remains Received; process-local ownership prevents
+	// redispatch and cleanup until the worker completes.
 	<-prover.started
 	closed.Store(true)
 	require.Eventually(t, func() bool {
-		share, ok := store.loadShare(closedRound, 0, 1, 0)
-		return ok && share.State == ShareStateWitnessed
+		return store.Status()[closedRound].Processing == 1
 	}, time.Second, 10*time.Millisecond)
 	share, ok := store.loadShare(closedRound, 0, 1, 0)
 	require.True(t, ok)
-	assert.Equal(t, ShareStateWitnessed, share.State)
+	assert.Equal(t, ShareStateReceived, share.State)
 	assert.NotEmpty(t, share.Payload.PrimaryBlind)
+	assert.Zero(t, store.PurgeRounds([]string{closedRound}))
+	assert.Equal(t, 1, store.Status()[closedRound].Total)
 
 	// Release the worker. Its duplicate result completes the share, after which
 	// the next maintenance pass may safely purge the closed round.
