@@ -153,6 +153,7 @@ func RegisterRoutesWithValidationGetters(
 		getPayloadValidator:   getPayloadValidator,
 		getChoiceValidator:    getChoiceValidator,
 		logger:                logger,
+		metrics:               defaultHelperMetrics,
 	}
 	recover := sentryhttp.New(sentryhttp.Options{Repanic: false}).Handle
 	router.Handle("/shielded-vote/v1/shares", recover(http.HandlerFunc(h.handleSubmitShare))).Methods("POST")
@@ -178,6 +179,7 @@ type apiHandler struct {
 	getPayloadValidator   func() SharePayloadValidator
 	getChoiceValidator    func() ShareChoiceValidator
 	logger                log.Logger
+	metrics               *helperMetrics
 }
 
 type submitResponse struct {
@@ -197,18 +199,24 @@ func jsonError(w http.ResponseWriter, msg string, code int) {
 }
 
 func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
+	observation := h.metrics.beginShareSubmission()
+	defer observation.finish()
+
+	stageStart := time.Now()
 	if !h.ensureIngressAllowed(w) {
-		recordShareSubmissionOutcome("unavailable", "ingress_disabled")
+		h.metrics.observeSubmissionStage("readiness", stageStart, ErrShareValidationUnavailable)
+		observation.recordOutcome("unavailable", "ingress_disabled")
 		return
 	}
+	h.metrics.observeSubmissionStage("readiness", stageStart, nil)
 	store := h.getStore()
 	if store == nil {
-		recordShareSubmissionOutcome("unavailable", "store")
+		observation.recordOutcome("unavailable", "store")
 		jsonError(w, "helper unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	if !h.authorizeSubmit(r) {
-		recordShareSubmissionOutcome("rejected", "unauthorized")
+		observation.recordOutcome("rejected", "unauthorized")
 		jsonError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -218,26 +226,39 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 
 	var payload SharePayload
 	decoder := json.NewDecoder(r.Body)
+	stageStart = time.Now()
 	if err := decoder.Decode(&payload); err != nil {
-		recordShareSubmissionOutcome("rejected", "invalid_json")
+		h.metrics.observeSubmissionStage("body_decode", stageStart, err)
+		observation.recordOutcome("rejected", "invalid_json")
 		jsonError(w, fmt.Sprintf("invalid JSON: %v", err), http.StatusBadRequest)
 		return
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		recordShareSubmissionOutcome("rejected", "invalid_json")
+		stageErr := err
+		if stageErr == nil {
+			stageErr = errors.New("multiple JSON objects")
+		}
+		h.metrics.observeSubmissionStage("body_decode", stageStart, stageErr)
+		observation.recordOutcome("rejected", "invalid_json")
 		jsonError(w, "invalid JSON: expected one object", http.StatusBadRequest)
 		return
 	}
+	h.metrics.observeSubmissionStage("body_decode", stageStart, nil)
 
+	stageStart = time.Now()
 	if err := validatePayload(&payload); err != nil {
-		recordShareSubmissionOutcome("rejected", "invalid_fields")
+		h.metrics.observeSubmissionStage("field_validation", stageStart, err)
+		observation.recordOutcome("rejected", "invalid_fields")
 		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	h.metrics.observeSubmissionStage("field_validation", stageStart, nil)
 
+	stageStart = time.Now()
 	if err := h.validatePayloadConsistency(&payload); err != nil {
+		h.metrics.observeSubmissionStage("payload_consistency", stageStart, err)
 		if errors.Is(err, ErrInvalidSharePayload) {
-			recordShareSubmissionOutcome("rejected", "inconsistent_payload")
+			observation.recordOutcome("rejected", "inconsistent_payload")
 			jsonError(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -246,7 +267,7 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 			CaptureErr(err, map[string]string{
 				"stage": "payload_consistency_check",
 			})
-			recordShareSubmissionOutcome("unavailable", "payload_validator")
+			observation.recordOutcome("unavailable", "payload_validator")
 			jsonError(w, "helper unavailable", http.StatusServiceUnavailable)
 			return
 		}
@@ -254,32 +275,36 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 		CaptureErr(err, map[string]string{
 			"stage": "payload_consistency_check",
 		})
-		recordShareSubmissionOutcome("failed", "payload_validator")
+		observation.recordOutcome("failed", "payload_validator")
 		jsonError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	h.metrics.observeSubmissionStage("payload_consistency", stageStart, nil)
 
 	if h.getRoundStatus != nil {
+		stageStart = time.Now()
 		checker := h.getRoundStatus()
 		if checker == nil {
 			err := fmt.Errorf("%w: round status checker", ErrShareValidationUnavailable)
+			h.metrics.observeSubmissionStage("round_status", stageStart, err)
 			h.logger.Error("round status checker unavailable", "error", err)
 			CaptureErr(err, map[string]string{
 				"stage": "round_status_check_ingress",
 			})
-			recordShareSubmissionOutcome("unavailable", "round_status_checker")
+			observation.recordOutcome("unavailable", "round_status_checker")
 			jsonError(w, "helper unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		active, err := checker(payload.VoteRoundID)
 		if err != nil {
+			h.metrics.observeSubmissionStage("round_status", stageStart, err)
 			if errors.Is(err, ErrUnknownRound) || errors.Is(err, types.ErrRoundNotFound) {
-				recordShareSubmissionOutcome("rejected", "unknown_round")
+				observation.recordOutcome("rejected", "unknown_round")
 				jsonError(w, ErrUnknownRound.Error(), http.StatusBadRequest)
 				return
 			}
 			if errors.Is(err, ErrCheckTxNotReady) {
-				recordShareSubmissionOutcome("unavailable", "check_tx_not_ready")
+				observation.recordOutcome("unavailable", "check_tx_not_ready")
 				jsonError(w, "helper unavailable", http.StatusServiceUnavailable)
 				return
 			}
@@ -287,20 +312,23 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 			CaptureErr(err, map[string]string{
 				"stage": "round_status_check_ingress",
 			})
-			recordShareSubmissionOutcome("failed", "round_status_check")
+			observation.recordOutcome("failed", "round_status_check")
 			jsonError(w, "internal error", http.StatusInternalServerError)
 			return
 		}
+		h.metrics.observeSubmissionStage("round_status", stageStart, nil)
 		if !active {
-			recordShareSubmissionOutcome("rejected", "round_inactive")
+			observation.recordOutcome("rejected", "round_inactive")
 			jsonError(w, "voting round is not active", http.StatusConflict)
 			return
 		}
 	}
 
+	stageStart = time.Now()
 	if err := h.validateShareChoice(&payload); err != nil {
+		h.metrics.observeSubmissionStage("round_choice", stageStart, err)
 		if errors.Is(err, ErrInvalidRoundChoice) || errors.Is(err, ErrUnknownRound) || errors.Is(err, types.ErrRoundNotFound) {
-			recordShareSubmissionOutcome("rejected", "invalid_round_choice")
+			observation.recordOutcome("rejected", "invalid_round_choice")
 			jsonError(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -309,7 +337,7 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 			CaptureErr(err, map[string]string{
 				"stage": "round_choice_check_ingress",
 			})
-			recordShareSubmissionOutcome("unavailable", "choice_validator")
+			observation.recordOutcome("unavailable", "choice_validator")
 			jsonError(w, "helper unavailable", http.StatusServiceUnavailable)
 			return
 		}
@@ -317,17 +345,20 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 		CaptureErr(err, map[string]string{
 			"stage": "round_choice_check_ingress",
 		})
-		recordShareSubmissionOutcome("failed", "choice_validator")
+		observation.recordOutcome("failed", "choice_validator")
 		jsonError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	h.metrics.observeSubmissionStage("round_choice", stageStart, nil)
 
 	// Vote commitment cross-check: recompute the Poseidon VC hash from the
 	// payload and compare against the on-chain leaf at tree_position. This
 	// rejects fabricated shares before they enter the queue (microsecond cost).
+	stageStart = time.Now()
 	if err := h.verifyCommitment(&payload); err != nil {
+		h.metrics.observeSubmissionStage("commitment", stageStart, err)
 		if errors.Is(err, ErrInvalidCommitment) {
-			recordShareSubmissionOutcome("rejected", "invalid_commitment")
+			observation.recordOutcome("rejected", "invalid_commitment")
 			jsonError(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -336,7 +367,7 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 			CaptureErr(err, map[string]string{
 				"stage": "commitment_check",
 			})
-			recordShareSubmissionOutcome("unavailable", "commitment_validator")
+			observation.recordOutcome("unavailable", "commitment_validator")
 			jsonError(w, "helper unavailable", http.StatusServiceUnavailable)
 			return
 		}
@@ -344,10 +375,11 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 		CaptureErr(err, map[string]string{
 			"stage": "commitment_check",
 		})
-		recordShareSubmissionOutcome("failed", "commitment_check")
+		observation.recordOutcome("failed", "commitment_check")
 		jsonError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	h.metrics.observeSubmissionStage("commitment", stageStart, nil)
 
 	h.logger.Info("share received",
 		"round_id", payload.VoteRoundID,
@@ -356,15 +388,17 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 		"tree_position", payload.TreePosition,
 	)
 
+	stageStart = time.Now()
 	result, err := store.Enqueue(payload)
 	if err != nil {
+		h.metrics.observeSubmissionStage("enqueue", stageStart, err)
 		if errors.Is(err, ErrUnknownRound) {
-			recordShareSubmissionOutcome("rejected", "unknown_round")
+			observation.recordOutcome("rejected", "unknown_round")
 			jsonError(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		if errors.Is(err, ErrInvalidSubmitAt) {
-			recordShareSubmissionOutcome("rejected", "invalid_schedule")
+			observation.recordOutcome("rejected", "invalid_schedule")
 			jsonError(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -373,12 +407,13 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 			"round_id": payload.VoteRoundID,
 			"stage":    "enqueue",
 		})
-		recordShareSubmissionOutcome("failed", "enqueue")
+		observation.recordOutcome("failed", "enqueue")
 		jsonError(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	h.metrics.observeSubmissionStage("enqueue", stageStart, nil)
 	if result == EnqueueConflict {
-		recordShareSubmissionOutcome("rejected", "conflict")
+		observation.recordOutcome("rejected", "conflict")
 		jsonError(w, "conflicting share payload for round_id/share_index", http.StatusConflict)
 		return
 	}
@@ -398,9 +433,9 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 	status := "queued"
 	if result == EnqueueDuplicate {
 		status = "duplicate"
-		recordShareSubmissionOutcome("duplicate", "exact")
+		observation.recordOutcome("duplicate", "exact")
 	} else {
-		recordShareSubmissionOutcome("accepted", "queued")
+		observation.recordOutcome("accepted", "queued")
 	}
 	json.NewEncoder(w).Encode(submitResponse{Status: status})
 }
