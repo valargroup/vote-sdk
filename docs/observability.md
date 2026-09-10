@@ -191,6 +191,11 @@ share delayed by retry backoff is `not_yet_due` even when its original
 `submit_at` has passed. Histogram placement remains based on the persisted
 submit time and does not move during retries.
 
+`last_minute_start` marks the final 40% of the round, capped at six hours.
+Older shares target their final retry around this boundary with jitter. Shares
+first attempted inside this window can retry through its remainder, leaving a
+separate safety margin before the voting deadline.
+
 The benchmark-only authenticated `/shielded-vote/v1/queue-status` response
 exposes the same three fields per round. Its existing `pending` field remains
 the aggregate of all nonterminal shares for compatibility; normally,

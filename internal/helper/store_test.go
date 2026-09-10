@@ -605,11 +605,11 @@ func TestQueueSummaryRejectsTooManyBuckets(t *testing.T) {
 
 func TestQueueSummaryLastMinuteStartPolicy(t *testing.T) {
 	start := uint64(1700000000)
-	assert.Equal(t, start+6*60, queueSummaryLastMinuteStart(start, start+10*60))
-	assert.Equal(t, start+36*60, queueSummaryLastMinuteStart(start, start+60*60))
-	assert.Equal(t, start+2*3600-48*60, queueSummaryLastMinuteStart(start, start+2*3600))
-	assert.Equal(t, start+7*24*3600-6*3600, queueSummaryLastMinuteStart(start, start+7*24*3600))
-	assert.Equal(t, start, queueSummaryLastMinuteStart(start, start))
+	assert.Equal(t, start+6*60, lastMinuteWindowStart(start, start+10*60))
+	assert.Equal(t, start+36*60, lastMinuteWindowStart(start, start+60*60))
+	assert.Equal(t, start+2*3600-48*60, lastMinuteWindowStart(start, start+2*3600))
+	assert.Equal(t, start+7*24*3600-6*3600, lastMinuteWindowStart(start, start+7*24*3600))
+	assert.Equal(t, start, lastMinuteWindowStart(start, start))
 }
 
 func TestQueueSummaryAggregatesStatesByBucket(t *testing.T) {

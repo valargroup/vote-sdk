@@ -1950,7 +1950,7 @@ func TestProcessor_RestartHonorsRetryHeightAndCutoff(t *testing.T) {
 	ready := store.TakeReady()
 	require.Len(t, ready, 1)
 	start := time.Now()
-	plan := newRetryState(start, ready[0].VoteEndTime)
+	plan := newRetryState(start, uint64(start.Unix()), ready[0].VoteEndTime)
 	plan.NextSlot, plan.LastAttempt, plan.LastHeight = 1, start, 100
 	require.NoError(t, store.reserveProofAttempt(ready[0], plan))
 	store.MarkRetry(roundID, 0, 1, 0)

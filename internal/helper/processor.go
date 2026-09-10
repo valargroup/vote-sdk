@@ -699,7 +699,12 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	// ambiguous submissions consume the slot rather than repeating proof work.
 	now := p.now()
 	if retry == nil {
-		initial := newRetryState(now, share.VoteEndTime)
+		info, err := p.store.getRoundInfo(share.Payload.VoteRoundID)
+		if err != nil {
+			return retryableShareError("retry_schedule", fmt.Errorf("read round window: %w", err))
+		}
+		now = p.now()
+		initial := newRetryState(now, info.CreatedAtTime, share.VoteEndTime)
 		retry = &initial
 	}
 	slot, _ := retry.due(now, share.VoteEndTime)

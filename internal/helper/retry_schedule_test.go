@@ -17,8 +17,9 @@ func TestRetrySlots(t *testing.T) {
 		final time.Duration
 		want  []time.Duration
 	}{
-		{"seven days", 7*24*time.Hour - 10*time.Minute, []time.Duration{0, time.Minute, 10 * time.Minute, 48 * time.Hour, 7*24*time.Hour - 10*time.Minute}},
-		{"six hours", 6*time.Hour - 10*time.Minute, []time.Duration{0, time.Minute, 10 * time.Minute, 3 * time.Hour, 6*time.Hour - 10*time.Minute}},
+		{"seven-day round", 7*24*time.Hour - 6*time.Hour, []time.Duration{0, time.Minute, 10 * time.Minute, 48 * time.Hour, 7*24*time.Hour - 6*time.Hour}},
+		{"last six hours of a long round", 6*time.Hour - 10*time.Minute, []time.Duration{0, time.Minute, 10 * time.Minute, 3 * time.Hour, 6*time.Hour - 10*time.Minute}},
+		{"six-hour round", 216 * time.Minute, []time.Duration{0, time.Minute, 10 * time.Minute, 113 * time.Minute, 216 * time.Minute}},
 		{"short window", 200 * time.Second, []time.Duration{0, time.Minute, 130 * time.Second, 165 * time.Second, 200 * time.Second}},
 		{"too close", 15 * time.Second, []time.Duration{0, 15 * time.Second}},
 		{"no retry room", 5 * time.Second, []time.Duration{0}},
@@ -33,31 +34,46 @@ func TestRetrySlots(t *testing.T) {
 	}
 }
 
-func TestRetryFinalJitterAndBuffer(t *testing.T) {
-	start := time.Unix(1_800_000_000, 0)
-	for _, remaining := range []time.Duration{7 * 24 * time.Hour, 6 * time.Hour, 4 * time.Minute} {
-		t.Run(remaining.String(), func(t *testing.T) {
-			deadline := start.Add(remaining)
-			buffer := min(retrySafetyBuffer, max(retryMinBuffer, remaining/8))
-			cutoff := deadline.Add(-buffer)
-			jitter := min(retryFinalJitter, remaining/8)
+func TestFinalRetryWindow(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	for _, tc := range []struct {
+		name                             string
+		age, remaining, earliest, latest time.Duration
+	}{
+		{"seven-day round", 0, 7 * 24 * time.Hour, 7*24*time.Hour - 6*time.Hour - 5*time.Minute, 7*24*time.Hour - 6*time.Hour + 5*time.Minute},
+		{"six-hour round", 0, 6 * time.Hour, 211 * time.Minute, 221 * time.Minute},
+		{"at the six-hour window start", 7 * 24 * time.Hour, 6 * time.Hour, 345 * time.Minute, 355 * time.Minute},
+		{"inside the six-hour window", 7 * 24 * time.Hour, 2 * time.Hour, 105 * time.Minute, 115 * time.Minute},
+		{"just before window start", 7 * 24 * time.Hour, 6*time.Hour + time.Minute, 0, 6 * time.Minute},
+		{"four-minute round", 0, 4 * time.Minute, 129 * time.Second, 159 * time.Second},
+		{"last four minutes", 7 * 24 * time.Hour, 4 * time.Minute, 180 * time.Second, 210 * time.Second},
+		{"safety margin clips short round", 0, 31 * time.Second, 500 * time.Millisecond, time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			created := uint64(now.Add(-tc.age).Unix())
+			end := uint64(now.Add(tc.remaining).Unix())
+			earliest, latest := finalRetryWindow(now, created, end)
+			assert.Equal(t, now.Add(tc.earliest), earliest)
+			assert.Equal(t, now.Add(tc.latest), latest)
 			seen := make(map[time.Time]bool)
 			for range 32 {
-				state := newRetryState(start, uint64(deadline.Unix()))
-				require.Len(t, retryTimes(state.FirstAttempt, state.FinalAttempt), 5)
-				last := retryTimes(state.FirstAttempt, state.FinalAttempt)[4]
-				assert.Equal(t, cutoff, retryCutoff(state.FirstAttempt, uint64(deadline.Unix())))
-				assert.False(t, last.Before(cutoff.Add(-jitter)))
-				assert.False(t, last.After(cutoff))
-				seen[last] = true
+				state := newRetryState(now, created, end)
+				assert.False(t, state.FinalAttempt.Before(earliest))
+				assert.False(t, state.FinalAttempt.After(latest))
+				assert.False(t, state.FinalAttempt.After(retryCutoff(now, end)))
+				seen[state.FinalAttempt] = true
 			}
-			assert.Greater(t, len(seen), 1, "independent shares should not share one final time")
+			assert.Greater(t, len(seen), 1, "helpers and shares choose independent final times")
 		})
 	}
-	for _, end := range []uint64{0, uint64(start.Add(20 * time.Second).Unix()), uint64(start.Add(-time.Hour).Unix())} {
-		state := newRetryState(start, end)
-		assert.Equal(t, []time.Time{start}, retryTimes(state.FirstAttempt, state.FinalAttempt))
+	for _, end := range []uint64{0, uint64(now.Add(20 * time.Second).Unix()), uint64(now.Add(-time.Hour).Unix())} {
+		state := newRetryState(now, uint64(now.Unix()), end)
+		assert.Equal(t, []time.Time{now}, retryTimes(state.FirstAttempt, state.FinalAttempt))
 	}
+	// Migrated rows with no creation timestamp retain the deadline-based fallback.
+	earliest, latest := finalRetryWindow(now, 0, uint64(now.Add(7*24*time.Hour).Unix()))
+	assert.Equal(t, now.Add(7*24*time.Hour-15*time.Minute), earliest)
+	assert.Equal(t, now.Add(7*24*time.Hour-5*time.Minute), latest)
 }
 
 func TestRetryDueSkipsMissedSlotsAndHonorsCutoff(t *testing.T) {
@@ -99,7 +115,7 @@ func TestRetryReservationSurvivesRestartAndRejectsStaleWorker(t *testing.T) {
 	enqueueAndRequireInserted(t, store, payload)
 	ready := store.TakeReady()
 	require.Len(t, ready, 1)
-	state := newRetryState(start, ready[0].VoteEndTime)
+	state := newRetryState(start, uint64(start.Unix()), ready[0].VoteEndTime)
 	state.NextSlot, state.LastAttempt, state.LastHeight = 1, start, 100
 	require.NoError(t, store.reserveProofAttempt(ready[0], state))
 	require.Error(t, store.reserveProofAttempt(ready[0], state), "a stale worker cannot consume or reset another slot")

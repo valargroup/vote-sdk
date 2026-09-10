@@ -26,15 +26,40 @@ type retryState struct {
 
 // newRetryState records the first attempt and one random final retry time.
 // Intermediate retry times and the cutoff are derived rather than persisted.
-func newRetryState(now time.Time, voteEndTime uint64) retryState {
+func newRetryState(now time.Time, createdAtTime, voteEndTime uint64) retryState {
+	earliest, latest := finalRetryWindow(now, createdAtTime, voteEndTime)
+	final := earliest.Add(time.Duration(rand.Int64N(int64(latest.Sub(earliest)) + 1)))
+	return retryState{FirstAttempt: now, FinalAttempt: final}
+}
+
+// finalRetryWindow centers older shares' final retry on the start of the
+// round's last-minute window. Shares first attempted inside that window can
+// retry through its remainder, stopping before the inclusion safety margin.
+// Missing round creation metadata uses the same deadline-based fallback.
+func finalRetryWindow(now time.Time, createdAtTime, voteEndTime uint64) (earliest, latest time.Time) {
 	cutoff := retryCutoff(now, voteEndTime)
 	if cutoff.Equal(now) {
-		return retryState{FirstAttempt: now, FinalAttempt: now}
+		return now, now
 	}
 	remaining := time.Unix(int64(voteEndTime), 0).Sub(now)
 	jitter := min(retryFinalJitter, remaining/8, cutoff.Sub(now))
-	final := cutoff.Add(-time.Duration(rand.Int64N(int64(jitter) + 1)))
-	return retryState{FirstAttempt: now, FinalAttempt: final}
+	if createdAtTime > 0 && createdAtTime < voteEndTime {
+		windowStart := time.Unix(int64(lastMinuteWindowStart(createdAtTime, voteEndTime)), 0)
+		if now.Before(windowStart) {
+			if windowStart.After(cutoff) {
+				windowStart = cutoff
+			}
+			earliest, latest = windowStart.Add(-jitter/2), windowStart.Add(jitter/2)
+			if earliest.Before(now) {
+				earliest = now
+			}
+			if latest.After(cutoff) {
+				latest = cutoff
+			}
+			return earliest, latest
+		}
+	}
+	return cutoff.Add(-jitter), cutoff
 }
 
 // retryCutoff reserves time for proving and block inclusion. Late shares or

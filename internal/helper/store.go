@@ -1274,9 +1274,9 @@ func queueSummaryPolicyBucketSeconds(durationSeconds uint64) uint64 {
 	}
 }
 
-// queueSummaryLastMinuteStart returns the start of the final public summary
-// window. The window is 40% of the round duration, capped at 6 hours.
-func queueSummaryLastMinuteStart(createdAtTime, voteEndTime uint64) uint64 {
+// lastMinuteWindowStart is shared by retry scheduling and the public queue
+// summary. The final window is 40% of the round duration, capped at 6 hours.
+func lastMinuteWindowStart(createdAtTime, voteEndTime uint64) uint64 {
 	if voteEndTime <= createdAtTime {
 		return createdAtTime
 	}
@@ -1339,7 +1339,7 @@ func (s *ShareStore) QueueSummary(roundID string, now time.Time) (QueueSummary, 
 		CreatedAtTime:   info.CreatedAtTime,
 		VoteEndTime:     info.VoteEndTime,
 		GeneratedAt:     generatedAt,
-		LastMinuteStart: queueSummaryLastMinuteStart(info.CreatedAtTime, info.VoteEndTime),
+		LastMinuteStart: lastMinuteWindowStart(info.CreatedAtTime, info.VoteEndTime),
 		Buckets:         make([]QueueSummaryBucket, bucketCount),
 	}
 	for i := range summary.Buckets {

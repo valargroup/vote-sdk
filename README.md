@@ -462,23 +462,34 @@ so a crash can consume an attempt but cannot reset the budget.
 
 The first attempt honors the wallet-provided `submit_at` time. After that,
 retries target one minute, ten minutes, and two days after the first proof
-attempt, followed by a final retry randomly scheduled before the closing safety
-buffer. The buffer is one eighth of the remaining window, bounded between
-30 seconds and five minutes. Final jitter covers up to ten
-minutes before that buffer, reduced to one eighth of the window for short
-rounds. Each helper stores the first attempt time, chosen final retry time,
-progress, and last attempt time and height. Intermediate retry times and the
-cutoff are calculated from those inputs and the round deadline. The buffer
-allows time for proving, submission, and block inclusion but does not guarantee
-inclusion under congestion.
+attempt, followed by a jittered final retry. The existing last-minute window
+covers the final 40% of the round, capped at six hours. Shares first attempted
+before that window target its start for their final retry, with up to five
+minutes of jitter on either side. Shares first attempted inside the window can
+spread retries through the remaining time.
 
-When time is short, each intermediate retry is capped at halfway between the
-previous slot and the randomized final slot. Slots less than ten seconds apart
-are omitted. For example, with six hours remaining and a final draw ten minutes
-before close, the schedule is now, one minute, ten minutes, three hours, and
-five hours fifty minutes. With seven days remaining, the two-day slot fits.
-Shares arriving with 30 seconds or less remaining, or without a known deadline,
-get only one immediate attempt.
+A separate safety margin allows time for proving, submission, and block
+inclusion. It is one eighth of the time remaining at the first attempt, bounded
+between 30 seconds and five minutes. Late shares place the final retry within
+ten minutes before that margin. For short windows, jitter shrinks to one eighth
+of the remaining time and is clipped to keep attempts between now and the
+safety cutoff. The margin does not guarantee inclusion under congestion.
+
+Each helper stores the first attempt time, chosen final retry time, progress,
+and last attempt time and height. Intermediate times and the cutoff are derived
+from those inputs and the round deadline. Short windows cap each intermediate
+retry at halfway between the previous slot and the final slot, omitting slots
+less than ten seconds apart. Example times below are measured from the first
+attempt and use hypothetical jitter draws:
+
+| Round duration | Time left at first attempt | Attempt times |
+| --- | --- | --- |
+| 7 days | 7 days | Now, 1m, 10m, 2d, 6d 18h |
+| 6 hours | 6 hours | Now, 1m, 10m, 1h 53m, 3h 36m |
+| 7 days | 6 hours | Now, 1m, 10m, 3h, 5h 50m |
+
+Shares with 30 seconds or less remaining, or without a known deadline, get one
+immediate attempt. Missing round creation metadata uses the late-share fallback.
 
 Retries still require a newer committed block height. The helper skips missed
 slots after delays and keeps checking commitment between attempts and after the
