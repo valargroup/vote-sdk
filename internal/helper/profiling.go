@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"github.com/valargroup/vote-sdk/internal/httpdiagnostics"
 	"os"
 	"runtime"
 	"sync"
@@ -11,7 +12,7 @@ import (
 // helperDiagnosticsEnabled is evaluated when constructing the helper/store.
 // Production and unspecified environments cannot enable these diagnostics.
 func helperDiagnosticsEnabled() bool {
-	return os.Getenv("SENTRY_ENVIRONMENT") == "staging" && os.Getenv("SVOTE_HELPER_DIAGNOSTICS") == "1"
+	return httpdiagnostics.Enabled()
 }
 
 var diagnosticProfilingOnce sync.Once

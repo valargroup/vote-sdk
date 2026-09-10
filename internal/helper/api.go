@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/valargroup/vote-sdk/internal/httpdiagnostics"
 	"io"
 	"net/http"
 	"strings"
@@ -199,6 +200,7 @@ func jsonError(w http.ResponseWriter, msg string, code int) {
 }
 
 func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
+	httpdiagnostics.HandlerEntry(r.Context())
 	observation := h.metrics.beginShareSubmission()
 	defer observation.finish()
 

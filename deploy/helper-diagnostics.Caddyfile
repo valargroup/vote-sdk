@@ -13,22 +13,35 @@ http://127.0.0.1:18088 {
 		}
 	}
 	@diagnostic {
-		method POST
-		path /shielded-vote/v1/shares
+		method GET POST
+		path_regexp ^/shielded-vote/v1/(shares|status|delegate-vote|cast-vote|cast-vote-batch|delegate-and-cast-vote-batch|tx/[0-9a-fA-F]{64})$
 		header_regexp X-Vote-Request-ID ^[0-9a-f]{32}$
 	}
 	@ordinary {
 		not {
-			method POST
-			path /shielded-vote/v1/shares
+			method GET POST
+			path_regexp ^/shielded-vote/v1/(shares|status|delegate-vote|cast-vote|cast-vote-batch|delegate-and-cast-vote-batch|tx/[0-9a-fA-F]{64})$
 			header_regexp X-Vote-Request-ID ^[0-9a-f]{32}$
 		}
 	}
 	log_skip @ordinary
 	log_append @diagnostic request_id {http.request.header.X-Vote-Request-ID}
-	log_append @diagnostic route shares
-	log_append @diagnostic method POST
+	log_append @diagnostic method {http.request.method}
 	log_append @diagnostic protocol {http.request.proto}
+	@shares path /shielded-vote/v1/shares
+	log_append @shares route shares
+	@helper_status path /shielded-vote/v1/status
+	log_append @helper_status route helper_status
+	@delegate_vote path /shielded-vote/v1/delegate-vote
+	log_append @delegate_vote route delegate_vote
+	@cast_vote path /shielded-vote/v1/cast-vote
+	log_append @cast_vote route cast_vote
+	@cast_vote_batch path /shielded-vote/v1/cast-vote-batch
+	log_append @cast_vote_batch route cast_vote_batch
+	@delegate_and_cast_vote_batch path /shielded-vote/v1/delegate-and-cast-vote-batch
+	log_append @delegate_and_cast_vote_batch route delegate_and_cast_vote_batch
+	@chain_status path /shielded-vote/v1/tx/*
+	log_append @chain_status route chain_status
 	log_append @diagnostic upstream_duration_ms {http.reverse_proxy.upstream.duration_ms}
 	log_append @diagnostic upstream_headers_ms {http.reverse_proxy.upstream.latency_ms}
 }

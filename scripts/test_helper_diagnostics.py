@@ -28,6 +28,20 @@ class DiagnosticsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             module('helper-diagnostics-caddy').overlay(candidate,adapted)
 
+    def test_application_records_redact_json_and_console(self):
+        parser = module('helper-diagnostic-records').application_record
+        fields = {'message':'vote HTTP timing','request_id':'a'*32,'route':'shares','method':'POST','body_bytes':42,'body_complete':True,'response_write_us':7,'payload':'private','error':'private','url':'private'}
+        record = parser(json.dumps(fields))
+        self.assertEqual(record['response_write_us'],7)
+        self.assertTrue(record['body_complete'])
+        self.assertNotIn('private',json.dumps(record))
+        console = '12:00 INF vote HTTP phase request_id=' + 'b'*32 + ' route=chain_status phase=status_lookup duration_us=5 outcome=error error=private'
+        record = parser(console)
+        self.assertEqual(record['duration_us'],5)
+        self.assertNotIn('private',json.dumps(record))
+        self.assertIsNone(parser(console.replace('chain_status','private')))
+        self.assertIsNone(parser('ordinary message payload=private'))
+
     def test_analysis_exposes_missing_correlations(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -40,6 +54,44 @@ class DiagnosticsTests(unittest.TestCase):
             self.assertEqual(result['timings']['handler']['mean_ms'],10)
             self.assertEqual(result['timings']['caddy']['mean_ms'],15)
             self.assertNotIn('a'*32,json.dumps(result))
+
+    def test_correlated_boundaries_and_incomplete_capture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            diagnostic = {'request_id':'c'*32, 'route':'shares', 'protocol':'h2',
+                          'response_headers_us':3000000, 'connection_predates_request':True,
+                          'phase':'complete'}
+            (root/'round.observability.json').write_text(json.dumps({'records':[{'http_diagnostics':diagnostic}]}))
+            (root/'runtime-lag.json').write_text(json.dumps({'samples':[{'lag_us':12000}], 'dropped':2}))
+            records = [
+                {'caddy_access':{'request_id':'c'*32, 'duration':3.1, 'upstream_headers_ms':2000}},
+                {'server_timing':{'request_id':'c'*32, 'duration_us':10000}},
+                {'server_phase':{'request_id':'c'*32, 'phase':'broadcast', 'duration_us':8000}},
+                {'server_journal_coverage':{'unstructured':1}},
+                {'errors':['svoted:TimeoutError']},
+            ]
+            (root/'primary.jsonl').write_text('\n'.join(map(json.dumps, records))+'\n{truncated')
+            result = module('analyze-helper-diagnostics').analyze([root], root)
+            self.assertEqual(result['server_matched'], 1)
+            self.assertEqual(result['headers_at_least_2s'], 1)
+            self.assertEqual(result['timings']['headers_outside_upstream']['mean_ms'], 1000)
+            self.assertEqual(result['timings']['rpc_broadcast']['mean_ms'], 8)
+            self.assertEqual(result['timings']['runtime_lag']['mean_ms'], 12)
+            self.assertEqual(result['runtime_dropped_samples'], 2)
+            self.assertEqual(result['coverage']['malformed_capture_lines'], 1)
+            self.assertEqual(result['coverage']['unstructured_server_records'], 1)
+            self.assertEqual(result['groups']['shares/h2/existing']['requests'], 1)
+            self.assertNotIn('c'*32, json.dumps(result))
+
+    def test_nonfinite_timings_are_excluded(self):
+        analyzer = module('analyze-helper-diagnostics')
+        for value in ('NaN', 'Infinity', -1, None, 'unavailable'):
+            self.assertIsNone(analyzer.milliseconds(value))
+        self.assertEqual(analyzer.milliseconds('12.5'), 12.5)
+
+    def test_remote_collector_compiles_without_connecting(self):
+        collector = module('collect-helper-diagnostics')
+        compile(collector.REMOTE, '<remote collector>', 'exec')
 
 
 if __name__ == '__main__':

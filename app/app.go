@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/valargroup/vote-sdk/internal/httpdiagnostics"
 	"io"
 	"net/http"
 	"os"
@@ -359,6 +360,7 @@ func (app *SvoteApp) SimulationManager() *module.SimulationManager {
 
 // RegisterAPIRoutes registers all application module routes with the provided API server.
 func (app *SvoteApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIConfig) {
+	apiSvr.Router.Use(func(next http.Handler) http.Handler { return httpdiagnostics.Wrap(next, app.Logger()) })
 	app.App.RegisterAPIRoutes(apiSvr, apiConfig)
 	// Cosmos SDK appends its own /metrics route after RegisterAPIRoutes returns.
 	// Gorilla/mux selects this earlier route, and its DefaultGatherer contains

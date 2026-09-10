@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Capture one-second staging metrics over SSH without opening public ports.
 
-Run concurrently with stage-bench. Files contain aggregate metrics and host
-counters only. --profiles also captures a 15-second CPU profile and goroutine
+Run concurrently with stage-bench. Files contain aggregate metrics, host counters, and projected request timing
+events; request bodies and credentials are excluded. --profiles also captures a 15-second CPU profile and goroutine
 stacks on each helper; profiling is opt-in because it adds runtime overhead.
 """
 import argparse
@@ -13,7 +13,7 @@ from pathlib import Path
 import subprocess
 import time
 
-REMOTE = r'''
+REMOTE = Path(__file__).with_name('helper-diagnostic-records.py').read_text() + r'''
 import json, pathlib, sys, time, urllib.request, subprocess, re
 duration = int(sys.argv[1])
 prefixes = ('svote_helper_', 'svote_vote_tx_', 'go_', 'process_', 'caddy_http_', 'caddy_reverse_proxy_', 'cometbft_consensus_', 'tendermint_consensus_')
@@ -47,6 +47,27 @@ try:
             print(json.dumps({'caddy_access':{key:access[key] for key in fields if key in access}}),flush=True)
 except Exception as error:
     print(json.dumps({'capture_error':'journal:'+type(error).__name__}),flush=True)
+# Project structured or console diagnostic events before transport. Never export
+# arbitrary journal text, even when a diagnostic record cannot be parsed.
+try:
+    journal = subprocess.run(['journalctl','-u','svoted','--since','@'+str(int(wall_started)),'--no-pager','-o','json','--grep=vote HTTP (timing|phase)'],text=True,capture_output=True)
+    if journal.returncode not in (0,1) or (journal.returncode == 1 and journal.stderr.strip()):
+        raise RuntimeError('journal query failed')
+    counts = {'timing':0,'phase':0,'unstructured':0}
+    for line in journal.stdout.splitlines():
+        if not line.startswith('{'): continue
+        entry = json.loads(line)
+        record = application_record(entry.get('MESSAGE'))
+        if record is None:
+            counts['unstructured'] += 1
+            continue
+        kind = {'vote HTTP timing':'timing','vote HTTP phase':'phase'}[record.pop('event')]
+        counts[kind] += 1
+        print(json.dumps({'server_'+kind:record}),flush=True)
+    print(json.dumps({'server_journal_coverage':counts}),flush=True)
+except Exception as error:
+    print(json.dumps({'capture_error':'server_journal:'+type(error).__name__}),flush=True)
+
 '''
 
 

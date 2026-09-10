@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/valargroup/vote-sdk/internal/httpdiagnostics"
 	"io"
 	"log"
 	"net"
@@ -170,6 +171,7 @@ func (h *Handler) RegisterTxRoutes(router *mux.Router) {
 // --- Tx submission handlers ---
 
 func (h *Handler) handleDelegateVote(w http.ResponseWriter, r *http.Request) {
+	httpdiagnostics.HandlerEntry(r.Context())
 	if !h.ensureCryptoReady(w) {
 		return
 	}
@@ -181,6 +183,7 @@ func (h *Handler) handleDelegateVote(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleCastVote(w http.ResponseWriter, r *http.Request) {
+	httpdiagnostics.HandlerEntry(r.Context())
 	if !h.ensureCryptoReady(w) {
 		return
 	}
@@ -192,6 +195,7 @@ func (h *Handler) handleCastVote(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleCastVoteBatch(w http.ResponseWriter, r *http.Request) {
+	httpdiagnostics.HandlerEntry(r.Context())
 	if !h.ensureCryptoReady(w) {
 		return
 	}
@@ -203,6 +207,7 @@ func (h *Handler) handleCastVoteBatch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleDelegateAndCastVoteBatch(w http.ResponseWriter, r *http.Request) {
+	httpdiagnostics.HandlerEntry(r.Context())
 	if !h.ensureCryptoReady(w) {
 		return
 	}
@@ -405,6 +410,7 @@ func (h *Handler) queryTxByHash(ctx context.Context, txHash string) (*txStatusRe
 // or 404 if not yet included. Returns HTTP 422 if the TX was included but
 // failed during execution (code != 0).
 func (h *Handler) handleTxStatus(w http.ResponseWriter, r *http.Request) {
+	httpdiagnostics.HandlerEntry(r.Context())
 	vars := mux.Vars(r)
 	txHash := vars["hash"]
 	if txHash == "" {
@@ -412,7 +418,9 @@ func (h *Handler) handleTxStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	started := time.Now()
 	result, err := h.queryTxByHash(r.Context(), txHash)
+	httpdiagnostics.ObserveRPC(r.Context(), "status_lookup", started, err, 1)
 	if errors.Is(err, errTxNotFound) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
@@ -532,6 +540,7 @@ func (h *Handler) cometBroadcastTxSyncAttempt(ctx context.Context, txBytes []byt
 
 	start := time.Now()
 	result, err := h.cometBroadcastTxSync(attemptCtx, txBytes, txHash)
+	httpdiagnostics.ObserveRPC(ctx, "broadcast", start, err, attempt)
 	elapsed := time.Since(start)
 	cancel()
 
@@ -648,6 +657,7 @@ func (h *Handler) queryTxByHashWithSpan(ctx context.Context, txHash, msgType str
 
 	start := time.Now()
 	status, err := h.queryTxByHash(statusCtx, txHash)
+	httpdiagnostics.ObserveRPC(ctx, "status_lookup", start, err, attempt)
 	elapsed := time.Since(start)
 	cancel()
 

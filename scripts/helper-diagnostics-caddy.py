@@ -47,13 +47,22 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--snippet", type=Path, required=True)
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--replace-candidate", type=Path, help="Previously applied candidate; live config must match exactly")
+    parser.add_argument("--base-config", type=Path, help="Original config before the existing overlay")
     parser.add_argument("--out", type=Path, default=Path("/var/lib/caddy/helper-diagnostics"))
     args = parser.parse_args()
     if socket.gethostname() not in ("vote-primary-stage", "vote-secondary-stage"):
         parser.error("this runtime overlay is restricted to the two staging helpers")
     current = json.load(urllib.request.urlopen("http://127.0.0.1:2019/config/", timeout=10))
     adapted = json.loads(subprocess.check_output(["caddy", "adapt", "--adapter", "caddyfile", "--config", str(args.snippet)], stderr=subprocess.PIPE))
-    candidate = overlay(current, adapted)
+    if bool(args.replace_candidate) != bool(args.base_config):
+        parser.error("--replace-candidate and --base-config must be supplied together")
+    base = current
+    if args.replace_candidate:
+        if current != json.loads(args.replace_candidate.read_text()):
+            raise RuntimeError("live config no longer matches the previous candidate; refusing replacement")
+        base = json.loads(args.base_config.read_text())
+    candidate = overlay(base, adapted)
     args.out.mkdir(parents=True, exist_ok=True, mode=0o700)
     stamp = str(time.time_ns())
     backup = args.out / (stamp + "-before.json")

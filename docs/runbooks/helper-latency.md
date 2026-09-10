@@ -118,3 +118,61 @@ The overlay is a runtime diagnostic change, not a persistent Caddyfile or
 Terraform change. A normal service restart restores its configured Caddyfile.
 The filtered records use journald retention. Keep captures private and retain
 the configuration/revision and background queue load with each result.
+
+## Expanded application and chain capture
+
+The staging request-ID wrapper covers helper shares and status, chain delegate/cast
+submissions (including batch routes), and transaction-status lookups. It records
+router entry, handler entry, body completion, first response headers, response
+writes, and local CometBFT broadcast/status calls. `body_read_us` is elapsed time
+from router entry until the body is consumed, not accumulated time inside Read.
+All diagnostics still require both staging environment switches and a valid ID.
+
+The collector includes `server_timing` and `server_phase` events projected from JSON or console
+journals to fixed safe fields. It does not export other application log messages,
+request bodies, transaction hashes, URLs, or error text. The analyzer reports
+application correlation coverage and phase distributions alongside proxy timing.
+
+To replace an existing diagnostic Caddy overlay, supply both
+`--replace-candidate <previous-candidate.json>` and
+`--base-config <original-before-overlay.json>`. The script refuses replacement
+unless live configuration exactly matches that candidate, validates the new
+configuration, and saves the currently active overlay as the rollback target.
+
+## Correlated report and coverage
+
+The collector exports only whitelisted structured `vote HTTP timing` and
+`vote HTTP phase` records from the `svoted` journal. Configure the diagnostic
+server with JSON logging. If it emits text logs, the collector counts those
+unstructured diagnostic records but does not copy their contents or attempt
+unsafe free-text parsing. Server redeployment and the two staging diagnostic
+environment flags are required for these records. Caddy configuration is separate.
+
+The analyzer includes every `*.observability.json` invocation in each `--run`
+directory, including immediate-share confirmation. It joins proxy and server
+records by random request ID, reports missing correlations and duplicate records,
+and groups request timings by normalized route, negotiated protocol, and whether
+the connection predates the request. IDs, raw paths and payloads are not included
+in the summary. Repeated `--run` arguments support multiple benchmark directories.
+
+`runtime-lag.json` is written by the client on normal completion. Missing files,
+dropped runtime samples, malformed capture lines, scrape errors and dropped
+observations are explicit in the report. A missing `capture.json` indicates the
+collector did not write its completion summary; wait for collection to finish
+before analyzing. Journal records are exported after the sampling window, so an
+interrupted collector may have metrics but no request records.
+
+Times are elapsed durations on each component's own clock. The per-request
+`headers_outside_upstream` residual compares client response-header time against
+Caddy upstream-header time. It includes connection acquisition, proxy and
+transport work outside that upstream interval; it must not be labeled network
+latency. Negative differences are counted as incompatible timing boundaries.
+Application response-write duration measures writes to the HTTP implementation,
+not receipt by the peer. The report does not prove clock synchronization or
+attribute a latency spike merely because it overlaps a chain transaction.
+
+Run the hermetic tooling checks with:
+
+```sh
+python3 -m unittest discover -s scripts -p test_helper_diagnostics.py
+```
