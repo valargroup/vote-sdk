@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"cosmossdk.io/log"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
@@ -147,6 +146,8 @@ type Processor struct {
 	isRoundClosed     RoundClosureChecker
 	isNodeReady       func() bool
 	preProofDedupe    *preProofShareDeduper
+	maintenanceEvery  time.Duration
+	readinessRetry    time.Duration
 	submitHeightMu    sync.Mutex
 	submitHeight      uint64
 	submitKeys        map[string]struct{}
@@ -204,7 +205,9 @@ func newPreProofShareDeduper(
 	}
 }
 
-// NewProcessor creates a new share processor.
+// NewProcessor creates an idle share processor. maxConcurrent bounds the full
+// per-share pipeline and values below one are normalized to one; processing
+// does not begin until Run is called.
 func NewProcessor(
 	store *ShareStore,
 	tree TreeReader,
@@ -227,6 +230,8 @@ func NewProcessor(
 		logger:            logger,
 		maxConcurrent:     maxConcurrent,
 		isRoundActive:     isRoundActive,
+		maintenanceEvery:  maintenanceInterval,
+		readinessRetry:    processingReadinessRetryInterval,
 		submitKeys:        make(map[string]struct{}),
 		stalledRetryCount: make(map[string]uint8),
 	}
@@ -236,59 +241,242 @@ func NewProcessor(
 	return p
 }
 
-// Run starts the processing loop. Blocks until ctx is cancelled.
-// Each cycle processes ready shares and purges share data for rounds whose
-// committed state confirms voting has ended.
+// Run processes scheduled shares with at most maxConcurrent in flight. It
+// blocks until ctx is cancelled, then waits for all workers to leave every
+// dequeued share in a terminal or retryable state and returns ctx.Err.
+//
+// Run must not be called concurrently on the same Processor.
 func (p *Processor) Run(ctx context.Context) error {
-	for {
-		p.cleanupClosedRounds()
-		if !p.processBatch(ctx) {
-			if err := waitForProcessingReadiness(ctx); err != nil {
-				return err
+	// active counts every dequeued share, including work buffered between the
+	// dispatcher and a worker. Matching channel capacities keep both the work
+	// set and completion notifications bounded by maxConcurrent.
+	jobs := make(chan QueuedShare, p.maxConcurrent)
+	completed := make(chan struct{}, p.maxConcurrent)
+	var workers sync.WaitGroup
+	for range p.maxConcurrent {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for share := range jobs {
+				p.processQueuedShare(ctx, share)
+				completed <- struct{}{}
 			}
-			continue
-		}
-		if err := p.waitForSchedule(ctx); err != nil {
+		}()
+	}
+
+	shutdown := func() {
+		close(jobs)
+		workers.Wait()
+	}
+
+	maintenanceTicker := time.NewTicker(p.maintenanceEvery)
+	defer maintenanceTicker.Stop()
+
+	active := 0
+	maintenanceDue := true
+	readinessPaused := false
+
+	for {
+		if err := ctx.Err(); err != nil {
+			shutdown()
 			return err
 		}
+
+		// Cleanup can delete queue rows and witness material. Drain workers
+		// before running it so their final state transitions cannot race a purge.
+		if maintenanceDue && active == 0 {
+			p.cleanupClosedRounds()
+			maintenanceDue = false
+		}
+
+		// Readiness gates only new work. Shares already handed to workers retain
+		// the same completion and retry semantics as the former batch loop.
+		if !maintenanceDue && active < p.maxConcurrent {
+			nodeReady := p.isNodeReady == nil || p.isNodeReady()
+			if !nodeReady {
+				if !readinessPaused {
+					p.logger.Debug("helper processing paused: local node is catching up or stale")
+					readinessPaused = true
+				}
+			} else {
+				readinessPaused = false
+				ready := p.store.TakeReadyBatch(p.maxConcurrent - active)
+				if len(ready) > 0 {
+					p.logger.Debug(
+						"dispatching ready shares",
+						"count", len(ready),
+						"active", active,
+						"max_concurrent", p.maxConcurrent,
+					)
+					for _, share := range ready {
+						jobs <- share
+						active++
+					}
+					continue
+				}
+			}
+		}
+
+		// A due-time timer is useful only while capacity is available. At full
+		// capacity, the next completion is the event that permits another take.
+		var wakeTimer *time.Timer
+		var wake <-chan time.Time
+		if !maintenanceDue && active < p.maxConcurrent {
+			if readinessPaused {
+				wakeTimer = time.NewTimer(p.readinessRetry)
+				wake = wakeTimer.C
+			} else if next, ok := p.store.NextScheduledTime(); ok {
+				delay := time.Until(next)
+				if delay < 0 {
+					delay = 0
+				}
+				wakeTimer = time.NewTimer(delay)
+				wake = wakeTimer.C
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			if wakeTimer != nil {
+				wakeTimer.Stop()
+			}
+			shutdown()
+			return ctx.Err()
+		case <-completed:
+			active--
+		case <-p.store.ScheduleChanged():
+		case <-wake:
+		case <-maintenanceTicker.C:
+			maintenanceDue = true
+		}
+		if wakeTimer != nil {
+			wakeTimer.Stop()
+		}
 	}
 }
 
-func waitForProcessingReadiness(ctx context.Context) error {
-	timer := time.NewTimer(processingReadinessRetryInterval)
-	defer timer.Stop()
+// processQueuedShare performs one dequeued share attempt and records exactly
+// one resulting queue transition. Cancellation and transient infrastructure
+// failures return the share for retry; deterministic failures spend an attempt.
+// Panics are recovered and classified as failed attempts.
+func (p *Processor) processQueuedShare(ctx context.Context, share QueuedShare) {
+	shareCtx, shareSpan := StartTrace(ctx, "helper.process_share", "helper.process_share", map[string]string{
+		"round_id":    share.Payload.VoteRoundID,
+		"share_index": strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
+	}, map[string]interface{}{
+		"proposal_id":   share.Payload.ProposalID,
+		"tree_position": share.Payload.TreePosition,
+		"submit_at":     share.Payload.SubmitAt,
+	})
+	var spanErr error
+	defer func() {
+		shareSpan.Finish(spanErr)
+	}()
+	defer func() {
+		if r := recover(); r != nil {
+			err := failedShareAttemptError(failureStagePanic, fmt.Errorf("panic in processShare: %v", r))
+			spanErr = err
+			captureShareProcessingFailure(share, failureStagePanic, err)
+			p.logger.Error("panic in share processing",
+				"round_id", share.Payload.VoteRoundID,
+				"share_index", share.Payload.EncShare.ShareIndex,
+				"panic", r,
+			)
+			p.markShareFailure(share, err)
+		}
+	}()
 
 	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
+	case <-shareCtx.Done():
+		spanErr = shareCtx.Err()
+		p.store.MarkRetry(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+		return
+	default:
 	}
-}
 
-func (p *Processor) waitForSchedule(ctx context.Context) error {
-	delay := maintenanceInterval
-	if next, ok := p.store.NextScheduledTime(); ok {
-		until := time.Until(next)
-		if until <= 0 {
-			return nil
+	if p.isRoundActive != nil {
+		_, statusSpan := StartTrace(shareCtx, "helper.round_status_check", "helper.round_status_check", nil, nil)
+		active, err := p.isRoundActive(share.Payload.VoteRoundID)
+		if errors.Is(err, ErrCheckTxNotReady) {
+			statusSpan.Finish(nil)
+			shareSpan.SetData("outcome", "check_tx_not_ready")
+			p.logger.Debug("waiting for post-restart CheckTx block time",
+				"round_id", share.Payload.VoteRoundID,
+				"share_index", share.Payload.EncShare.ShareIndex,
+			)
+			p.store.MarkRetry(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+			return
 		}
-		if until < delay {
-			delay = until
+		statusSpan.Finish(err)
+		if err != nil {
+			err = retryableShareError(failureStageRoundStatusCheck, err)
+			spanErr = err
+			p.logger.Warn("round status check failed, skipping share",
+				"round_id", share.Payload.VoteRoundID,
+				"share_index", share.Payload.EncShare.ShareIndex,
+				"error", err,
+			)
+			captureShareProcessingFailure(share, failureStageRoundStatusCheck, err)
+			p.markShareFailure(share, err)
+			return
+		}
+		if !active {
+			shareSpan.SetData("outcome", "round_inactive")
+			p.logger.Info("round no longer active, skipping share",
+				"round_id", share.Payload.VoteRoundID,
+				"share_index", share.Payload.EncShare.ShareIndex,
+			)
+			p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+			return
 		}
 	}
 
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	case <-p.store.ScheduleChanged():
-		return nil
+	if err := p.processShare(shareCtx, share); err != nil {
+		spanErr = err
+		var waitingErr *waitingForNewBlockError
+		if errors.As(err, &waitingErr) {
+			shareSpan.SetData("outcome", "waiting_for_new_block")
+			spanErr = nil
+			retryCount := p.nextStalledRetryCount(share, waitingErr.height)
+			shareSpan.SetData("stalled_retry_count", retryCount)
+			p.store.MarkStalledRetry(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition, retryCount)
+			return
+		}
+		if errors.Is(err, errAwaitingCommit) {
+			shareSpan.SetData("outcome", "awaiting_commit")
+			spanErr = nil
+			// Bound accepted-but-unconfirmed broadcasts so an unavailable
+			// committed-state check cannot trigger proof generation forever.
+			p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+			return
+		}
+		if isCanceledShareError(err) {
+			p.logger.Warn("share processing canceled",
+				"round_id", share.Payload.VoteRoundID,
+				"share_index", share.Payload.EncShare.ShareIndex,
+				"error", err,
+			)
+			p.store.MarkRetry(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+			return
+		}
+		_, stage := classifyShareFailure(err)
+		p.logger.Warn("share processing failed",
+			"round_id", share.Payload.VoteRoundID,
+			"share_index", share.Payload.EncShare.ShareIndex,
+			"error", err,
+		)
+		captureShareProcessingFailure(share, stage, err)
+		p.markShareFailure(share, err)
+		return
 	}
+
+	shareSpan.SetData("outcome", "submitted")
+	p.store.MarkSubmitted(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+	p.clearSubmitHeight(share)
+	p.logger.Info("share submitted",
+		"round_id", share.Payload.VoteRoundID,
+		"share_index", share.Payload.EncShare.ShareIndex,
+	)
 }
 
 // cleanupClosedRounds uses wall time only to select candidates. A fresh node
@@ -350,164 +538,6 @@ func (p *Processor) cleanupClosedRounds() {
 		)
 	}
 	p.store.PurgeRounds(confirmed)
-}
-
-// processBatch takes one worker-sized batch of ready shares and processes it.
-// It returns false without touching the queue when the local node is not ready.
-func (p *Processor) processBatch(ctx context.Context) bool {
-	if p.isNodeReady != nil && !p.isNodeReady() {
-		p.logger.Debug("helper processing paused: local node is catching up or stale")
-		return false
-	}
-
-	ready := p.store.TakeReadyBatch(p.maxConcurrent)
-	if len(ready) == 0 {
-		return true
-	}
-
-	ctx, batchSpan := StartTrace(ctx, "helper.wakeup", "helper.process_ready_shares", nil, map[string]interface{}{
-		"ready_count":    len(ready),
-		"max_concurrent": p.maxConcurrent,
-	})
-	p.logger.Info(
-		"processing ready shares",
-		"count", len(ready),
-		"max_concurrent", p.maxConcurrent,
-	)
-
-	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(p.maxConcurrent)
-
-	for _, queued := range ready {
-		share := queued
-		g.Go(func() (retErr error) {
-			shareCtx, shareSpan := StartTrace(gctx, "helper.process_share", "helper.process_share", map[string]string{
-				"round_id":    share.Payload.VoteRoundID,
-				"share_index": strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
-			}, map[string]interface{}{
-				"proposal_id":   share.Payload.ProposalID,
-				"tree_position": share.Payload.TreePosition,
-				"submit_at":     share.Payload.SubmitAt,
-			})
-			var spanErr error
-			defer func() {
-				shareSpan.Finish(spanErr)
-			}()
-			defer func() {
-				if r := recover(); r != nil {
-					err := failedShareAttemptError(failureStagePanic, fmt.Errorf("panic in processShare: %v", r))
-					spanErr = err
-					captureShareProcessingFailure(share, failureStagePanic, err)
-					p.logger.Error("panic in share processing",
-						"round_id", share.Payload.VoteRoundID,
-						"share_index", share.Payload.EncShare.ShareIndex,
-						"panic", r,
-					)
-					p.markShareFailure(share, err)
-				}
-			}()
-
-			select {
-			case <-shareCtx.Done():
-				spanErr = shareCtx.Err()
-				p.store.MarkRetry(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
-				return nil
-			default:
-			}
-
-			if p.isRoundActive != nil {
-				_, statusSpan := StartTrace(shareCtx, "helper.round_status_check", "helper.round_status_check", nil, nil)
-				active, err := p.isRoundActive(share.Payload.VoteRoundID)
-				if errors.Is(err, ErrCheckTxNotReady) {
-					statusSpan.Finish(nil)
-					shareSpan.SetData("outcome", "check_tx_not_ready")
-					p.logger.Debug("waiting for post-restart CheckTx block time",
-						"round_id", share.Payload.VoteRoundID,
-						"share_index", share.Payload.EncShare.ShareIndex,
-					)
-					p.store.MarkRetry(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
-					return nil
-				}
-				statusSpan.Finish(err)
-				if err != nil {
-					err = retryableShareError(failureStageRoundStatusCheck, err)
-					spanErr = err
-					p.logger.Warn("round status check failed, skipping share",
-						"round_id", share.Payload.VoteRoundID,
-						"share_index", share.Payload.EncShare.ShareIndex,
-						"error", err,
-					)
-					captureShareProcessingFailure(share, failureStageRoundStatusCheck, err)
-					p.markShareFailure(share, err)
-					return nil
-				}
-				if !active {
-					shareSpan.SetData("outcome", "round_inactive")
-					p.logger.Info("round no longer active, skipping share",
-						"round_id", share.Payload.VoteRoundID,
-						"share_index", share.Payload.EncShare.ShareIndex,
-					)
-					p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
-					return nil
-				}
-			}
-
-			if err := p.processShare(shareCtx, share); err != nil {
-				spanErr = err
-				var waitingErr *waitingForNewBlockError
-				if errors.As(err, &waitingErr) {
-					shareSpan.SetData("outcome", "waiting_for_new_block")
-					spanErr = nil
-					retryCount := p.nextStalledRetryCount(share, waitingErr.height)
-					shareSpan.SetData("stalled_retry_count", retryCount)
-					p.store.MarkStalledRetry(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition, retryCount)
-					return nil
-				}
-				if errors.Is(err, errAwaitingCommit) {
-					shareSpan.SetData("outcome", "awaiting_commit")
-					spanErr = nil
-					// Bound accepted-but-unconfirmed broadcasts so an unavailable
-					// committed-state check cannot trigger proof generation forever.
-					p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
-					return nil
-				}
-				if isCanceledShareError(err) {
-					p.logger.Warn("share processing canceled",
-						"round_id", share.Payload.VoteRoundID,
-						"share_index", share.Payload.EncShare.ShareIndex,
-						"error", err,
-					)
-					p.store.MarkRetry(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
-					return nil
-				}
-				_, stage := classifyShareFailure(err)
-				p.logger.Warn("share processing failed",
-					"round_id", share.Payload.VoteRoundID,
-					"share_index", share.Payload.EncShare.ShareIndex,
-					"error", err,
-				)
-				captureShareProcessingFailure(share, stage, err)
-				p.markShareFailure(share, err)
-				return nil
-			}
-
-			shareSpan.SetData("outcome", "submitted")
-			p.store.MarkSubmitted(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
-			p.clearSubmitHeight(share)
-			p.logger.Info("share submitted",
-				"round_id", share.Payload.VoteRoundID,
-				"share_index", share.Payload.EncShare.ShareIndex,
-			)
-			return nil
-		})
-	}
-	if err := g.Wait(); err != nil {
-		batchSpan.Finish(err)
-		p.logger.Error("share processing batch had errors", "error", err)
-		return true
-	}
-	batchSpan.Finish(nil)
-	return true
 }
 
 // captureShareProcessingFailure groups repeated attempts from the local helper
