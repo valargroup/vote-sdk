@@ -133,6 +133,105 @@ func TestScrubSensitiveRequestEvent(t *testing.T) {
 	}
 }
 
+func TestTraceSampleRate(t *testing.T) {
+	tests := []struct {
+		name            string
+		environment     string
+		transactionName string
+		want            float64
+	}{
+		{
+			name:            "staging helper",
+			environment:     "staging",
+			transactionName: "helper.process_share",
+			want:            0,
+		},
+		{
+			name:            "staging critical write",
+			environment:     "staging",
+			transactionName: "POST /shielded-vote/v1/cast-vote",
+			want:            0,
+		},
+		{
+			name:            "production helper",
+			environment:     "production",
+			transactionName: "helper.process_share",
+			want:            reducedTraceSampleRate,
+		},
+		{
+			name:            "production concrete share status",
+			environment:     "production",
+			transactionName: "GET /shielded-vote/v1/share-status/round-1/nullifier-1",
+			want:            reducedTraceSampleRate,
+		},
+		{
+			name:            "production concrete round",
+			environment:     "production",
+			transactionName: "GET /shielded-vote/v1/round/round-1",
+			want:            reducedTraceSampleRate,
+		},
+		{
+			name:            "production vote managers",
+			environment:     "production",
+			transactionName: "GET /shielded-vote/v1/vote-managers",
+			want:            reducedTraceSampleRate,
+		},
+		{
+			name:            "production rounds prefix boundary",
+			environment:     "production",
+			transactionName: "GET /shielded-vote/v1/rounds",
+			want:            1,
+		},
+		{
+			name:            "production share status prefix boundary",
+			environment:     "production",
+			transactionName: "GET /shielded-vote/v1/share-status",
+			want:            1,
+		},
+		{
+			name:            "production critical write",
+			environment:     "production",
+			transactionName: "POST /shielded-vote/v1/reveal-share",
+			want:            1,
+		},
+		{
+			name:            "unknown environment remains fully traced",
+			environment:     "development",
+			transactionName: "helper.process_share",
+			want:            1,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := traceSampleRate(tc.environment, tc.transactionName); got != tc.want {
+				t.Fatalf("traceSampleRate(%q, %q) = %v, want %v", tc.environment, tc.transactionName, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestStagingDisablesTracingButKeepsErrors(t *testing.T) {
+	transport := initTestSentryWithEnvironment(t, "staging")
+
+	_, span := StartSpan(context.Background(), "helper.process_share", "helper.process_share", nil, nil)
+	span.Finish(nil)
+	_, transaction := StartTransaction(context.Background(), "POST /shielded-vote/v1/cast-vote", nil, nil)
+	transaction.Finish(nil)
+	CaptureErr(errors.New("staging database unavailable"), nil)
+
+	events := transport.Events()
+	if len(events) != 1 {
+		t.Fatalf("sent %d events, want only the error event", len(events))
+	}
+	if len(events[0].Exception) != 1 {
+		t.Fatalf("event has %d exceptions, want 1", len(events[0].Exception))
+	}
+	if events[0].Exception[0].Value != "staging database unavailable" {
+		t.Fatalf("exception value = %q, want staging database unavailable", events[0].Exception[0].Value)
+	}
+}
+
 func TestStartSpanCreatesSearchableRootSpan(t *testing.T) {
 	transport := initTestSentry(t)
 
@@ -163,7 +262,12 @@ func TestStartSpanCreatesSearchableRootSpan(t *testing.T) {
 func TestStartSpanKeepsParentTransactionName(t *testing.T) {
 	transport := initTestSentry(t)
 
-	parent := sentrylib.StartSpan(context.Background(), "http.server", sentrylib.WithTransactionName("POST /shielded-vote/v1/cast-vote"))
+	parent := sentrylib.StartSpan(
+		context.Background(),
+		"http.server",
+		sentrylib.WithTransactionName("POST /shielded-vote/v1/cast-vote"),
+		sentrylib.WithSpanSampled(sentrylib.SampledTrue),
+	)
 	_, child := StartSpan(parent.Context(), "zkp.prove", "helper.generate_share_reveal_proof", nil, nil)
 	child.Finish(nil)
 	parent.Finish()
@@ -222,23 +326,30 @@ func TestCaptureErrWithGrouping(t *testing.T) {
 }
 
 func initTestSentry(t *testing.T) *captureTransport {
+	return initTestSentryWithEnvironment(t, "production")
+}
+
+func initTestSentryWithEnvironment(t *testing.T, environment string) *captureTransport {
 	t.Helper()
 
 	transport := &captureTransport{}
+	enableTracing := environment != "staging"
 	err := sentrylib.Init(sentrylib.ClientOptions{
-		Dsn:              "https://public@example.com/1",
-		Environment:      "staging",
-		EnableTracing:    true,
-		ServerName:       "helper-a",
-		TracesSampleRate: 1.0,
-		Transport:        transport,
+		Dsn:           "https://public@example.com/1",
+		Environment:   environment,
+		EnableTracing: enableTracing,
+		ServerName:    "helper-a",
+		TracesSampler: newTraceSampler(environment),
+		Transport:     transport,
 	})
 	if err != nil {
 		t.Fatalf("sentry init: %v", err)
 	}
 	sentryEnabled.Store(true)
+	tracingEnabled.Store(enableTracing)
 	t.Cleanup(func() {
 		sentryEnabled.Store(false)
+		tracingEnabled.Store(false)
 		sentrylib.CurrentHub().BindClient(nil)
 	})
 

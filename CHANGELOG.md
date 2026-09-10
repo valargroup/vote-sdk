@@ -8,6 +8,10 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Keep Sentry error capture at 100% while disabling performance spans in
+  staging and sampling high-volume helper processing and polling traces at 10%
+  in production. Retain full production tracing for write routes and use
+  Prometheus for exact operational totals.
 - Limit helper reveal retries to 48 hours after the first attempt, with at most
   five persisted proof attempts, counting attempts recorded before upgrade.
   Target older shares' final retry around the start of the last-minute window

@@ -12,7 +12,12 @@ import (
 	sentrylib "github.com/getsentry/sentry-go"
 )
 
-var sentryEnabled atomic.Bool
+var (
+	sentryEnabled  atomic.Bool
+	tracingEnabled atomic.Bool
+)
+
+const reducedTraceSampleRate = 0.1
 
 // TraceSpan is a small wrapper around a Sentry span that keeps callers from
 // depending on sentry-go directly. Methods are safe to call when tracing is
@@ -36,6 +41,8 @@ var knownNoisyErrorSignatures = []string{
 // (e.g. the CometBFT moniker "val1") so events from different validators
 // can be distinguished in the Sentry dashboard.
 func InitSentry(dsn, release, serverName string, logger log.Logger) error {
+	sentryEnabled.Store(false)
+	tracingEnabled.Store(false)
 	if dsn == "" {
 		return nil
 	}
@@ -43,15 +50,16 @@ func InitSentry(dsn, release, serverName string, logger log.Logger) error {
 	if env == "" {
 		env = "production"
 	}
+	enableTracing := env != "staging"
 	err := sentrylib.Init(sentrylib.ClientOptions{
 		Dsn:              dsn,
 		Release:          release,
 		Environment:      env,
 		ServerName:       serverName,
 		SampleRate:       1.0,
-		TracesSampleRate: 1.0,
+		TracesSampler:    newTraceSampler(env),
 		AttachStacktrace: true,
-		EnableTracing:    true,
+		EnableTracing:    enableTracing,
 		BeforeSend:       filterNoisyErrorEvents,
 		BeforeSendTransaction: func(event *sentrylib.Event, _ *sentrylib.EventHint) *sentrylib.Event {
 			return scrubSensitiveRequestEvent(event)
@@ -65,10 +73,44 @@ func InitSentry(dsn, release, serverName string, logger log.Logger) error {
 			scope.SetTag("validator", serverName)
 		})
 	}
+	tracingEnabled.Store(enableTracing)
 	sentryEnabled.Store(true)
-	logger.Info("sentry error tracking enabled", "server_name", serverName)
+	logger.Info(
+		"sentry error tracking enabled",
+		"server_name", serverName,
+		"environment", env,
+		"tracing_enabled", enableTracing,
+	)
 
 	return nil
+}
+
+func newTraceSampler(environment string) sentrylib.TracesSampler {
+	return func(ctx sentrylib.SamplingContext) float64 {
+		return traceSampleRate(environment, ctx.Span.Name)
+	}
+}
+
+func traceSampleRate(environment, transactionName string) float64 {
+	if environment == "staging" {
+		return 0
+	}
+	if environment != "production" {
+		return 1
+	}
+
+	switch {
+	case transactionName == "helper.process_share":
+		return reducedTraceSampleRate
+	case strings.HasPrefix(transactionName, "GET /shielded-vote/v1/share-status/"):
+		return reducedTraceSampleRate
+	case strings.HasPrefix(transactionName, "GET /shielded-vote/v1/round/"):
+		return reducedTraceSampleRate
+	case transactionName == "GET /shielded-vote/v1/vote-managers":
+		return reducedTraceSampleRate
+	default:
+		return 1
+	}
 }
 
 func filterNoisyErrorEvents(event *sentrylib.Event, _ *sentrylib.EventHint) *sentrylib.Event {
@@ -185,7 +227,7 @@ func captureErr(err error, tags map[string]string, fingerprint []string) {
 // StartTransaction starts a root performance transaction when Sentry tracing is
 // enabled. It returns the transaction context so child spans attach to it.
 func StartTransaction(ctx context.Context, name string, tags map[string]string, data map[string]interface{}) (context.Context, *TraceSpan) {
-	if !sentryEnabled.Load() {
+	if !tracingEnabled.Load() {
 		return ctx, &TraceSpan{}
 	}
 	span := sentrylib.StartTransaction(ctx, name)
@@ -197,7 +239,7 @@ func StartTransaction(ctx context.Context, name string, tags map[string]string, 
 // does not already contain a Sentry span, the span becomes the root transaction
 // so background work is still sent to Sentry.
 func StartSpan(ctx context.Context, operation, description string, tags map[string]string, data map[string]interface{}) (context.Context, *TraceSpan) {
-	if !sentryEnabled.Load() {
+	if !tracingEnabled.Load() {
 		return ctx, &TraceSpan{}
 	}
 

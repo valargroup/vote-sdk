@@ -178,6 +178,14 @@ Set `SENTRY_ENVIRONMENT` to `staging` or `production` on managed fleets. The
 binary defaults to `production` only for local/backward-compatible starts where
 no explicit environment is available.
 
+Sentry error events remain enabled at 100% in both managed environments.
+Performance tracing is disabled in `staging`. In `production`, the helper
+share-processing transaction and the high-volume `share-status`, `round`, and
+`vote-managers` polling routes are sampled at 10%; write routes and other
+transactions remain fully traced. Child spans inherit their root transaction's
+sampling decision. Use Prometheus metrics, rather than sampled Sentry spans, for
+exact request, processing, outcome, and latency totals.
+
 ### CI / deploy
 
 Both the `sdk-chain-deploy` and `sdk-chain-reset` workflows read
@@ -264,7 +272,10 @@ while the round is active and scheduled submissions strictly before round end.
 ### Share pipeline observability
 
 The helper share pipeline has distinct stages. Dashboard widgets should not
-treat HTTP request counts as durable queue counts.
+treat HTTP request counts as durable queue counts. In production, Sentry counts
+for the sampled helper processing and polling transactions are estimates; use
+the corresponding Prometheus counters for exact operational totals. Staging
+does not send performance spans.
 
 | Metric | Sentry signal | Meaning |
 |--------|---------------|---------|
