@@ -84,6 +84,53 @@ sum by (instance, outcome, reason) (
 svote_helper_share_processing_in_flight
 ```
 
+### Vote transaction verification metrics
+
+The custom vote ante pipeline emits the following metrics for delegation,
+single-cast, cast-batch, atomic delegation-and-cast, reveal-share, and tally
+transactions:
+
+| Metric | Meaning |
+|--------|---------|
+| `svote_vote_tx_verification_attempts_total{tx_type,mode,outcome,stage}` | Verification attempts and the stage at which a rejected transaction failed. |
+| `svote_vote_tx_verification_in_flight{tx_type,mode}` | Verification attempts currently executing. |
+| `svote_vote_tx_verification_duration_seconds{tx_type,mode,outcome}` | End-to-end validation latency. |
+| `svote_vote_tx_verification_stage_duration_seconds{tx_type,mode,stage,result}` | Latency for state checks, signatures, state/root lookups, synthetic-root derivation, and individual proofs. |
+| `svote_vote_tx_verification_batch_size{tx_type}` | Number of cast votes in cast-batch and atomic delegation-and-cast transactions. |
+
+The bounded `mode` label distinguishes `check_tx`, `recheck_tx`, and
+`finalize_block`. Batch signature and proof stages produce one histogram
+observation per cast, while the end-to-end histogram produces one observation
+per transaction. This makes both per-proof latency and total batch cost visible
+without using vote indexes or transaction identifiers as labels.
+
+To compare p95 proof-verification latency by transaction type and validator:
+
+```promql
+histogram_quantile(
+  0.95,
+  sum by (instance, tx_type, stage, le) (
+    rate(svote_vote_tx_verification_stage_duration_seconds_bucket{
+      stage=~"delegation_proof|cast_proof"
+    }[5m])
+  )
+)
+```
+
+To find full verification attempts that take longer than 15 seconds:
+
+```promql
+sum by (instance, tx_type, mode) (
+  rate(svote_vote_tx_verification_duration_seconds_count{
+    mode=~"check_tx|finalize_block"
+  }[5m])
+  - ignoring(le) rate(svote_vote_tx_verification_duration_seconds_bucket{
+    mode=~"check_tx|finalize_block",
+    le="15"
+  }[5m])
+)
+```
+
 ## Sentry error tracking
 
 Sentry project: **svote-helper** (slug: `svote-helper-vm`) in the
