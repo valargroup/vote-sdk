@@ -419,13 +419,23 @@ a 5 MiB (`5242880` byte) consensus block limit. Existing chains run the old
 binary through H-1, switch binaries at upgrade height H, and use both limits for
 the first new proposal at H+1. Fresh chains use both limits from genesis.
 
-The same binary uses the new `helper.max_concurrent_proofs_v2` setting and
-defaults it to one. It intentionally ignores the legacy
-`helper.max_concurrent_proofs` value, which was commonly eight, so existing
-validators switch to the load-tested safe value when Cosmovisor starts v1.4.0.
-Operators do not need to edit ten local `app.toml` files. Fresh validator
-configs emit the v2 key with value one; a future separately benchmarked value
-can still be set explicitly through that key.
+The same binary uses the new `helper.max_concurrent_proofs_v2` setting. It
+intentionally ignores the legacy `helper.max_concurrent_proofs` value, which was
+commonly eight, so that the v1.4.0 switch needed no coordinated edit of ten
+local `app.toml` files.
+
+A validator carrying only the legacy key therefore falls back to a single
+worker. That fallback has since been measured on staging and is too low to
+keep up with a wide ballot: one worker drains about 0.58 shares per second —
+roughly 1.7 seconds per share — so a 37-proposal round's 1,776 shares take
+about fifty minutes to clear on their own, and any queue ahead of them is
+served first. Fresh validator configs now emit the v2 key with value two,
+which is the separately benchmarked value this section previously anticipated.
+
+Two is a starting point sized for a validator host with room, not a
+universal constant. Each worker holds roughly 500 MB while proving, so two
+wants about 1 GB free beyond the validator's own footprint. Set a lower value
+where that is not available, and raise it only against a measurement.
 
 Pre-stage the binary on every validator under the exact `v1.4.0` Cosmovisor
 directory. Do not manually start the staged binary before the scheduled halt.
