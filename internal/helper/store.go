@@ -1,12 +1,18 @@
 package helper
 
 import (
+	"bytes"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,20 +34,34 @@ var ErrInvalidSubmitAt = errors.New("invalid submit_at")
 // valid queue summary.
 var ErrInvalidRoundInfo = errors.New("invalid voting round metadata")
 
-// ShareStore is a SQLite-backed share queue with ephemeral in-memory scheduling.
-// Payload data and processing state are persisted; client-provided submit_at
-// timestamps control when each share is eligible for proof generation.
+// ShareStore is a SQLite-backed share queue with ephemeral scheduling and
+// worker ownership. Payload data and terminal outcomes are persisted; effective
+// submit_at timestamps control when each share is eligible for proof generation.
 type ShareStore struct {
-	db              *sql.DB
-	lockFile        *os.File
-	mu              sync.Mutex
-	schedule        map[string]time.Time // key: "round_id:share_index:proposal_id:tree_position"
-	scheduleChanged chan struct{}
-	roundCache      map[string]RoundInfo             // roundID -> chain round metadata
-	fetchRoundInfo  RoundInfoFetcher                 // queries the chain; may be nil in tests
-	logger          func(msg string, keyvals ...any) // optional error logger
-	logInfo         func(msg string, keyvals ...any) // optional info logger
-	captureErr      func(err error, tags map[string]string)
+	db                *sql.DB
+	lockFile          *os.File
+	mu                sync.Mutex
+	schedule          map[string]time.Time // key: "round_id:share_index:proposal_id:tree_position"
+	inFlight          map[string]inFlightShare
+	nextAttemptID     uint64
+	lastReadyRound    string    // process-local round-robin cursor; guarded by mu
+	dequeueRetryUntil time.Time // common store-error backoff; guarded by mu
+	schedulingSecret  [32]byte
+	now               func() time.Time
+	scheduleChanged   chan struct{}
+	roundCache        map[string]RoundInfo             // roundID -> chain round metadata
+	fetchRoundInfo    RoundInfoFetcher                 // queries the chain; may be nil in tests
+	logger            func(msg string, keyvals ...any) // optional error logger
+	logInfo           func(msg string, keyvals ...any) // optional info logger
+	captureErr        func(err error, tags map[string]string)
+}
+
+// inFlightShare is the process-local ownership record for a dequeued share.
+// SQLite remains in Received state until the worker records its outcome.
+type inFlightShare struct {
+	roundID     string
+	voteEndTime uint64
+	attemptID   uint64
 }
 
 // EnqueueResult reports how an enqueue attempt was handled.
@@ -55,6 +75,11 @@ const (
 
 // NewShareStore opens (or creates) a SQLite database and runs migrations.
 func NewShareStore(dbPath string, fetcher RoundInfoFetcher) (*ShareStore, error) {
+	var schedulingSecret [32]byte
+	if _, err := rand.Read(schedulingSecret[:]); err != nil {
+		return nil, fmt.Errorf("generate scheduling secret: %w", err)
+	}
+
 	lockFile, err := acquireShareStoreLock(dbPath)
 	if err != nil {
 		return nil, err
@@ -89,12 +114,15 @@ func NewShareStore(dbPath string, fetcher RoundInfoFetcher) (*ShareStore, error)
 	}
 
 	s := &ShareStore{
-		db:              db,
-		lockFile:        lockFile,
-		schedule:        make(map[string]time.Time),
-		scheduleChanged: make(chan struct{}, 1),
-		roundCache:      make(map[string]RoundInfo),
-		fetchRoundInfo:  fetcher,
+		db:               db,
+		lockFile:         lockFile,
+		schedule:         make(map[string]time.Time),
+		inFlight:         make(map[string]inFlightShare),
+		scheduleChanged:  make(chan struct{}, 1),
+		roundCache:       make(map[string]RoundInfo),
+		fetchRoundInfo:   fetcher,
+		schedulingSecret: schedulingSecret,
+		now:              time.Now,
 	}
 
 	// Recover non-terminal shares from SQLite.
@@ -405,13 +433,17 @@ func schedKey(roundID string, shareIndex, proposalID uint32, treePosition uint64
 	return fmt.Sprintf("%s:%d:%d:%d", roundID, shareIndex, proposalID, treePosition)
 }
 
-// Enqueue adds a share payload using the wallet-provided submit_at time.
+// Enqueue adds an admission-validated share payload, clamping a past nonzero
+// submit_at to arrival. The production caller authenticates the request and
+// validates its witness relationships and on-chain commitment before calling
+// Enqueue; that validation authorizes repair of an undecodable stored row.
 //
 // Returns:
-//   - EnqueueInserted when a new row was inserted and scheduled.
+//   - EnqueueInserted when a new row was inserted or a corrupt row was repaired
+//     and scheduled.
 //   - EnqueueDuplicate when an identical payload already exists.
-//   - EnqueueConflict when an entry exists for (round_id, share_index) but
-//     with different payload content.
+//   - EnqueueConflict when an entry exists for the same canonical schedule key
+//     but with different payload content.
 func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 	commsJSON, err := json.Marshal(payload.ShareComms)
 	if err != nil {
@@ -428,7 +460,16 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 	if payload.SubmitAt != 0 && payload.SubmitAt >= roundInfo.VoteEndTime {
 		return EnqueueConflict, fmt.Errorf("%w: submit_at (%d) >= vote_end_time (%d)", ErrInvalidSubmitAt, payload.SubmitAt, roundInfo.VoteEndTime)
 	}
-	receivedAt := uint64(time.Now().Unix())
+	arrival := s.now()
+	arrivalSecond := time.Unix(arrival.Unix(), 0)
+	receivedAt := uint64(arrival.Unix())
+	originalSubmitAt := payload.SubmitAt
+	effectiveSubmitAt := originalSubmitAt
+	// Past timestamps already mean "ready now"; clamp them to arrival so they
+	// cannot jump ahead of queued shares under oldest-first scheduling.
+	if effectiveSubmitAt != 0 && effectiveSubmitAt < receivedAt && receivedAt < roundInfo.VoteEndTime {
+		effectiveSubmitAt = receivedAt
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -449,8 +490,8 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 		string(commsJSON),
 		payload.PrimaryBlind,
 		roundInfo.VoteEndTime,
-		payload.SubmitAt,
-		payload.SubmitAt,
+		effectiveSubmitAt,
+		originalSubmitAt,
 		receivedAt,
 	)
 	if err != nil {
@@ -460,11 +501,9 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 	// Only schedule if the row was actually inserted (not a duplicate).
 	affected, _ := res.RowsAffected()
 	if affected > 0 {
-		var schedTime time.Time
-		if payload.SubmitAt == 0 {
-			schedTime = time.Now()
-		} else {
-			schedTime = time.Unix(int64(payload.SubmitAt), 0)
+		schedTime := arrivalSecond
+		if effectiveSubmitAt != 0 {
+			schedTime = time.Unix(int64(effectiveSubmitAt), 0)
 		}
 		key := schedKey(payload.VoteRoundID, payload.EncShare.ShareIndex, payload.ProposalID, payload.TreePosition)
 		s.schedule[key] = schedTime
@@ -474,27 +513,115 @@ func (s *ShareStore) Enqueue(payload SharePayload) (EnqueueResult, error) {
 				"round_id", payload.VoteRoundID,
 				"share_index", payload.EncShare.ShareIndex,
 				"proposal_id", payload.ProposalID,
-				"submit_at", payload.SubmitAt,
+				"submit_at", effectiveSubmitAt,
+				"original_submit_at", originalSubmitAt,
 			)
 		}
 		return EnqueueInserted, nil
 	}
 
-	// Conflict path: row already exists, classify as idempotent duplicate vs conflict.
-	existing, ok := s.loadShare(payload.VoteRoundID, payload.EncShare.ShareIndex, payload.ProposalID, payload.TreePosition)
-	if !ok {
+	// Conflict path: row already exists, classify as idempotent duplicate vs
+	// conflict. A validated wallet retry may replace an undecodable row that is
+	// neither submitted nor owned by a worker.
+	existing, loadErr := loadShareFrom(s.db, payload.VoteRoundID, payload.EncShare.ShareIndex, payload.ProposalID, payload.TreePosition)
+	if loadErr == nil && payloadEqual(existing.Payload, payload) {
+		return EnqueueDuplicate, nil
+	}
+	if loadErr == nil {
+		return EnqueueConflict, nil
+	}
+	if !errors.Is(loadErr, errCorruptShareRow) {
 		return EnqueueConflict, fmt.Errorf(
-			"load existing share after conflict: round_id=%s share_index=%d proposal_id=%d",
+			"load existing share after conflict: round_id=%s share_index=%d proposal_id=%d: %w",
 			payload.VoteRoundID,
 			payload.EncShare.ShareIndex,
 			payload.ProposalID,
+			loadErr,
 		)
 	}
-	if payloadEqual(existing.Payload, payload) {
+
+	key := schedKey(payload.VoteRoundID, payload.EncShare.ShareIndex, payload.ProposalID, payload.TreePosition)
+	if _, active := s.inFlight[key]; active {
 		return EnqueueDuplicate, nil
 	}
 
-	return EnqueueConflict, nil
+	var stateValue any
+	if err := s.db.QueryRow(
+		"SELECT state FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
+		payload.VoteRoundID, payload.EncShare.ShareIndex, payload.ProposalID, payload.TreePosition,
+	).Scan(&stateValue); err != nil {
+		return EnqueueConflict, fmt.Errorf("read corrupt share state before replacement: %w", err)
+	}
+	state, stateErr := decodeRowInt("state", stateValue)
+	if stateErr != nil {
+		s.logError("refusing corrupt share replacement with unreadable state",
+			"round_id", payload.VoteRoundID,
+			"share_index", payload.EncShare.ShareIndex,
+			"proposal_id", payload.ProposalID,
+			"tree_position", payload.TreePosition,
+			"error", stateErr,
+		)
+		return EnqueueConflict, nil
+	}
+	if ShareState(state) == ShareStateSubmitted {
+		return EnqueueDuplicate, nil
+	}
+
+	replaced, err := s.db.Exec(
+		`UPDATE shares SET
+		   shares_hash = ?, vote_decision = ?, enc_share_c1 = ?, enc_share_c2 = ?,
+		   share_comms = ?, primary_blind = ?, state = 0, attempts = 0,
+		   vote_end_time = ?, submit_at = ?, original_submit_at = ?, received_at = ?
+		 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
+		payload.SharesHash,
+		payload.VoteDecision,
+		payload.EncShare.C1,
+		payload.EncShare.C2,
+		string(commsJSON),
+		payload.PrimaryBlind,
+		roundInfo.VoteEndTime,
+		effectiveSubmitAt,
+		originalSubmitAt,
+		receivedAt,
+		payload.VoteRoundID,
+		payload.EncShare.ShareIndex,
+		payload.ProposalID,
+		payload.TreePosition,
+	)
+	if err != nil {
+		return EnqueueConflict, fmt.Errorf("replace corrupt share: %w", err)
+	}
+	replacedCount, err := replaced.RowsAffected()
+	if err != nil {
+		return EnqueueConflict, fmt.Errorf("read corrupt share replacement result: %w", err)
+	}
+	if replacedCount != 1 {
+		return EnqueueConflict, fmt.Errorf("replace corrupt share affected %d rows", replacedCount)
+	}
+
+	schedTime := arrivalSecond
+	if effectiveSubmitAt != 0 {
+		schedTime = time.Unix(int64(effectiveSubmitAt), 0)
+	}
+	s.schedule[key] = schedTime
+	s.notifyScheduleChangedLocked()
+	s.logError("replaced corrupt share from validated wallet retry",
+		"round_id", payload.VoteRoundID,
+		"share_index", payload.EncShare.ShareIndex,
+		"proposal_id", payload.ProposalID,
+		"tree_position", payload.TreePosition,
+		"error", loadErr,
+	)
+	if s.logInfo != nil {
+		s.logInfo("share scheduled",
+			"round_id", payload.VoteRoundID,
+			"share_index", payload.EncShare.ShareIndex,
+			"proposal_id", payload.ProposalID,
+			"submit_at", effectiveSubmitAt,
+			"original_submit_at", originalSubmitAt,
+		)
+	}
+	return EnqueueInserted, nil
 }
 
 // ScheduleChanged returns a buffered notification channel that receives a signal
@@ -510,7 +637,8 @@ func (s *ShareStore) notifyScheduleChangedLocked() {
 	}
 }
 
-// NextScheduledTime returns the earliest scheduled share time.
+// NextScheduledTime returns the earliest scheduled share time, delayed by a
+// common backoff after a store-wide dequeue failure.
 func (s *ShareStore) NextScheduledTime() (time.Time, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -524,11 +652,14 @@ func (s *ShareStore) NextScheduledTime() (time.Time, bool) {
 	if next.IsZero() {
 		return time.Time{}, false
 	}
+	if next.Before(s.dequeueRetryUntil) {
+		return s.dequeueRetryUntil, true
+	}
 	return next, true
 }
 
 // TakeReady returns all shares past their scheduled submission time that are
-// in Received state, transitioning them to Witnessed.
+// not already owned by a worker in this process.
 func (s *ShareStore) TakeReady() []QueuedShare {
 	return s.takeReady(0)
 }
@@ -539,77 +670,214 @@ func (s *ShareStore) TakeReadyBatch(limit int) []QueuedShare {
 }
 
 func (s *ShareStore) takeReady(limit int) []QueuedShare {
-	now := time.Now()
+	now := s.now()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	// Find ready keys.
-	var readyKeys []string
-	for key, scheduledAt := range s.schedule {
-		if scheduledAt.Before(now) || scheduledAt.Equal(now) {
-			readyKeys = append(readyKeys, key)
-		}
-	}
-
-	if len(readyKeys) == 0 {
+	if now.Before(s.dequeueRetryUntil) {
 		return nil
 	}
+	s.dequeueRetryUntil = time.Time{}
 
-	var result []QueuedShare
-	for _, key := range readyKeys {
-		if limit > 0 && len(result) >= limit {
-			break
+	type readyCandidate struct {
+		key          string
+		roundID      string
+		shareIndex   uint32
+		proposalID   uint32
+		treePosition uint64
+		scheduledAt  time.Time
+		rank         [sha256.Size]byte
+	}
+
+	// Group ready shares by round. Malformed keys are internal corruption and
+	// cannot be processed, so remove them from the ephemeral schedule.
+	readyByRound := make(map[string][]readyCandidate)
+	for key, scheduledAt := range s.schedule {
+		// Worker ownership is authoritative. Drop any schedule entry that was
+		// reintroduced for an active share so it cannot be dispatched twice or
+		// keep the scheduler waiting on a duplicate.
+		if _, active := s.inFlight[key]; active {
+			delete(s.schedule, key)
+			continue
 		}
-
-		// Parse round_id, share_index, proposal_id, and tree_position from key.
+		if scheduledAt.After(now) {
+			continue
+		}
 		parts := strings.SplitN(key, ":", 4)
 		if len(parts) != 4 {
 			delete(s.schedule, key)
 			continue
 		}
-		roundID := parts[0]
 		idx64, err := strconv.ParseUint(parts[1], 10, 32)
 		if err != nil {
 			delete(s.schedule, key)
 			continue
 		}
-		shareIndex := uint32(idx64)
 		pid64, err := strconv.ParseUint(parts[2], 10, 32)
 		if err != nil {
 			delete(s.schedule, key)
 			continue
 		}
-		proposalID := uint32(pid64)
 		treePos, err := strconv.ParseUint(parts[3], 10, 64)
 		if err != nil {
 			delete(s.schedule, key)
 			continue
 		}
+		candidate := readyCandidate{
+			key:          key,
+			roundID:      parts[0],
+			shareIndex:   uint32(idx64),
+			proposalID:   uint32(pid64),
+			treePosition: treePos,
+			scheduledAt:  scheduledAt,
+			rank:         s.scheduleRank(key),
+		}
+		readyByRound[candidate.roundID] = append(readyByRound[candidate.roundID], candidate)
+	}
 
-		// Only take shares in Received state (0).
-		res, err := s.db.Exec(
-			"UPDATE shares SET state = 1 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = 0",
-			roundID, shareIndex, proposalID, treePos,
-		)
+	if len(readyByRound) == 0 {
+		return nil
+	}
+
+	roundIDs := make([]string, 0, len(readyByRound))
+	remaining := 0
+	for roundID, candidates := range readyByRound {
+		roundIDs = append(roundIDs, roundID)
+		remaining += len(candidates)
+		sort.Slice(candidates, func(i, j int) bool {
+			if !candidates[i].scheduledAt.Equal(candidates[j].scheduledAt) {
+				return candidates[i].scheduledAt.Before(candidates[j].scheduledAt)
+			}
+			return bytes.Compare(candidates[i].rank[:], candidates[j].rank[:]) < 0
+		})
+		readyByRound[roundID] = candidates
+	}
+	sort.Strings(roundIDs)
+
+	// Start strictly after the previously served round. If that round is no
+	// longer ready, Search still finds its successor in the sorted ring.
+	roundIndex := sort.Search(len(roundIDs), func(i int) bool {
+		return roundIDs[i] > s.lastReadyRound
+	})
+	if roundIndex == len(roundIDs) {
+		roundIndex = 0
+	}
+	nextByRound := make(map[string]int, len(roundIDs))
+	var result []QueuedShare
+candidateLoop:
+	for remaining > 0 {
+		if limit > 0 && len(result) >= limit {
+			break
+		}
+		roundID := roundIDs[roundIndex]
+		roundIndex = (roundIndex + 1) % len(roundIDs)
+		candidateIndex := nextByRound[roundID]
+		candidates := readyByRound[roundID]
+		if candidateIndex >= len(candidates) {
+			continue
+		}
+		candidate := candidates[candidateIndex]
+		nextByRound[roundID] = candidateIndex + 1
+		remaining--
+
+		share, err := loadShareFrom(s.db, candidate.roundID, candidate.shareIndex, candidate.proposalID, candidate.treePosition)
 		if err != nil {
+			switch {
+			case errors.Is(err, sql.ErrNoRows):
+				delete(s.schedule, candidate.key)
+				continue
+			case errors.Is(err, errCorruptShareRow):
+				if !s.handleCorruptCandidateLocked(candidate.roundID, candidate.shareIndex, candidate.proposalID, candidate.treePosition, candidate.key, err) {
+					break candidateLoop
+				}
+				continue
+			default:
+				s.backoffStoreLocked("TakeReadyBatch: load share", err)
+				break candidateLoop
+			}
+		}
+		switch share.State {
+		case ShareStateReceived:
+		case ShareStateSubmitted, ShareStateFailed:
+			delete(s.schedule, candidate.key)
+			continue
+		default:
+			if !s.handleCorruptCandidateLocked(candidate.roundID, candidate.shareIndex, candidate.proposalID, candidate.treePosition, candidate.key, fmt.Errorf("%w: invalid state %d", errCorruptShareRow, share.State)) {
+				break candidateLoop
+			}
 			continue
 		}
-		affected, _ := res.RowsAffected()
-		if affected == 0 {
-			// Not in Received state, remove from schedule.
-			delete(s.schedule, key)
-			continue
+		s.nextAttemptID++
+		if s.nextAttemptID == 0 {
+			s.nextAttemptID++
 		}
-
-		// Load the payload.
-		if share, ok := s.loadShare(roundID, shareIndex, proposalID, treePos); ok {
-			result = append(result, share)
+		share.attemptID = s.nextAttemptID
+		result = append(result, share)
+		s.lastReadyRound = candidate.roundID
+		s.inFlight[candidate.key] = inFlightShare{
+			roundID:     candidate.roundID,
+			voteEndTime: share.VoteEndTime,
+			attemptID:   share.attemptID,
 		}
-		delete(s.schedule, key)
+		delete(s.schedule, candidate.key)
 	}
 
 	return result
+}
+
+func (s *ShareStore) scheduleRank(key string) [sha256.Size]byte {
+	mac := hmac.New(sha256.New, s.schedulingSecret[:])
+	_, _ = mac.Write([]byte("helper-schedule-v1:" + key))
+	var rank [sha256.Size]byte
+	copy(rank[:], mac.Sum(nil))
+	return rank
+}
+
+func (s *ShareStore) backoffStoreLocked(stage string, err error) {
+	s.dequeueRetryUntil = s.now().Add(shareSystemRetryBackoff)
+	s.logError(stage+" failed", "error", err)
+}
+
+var errCorruptShareRow = errors.New("corrupt share row")
+
+func (s *ShareStore) handleCorruptCandidateLocked(roundID string, shareIndex, proposalID uint32, treePosition uint64, key string, cause error) bool {
+	s.lastReadyRound = roundID
+	if err := s.failCorruptCandidateLocked(roundID, shareIndex, proposalID, treePosition, key); err != nil {
+		s.backoffStoreLocked("TakeReadyBatch: terminalize corrupt share", err)
+		return false
+	}
+	s.logError("TakeReadyBatch: corrupt share failed permanently", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", cause)
+	return true
+}
+
+func (s *ShareStore) failCorruptCandidateLocked(roundID string, shareIndex, proposalID uint32, treePosition uint64, key string) error {
+	res, err := s.db.Exec(
+		`UPDATE shares SET state = 3, attempts = attempts + 1,
+		        enc_share_c1 = CASE WHEN vote_end_time = 0 THEN '' ELSE enc_share_c1 END,
+		        enc_share_c2 = CASE WHEN vote_end_time = 0 THEN '' ELSE enc_share_c2 END,
+		        share_comms = CASE WHEN vote_end_time = 0 THEN '[]' ELSE share_comms END,
+		        primary_blind = CASE WHEN vote_end_time = 0 THEN '' ELSE primary_blind END
+		  WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
+		roundID, shareIndex, proposalID, treePosition,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		delete(s.schedule, key)
+		s.notifyScheduleChangedLocked()
+		return nil
+	}
+	if affected != 1 {
+		return fmt.Errorf("terminal update affected %d rows", affected)
+	}
+	delete(s.schedule, key)
+	s.notifyScheduleChangedLocked()
+	return nil
 }
 
 // MarkSubmitted marks a share as successfully submitted to the chain.
@@ -617,20 +885,34 @@ func (s *ShareStore) MarkSubmitted(roundID string, shareIndex, proposalID uint32
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, err := s.db.Exec(
+	key := schedKey(roundID, shareIndex, proposalID, treePosition)
+	if _, ok := s.inFlight[key]; !ok {
+		s.logError("MarkSubmitted: completion has no active owner", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition)
+		return
+	}
+	res, err := s.db.Exec(
 		`UPDATE shares SET state = 2,
 		        enc_share_c1 = '', enc_share_c2 = '',
 		        share_comms = '[]', primary_blind = ''
-		 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = 1`,
+		 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = 0`,
 		roundID, shareIndex, proposalID, treePosition,
-	); err != nil {
+	)
+	if err != nil {
+		s.requeueInFlightAfterStoreFailureLocked("MarkSubmitted: db update", key, err)
 		s.logError("MarkSubmitted: db update failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
+		return
 	}
-	key := schedKey(roundID, shareIndex, proposalID, treePosition)
-	if _, ok := s.schedule[key]; ok {
-		delete(s.schedule, key)
-		s.notifyScheduleChangedLocked()
+	affected, err := res.RowsAffected()
+	if err != nil {
+		s.requeueInFlightAfterStoreFailureLocked("MarkSubmitted: read update result", key, err)
+		s.logError("MarkSubmitted: read update result failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
+		return
 	}
+	if affected == 0 {
+		s.requeueInFlightAfterStoreFailureLocked("MarkSubmitted: unresolved update", key, errors.New("submitted update affected no rows"))
+		return
+	}
+	delete(s.inFlight, key)
 }
 
 const (
@@ -639,6 +921,7 @@ const (
 	shareSystemRetryDeadlineBuffer = 30 * time.Second
 	shareStalledRetryMaxBackoff    = 2 * time.Minute
 	shareStalledRetryMaxCount      = 5
+	shareFailedMaxAttempts         = 5
 )
 
 // MarkRetry returns an in-flight share to the pending queue without spending a
@@ -657,41 +940,32 @@ func (s *ShareStore) markRetry(roundID string, shareIndex, proposalID uint32, tr
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	var voteEndTime uint64
+	key := schedKey(roundID, shareIndex, proposalID, treePosition)
+	active, ok := s.inFlight[key]
+	if !ok {
+		s.logError("MarkRetry: completion has no active owner", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition)
+		return
+	}
+
 	var retryRaw string
 	if err := s.db.QueryRow(
-		"SELECT vote_end_time, retry_state FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = 1",
+		"SELECT retry_state FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = 0",
 		roundID, shareIndex, proposalID, treePosition,
-	).Scan(&voteEndTime, &retryRaw); err != nil {
-		if !errors.Is(err, sql.ErrNoRows) {
-			s.logError("MarkRetry: db query failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
-		}
+	).Scan(&retryRaw); err != nil {
+		s.requeueInFlightAfterStoreFailureLocked("MarkRetry: db query", key, err)
 		return
 	}
+	delete(s.inFlight, key)
 
-	res, err := s.db.Exec(
-		"UPDATE shares SET state = 0 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = 1",
-		roundID, shareIndex, proposalID, treePosition,
-	)
-	if err != nil {
-		s.logError("MarkRetry: db update failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
-		return
-	}
-	affected, _ := res.RowsAffected()
-	if affected == 0 {
-		return
-	}
-
-	key := schedKey(roundID, shareIndex, proposalID, treePosition)
-	now := time.Now()
+	now := s.now()
 	if stalledRetryCount == 0 {
-		s.schedule[key] = nextShareSystemRetryTime(now, voteEndTime)
+		s.schedule[key] = scheduleRetryTime(now, nextShareSystemRetryTime(now, active.voteEndTime))
 	} else {
-		s.schedule[key] = nextShareStalledRetryTime(now, voteEndTime, stalledRetryCount)
+		s.schedule[key] = scheduleRetryTime(now, nextShareStalledRetryTime(now, active.voteEndTime, stalledRetryCount))
 	}
 	// Poll cheaply, but do not sleep past a future proof slot near the cutoff.
-	if retry, err := decodeRetryState(retryRaw, voteEndTime); err == nil && retry != nil {
-		if _, next := retry.due(now, voteEndTime); next.After(now) && next.Before(s.schedule[key]) {
+	if retry, err := decodeRetryState(retryRaw, active.voteEndTime); err == nil && retry != nil {
+		if _, next := retry.due(now, active.voteEndTime); next.After(now) && next.Before(s.schedule[key]) {
 			s.schedule[key] = next
 		}
 	}
@@ -743,68 +1017,122 @@ func nextSharePollTime(now time.Time, voteEndTime uint64, backoff time.Duration)
 	return now.Add(urgentBackoff)
 }
 
-// MarkFailed marks a share processing attempt as failed, with retry or
-// permanent failure after max attempts.
-func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, treePosition uint64) {
-	const maxAttempts = 5
+func scheduleSecond(at time.Time) time.Time {
+	return time.Unix(at.Unix(), 0)
+}
 
+func scheduleRetryTime(now, at time.Time) time.Time {
+	scheduled := scheduleSecond(at)
+	// Retain subsecond precision when truncation would erase an intentional
+	// positive backoff and make the retry immediately due.
+	if at.After(now) && !scheduled.After(now) {
+		return at
+	}
+	return scheduled
+}
+
+func (s *ShareStore) scheduleCandidateRetryLocked(key string) {
+	s.schedule[key] = scheduleSecond(s.now().Add(shareSystemRetryBackoff))
+	s.notifyScheduleChangedLocked()
+}
+
+func (s *ShareStore) requeueInFlightAfterStoreFailureLocked(stage, key string, err error) {
+	delete(s.inFlight, key)
+	s.scheduleCandidateRetryLocked(key)
+	s.backoffStoreLocked(stage, err)
+}
+
+// requeueInFlightIfOwned releases the calling attempt's ownership record when
+// it reached the end of processing without recording an outcome. A stale
+// attempt cannot release ownership acquired by a later retry.
+func (s *ShareStore) requeueInFlightIfOwned(roundID string, shareIndex, proposalID uint32, treePosition, attemptID uint64) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	var attempts int
+	key := schedKey(roundID, shareIndex, proposalID, treePosition)
+	active, ok := s.inFlight[key]
+	if !ok || active.attemptID != attemptID {
+		return false
+	}
+	delete(s.inFlight, key)
+	// The safety net does not spend an attempt, so always apply a positive
+	// backoff. Deadline-aware retries may become immediately due after vote end
+	// and are reserved for normal paths with a bounded failure transition.
+	s.scheduleCandidateRetryLocked(key)
+	s.logError("worker returned without queue transition",
+		"round_id", roundID,
+		"share_index", shareIndex,
+		"proposal_id", proposalID,
+		"tree_position", treePosition,
+		"error", errors.New("worker returned without queue transition"),
+	)
+	return true
+}
+
+// recordFailedAttemptLocked atomically spends one processing attempt. The
+// caller restores process-local ownership after an unresolved database error.
+func (s *ShareStore) recordFailedAttemptLocked(roundID string, shareIndex, proposalID uint32, treePosition uint64, key string) error {
+	var state, attempts int
 	var voteEndTime uint64
-	if err := s.db.QueryRow(
-		"SELECT attempts, vote_end_time FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
+	err := s.db.QueryRow(
+		`UPDATE shares
+		    SET attempts = attempts + 1,
+		        state = CASE WHEN attempts + 1 >= ? THEN 3 ELSE 0 END,
+		        enc_share_c1 = CASE WHEN attempts + 1 >= ? AND vote_end_time = 0 THEN '' ELSE enc_share_c1 END,
+		        enc_share_c2 = CASE WHEN attempts + 1 >= ? AND vote_end_time = 0 THEN '' ELSE enc_share_c2 END,
+		        share_comms = CASE WHEN attempts + 1 >= ? AND vote_end_time = 0 THEN '[]' ELSE share_comms END,
+		        primary_blind = CASE WHEN attempts + 1 >= ? AND vote_end_time = 0 THEN '' ELSE primary_blind END
+		  WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?
+		    AND state = 0
+		  RETURNING state, attempts, vote_end_time`,
+		shareFailedMaxAttempts,
+		shareFailedMaxAttempts,
+		shareFailedMaxAttempts,
+		shareFailedMaxAttempts,
+		shareFailedMaxAttempts,
 		roundID, shareIndex, proposalID, treePosition,
-	).Scan(&attempts, &voteEndTime); err != nil {
-		s.logError("MarkFailed: db query failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
-		return
+	).Scan(&state, &attempts, &voteEndTime)
+	if errors.Is(err, sql.ErrNoRows) {
+		return errors.New("failed-attempt update affected no received row")
+	}
+	if err != nil {
+		return err
 	}
 
-	newAttempts := attempts + 1
-	key := schedKey(roundID, shareIndex, proposalID, treePosition)
-
-	if newAttempts >= maxAttempts {
-		if voteEndTime == 0 {
-			// Legacy or imported rows without a purge time cannot safely retain
-			// witness data because no end-of-round cleanup can be scheduled.
-			if _, err := s.db.Exec(
-				`UPDATE shares SET state = 3, attempts = ?,
-				        enc_share_c1 = '', enc_share_c2 = '',
-				        share_comms = '[]', primary_blind = ''
-				 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
-				newAttempts, roundID, shareIndex, proposalID, treePosition,
-			); err != nil {
-				s.logError("MarkFailed: db update (permanent scrub) failed", "error", err)
-			} else {
-				s.truncateWALAfterWitnessCleanup("MarkFailed: permanent scrub")
-			}
-		} else {
-			// Permanently failed. Keep witness data until round purge so operators
-			// can inspect or export failed rows before the voting window closes.
-			if _, err := s.db.Exec(
-				`UPDATE shares SET state = 3, attempts = ?
-				 WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
-				newAttempts, roundID, shareIndex, proposalID, treePosition,
-			); err != nil {
-				s.logError("MarkFailed: db update (permanent) failed", "error", err)
-			}
-		}
-		if _, ok := s.schedule[key]; ok {
-			delete(s.schedule, key)
-			s.notifyScheduleChangedLocked()
-		}
-	} else {
-		// Re-schedule with exponential backoff.
-		if _, err := s.db.Exec(
-			"UPDATE shares SET state = 0, attempts = ? WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?",
-			newAttempts, roundID, shareIndex, proposalID, treePosition,
-		); err != nil {
-			s.logError("MarkFailed: db update (retry) failed", "error", err)
-		}
-		backoff := time.Duration(1<<uint(min(newAttempts, 6))) * time.Second
-		s.schedule[key] = time.Now().Add(backoff)
+	switch ShareState(state) {
+	case ShareStateReceived:
+		delete(s.inFlight, key)
+		backoff := time.Duration(1<<uint(min(attempts, 6))) * time.Second
+		s.schedule[key] = scheduleSecond(s.now().Add(backoff))
 		s.notifyScheduleChangedLocked()
+		return nil
+	case ShareStateFailed:
+		delete(s.inFlight, key)
+		delete(s.schedule, key)
+		s.notifyScheduleChangedLocked()
+		if voteEndTime == 0 {
+			s.truncateWALAfterWitnessCleanup("MarkFailed: permanent scrub")
+		}
+		return nil
+	default:
+		return fmt.Errorf("unexpected failed-attempt state %d", state)
+	}
+}
+
+// MarkFailed marks a share processing attempt as failed, with retry or
+// permanent failure after max attempts.
+func (s *ShareStore) MarkFailed(roundID string, shareIndex, proposalID uint32, treePosition uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	key := schedKey(roundID, shareIndex, proposalID, treePosition)
+	if _, ok := s.inFlight[key]; !ok {
+		s.logError("MarkFailed: completion has no active owner", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition)
+		return
+	}
+	if err := s.recordFailedAttemptLocked(roundID, shareIndex, proposalID, treePosition, key); err != nil {
+		s.requeueInFlightAfterStoreFailureLocked("MarkFailed: record attempt", key, err)
+		s.logError("MarkFailed: db update failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
 	}
 }
 
@@ -852,7 +1180,7 @@ func (s *ShareStore) logError(msg string, keyvals ...any) {
 
 // Status returns per-round queue statistics.
 func (s *ShareStore) Status() map[string]QueueStatus {
-	now := time.Now()
+	now := s.now()
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -877,15 +1205,17 @@ func (s *ShareStore) Status() map[string]QueueStatus {
 		switch state {
 		case 0:
 			entry.Pending += count
-		case 1:
-			entry.Pending += count
-			entry.Processing += count
 		case 2:
 			entry.Submitted += count
 		case 3:
 			entry.Failed += count
 		}
 		result[roundID] = entry
+	}
+	for _, active := range s.inFlight {
+		entry := result[active.roundID]
+		entry.Processing++
+		result[active.roundID] = entry
 	}
 
 	// Readiness follows the effective in-memory schedule rather than persisted
@@ -927,6 +1257,11 @@ func (s *ShareStore) ExportQueue(roundID string, now time.Time) (QueueExport, er
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for _, active := range s.inFlight {
+		if active.roundID == roundID {
+			return QueueExport{}, fmt.Errorf("cannot export round %s while a worker is active", roundID)
+		}
+	}
 
 	if err := s.db.QueryRow(
 		"SELECT created_at_time, vote_end_time FROM rounds WHERE round_id = ?",
@@ -953,7 +1288,7 @@ func (s *ShareStore) ExportQueue(roundID string, now time.Time) (QueueExport, er
 	for rows.Next() {
 		var row QueueExportRow
 		var state int
-		var commsJSON string
+		var commsJSON []byte
 		if err := rows.Scan(
 			&row.ShareIndex,
 			&row.SharesHash,
@@ -979,10 +1314,13 @@ func (s *ShareStore) ExportQueue(roundID string, now time.Time) (QueueExport, er
 		if row.OriginalSubmitAt == 0 {
 			row.OriginalSubmitAt = row.SubmitAt
 		}
-		if commsJSON != "" {
-			if err := json.Unmarshal([]byte(commsJSON), &row.ShareComms); err != nil {
-				return QueueExport{}, fmt.Errorf("decode share_comms for share_index %d: %w", row.ShareIndex, err)
-			}
+		if err := json.Unmarshal(commsJSON, &row.ShareComms); err != nil {
+			rawComms := base64.StdEncoding.EncodeToString(commsJSON)
+			row.Corrupt = true
+			row.CorruptionReason = "invalid_share_comms_json"
+			row.RawShareCommsBase64 = &rawComms
+			row.ShareComms = nil
+			row.Processable = false
 		}
 		if export.Round.VoteEndTime == 0 && row.VoteEndTime != 0 {
 			export.Round.VoteEndTime = row.VoteEndTime
@@ -1009,6 +1347,7 @@ func (s *ShareStore) ImportQueue(export QueueExport, opts QueueImportOptions) (Q
 
 	result := QueueImportResult{}
 	schedule := make(map[string]time.Time)
+	immediateBucket := time.Unix(s.now().Unix(), 0)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1028,7 +1367,7 @@ func (s *ShareStore) ImportQueue(export QueueExport, opts QueueImportOptions) (Q
 	}
 
 	for _, row := range export.Rows {
-		if !isProcessableShareState(row.State) {
+		if row.Corrupt || !isProcessableShareState(row.State) {
 			result.SkippedTerminal++
 			continue
 		}
@@ -1084,7 +1423,7 @@ func (s *ShareStore) ImportQueue(export QueueExport, opts QueueImportOptions) (Q
 		affected, _ := res.RowsAffected()
 		if affected > 0 {
 			result.Inserted++
-			schedule[schedKey(export.RoundID, row.ShareIndex, row.ProposalID, row.TreePosition)] = scheduledTime(submitAt)
+			schedule[schedKey(export.RoundID, row.ShareIndex, row.ProposalID, row.TreePosition)] = scheduledTime(submitAt, immediateBucket)
 			continue
 		}
 
@@ -1095,11 +1434,18 @@ func (s *ShareStore) ImportQueue(export QueueExport, opts QueueImportOptions) (Q
 		if duplicate {
 			result.Duplicates++
 			if opts.ForceReady && isProcessableShareState(existingState) {
+				key := schedKey(export.RoundID, row.ShareIndex, row.ProposalID, row.TreePosition)
+				if _, active := s.inFlight[key]; active {
+					// Preserve the current worker's ownership. Force-ready may
+					// reschedule an idle duplicate, but it cannot create a second
+					// owner for an attempt already in progress.
+					continue
+				}
 				if err := forceReadyExistingImportRow(tx, export.RoundID, row, originalSubmitAt); err != nil {
 					return QueueImportResult{}, err
 				}
 				if existingState == ShareStateReceived {
-					schedule[schedKey(export.RoundID, row.ShareIndex, row.ProposalID, row.TreePosition)] = scheduledTime(0)
+					schedule[key] = scheduledTime(0, immediateBucket)
 				}
 			}
 		} else {
@@ -1142,9 +1488,9 @@ func (s *ShareStore) ImportQueue(export QueueExport, opts QueueImportOptions) (Q
 }
 
 // scheduledTime converts a submit_at unix timestamp into an in-memory schedule time.
-func scheduledTime(submitAt uint64) time.Time {
+func scheduledTime(submitAt uint64, immediateBucket time.Time) time.Time {
 	if submitAt == 0 {
-		return time.Now()
+		return immediateBucket
 	}
 	return time.Unix(int64(submitAt), 0)
 }
@@ -1368,26 +1714,31 @@ func (s *ShareStore) QueueSummary(roundID string, now time.Time) (QueueSummary, 
 
 		idx := queueSummaryBucketIndex(effectiveTime, info.CreatedAtTime, info.VoteEndTime, bucketSeconds, bucketCount)
 		bucket := &summary.Buckets[idx]
-		switch ShareState(state) {
-		case ShareStateReceived:
+		key := schedKey(roundID, shareIndex, proposalID, treePosition)
+		_, active := s.inFlight[key]
+		switch {
+		case active:
+			bucket.Processing++
+			summary.Processing++
+		case ShareState(state) == ShareStateReceived:
 			if effectiveTime <= generatedAt {
 				bucket.OverduePending++
 			} else {
 				bucket.PendingFuture++
 			}
-			if scheduledAt, ok := s.schedule[schedKey(roundID, shareIndex, proposalID, treePosition)]; ok {
+			if scheduledAt, ok := s.schedule[key]; ok {
 				if scheduledAt.After(now) {
 					summary.NotYetDue++
 				} else {
 					summary.Ready++
 				}
 			}
-		case ShareStateWitnessed:
+		case ShareState(state) == ShareStateWitnessed:
 			bucket.Processing++
 			summary.Processing++
-		case ShareStateSubmitted:
+		case ShareState(state) == ShareStateSubmitted:
 			bucket.Submitted++
-		case ShareStateFailed:
+		case ShareState(state) == ShareStateFailed:
 			bucket.Failed++
 		}
 		bucket.Total++
@@ -1524,14 +1875,26 @@ func (s *ShareStore) PurgeRounds(roundIDs []string) int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var deleted int64
-	if len(roundIDs) > 0 {
+	activeRounds := make(map[string]bool)
+	for _, active := range s.inFlight {
+		activeRounds[active.roundID] = true
+	}
+	purgeable := make([]string, 0, len(roundIDs))
+	for _, roundID := range roundIDs {
+		if activeRounds[roundID] {
+			s.logError("PurgeRounds: retaining active round", "round_id", roundID)
+			continue
+		}
+		purgeable = append(purgeable, roundID)
+	}
+	if len(purgeable) > 0 {
 		tx, err := s.db.Begin()
 		if err != nil {
 			s.logError("PurgeRounds: begin failed", "error", err)
 			return 0
 		}
 		defer tx.Rollback()
-		for _, roundID := range roundIDs {
+		for _, roundID := range purgeable {
 			res, err := tx.Exec("DELETE FROM shares WHERE round_id = ?", roundID)
 			if err != nil {
 				s.logError("PurgeRounds: delete shares failed", "error", err)
@@ -1554,8 +1917,8 @@ func (s *ShareStore) PurgeRounds(roundIDs []string) int64 {
 		}
 	}
 	s.truncateWALAfterWitnessCleanup("PurgeRounds")
-	closed := make(map[string]bool, len(roundIDs))
-	for _, roundID := range roundIDs {
+	closed := make(map[string]bool, len(purgeable))
+	for _, roundID := range purgeable {
 		closed[roundID] = true
 		delete(s.roundCache, roundID)
 	}
@@ -1595,9 +1958,10 @@ func (s *ShareStore) truncateWALAfterWitnessCleanup(stage string) {
 	}
 }
 
-// recover resets in-flight shares and restores their submit_at schedule.
+// recover normalizes legacy state and restores every pending submit_at schedule.
 func (s *ShareStore) recover() error {
-	// Reset Witnessed (1) → Received (0).
+	immediateBucket := time.Unix(s.now().Unix(), 0)
+	// Current workers remain Received; reset Witnessed rows left by older binaries.
 	if _, err := s.db.Exec("UPDATE shares SET state = 0 WHERE state = 1"); err != nil {
 		return fmt.Errorf("reset witnessed shares: %w", err)
 	}
@@ -1612,9 +1976,12 @@ func (s *ShareStore) recover() error {
 		var roundID string
 		var info RoundInfo
 		if err := roundRows.Scan(&roundID, &info.VoteEndTime, &info.CreatedAtTime); err != nil {
-			continue
+			return fmt.Errorf("scan rounds cache: %w", err)
 		}
 		s.roundCache[roundID] = info
+	}
+	if err := roundRows.Err(); err != nil {
+		return fmt.Errorf("iterate rounds cache: %w", err)
 	}
 
 	// Load all non-terminal shares with their submit_at times.
@@ -1629,58 +1996,168 @@ func (s *ShareStore) recover() error {
 		var shareIndex, proposalID uint32
 		var treePosition, submitAt uint64
 		if err := rows.Scan(&roundID, &shareIndex, &proposalID, &treePosition, &submitAt); err != nil {
-			continue
+			return fmt.Errorf("scan recoverable share: %w", err)
 		}
-		var schedTime time.Time
-		if submitAt == 0 {
-			schedTime = time.Now()
-		} else {
-			schedTime = time.Unix(int64(submitAt), 0)
-		}
+		schedTime := scheduledTime(submitAt, immediateBucket)
 		s.schedule[schedKey(roundID, shareIndex, proposalID, treePosition)] = schedTime
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate recoverable shares: %w", err)
 	}
 	return nil
 }
 
-func (s *ShareStore) loadShare(roundID string, shareIndex, proposalID uint32, treePosition uint64) (QueuedShare, bool) {
-	var q QueuedShare
-	var commsJSON string
-	var state, attempts int
+type shareRowQuerier interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
 
-	err := s.db.QueryRow(
-		`SELECT shares_hash, proposal_id, vote_decision, enc_share_c1, enc_share_c2,
-		        tree_position, share_comms, primary_blind, state, attempts, vote_end_time, submit_at, retry_state
+func (s *ShareStore) loadShare(roundID string, shareIndex, proposalID uint32, treePosition uint64) (QueuedShare, bool) {
+	share, err := loadShareFrom(s.db, roundID, shareIndex, proposalID, treePosition)
+	return share, err == nil
+}
+
+func loadShareFrom(queryer shareRowQuerier, roundID string, shareIndex, proposalID uint32, treePosition uint64) (QueuedShare, error) {
+	var share QueuedShare
+	var sharesHash, voteDecision, encC1, encC2 any
+	var commsJSON, primaryBlind, stateValue, attemptsValue any
+	var voteEndTime, submitAt, retryState any
+
+	err := queryer.QueryRow(
+		`SELECT shares_hash, vote_decision, enc_share_c1, enc_share_c2,
+		        share_comms, primary_blind, state, attempts, vote_end_time, submit_at, retry_state
 		 FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
 		roundID, shareIndex, proposalID, treePosition,
 	).Scan(
-		&q.Payload.SharesHash,
-		&q.Payload.ProposalID,
-		&q.Payload.VoteDecision,
-		&q.Payload.EncShare.C1,
-		&q.Payload.EncShare.C2,
-		&q.Payload.TreePosition,
+		&sharesHash,
+		&voteDecision,
+		&encC1,
+		&encC2,
 		&commsJSON,
-		&q.Payload.PrimaryBlind,
-		&state,
-		&attempts,
-		&q.VoteEndTime,
-		&q.Payload.SubmitAt,
-		&q.retryState,
+		&primaryBlind,
+		&stateValue,
+		&attemptsValue,
+		&voteEndTime,
+		&submitAt,
+		&retryState,
 	)
 	if err != nil {
-		return q, false
+		return share, fmt.Errorf("scan share row: %w", err)
 	}
 
-	q.Payload.VoteRoundID = roundID
-	q.Payload.EncShare.ShareIndex = shareIndex
-	q.State = ShareState(state)
-	q.Attempts = attempts
-
-	if err := json.Unmarshal([]byte(commsJSON), &q.Payload.ShareComms); err != nil {
-		return q, false
+	share.Payload.SharesHash, err = decodeRowText("shares_hash", sharesHash)
+	if err != nil {
+		return share, err
+	}
+	share.Payload.VoteDecision, err = decodeRowUint32("vote_decision", voteDecision)
+	if err != nil {
+		return share, err
+	}
+	share.Payload.EncShare.C1, err = decodeRowText("enc_share_c1", encC1)
+	if err != nil {
+		return share, err
+	}
+	share.Payload.EncShare.C2, err = decodeRowText("enc_share_c2", encC2)
+	if err != nil {
+		return share, err
+	}
+	commsText, err := decodeRowText("share_comms", commsJSON)
+	if err != nil {
+		return share, err
+	}
+	share.Payload.PrimaryBlind, err = decodeRowText("primary_blind", primaryBlind)
+	if err != nil {
+		return share, err
+	}
+	state, err := decodeRowInt("state", stateValue)
+	if err != nil {
+		return share, err
+	}
+	switch ShareState(state) {
+	case ShareStateReceived, ShareStateWitnessed, ShareStateSubmitted, ShareStateFailed:
+	default:
+		return share, fmt.Errorf("%w: invalid state %d", errCorruptShareRow, state)
+	}
+	attempts, err := decodeRowInt("attempts", attemptsValue)
+	if err != nil {
+		return share, err
+	}
+	share.VoteEndTime, err = decodeRowUint64("vote_end_time", voteEndTime)
+	if err != nil {
+		return share, err
+	}
+	share.Payload.SubmitAt, err = decodeRowUint64("submit_at", submitAt)
+	if err != nil {
+		return share, err
+	}
+	share.retryState, err = decodeRowText("retry_state", retryState)
+	if err != nil {
+		return share, err
 	}
 
-	return q, true
+	share.Payload.VoteRoundID = roundID
+	share.Payload.ProposalID = proposalID
+	share.Payload.TreePosition = treePosition
+	share.Payload.EncShare.ShareIndex = shareIndex
+	share.State = ShareState(state)
+	share.Attempts = attempts
+
+	if err := json.Unmarshal([]byte(commsText), &share.Payload.ShareComms); err != nil {
+		return share, fmt.Errorf("%w: invalid share_comms JSON: %v", errCorruptShareRow, err)
+	}
+
+	return share, nil
+}
+
+func decodeRowText(column string, value any) (string, error) {
+	switch value := value.(type) {
+	case string:
+		return value, nil
+	case []byte:
+		return string(value), nil
+	default:
+		return "", fmt.Errorf("%w: %s has type %T", errCorruptShareRow, column, value)
+	}
+}
+
+func decodeRowInt(column string, value any) (int, error) {
+	integer, err := decodeRowUint64(column, value)
+	if err != nil {
+		return 0, err
+	}
+	maxInt := uint64(^uint(0) >> 1)
+	if integer > maxInt {
+		return 0, fmt.Errorf("%w: %s is out of range", errCorruptShareRow, column)
+	}
+	return int(integer), nil
+}
+
+func decodeRowUint32(column string, value any) (uint32, error) {
+	integer, err := decodeRowUint64(column, value)
+	if err != nil {
+		return 0, err
+	}
+	if integer > uint64(^uint32(0)) {
+		return 0, fmt.Errorf("%w: %s is out of range", errCorruptShareRow, column)
+	}
+	return uint32(integer), nil
+}
+
+func decodeRowUint64(column string, value any) (uint64, error) {
+	switch value := value.(type) {
+	case int64:
+		if value >= 0 {
+			return uint64(value), nil
+		}
+	case int:
+		if value >= 0 {
+			return uint64(value), nil
+		}
+	case uint64:
+		return value, nil
+	case uint32:
+		return uint64(value), nil
+	}
+	return 0, fmt.Errorf("%w: %s must be a non-negative integer, got %T", errCorruptShareRow, column, value)
 }
 
 func payloadEqual(existing, incoming SharePayload) bool {

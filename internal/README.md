@@ -1,7 +1,7 @@
 # Helper Server - Share Scheduling Model
 
 The helper server accepts encrypted voting shares from wallets, stores them in
-SQLite, waits until each wallet-provided `submit_at` time, generates the ZKP 3
+SQLite, waits until each effective `submit_at` time, generates the ZKP 3
 share reveal proof, and submits `MsgRevealShare` to the chain.
 
 Timing privacy is owned by the wallet. The helper does not add random
@@ -16,15 +16,36 @@ roughly 500 MB while proving, so size the value against the host.
 ## Client-controlled `submit_at`
 
 `POST /shielded-vote/v1/shares` includes `submit_at` in the share payload.
-`ShareStore.Enqueue()` persists that value with the payload and schedules the
-share for the corresponding Unix second.
+`ShareStore.Enqueue()` persists an effective value with the payload and
+schedules the share for the corresponding Unix second.
 
 - `submit_at = 0` means immediate processing.
 - `submit_at > 0` means the share is eligible once that Unix timestamp arrives.
-- `submit_at` must not be greater than the round's `vote_end_time`.
+- `submit_at` must be strictly before the round's `vote_end_time`; the API
+  separately rejects inactive rounds.
+- For an active round, a nonzero past value is clamped to the arrival second so it
+  cannot claim queue age. The caller's value is retained as
+  `original_submit_at` in queue exports.
 
-The helper accepts same-second collisions without spreading them. This preserves
-the wallet's intended schedule exactly.
+The helper accepts same-second collisions without spreading them. Equal-time
+shares use a keyed, process-local rank, so connection timing within that second
+is not restored as FIFO. This protection requires at least two ready shares
+from the same round in one second bucket; a singleton bucket remains correlated
+with its arrival time because the helper adds no timing delay.
+
+## Ready-round fairness
+
+Ready shares are scheduled round-robin by `round_id`. Each ready round receives
+one processing slot before any ready round receives a second slot. Within a
+round, earlier effective `submit_at` values are selected first. Future shares
+and retrying shares whose backoff has not elapsed do not participate in the
+rotation. Retry targets normally use Unix-second buckets. A near-deadline retry
+retains subsecond precision when quantization would erase its positive backoff;
+that exceptional retry does not participate in same-time keyed ranking.
+
+The rotation cursor is in memory and continues across bounded processor refills.
+It is not persisted: after restart a different ready round may be selected first,
+while every share retains its persisted effective schedule.
 
 ## Processor wakeups
 
@@ -46,23 +67,27 @@ maintenance wake.
 ## Crash Recovery
 
 The helper server is designed for crash-safe operation. Share payloads,
-`submit_at`, vote end times, attempt counts, and processing state are persisted
-to SQLite with WAL mode enabled. On startup, `NewShareStore` calls `recover()`
+`submit_at`, vote end times, attempt counts, and terminal outcomes are persisted
+to SQLite with WAL mode enabled. Worker ownership is process-local: a dequeued
+row remains durably Received while its schedule key is held in memory. On
+startup, `NewShareStore` calls `recover()`
 which:
 
-1. resets in-flight shares from Witnessed back to Received,
+1. resets legacy Witnessed rows from older binaries back to Received,
 2. rebuilds the round cache from the persisted `rounds` table,
-3. restores each pending share to its persisted `submit_at` schedule.
+3. restores each pending share to its persisted effective `submit_at` schedule.
 
-No fresh random delay is assigned during recovery. A recovered share keeps the
-same schedule the wallet provided.
+No fresh random delay is assigned during recovery. A recovered share keeps its
+effective schedule; queue exports retain the wallet-provided value separately.
+All immediate rows recovered or imported in one operation share one common
+second bucket.
 
 ### State-by-state behavior
 
 | State at crash | On recovery | Share lost? |
 |---|---|---|
-| Received (0) - waiting for `submit_at` | Re-enters schedule at persisted `submit_at` | No |
-| Witnessed (1) - mid-processing | Reset to Received, re-enters schedule | No |
+| Received (0) - waiting or owned by a worker at crash | Re-enters schedule at persisted `submit_at` | No |
+| Witnessed (1) - legacy mid-processing state | Reset to Received, re-enters schedule | No |
 | Submitted (2) - on chain | Terminal, no action needed | No |
 | Failed (3) - permanent failure | Terminal, no action needed | N/A |
 
@@ -74,12 +99,30 @@ still present in `helper.db`. Legacy or imported rows without a known
 `vote_end_time` are scrubbed when they become permanently failed because there
 is no reliable purge deadline.
 
+If a retained failed row contains malformed `share_comms`, queue export includes
+the exact stored bytes as base64 diagnostic data and marks the row corrupt and
+nonprocessable. That raw field is witness material and has the same handling
+requirements as the rest of the local rescue artifact. Import skips diagnostic
+corrupt rows while restoring healthy processable rows.
+
+Malformed `share_comms` is exported this way in any queue state, including a
+future `Received` row. Export does not mutate the database state and refuses to
+snapshot a round while one of its workers is active. Any SQL execution or scan
+failure pauses dequeue with a common retry delay without spending a share
+attempt. Only explicit validation of a successfully read row can terminally
+classify that row as corrupt. A recovery scan error aborts helper-store startup
+instead of silently leaving a persisted share outside the schedule.
+
 ## Wallet Retry Safety
 
 If the server crashes between receiving the HTTP POST and completing the SQLite
 insert, the wallet gets an HTTP error and can retry. `Enqueue` is idempotent:
 duplicate payloads return `"duplicate"`, and conflicting payloads for the same
 `(round_id, share_index, proposal_id, tree_position)` return `409 Conflict`.
+An authenticated retry that passes payload-consistency and on-chain commitment
+validation replaces an unowned, non-submitted row whose stored payload cannot
+be decoded and whose state remains independently readable. Active worker
+ownership, submitted outcomes, and unreadable states are preserved.
 
 ## Known Limitations
 

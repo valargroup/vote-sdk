@@ -632,6 +632,54 @@ func TestSubmitShare_DuplicateIsIdempotent(t *testing.T) {
 	assert.Equal(t, "duplicate", resp.Status)
 }
 
+func TestSubmitShare_RetryRepairsTerminalizedCorruptRow(t *testing.T) {
+	router, store := newTestRouter(t)
+	body := validPayloadJSON()
+
+	first := httptest.NewRecorder()
+	router.ServeHTTP(first, httptest.NewRequest(http.MethodPost, "/shielded-vote/v1/shares", strings.NewReader(body)))
+	require.Equal(t, http.StatusOK, first.Code)
+	_, err := store.db.Exec("UPDATE shares SET share_comms = 'not-json' WHERE round_id = ?", apiTestRoundID)
+	require.NoError(t, err)
+	assert.Empty(t, store.TakeReadyBatch(1))
+
+	retry := httptest.NewRecorder()
+	router.ServeHTTP(retry, httptest.NewRequest(http.MethodPost, "/shielded-vote/v1/shares", strings.NewReader(body)))
+	require.Equal(t, http.StatusOK, retry.Code)
+	var response submitResponse
+	require.NoError(t, json.Unmarshal(retry.Body.Bytes(), &response))
+	assert.Equal(t, "queued", response.Status)
+	assert.Len(t, store.TakeReadyBatch(1), 1)
+}
+
+func TestSubmitShare_RetryRejectsCorruptRowWithUnreadableState(t *testing.T) {
+	router, store := newTestRouter(t)
+	body := validPayloadJSON()
+
+	first := httptest.NewRecorder()
+	router.ServeHTTP(first, httptest.NewRequest(http.MethodPost, "/shielded-vote/v1/shares", strings.NewReader(body)))
+	require.Equal(t, http.StatusOK, first.Code)
+	key := schedKey(apiTestRoundID, 0, 1, 0)
+	scheduledBefore := store.schedule[key]
+	_, err := store.db.Exec(
+		"UPDATE shares SET share_comms = 'not-json', state = '2x' WHERE round_id = ?",
+		apiTestRoundID,
+	)
+	require.NoError(t, err)
+
+	retry := httptest.NewRecorder()
+	router.ServeHTTP(retry, httptest.NewRequest(http.MethodPost, "/shielded-vote/v1/shares", strings.NewReader(body)))
+	assert.Equal(t, http.StatusConflict, retry.Code)
+	assert.Equal(t, scheduledBefore, store.schedule[key])
+	assert.Empty(t, store.inFlight)
+
+	var state, comms string
+	err = store.db.QueryRow("SELECT state, share_comms FROM shares WHERE round_id = ?", apiTestRoundID).Scan(&state, &comms)
+	require.NoError(t, err)
+	assert.Equal(t, "2x", state)
+	assert.Equal(t, "not-json", comms)
+}
+
 func TestSubmitShare_RoundIDCaseIsIdempotent(t *testing.T) {
 	router, store := newTestRouter(t)
 	roundID := "ab" + strings.Repeat("00", 31)

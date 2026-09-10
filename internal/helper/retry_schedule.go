@@ -151,8 +151,9 @@ func (s *retryState) due(now time.Time, voteEndTime uint64) (slot int, next time
 	return slot, next
 }
 
-// reserveProofAttempt atomically consumes a slot on the witnessed row before any
-// proof work. The compare-and-swap prevents stale workers from resetting it.
+// reserveProofAttempt atomically consumes a slot on the process-owned Received
+// row before any proof work. The compare-and-swap prevents stale workers from
+// resetting it.
 func (s *ShareStore) reserveProofAttempt(share QueuedShare, state retryState) error {
 	raw, err := json.Marshal(state)
 	if err != nil {
@@ -162,7 +163,7 @@ func (s *ShareStore) reserveProofAttempt(share QueuedShare, state retryState) er
 	defer s.mu.Unlock()
 	res, err := s.db.Exec(`UPDATE shares SET retry_state = ?
 		WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?
-		AND state = 1 AND retry_state = ?`, string(raw), share.Payload.VoteRoundID,
+		AND state = 0 AND retry_state = ?`, string(raw), share.Payload.VoteRoundID,
 		share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition, share.retryState)
 	if err != nil {
 		return fmt.Errorf("reserve proof attempt: %w", err)
@@ -172,7 +173,7 @@ func (s *ShareStore) reserveProofAttempt(share QueuedShare, state retryState) er
 		return err
 	}
 	if n != 1 {
-		return fmt.Errorf("proof attempt reservation lost witnessed row")
+		return fmt.Errorf("proof attempt reservation lost owned row")
 	}
 	return nil
 }

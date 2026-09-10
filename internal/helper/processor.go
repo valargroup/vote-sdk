@@ -387,6 +387,15 @@ func (p *Processor) processQueuedShare(ctx context.Context, share QueuedShare) {
 		shareSpan.Finish(spanErr)
 	}()
 	defer func() {
+		p.store.requeueInFlightIfOwned(
+			share.Payload.VoteRoundID,
+			share.Payload.EncShare.ShareIndex,
+			share.Payload.ProposalID,
+			share.Payload.TreePosition,
+			share.attemptID,
+		)
+	}()
+	defer func() {
 		if r := recover(); r != nil {
 			metricOutcome = "panic"
 			metricStage = failureStagePanic

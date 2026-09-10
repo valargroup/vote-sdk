@@ -1,6 +1,6 @@
 // Package helper implements the share processing pipeline that receives
-// encrypted voting shares from wallets, waits until wallet-provided submit_at
-// times, generates ZKP 3 proofs, and submits MsgRevealShare to the chain.
+// encrypted voting shares from wallets, waits until each effective submit_at,
+// generates ZKP 3 proofs, and submits MsgRevealShare to the chain.
 //
 // This package runs inside the svoted binary, reading commitment tree
 // leaves directly from the vote keeper's KV store.
@@ -134,8 +134,10 @@ type SharePayload struct {
 type ShareState int
 
 const (
-	ShareStateReceived  ShareState = 0 // waiting for submit_at
-	ShareStateWitnessed ShareState = 1 // ready for proof generation
+	ShareStateReceived ShareState = 0 // waiting for submit_at
+	// ShareStateWitnessed is retained for compatibility with older helper DBs.
+	// Current workers keep ownership in memory while the durable row remains Received.
+	ShareStateWitnessed ShareState = 1
 	ShareStateSubmitted ShareState = 2 // submitted to chain
 	ShareStateFailed    ShareState = 3 // permanently failed
 )
@@ -143,6 +145,7 @@ const (
 // QueuedShare is a share payload with processing metadata.
 type QueuedShare struct {
 	retryState  string // persisted retry inputs and progress
+	attemptID   uint64 // process-local ownership generation
 	Payload     SharePayload
 	State       ShareState
 	Attempts    int
@@ -229,22 +232,28 @@ type QueueExportRound struct {
 // for debugging, but import skips them so they cannot be processed again.
 // Submitted rows should have witness material cleared. Failed rows can retain
 // it until the helper confirms committed round closure and purges the queue.
+// A corrupt row in any state can contain its exact raw share_comms bytes as
+// base64; callers must treat that diagnostic field as witness material. Such a
+// row is always exported as nonprocessable and skipped during import.
 type QueueExportRow struct {
-	ShareIndex       uint32             `json:"share_index"`
-	SharesHash       string             `json:"shares_hash,omitempty"`
-	ProposalID       uint32             `json:"proposal_id"`
-	VoteDecision     uint32             `json:"vote_decision"`
-	EncShare         EncryptedShareWire `json:"enc_share,omitempty"`
-	TreePosition     uint64             `json:"tree_position"`
-	ShareComms       []string           `json:"share_comms,omitempty"`
-	PrimaryBlind     string             `json:"primary_blind,omitempty"`
-	State            ShareState         `json:"state"`
-	Attempts         int                `json:"attempts"`
-	VoteEndTime      uint64             `json:"vote_end_time"`
-	SubmitAt         uint64             `json:"submit_at"`
-	OriginalSubmitAt uint64             `json:"original_submit_at,omitempty"`
-	ReceivedAt       uint64             `json:"received_at"`
-	Processable      bool               `json:"processable"`
+	ShareIndex          uint32             `json:"share_index"`
+	SharesHash          string             `json:"shares_hash,omitempty"`
+	ProposalID          uint32             `json:"proposal_id"`
+	VoteDecision        uint32             `json:"vote_decision"`
+	EncShare            EncryptedShareWire `json:"enc_share,omitempty"`
+	TreePosition        uint64             `json:"tree_position"`
+	ShareComms          []string           `json:"share_comms,omitempty"`
+	PrimaryBlind        string             `json:"primary_blind,omitempty"`
+	State               ShareState         `json:"state"`
+	Attempts            int                `json:"attempts"`
+	VoteEndTime         uint64             `json:"vote_end_time"`
+	SubmitAt            uint64             `json:"submit_at"`
+	OriginalSubmitAt    uint64             `json:"original_submit_at,omitempty"`
+	ReceivedAt          uint64             `json:"received_at"`
+	Processable         bool               `json:"processable"`
+	Corrupt             bool               `json:"corrupt,omitempty"`
+	CorruptionReason    string             `json:"corruption_reason,omitempty"`
+	RawShareCommsBase64 *string            `json:"raw_share_comms_base64,omitempty"`
 }
 
 // QueueImportOptions controls how processable rows from a rescue artifact are scheduled.
