@@ -52,16 +52,29 @@ type ValidateOpts struct {
 //   - CheckTx: full validation (basic + round + proposals + nullifiers + sig + ZKP)
 //   - RecheckTx: lightweight re-validation (basic + round + proposals + nullifiers)
 //   - FinalizeBlock: full validation before keeper execution
-func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper, opts ValidateOpts) error {
+func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper, opts ValidateOpts) (retErr error) {
+	observation := defaultVerificationMetrics.begin(ctx, msg, opts.IsRecheck)
+	defer func() {
+		if panicValue := recover(); panicValue != nil {
+			observation.finishPanic()
+			panic(panicValue)
+		}
+		observation.finish(retErr)
+	}()
+
 	// 1. Basic field validation (stateless).
-	if err := msg.ValidateBasic(); err != nil {
+	if err := observation.observe("basic_validation", msg.ValidateBasic); err != nil {
 		return fmt.Errorf("basic validation failed: %w", err)
 	}
 
 	// 2. Vote round existence and status check (message-type-aware).
 	// MsgCreateVotingSession returns nil for GetVoteRoundId() since the round
 	// doesn't exist yet — skip the check in that case.
-	if roundID := msg.GetVoteRoundId(); roundID != nil {
+	if err := observation.observe("round_validation", func() error {
+		roundID := msg.GetVoteRoundId()
+		if roundID == nil {
+			return nil
+		}
 		switch m := msg.(type) {
 		case *types.MsgSubmitTally:
 			// MsgSubmitTally requires strictly TALLYING status.
@@ -69,14 +82,12 @@ func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper
 				return err
 			}
 			// Creator must be the block proposer; rejected entirely in CheckTx.
-			if err := k.ValidateProposerIsCreator(ctx, m.Creator, "MsgSubmitTally"); err != nil {
-				return err
-			}
+			return k.ValidateProposerIsCreator(ctx, m.Creator, "MsgSubmitTally")
 		default:
-			if err := k.ValidateRoundForVoting(ctx, roundID); err != nil {
-				return err
-			}
+			return k.ValidateRoundForVoting(ctx, roundID)
 		}
+	}); err != nil {
+		return err
 	}
 
 	// 3. Reject nonexistent cast proposals before paying for any signatures or
@@ -91,29 +102,36 @@ func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper
 	case *types.MsgDelegateAndCastVoteBatch:
 		votes = m.Batch.Votes
 	}
-	if len(votes) > 0 {
-		kvStore := k.OpenKVStore(ctx)
-		for _, vote := range votes {
-			if err := k.ValidateProposalId(kvStore, vote.VoteRoundId, vote.ProposalId); err != nil {
-				return err
+	if err := observation.observe("proposal_validation", func() error {
+		if len(votes) > 0 {
+			kvStore := k.OpenKVStore(ctx)
+			for _, vote := range votes {
+				if err := k.ValidateProposalId(kvStore, vote.VoteRoundId, vote.ProposalId); err != nil {
+					return err
+				}
 			}
 		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	// 4. Nullifier uniqueness (ALWAYS runs, even on RecheckTx).
 	// Nullifiers may have been consumed by the block that was just committed,
 	// so we must re-check every time. Nullifiers are scoped by type + round.
-	if composite, ok := msg.(*types.MsgDelegateAndCastVoteBatch); ok {
-		if err := k.CheckNullifiersUnique(ctx, types.NullifierTypeGov, composite.GetVoteRoundId(), composite.Delegation.GovNullifiers); err != nil {
-			return err
+	if err := observation.observe("nullifier_validation", func() error {
+		if composite, ok := msg.(*types.MsgDelegateAndCastVoteBatch); ok {
+			if err := k.CheckNullifiersUnique(ctx, types.NullifierTypeGov, composite.GetVoteRoundId(), composite.Delegation.GovNullifiers); err != nil {
+				return err
+			}
+			return k.CheckNullifiersUnique(ctx, types.NullifierTypeVoteAuthorityNote, composite.GetVoteRoundId(), composite.Batch.GetNullifiers())
 		}
-		if err := k.CheckNullifiersUnique(ctx, types.NullifierTypeVoteAuthorityNote, composite.GetVoteRoundId(), composite.Batch.GetNullifiers()); err != nil {
-			return err
+		if nullifiers := msg.GetNullifiers(); len(nullifiers) > 0 {
+			return k.CheckNullifiersUnique(ctx, msg.GetNullifierType(), msg.GetVoteRoundId(), nullifiers)
 		}
-	} else if nullifiers := msg.GetNullifiers(); len(nullifiers) > 0 {
-		if err := k.CheckNullifiersUnique(ctx, msg.GetNullifierType(), msg.GetVoteRoundId(), nullifiers); err != nil {
-			return err
-		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	// Skip expensive cryptographic checks on RecheckTx.
@@ -122,31 +140,31 @@ func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper
 	}
 
 	// 5–6. Per-message-type signature and ZKP verification.
-	return verifyProofs(ctx, msg, k, opts)
+	return verifyProofs(ctx, msg, k, opts, observation)
 }
 
 // verifyProofs dispatches to the appropriate signature and ZKP verifier
 // based on the concrete message type.
-func verifyProofs(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper, opts ValidateOpts) error {
+func verifyProofs(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper, opts ValidateOpts, observation *verificationObservation) error {
 	switch m := msg.(type) {
 	case *types.MsgCreateVotingSession:
 		// No cryptographic verification needed for session setup.
 		return nil
 
 	case *types.MsgDelegateVote:
-		return verifyDelegation(ctx, m, k, opts)
+		return verifyDelegation(ctx, m, k, opts, observation)
 
 	case *types.MsgCastVote:
-		return verifyCastVote(ctx, m, k, opts)
+		return verifyCastVote(ctx, m, k, opts, observation)
 
 	case *types.MsgCastVoteBatch:
-		return verifyCastVoteBatch(ctx, m, k, opts)
+		return verifyCastVoteBatch(ctx, m, k, opts, observation)
 
 	case *types.MsgDelegateAndCastVoteBatch:
-		return verifyDelegateAndCastVoteBatch(ctx, m, k, opts)
+		return verifyDelegateAndCastVoteBatch(ctx, m, k, opts, observation)
 
 	case *types.MsgRevealShare:
-		return verifyRevealShare(ctx, m, k, opts)
+		return verifyRevealShare(ctx, m, k, opts, observation)
 
 	case *types.MsgSubmitTally:
 		// No cryptographic verification needed for tally submission.
@@ -154,7 +172,9 @@ func verifyProofs(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper, 
 		return nil
 
 	default:
-		return fmt.Errorf("unknown vote message type: %T", msg)
+		return observation.observe("message_dispatch", func() error {
+			return fmt.Errorf("unknown vote message type: %T", msg)
+		})
 	}
 }
 
@@ -162,37 +182,59 @@ func verifyProofs(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper, 
 // first cast proof to the one-leaf tree containing the delegation's VAN. Later
 // cast proofs are chained through their predecessor's successor VAN exactly as
 // in an ordinary atomic cast batch.
-func verifyDelegateAndCastVoteBatch(ctx context.Context, msg *types.MsgDelegateAndCastVoteBatch, k *keeper.Keeper, opts ValidateOpts) error {
-	digest := types.ComputeDelegateAndCastVoteBatchSighash(msg)
+func verifyDelegateAndCastVoteBatch(ctx context.Context, msg *types.MsgDelegateAndCastVoteBatch, k *keeper.Keeper, opts ValidateOpts, observation *verificationObservation) error {
+	var digest []byte
+	_ = observation.observe("cast_sighash", func() error {
+		digest = types.ComputeDelegateAndCastVoteBatchSighash(msg)
+		return nil
+	})
 	for i, vote := range msg.Batch.Votes {
-		if _, err := elgamal.UnmarshalPublicKey(vote.RVpk); err != nil {
+		if err := observation.observe("cast_key_decode", func() error {
+			_, err := elgamal.UnmarshalPublicKey(vote.RVpk)
+			return err
+		}); err != nil {
 			return fmt.Errorf("%w: batch votes[%d] r_vpk: %v", types.ErrInvalidSignature, i, err)
 		}
-		if err := opts.SigVerifier.Verify(vote.RVpk, digest, vote.VoteAuthSig); err != nil {
+		if err := observation.observe("cast_signature", func() error {
+			return opts.SigVerifier.Verify(vote.RVpk, digest, vote.VoteAuthSig)
+		}); err != nil {
 			return fmt.Errorf("%w: batch votes[%d]: %v", types.ErrInvalidSignature, i, err)
 		}
 	}
 
-	if err := verifyDelegation(ctx, msg.Delegation, k, opts); err != nil {
+	if err := verifyDelegation(ctx, msg.Delegation, k, opts, observation); err != nil {
 		return fmt.Errorf("delegation: %w", err)
 	}
 
 	kvStore := k.OpenKVStore(ctx)
-	round, err := k.GetVoteRound(kvStore, msg.GetVoteRoundId())
-	if err != nil {
+	var round *types.VoteRound
+	if err := observation.observe("round_lookup", func() error {
+		var err error
+		round, err = k.GetVoteRound(kvStore, msg.GetVoteRoundId())
+		return err
+	}); err != nil {
 		return fmt.Errorf("failed to look up round for ZKP inputs: %w", err)
 	}
-	proofRoot, err := votetree.SingleLeafRoot(msg.Delegation.VanCmx)
-	if err != nil {
+	var proofRoot []byte
+	if err := observation.observe("synthetic_root", func() error {
+		var err error
+		proofRoot, err = votetree.SingleLeafRoot(msg.Delegation.VanCmx)
+		return err
+	}); err != nil {
 		return fmt.Errorf("derive delegation synthetic root: %w", err)
 	}
 	for i, vote := range msg.Batch.Votes {
-		if err := verifyVoteCommitmentProof(vote, proofRoot, round.EaPk, opts.ZKPVerifier); err != nil {
+		if err := observation.observe("cast_proof", func() error {
+			return verifyVoteCommitmentProof(vote, proofRoot, round.EaPk, opts.ZKPVerifier)
+		}); err != nil {
 			return fmt.Errorf("batch votes[%d]: %w", i, err)
 		}
 		if i+1 < len(msg.Batch.Votes) {
-			proofRoot, err = votetree.SingleLeafRoot(vote.VoteAuthorityNoteNew)
-			if err != nil {
+			if err := observation.observe("synthetic_root", func() error {
+				var err error
+				proofRoot, err = votetree.SingleLeafRoot(vote.VoteAuthorityNoteNew)
+				return err
+			}); err != nil {
 				return fmt.Errorf("derive synthetic root after batch votes[%d]: %w", i, err)
 			}
 		}
@@ -203,29 +245,42 @@ func verifyDelegateAndCastVoteBatch(ctx context.Context, msg *types.MsgDelegateA
 // verifyDelegation verifies both the RedPallas signature and ZKP #1 for
 // a MsgDelegateVote. It looks up the session to pass nc_root and
 // nullifier_imt_root as ZKP public inputs.
-func verifyDelegation(ctx context.Context, msg *types.MsgDelegateVote, k *keeper.Keeper, opts ValidateOpts) error {
+func verifyDelegation(ctx context.Context, msg *types.MsgDelegateVote, k *keeper.Keeper, opts ValidateOpts, observation *verificationObservation) error {
 	// Validate rk is a valid on-curve non-identity Pallas point before
 	// passing to the FFI. This makes the Go layer self-sufficient against
 	// the identity-point signature bypass regardless of Rust-side checks.
-	if _, err := elgamal.UnmarshalPublicKey(msg.Rk); err != nil {
+	if err := observation.observe("delegation_key_decode", func() error {
+		_, err := elgamal.UnmarshalPublicKey(msg.Rk)
+		return err
+	}); err != nil {
 		return fmt.Errorf("%w: rk: %v", types.ErrInvalidSignature, err)
 	}
 
-	canonicalSighash, err := tx1.ComputeDelegationSighash(msg.Tx1Effects)
-	if err != nil {
+	var canonicalSighash []byte
+	if err := observation.observe("delegation_sighash", func() error {
+		var err error
+		canonicalSighash, err = tx1.ComputeDelegationSighash(msg.Tx1Effects)
+		return err
+	}); err != nil {
 		return fmt.Errorf("%w: tx1_effects: %v", types.ErrInvalidField, err)
 	}
 
 	// Verify the RedPallas signature over the digest reconstructed from the
 	// supplied Ironwood transaction effects.
-	if err := opts.SigVerifier.Verify(msg.Rk, canonicalSighash, msg.SpendAuthSig); err != nil {
+	if err := observation.observe("delegation_signature", func() error {
+		return opts.SigVerifier.Verify(msg.Rk, canonicalSighash, msg.SpendAuthSig)
+	}); err != nil {
 		return fmt.Errorf("%w: %v", types.ErrInvalidSignature, err)
 	}
 
 	// Look up the session to get nc_root and nullifier_imt_root for ZKP inputs.
 	kvStore := k.OpenKVStore(ctx)
-	round, err := k.GetVoteRound(kvStore, msg.VoteRoundId)
-	if err != nil {
+	var round *types.VoteRound
+	if err := observation.observe("round_lookup", func() error {
+		var err error
+		round, err = k.GetVoteRound(kvStore, msg.VoteRoundId)
+		return err
+	}); err != nil {
 		return fmt.Errorf("failed to look up round for ZKP inputs: %w", err)
 	}
 
@@ -244,15 +299,17 @@ func verifyDelegation(ctx context.Context, msg *types.MsgDelegateVote, k *keeper
 		types.SessionKeyNcRoot, hex.EncodeToString(round.NcRoot),
 		types.SessionKeyNullifierImtRoot, hex.EncodeToString(round.NullifierImtRoot),
 	)
-	if err := opts.ZKPVerifier.VerifyDelegation(msg.Proof, zkp.DelegationInputs{
-		Rk:                  msg.Rk,
-		SignedNoteNullifier: msg.SignedNoteNullifier,
-		CmxNew:              msg.CmxNew,
-		VanCmx:              msg.VanCmx,
-		GovNullifiers:       msg.GovNullifiers,
-		VoteRoundId:         msg.VoteRoundId,
-		NcRoot:              round.NcRoot,
-		NullifierImtRoot:    round.NullifierImtRoot,
+	if err := observation.observe("delegation_proof", func() error {
+		return opts.ZKPVerifier.VerifyDelegation(msg.Proof, zkp.DelegationInputs{
+			Rk:                  msg.Rk,
+			SignedNoteNullifier: msg.SignedNoteNullifier,
+			CmxNew:              msg.CmxNew,
+			VanCmx:              msg.VanCmx,
+			GovNullifiers:       msg.GovNullifiers,
+			VoteRoundId:         msg.VoteRoundId,
+			NcRoot:              round.NcRoot,
+			NullifierImtRoot:    round.NullifierImtRoot,
+		})
 	}); err != nil {
 		return fmt.Errorf("%w: delegation: %v", types.ErrInvalidProof, err)
 	}
@@ -263,78 +320,125 @@ func verifyDelegation(ctx context.Context, msg *types.MsgDelegateVote, k *keeper
 // verifyCastVote verifies the RedPallas signature and ZKP #2 for a MsgCastVote.
 // It looks up the session to get ea_pk and the commitment tree root at the
 // anchor height, mirroring how verifyDelegation fetches nc_root and nf_imt_root.
-func verifyCastVote(ctx context.Context, msg *types.MsgCastVote, k *keeper.Keeper, opts ValidateOpts) error {
+func verifyCastVote(ctx context.Context, msg *types.MsgCastVote, k *keeper.Keeper, opts ValidateOpts, observation *verificationObservation) error {
 	// Compute the canonical sighash from message fields and verify the
 	// RedPallas signature over it. r_vpk is the compressed randomized voting
 	// key; the ZKP proves it equals vsk.ak + [alpha_v]*G (condition 4).
 	// Validate r_vpk is a valid on-curve non-identity Pallas point before
 	// passing to the FFI. This makes the Go layer self-sufficient against
 	// the identity-point signature bypass regardless of Rust-side checks.
-	if _, err := elgamal.UnmarshalPublicKey(msg.RVpk); err != nil {
+	if err := observation.observe("cast_key_decode", func() error {
+		_, err := elgamal.UnmarshalPublicKey(msg.RVpk)
+		return err
+	}); err != nil {
 		return fmt.Errorf("%w: r_vpk: %v", types.ErrInvalidSignature, err)
 	}
-	sighash := types.ComputeCastVoteSighash(msg)
-	if err := opts.SigVerifier.Verify(msg.RVpk, sighash, msg.VoteAuthSig); err != nil {
+	var sighash []byte
+	_ = observation.observe("cast_sighash", func() error {
+		sighash = types.ComputeCastVoteSighash(msg)
+		return nil
+	})
+	if err := observation.observe("cast_signature", func() error {
+		return opts.SigVerifier.Verify(msg.RVpk, sighash, msg.VoteAuthSig)
+	}); err != nil {
 		return fmt.Errorf("%w: %v", types.ErrInvalidSignature, err)
 	}
 
 	kvStore := k.OpenKVStore(ctx)
 
 	// Fetch vote commitment tree root at the anchor height for this round.
-	root, err := k.GetCommitmentRootAtHeight(kvStore, msg.VoteRoundId, msg.VoteCommTreeAnchorHeight)
-	if err != nil {
-		return fmt.Errorf("failed to get commitment tree root at height %d: %w", msg.VoteCommTreeAnchorHeight, err)
-	}
-	if root == nil {
-		return fmt.Errorf("%w: no commitment tree root at height %d", types.ErrInvalidAnchorHeight, msg.VoteCommTreeAnchorHeight)
+	var root []byte
+	if err := observation.observe("commitment_root_lookup", func() error {
+		var err error
+		root, err = k.GetCommitmentRootAtHeight(kvStore, msg.VoteRoundId, msg.VoteCommTreeAnchorHeight)
+		if err != nil {
+			return fmt.Errorf("failed to get commitment tree root at height %d: %w", msg.VoteCommTreeAnchorHeight, err)
+		}
+		if root == nil {
+			return fmt.Errorf("%w: no commitment tree root at height %d", types.ErrInvalidAnchorHeight, msg.VoteCommTreeAnchorHeight)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	// Fetch the session to get the election authority public key.
-	round, err := k.GetVoteRound(kvStore, msg.VoteRoundId)
-	if err != nil {
+	var round *types.VoteRound
+	if err := observation.observe("round_lookup", func() error {
+		var err error
+		round, err = k.GetVoteRound(kvStore, msg.VoteRoundId)
+		return err
+	}); err != nil {
 		return fmt.Errorf("failed to look up round for ZKP inputs: %w", err)
 	}
 
-	return verifyVoteCommitmentProof(msg, root, round.EaPk, opts.ZKPVerifier)
+	return observation.observe("cast_proof", func() error {
+		return verifyVoteCommitmentProof(msg, root, round.EaPk, opts.ZKPVerifier)
+	})
 }
 
 // verifyCastVoteBatch verifies all batch-wide signatures before paying for any
 // proofs. The first proof uses the real chain root at the shared anchor. Each
 // later proof uses the canonical single-leaf root of its predecessor's new VAN.
-func verifyCastVoteBatch(ctx context.Context, msg *types.MsgCastVoteBatch, k *keeper.Keeper, opts ValidateOpts) error {
-	digest := types.ComputeCastVoteBatchSighash(msg)
+func verifyCastVoteBatch(ctx context.Context, msg *types.MsgCastVoteBatch, k *keeper.Keeper, opts ValidateOpts, observation *verificationObservation) error {
+	var digest []byte
+	_ = observation.observe("cast_sighash", func() error {
+		digest = types.ComputeCastVoteBatchSighash(msg)
+		return nil
+	})
 	for i, vote := range msg.Votes {
-		if _, err := elgamal.UnmarshalPublicKey(vote.RVpk); err != nil {
+		if err := observation.observe("cast_key_decode", func() error {
+			_, err := elgamal.UnmarshalPublicKey(vote.RVpk)
+			return err
+		}); err != nil {
 			return fmt.Errorf("%w: votes[%d] r_vpk: %v", types.ErrInvalidSignature, i, err)
 		}
-		if err := opts.SigVerifier.Verify(vote.RVpk, digest, vote.VoteAuthSig); err != nil {
+		if err := observation.observe("cast_signature", func() error {
+			return opts.SigVerifier.Verify(vote.RVpk, digest, vote.VoteAuthSig)
+		}); err != nil {
 			return fmt.Errorf("%w: votes[%d]: %v", types.ErrInvalidSignature, i, err)
 		}
 	}
 
 	first := msg.Votes[0]
 	kvStore := k.OpenKVStore(ctx)
-	root, err := k.GetCommitmentRootAtHeight(kvStore, first.VoteRoundId, first.VoteCommTreeAnchorHeight)
-	if err != nil {
-		return fmt.Errorf("failed to get commitment tree root at height %d: %w", first.VoteCommTreeAnchorHeight, err)
-	}
-	if root == nil {
-		return fmt.Errorf("%w: no commitment tree root at height %d", types.ErrInvalidAnchorHeight, first.VoteCommTreeAnchorHeight)
+	var root []byte
+	if err := observation.observe("commitment_root_lookup", func() error {
+		var err error
+		root, err = k.GetCommitmentRootAtHeight(kvStore, first.VoteRoundId, first.VoteCommTreeAnchorHeight)
+		if err != nil {
+			return fmt.Errorf("failed to get commitment tree root at height %d: %w", first.VoteCommTreeAnchorHeight, err)
+		}
+		if root == nil {
+			return fmt.Errorf("%w: no commitment tree root at height %d", types.ErrInvalidAnchorHeight, first.VoteCommTreeAnchorHeight)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
-	round, err := k.GetVoteRound(kvStore, first.VoteRoundId)
-	if err != nil {
+	var round *types.VoteRound
+	if err := observation.observe("round_lookup", func() error {
+		var err error
+		round, err = k.GetVoteRound(kvStore, first.VoteRoundId)
+		return err
+	}); err != nil {
 		return fmt.Errorf("failed to look up round for ZKP inputs: %w", err)
 	}
 
 	proofRoot := root
 	for i, vote := range msg.Votes {
-		if err := verifyVoteCommitmentProof(vote, proofRoot, round.EaPk, opts.ZKPVerifier); err != nil {
+		if err := observation.observe("cast_proof", func() error {
+			return verifyVoteCommitmentProof(vote, proofRoot, round.EaPk, opts.ZKPVerifier)
+		}); err != nil {
 			return fmt.Errorf("votes[%d]: %w", i, err)
 		}
 		if i+1 < len(msg.Votes) {
-			proofRoot, err = votetree.SingleLeafRoot(vote.VoteAuthorityNoteNew)
-			if err != nil {
+			if err := observation.observe("synthetic_root", func() error {
+				var err error
+				proofRoot, err = votetree.SingleLeafRoot(vote.VoteAuthorityNoteNew)
+				return err
+			}); err != nil {
 				return fmt.Errorf("derive synthetic root after votes[%d]: %w", i, err)
 			}
 		}
@@ -364,25 +468,34 @@ func verifyVoteCommitmentProof(msg *types.MsgCastVote, root, eaPk []byte, verifi
 // verifyRevealShare verifies ZKP #3 for a MsgRevealShare.
 // It looks up the vote commitment tree root at the anchor height specified
 // in the message and includes it as a public input to the ZKP verifier.
-func verifyRevealShare(ctx context.Context, msg *types.MsgRevealShare, k *keeper.Keeper, opts ValidateOpts) error {
+func verifyRevealShare(ctx context.Context, msg *types.MsgRevealShare, k *keeper.Keeper, opts ValidateOpts, observation *verificationObservation) error {
 	// Look up the commitment tree root at the specified anchor height for this round.
 	kvStore := k.OpenKVStore(ctx)
-	treeRoot, err := k.GetCommitmentRootAtHeight(kvStore, msg.VoteRoundId, msg.VoteCommTreeAnchorHeight)
-	if err != nil {
-		return fmt.Errorf("failed to look up commitment tree root: %w", err)
-	}
-	if treeRoot == nil {
-		return &types.CommitmentRootUnavailableError{AnchorHeight: msg.VoteCommTreeAnchorHeight}
+	var treeRoot []byte
+	if err := observation.observe("commitment_root_lookup", func() error {
+		var err error
+		treeRoot, err = k.GetCommitmentRootAtHeight(kvStore, msg.VoteRoundId, msg.VoteCommTreeAnchorHeight)
+		if err != nil {
+			return fmt.Errorf("failed to look up commitment tree root: %w", err)
+		}
+		if treeRoot == nil {
+			return &types.CommitmentRootUnavailableError{AnchorHeight: msg.VoteCommTreeAnchorHeight}
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
-	if err := opts.ZKPVerifier.VerifyVoteShare(msg.Proof, zkp.VoteShareInputs{
-		ShareNullifier:   msg.ShareNullifier,
-		EncShare:         msg.EncShare,
-		ProposalId:       msg.ProposalId,
-		VoteDecision:     msg.VoteDecision,
-		VoteRoundId:      msg.VoteRoundId,
-		AnchorHeight:     msg.VoteCommTreeAnchorHeight,
-		VoteCommTreeRoot: treeRoot,
+	if err := observation.observe("share_proof", func() error {
+		return opts.ZKPVerifier.VerifyVoteShare(msg.Proof, zkp.VoteShareInputs{
+			ShareNullifier:   msg.ShareNullifier,
+			EncShare:         msg.EncShare,
+			ProposalId:       msg.ProposalId,
+			VoteDecision:     msg.VoteDecision,
+			VoteRoundId:      msg.VoteRoundId,
+			AnchorHeight:     msg.VoteCommTreeAnchorHeight,
+			VoteCommTreeRoot: treeRoot,
+		})
 	}); err != nil {
 		return fmt.Errorf("%w: vote share: %v", types.ErrInvalidProof, err)
 	}

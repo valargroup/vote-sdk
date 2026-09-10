@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"cosmossdk.io/log"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -62,7 +64,18 @@ func TestProcessorInactiveRoundReconcilesCommitment(t *testing.T) {
 					return tc.committed, tc.checkErr
 				}),
 			)
+			proc.metrics = newHelperMetrics(prometheus.NewRegistry())
 			proc.processBatch(context.Background())
+			outcome, stage := "inactive", "round_status"
+			if tc.committed {
+				outcome, stage = "confirmed", "confirmation"
+			} else if tc.checkErr != nil {
+				outcome, stage = "retry", failureStageCommitmentCheck
+			} else if tc.invalid {
+				outcome, stage = "failed", failureStageCommitmentCheck
+			}
+			assert.Equal(t, float64(1), testutil.ToFloat64(proc.metrics.shareProcessingAttempts.WithLabelValues(outcome, stage)))
+			assert.Zero(t, testutil.ToFloat64(proc.metrics.shareProcessingInFlight))
 			share, ok := store.loadShare(roundID, 0, 1, 0)
 			require.True(t, ok)
 			if tc.invalid {

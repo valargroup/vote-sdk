@@ -32,6 +32,14 @@ func TestSetGenesisBlockLimit(t *testing.T) {
 	require.Equal(t, genesis.Consensus.Params.Block.MaxGas, updated.Consensus.Params.Block.MaxGas)
 }
 
+func TestInitAppConfigEnablesPrometheusTelemetry(t *testing.T) {
+	_, rawConfig := initAppConfig()
+	config, ok := rawConfig.(CustomAppConfig)
+	require.True(t, ok)
+	require.True(t, config.Telemetry.Enabled)
+	require.Equal(t, int64(60), config.Telemetry.PrometheusRetentionTime)
+}
+
 func TestInitCommandSetsBlockLimitAtConfiguredGenesisPath(t *testing.T) {
 	home := t.TempDir()
 	config := initCometBFTConfig()
