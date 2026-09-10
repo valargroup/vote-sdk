@@ -13,7 +13,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
   start of the last-minute window when it is sooner, while late shares can
   retry through its remainder. Keep checking commitment after the last attempt
   instead of treating mempool acceptance as failure. Reconcile committed shares
-  before inactive-round rejection and cleanup to avoid false failure reports.
+  before inactive-round rejection and cleanup to avoid false failure reports,
+  while still reporting and purging invalid stored shares after closure.
 - Reject casts for nonexistent round proposals before signature and proof
   verification, including atomic batches and mempool rechecks, preventing
   repeated verification of votes that cannot execute. Requires a coordinated

@@ -40,6 +40,7 @@ func (e *waitingForNewBlockError) Error() string {
 const (
 	failureStagePanic            = "panic"
 	failureStageRoundStatusCheck = "round_status_check"
+	failureStageCommitmentCheck  = "commitment_check"
 	failureStageRoundClosed      = "round_closed_unsubmitted_shares"
 	failureStageDecodeRoundID    = "decode_round_id"
 	failureStageTreeStatus       = "tree_status"
@@ -428,8 +429,8 @@ func (p *Processor) processQueuedShare(ctx context.Context, share QueuedShare) {
 			committed, err := p.shareAlreadyRevealed(shareCtx, share)
 			if err != nil {
 				spanErr = err
-				p.logger.Warn("waiting to reconcile share in inactive round", "round_id", share.Payload.VoteRoundID, "error", err)
-				p.store.MarkRetry(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+				p.logger.Warn("share commitment check failed in inactive round", "round_id", share.Payload.VoteRoundID, "error", err)
+				p.markShareFailure(share, err)
 				return
 			}
 			if committed {
@@ -571,7 +572,8 @@ func (p *Processor) cleanupClosedRounds() {
 
 // reconcileClosedRoundSummary accounts for commits missed by queue polling,
 // including failed rows. The rows are purged after reporting, so only the
-// summary needs updating. An unavailable check defers this round's cleanup.
+// summary needs updating. Invalid local rows remain counted as unsubmitted.
+// Unavailable chain lookups defer this round's cleanup.
 func (p *Processor) reconcileClosedRoundSummary(summary *ExpiredRoundSummary, now time.Time) error {
 	if p.preProofDedupe == nil || summary.Unsubmitted() == 0 {
 		return nil
@@ -583,7 +585,12 @@ func (p *Processor) reconcileClosedRoundSummary(summary *ExpiredRoundSummary, no
 	for _, share := range shares {
 		committed, err := p.shareAlreadyRevealed(context.Background(), share)
 		if err != nil {
-			return err
+			if action, _ := classifyShareFailure(err); action == shareFailureRetry {
+				return err
+			}
+			p.logger.Warn("invalid share remains unsubmitted at round closure",
+				"round_id", summary.RoundID, "share_index", share.Payload.EncShare.ShareIndex, "error", err)
+			continue
 		}
 		if !committed {
 			continue
@@ -967,7 +974,8 @@ func decodeShareRoundID(value string) ([32]byte, error) {
 }
 
 // shareAlreadyRevealed computes the queued share's nullifier and checks whether
-// the chain has already recorded it for the share's voting round.
+// the chain has already recorded it for the share's voting round. Only chain
+// lookup errors are retryable. Decode and hash errors are local row failures.
 func (d *preProofShareDeduper) shareAlreadyRevealed(ctx context.Context, share QueuedShare, roundID [32]byte) (bool, error) {
 	_, span := StartTrace(ctx, "helper.dedupe", "helper.preproof_share_nullifier_check", map[string]string{
 		"round_id":    share.Payload.VoteRoundID,
@@ -1006,7 +1014,7 @@ func (d *preProofShareDeduper) shareAlreadyRevealed(ctx context.Context, share Q
 	already, err = d.shareNF(share.Payload.VoteRoundID, nullifier[:])
 	if err != nil {
 		spanErr = err
-		return false, fmt.Errorf("check share nullifier: %w", err)
+		return false, retryableShareError(failureStageCommitmentCheck, fmt.Errorf("check share nullifier: %w", err))
 	}
 	return already, nil
 }

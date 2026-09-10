@@ -442,7 +442,8 @@ monitor other helper servers.
 When a voting round closes, the helper reconciles queued shares against committed
 nullifiers before reporting and purging expired witness data. This includes
 failed shares that committed before closure but missed the final queue check.
-An unavailable commitment check defers that round's reporting and cleanup.
+An unavailable chain lookup defers that round's reporting and cleanup. Invalid
+stored rows remain counted as unsubmitted and do not block the round's purge.
 If any shares for that round are still pending or failed,
 it emits a Sentry error with `stage=round_closed_unsubmitted_shares` and tags
 for `alert=helper_round_closed`, `round_id`, `total_shares`, `pending_shares`,

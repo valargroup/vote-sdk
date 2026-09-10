@@ -3,6 +3,7 @@ package helper
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/hex"
 	"testing"
 	"time"
@@ -27,15 +28,20 @@ func TestProcessorInactiveRoundReconcilesCommitment(t *testing.T) {
 		checkErr  error
 		wantState ShareState
 		attempts  int
+		invalid   bool
 	}{
 		{name: "committed", committed: true, wantState: ShareStateSubmitted},
 		{name: "uncommitted", wantState: ShareStateReceived, attempts: 1},
 		{name: "check unavailable", checkErr: assert.AnError, wantState: ShareStateReceived},
+		{name: "invalid local witness", invalid: true, wantState: ShareStateReceived, attempts: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newTestStore(t)
 			roundID := hex.EncodeToString(make([]byte, 32))
 			payload := testPayload(roundID, 0)
+			if tc.invalid {
+				payload.PrimaryBlind = "invalid"
+			}
 			enqueueAndRequireInserted(t, store, payload)
 			ready := store.TakeReady()
 			require.Len(t, ready, 1)
@@ -59,7 +65,11 @@ func TestProcessorInactiveRoundReconcilesCommitment(t *testing.T) {
 			proc.processBatch(context.Background())
 			share, ok := store.loadShare(roundID, 0, 1, 0)
 			require.True(t, ok)
-			assert.Equal(t, 1, checks)
+			if tc.invalid {
+				assert.Zero(t, checks)
+			} else {
+				assert.Equal(t, 1, checks)
+			}
 			assert.Equal(t, tc.wantState, share.State)
 			assert.Equal(t, tc.attempts, share.Attempts)
 			assert.Zero(t, prover.callCount.Load())
@@ -69,6 +79,85 @@ func TestProcessorInactiveRoundReconcilesCommitment(t *testing.T) {
 			} else {
 				assert.Equal(t, payload.PrimaryBlind, share.Payload.PrimaryBlind)
 			}
+		})
+	}
+}
+
+func TestProcessorCleanupInvalidRowsDoNotBlockRound(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		mutate         func(*SharePayload)
+		failVC, failNF bool
+		state          ShareState
+	}{
+		{name: "invalid shares hash", mutate: func(p *SharePayload) { p.SharesHash = "invalid" }},
+		{name: "short shares hash", mutate: func(p *SharePayload) { p.SharesHash = "AQ==" }},
+		{name: "invalid primary blind", mutate: func(p *SharePayload) { p.PrimaryBlind = "invalid" }},
+		{name: "legacy missing blind", state: ShareStateFailed, mutate: func(p *SharePayload) { p.PrimaryBlind = "" }},
+		{name: "commitment hash failure", failVC: true},
+		{name: "nullifier hash failure", failNF: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, err := NewShareStore(":memory:", nil)
+			require.NoError(t, err)
+			t.Cleanup(func() { store.Close() })
+			end := uint64(time.Now().Add(-time.Minute).Unix())
+			roundID := hex.EncodeToString(make([]byte, 32))
+			export := QueueExport{
+				Version: QueueExportVersion, RoundID: roundID,
+				Round: QueueExportRound{CreatedAtTime: end - 3600, VoteEndTime: end},
+			}
+			for index := range uint32(2) {
+				payload := testPayload(roundID, index)
+				hash := [32]byte{byte(index)}
+				payload.SharesHash = base64.StdEncoding.EncodeToString(hash[:])
+				if index == 0 && tc.mutate != nil {
+					tc.mutate(&payload)
+				}
+				export.Rows = append(export.Rows, QueueExportRow{
+					ShareIndex: index, SharesHash: payload.SharesHash, ProposalID: payload.ProposalID,
+					VoteDecision: payload.VoteDecision, EncShare: payload.EncShare,
+					PrimaryBlind: payload.PrimaryBlind, ShareComms: payload.ShareComms,
+					State: ShareStateReceived, VoteEndTime: end, ReceivedAt: end - 20,
+				})
+			}
+			result, err := store.ImportQueue(export, QueueImportOptions{})
+			require.NoError(t, err)
+			require.Equal(t, 2, result.Inserted)
+			_, err = store.db.Exec("UPDATE shares SET state = ? WHERE share_index = 0", tc.state)
+			require.NoError(t, err)
+			checks := 0
+			var logs bytes.Buffer
+			proc := NewProcessor(store, nil, nil, nil, log.NewLogger(&logs, log.OutputJSONOption()), 1, nil,
+				WithProcessingReadinessCheck(func() bool { return true }),
+				WithRoundClosureCheck(func(string) (bool, error) { return true, nil }),
+				WithPreProofShareDeduper(
+					func(_ [32]byte, hash [32]byte, _, _ uint32) ([32]byte, error) {
+						if tc.failVC && hash[0] == 0 {
+							return [32]byte{}, assert.AnError
+						}
+						return hash, nil
+					},
+					func(hash [32]byte, index uint32, _ [32]byte) ([32]byte, error) {
+						if tc.failNF && index == 0 {
+							return [32]byte{}, assert.AnError
+						}
+						return hash, nil
+					},
+					func(_ string, nullifier []byte) (bool, error) {
+						checks++
+						assert.Equal(t, byte(1), nullifier[0])
+						return true, nil
+					},
+				),
+			)
+			proc.cleanupClosedRounds()
+			assert.Zero(t, store.Status()[roundID].Total, "an invalid row must not retain the round's witnesses")
+			assert.Equal(t, 1, checks, "the valid row must still be reconciled")
+			assert.Contains(t, logs.String(), "round closed with unsubmitted shares")
+			assert.Contains(t, logs.String(), `"unsubmitted":1`)
+			assert.Contains(t, logs.String(), `"submitted":1`)
+			assert.NotContains(t, logs.String(), "retaining shares")
 		})
 	}
 }
