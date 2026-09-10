@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRelaySlots(t *testing.T) {
+func TestRetrySlots(t *testing.T) {
 	start := time.Unix(1_800_000_000, 0)
 	for _, tc := range []struct {
 		name  string
@@ -24,7 +24,7 @@ func TestRelaySlots(t *testing.T) {
 		{"no retry room", 5 * time.Second, []time.Duration{0}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := relaySlots(start, start.Add(tc.final))
+			got := retryTimes(start, start.Add(tc.final))
 			require.Len(t, got, len(tc.want))
 			for i, offset := range tc.want {
 				assert.Equal(t, start.Add(offset), got[i])
@@ -33,20 +33,20 @@ func TestRelaySlots(t *testing.T) {
 	}
 }
 
-func TestRelayFinalJitterAndBuffer(t *testing.T) {
+func TestRetryFinalJitterAndBuffer(t *testing.T) {
 	start := time.Unix(1_800_000_000, 0)
 	for _, remaining := range []time.Duration{7 * 24 * time.Hour, 6 * time.Hour, 4 * time.Minute} {
 		t.Run(remaining.String(), func(t *testing.T) {
 			deadline := start.Add(remaining)
-			buffer := min(relaySafetyBuffer, max(relayMinBuffer, remaining/8))
+			buffer := min(retrySafetyBuffer, max(retryMinBuffer, remaining/8))
 			cutoff := deadline.Add(-buffer)
-			jitter := min(relayFinalJitter, remaining/8)
+			jitter := min(retryFinalJitter, remaining/8)
 			seen := make(map[time.Time]bool)
 			for range 32 {
-				plan := newRelayPlan(start, uint64(deadline.Unix()))
-				require.Len(t, plan.Slots, 5)
-				last := plan.Slots[4]
-				assert.Equal(t, cutoff, plan.Cutoff)
+				state := newRetryState(start, uint64(deadline.Unix()))
+				require.Len(t, retryTimes(state.FirstAttempt, state.FinalAttempt), 5)
+				last := retryTimes(state.FirstAttempt, state.FinalAttempt)[4]
+				assert.Equal(t, cutoff, retryCutoff(state.FirstAttempt, uint64(deadline.Unix())))
 				assert.False(t, last.Before(cutoff.Add(-jitter)))
 				assert.False(t, last.After(cutoff))
 				seen[last] = true
@@ -55,40 +55,38 @@ func TestRelayFinalJitterAndBuffer(t *testing.T) {
 		})
 	}
 	for _, end := range []uint64{0, uint64(start.Add(20 * time.Second).Unix()), uint64(start.Add(-time.Hour).Unix())} {
-		plan := newRelayPlan(start, end)
-		assert.Equal(t, []time.Time{start}, plan.Slots)
+		state := newRetryState(start, end)
+		assert.Equal(t, []time.Time{start}, retryTimes(state.FirstAttempt, state.FinalAttempt))
 	}
 }
 
-func TestRelayDueSkipsMissedSlotsAndHonorsCutoff(t *testing.T) {
+func TestRetryDueSkipsMissedSlotsAndHonorsCutoff(t *testing.T) {
 	start := time.Unix(1_800_000_000, 0)
-	plan := relayPlan{
-		Slots: relaySlots(start, start.Add(6*time.Hour)), Cutoff: start.Add(6*time.Hour + time.Minute), Next: 1,
-		LastStart: start,
-	}
-	slot, next := plan.due(start.Add(30 * time.Second))
+	end := uint64(start.Add(6*time.Hour + 6*time.Minute).Unix())
+	state := retryState{FirstAttempt: start, FinalAttempt: start.Add(6 * time.Hour), NextSlot: 1, LastAttempt: start}
+	slot, next := state.due(start.Add(30*time.Second), end)
 	assert.Equal(t, -1, slot)
 	assert.Equal(t, start.Add(time.Minute), next)
 
 	// After downtime, the missed one-minute slot is skipped in favor of ten minutes.
 	now := start.Add(20 * time.Minute)
-	slot, _ = plan.due(now)
+	slot, _ = state.due(now, end)
 	require.Equal(t, 2, slot)
-	plan.Next, plan.LastStart = slot+1, now
-	slot, next = plan.due(now)
+	state.NextSlot, state.LastAttempt = slot+1, now
+	slot, next = state.due(now, end)
 	assert.Equal(t, -1, slot)
-	assert.Equal(t, plan.Slots[3], next)
+	assert.Equal(t, retryTimes(state.FirstAttempt, state.FinalAttempt)[3], next)
 
-	slot, next = plan.due(plan.Cutoff.Add(time.Second))
+	slot, next = state.due(retryCutoff(state.FirstAttempt, end).Add(time.Second), end)
 	assert.Equal(t, -1, slot)
 	assert.True(t, next.IsZero())
-	plan.Next = len(plan.Slots)
-	slot, next = plan.due(plan.Slots[4])
+	state.NextSlot = len(retryTimes(state.FirstAttempt, state.FinalAttempt))
+	slot, next = state.due(state.FinalAttempt, end)
 	assert.Equal(t, -1, slot)
 	assert.True(t, next.IsZero())
 }
 
-func TestRelayReservationSurvivesRestartAndRejectsStaleWorker(t *testing.T) {
+func TestRetryReservationSurvivesRestartAndRejectsStaleWorker(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "helper.db")
 	start := time.Now()
 	fetcher := func(string) (RoundInfo, error) {
@@ -101,10 +99,10 @@ func TestRelayReservationSurvivesRestartAndRejectsStaleWorker(t *testing.T) {
 	enqueueAndRequireInserted(t, store, payload)
 	ready := store.TakeReady()
 	require.Len(t, ready, 1)
-	plan := newRelayPlan(start, ready[0].VoteEndTime)
-	plan.Next, plan.LastStart, plan.LastHeight = 1, start, 100
-	require.NoError(t, store.reserveRelaySlot(ready[0], plan))
-	require.Error(t, store.reserveRelaySlot(ready[0], plan), "a stale worker cannot consume or reset another slot")
+	state := newRetryState(start, ready[0].VoteEndTime)
+	state.NextSlot, state.LastAttempt, state.LastHeight = 1, start, 100
+	require.NoError(t, store.reserveProofAttempt(ready[0], state))
+	require.Error(t, store.reserveProofAttempt(ready[0], state), "a stale worker cannot consume or reset another slot")
 	require.NoError(t, store.Close())
 
 	// A crash after reservation leaves the slot consumed, even without a result.
@@ -115,40 +113,48 @@ func TestRelayReservationSurvivesRestartAndRejectsStaleWorker(t *testing.T) {
 	require.Equal(t, EnqueueDuplicate, result)
 	ready = store.TakeReady()
 	require.Len(t, ready, 1)
-	recovered, err := decodeRelayPlan(ready[0].relayPlan)
+	recovered, err := decodeRetryState(ready[0].retryState, ready[0].VoteEndTime)
 	require.NoError(t, err)
-	raw, err := json.Marshal(plan)
+	raw, err := json.Marshal(state)
 	require.NoError(t, err)
-	assert.JSONEq(t, string(raw), ready[0].relayPlan)
-	slot, next := recovered.due(start.Add(30 * time.Second))
+	assert.JSONEq(t, string(raw), ready[0].retryState)
+	assert.NotContains(t, ready[0].retryState, `"slots"`)
+	assert.NotContains(t, ready[0].retryState, `"cutoff"`)
+	slot, next := recovered.due(start.Add(30*time.Second), ready[0].VoteEndTime)
 	assert.Equal(t, -1, slot)
-	assert.True(t, plan.Slots[1].Equal(next))
+	assert.True(t, retryTimes(state.FirstAttempt, state.FinalAttempt)[1].Equal(next))
 	assert.Equal(t, uint64(100), recovered.LastHeight)
 }
 
-func TestRelayRetryWakesAtFinalSlot(t *testing.T) {
+func TestRetryPollingWakesAtFinalSlot(t *testing.T) {
 	store := newTestStore(t)
 	enqueueAndRequireInserted(t, store, testPayload("round1", 0))
 	ready := store.TakeReady()
 	require.Len(t, ready, 1)
 	now := time.Now()
 	final := now.Add(3 * time.Second)
-	plan := relayPlan{Slots: []time.Time{now.Add(-time.Minute), final}, Cutoff: final.Add(time.Minute), Next: 1}
-	require.NoError(t, store.reserveRelaySlot(ready[0], plan))
+	state := retryState{FirstAttempt: now.Add(-time.Minute), FinalAttempt: final}
+	state.NextSlot = len(retryTimes(state.FirstAttempt, state.FinalAttempt)) - 1
+	require.NoError(t, store.reserveProofAttempt(ready[0], state))
 	store.MarkRetry("round1", 0, 1, 0)
 	next, ok := store.NextScheduledTime()
 	require.True(t, ok)
 	assert.True(t, final.Equal(next), "the ten-second poll must not oversleep the final proof slot")
 }
 
-func TestDecodeRelayPlanRejectsInvalidProgress(t *testing.T) {
-	for _, raw := range []string{`garbage`, `{}`, `{"slots":[],"next":0}`, `{"slots":["2027-01-01T00:00:00Z"],"next":-1}`} {
-		_, err := decodeRelayPlan(raw)
+func TestDecodeRetryStateRejectsInvalidProgress(t *testing.T) {
+	for _, raw := range []string{
+		`garbage`, `{}`, `{"next_slot":0}`,
+		`{"first_attempt":"2027-01-01T00:00:00Z","final_attempt":"2027-01-01T00:00:00Z","next_slot":-1}`,
+		`{"first_attempt":"2027-01-01T00:00:00Z","final_attempt":"2027-01-01T00:00:00Z","next_slot":2}`,
+		`{"first_attempt":"2027-01-01T00:00:00Z","final_attempt":"2027-01-01T00:00:01Z","next_slot":0}`,
+	} {
+		_, err := decodeRetryState(raw, 0)
 		require.Error(t, err)
 	}
 }
 
-func TestRelayChecksDoNotSpinAfterLocalDeadline(t *testing.T) {
+func TestRetryChecksDoNotSpinAfterLocalDeadline(t *testing.T) {
 	store := newTestStore(t)
 	enqueueAndRequireInserted(t, store, testPayload("round1", 0))
 	now := time.Now()
@@ -156,8 +162,8 @@ func TestRelayChecksDoNotSpinAfterLocalDeadline(t *testing.T) {
 	require.NoError(t, err)
 	ready := store.TakeReady()
 	require.Len(t, ready, 1)
-	plan := relayPlan{Slots: []time.Time{now.Add(-2 * time.Hour)}, Cutoff: now.Add(-time.Hour), Next: 1}
-	require.NoError(t, store.reserveRelaySlot(ready[0], plan))
+	state := retryState{FirstAttempt: now.Add(-2 * time.Hour), FinalAttempt: now.Add(-2 * time.Hour), NextSlot: 1}
+	require.NoError(t, store.reserveProofAttempt(ready[0], state))
 	store.MarkRetry("round1", 0, 1, 0)
 	next, ok := store.NextScheduledTime()
 	require.True(t, ok)
@@ -168,7 +174,7 @@ func TestRelayChecksDoNotSpinAfterLocalDeadline(t *testing.T) {
 	assert.NotEmpty(t, share.Payload.PrimaryBlind)
 }
 
-func TestRelayPlanMigrationPreservesExistingQueue(t *testing.T) {
+func TestRetryStateMigrationPreservesExistingQueue(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "helper.db")
 	store, err := NewShareStore(path, func(string) (RoundInfo, error) {
 		return RoundInfo{CreatedAtTime: 1, VoteEndTime: uint64(time.Now().Add(time.Hour).Unix())}, nil
@@ -177,7 +183,7 @@ func TestRelayPlanMigrationPreservesExistingQueue(t *testing.T) {
 	t.Cleanup(func() { store.Close() })
 	payload := testPayload("round1", 0)
 	enqueueAndRequireInserted(t, store, payload)
-	_, err = store.db.Exec("ALTER TABLE shares DROP COLUMN relay_plan")
+	_, err = store.db.Exec("ALTER TABLE shares DROP COLUMN retry_state")
 	require.NoError(t, err)
 	require.NoError(t, store.Close())
 	store, err = NewShareStore(path, nil)
@@ -185,6 +191,6 @@ func TestRelayPlanMigrationPreservesExistingQueue(t *testing.T) {
 	ready := store.TakeReady()
 	require.Len(t, ready, 1)
 	assert.Equal(t, payload, ready[0].Payload)
-	assert.Empty(t, ready[0].relayPlan)
+	assert.Empty(t, ready[0].retryState)
 	require.NoError(t, migrate(store.db), "migration is idempotent")
 }

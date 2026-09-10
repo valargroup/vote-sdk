@@ -463,12 +463,14 @@ so a crash can consume an attempt but cannot reset the budget.
 The first attempt honors the wallet-provided `submit_at` time. After that,
 retries target one minute, ten minutes, and two days after the first proof
 attempt, followed by a final retry randomly scheduled before the closing safety
-buffer. The buffer is one eighth of the remaining window,
-bounded between 30 seconds and five minutes. Final jitter covers up to ten
+buffer. The buffer is one eighth of the remaining window, bounded between
+30 seconds and five minutes. Final jitter covers up to ten
 minutes before that buffer, reduced to one eighth of the window for short
-rounds. Each helper draws and persists its own retry schedule for each share.
-The buffer allows time for proving, submission, and block inclusion but does
-not guarantee inclusion under congestion.
+rounds. Each helper stores the first attempt time, chosen final retry time,
+progress, and last attempt time and height. Intermediate retry times and the
+cutoff are calculated from those inputs and the round deadline. The buffer
+allows time for proving, submission, and block inclusion but does not guarantee
+inclusion under congestion.
 
 When time is short, each intermediate retry is capped at halfway between the
 previous slot and the randomized final slot. Slots less than ten seconds apart

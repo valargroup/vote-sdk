@@ -255,13 +255,13 @@ func migrate(db *sql.DB) error {
 		}
 	}
 
-	hasRelayPlan, err := tableHasColumn(db, "shares", "relay_plan")
+	hasRetryState, err := tableHasColumn(db, "shares", "retry_state")
 	if err != nil {
-		return fmt.Errorf("check relay schedule schema: %w", err)
+		return fmt.Errorf("check retry state schema: %w", err)
 	}
-	if !hasRelayPlan {
-		if _, err := db.Exec("ALTER TABLE shares ADD COLUMN relay_plan TEXT NOT NULL DEFAULT ''"); err != nil {
-			return fmt.Errorf("add shares.relay_plan: %w", err)
+	if !hasRetryState {
+		if _, err := db.Exec("ALTER TABLE shares ADD COLUMN retry_state TEXT NOT NULL DEFAULT ''"); err != nil {
+			return fmt.Errorf("add shares.retry_state: %w", err)
 		}
 	}
 
@@ -658,11 +658,11 @@ func (s *ShareStore) markRetry(roundID string, shareIndex, proposalID uint32, tr
 	defer s.mu.Unlock()
 
 	var voteEndTime uint64
-	var relayRaw string
+	var retryRaw string
 	if err := s.db.QueryRow(
-		"SELECT vote_end_time, relay_plan FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = 1",
+		"SELECT vote_end_time, retry_state FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = 1",
 		roundID, shareIndex, proposalID, treePosition,
-	).Scan(&voteEndTime, &relayRaw); err != nil {
+	).Scan(&voteEndTime, &retryRaw); err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			s.logError("MarkRetry: db query failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
 		}
@@ -691,12 +691,12 @@ func (s *ShareStore) markRetry(roundID string, shareIndex, proposalID uint32, tr
 	}
 	// A passed local deadline must not turn commitment-only polling into a
 	// busy loop while committed round closure is still unavailable.
-	if relayRaw != "" && !s.schedule[key].After(now) {
+	if retryRaw != "" && !s.schedule[key].After(now) {
 		s.schedule[key] = now.Add(shareSystemRetryBackoff)
 	}
 	// Poll cheaply, but do not sleep past a future proof slot near the cutoff.
-	if plan, err := decodeRelayPlan(relayRaw); err == nil && plan != nil {
-		if _, next := plan.due(now); next.After(now) && next.Before(s.schedule[key]) {
+	if retry, err := decodeRetryState(retryRaw, voteEndTime); err == nil && retry != nil {
+		if _, next := retry.due(now, voteEndTime); next.After(now) && next.Before(s.schedule[key]) {
 			s.schedule[key] = next
 		}
 	}
@@ -1639,7 +1639,7 @@ func (s *ShareStore) loadShare(roundID string, shareIndex, proposalID uint32, tr
 
 	err := s.db.QueryRow(
 		`SELECT shares_hash, proposal_id, vote_decision, enc_share_c1, enc_share_c2,
-		        tree_position, share_comms, primary_blind, state, attempts, vote_end_time, submit_at, relay_plan
+		        tree_position, share_comms, primary_blind, state, attempts, vote_end_time, submit_at, retry_state
 		 FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
 		roundID, shareIndex, proposalID, treePosition,
 	).Scan(
@@ -1655,7 +1655,7 @@ func (s *ShareStore) loadShare(roundID string, shareIndex, proposalID uint32, tr
 		&attempts,
 		&q.VoteEndTime,
 		&q.Payload.SubmitAt,
-		&q.relayPlan,
+		&q.retryState,
 	)
 	if err != nil {
 		return q, false

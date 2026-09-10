@@ -552,9 +552,9 @@ func TestProcessor_BroadcastScheduleBoundsProofsUntilCommitment(t *testing.T) {
 		return share
 	}
 	share := run()
-	plan, err := decodeRelayPlan(share.relayPlan)
+	plan, err := decodeRetryState(share.retryState, share.VoteEndTime)
 	require.NoError(t, err)
-	require.Len(t, plan.Slots, 5)
+	require.Len(t, retryTimes(plan.FirstAttempt, plan.FinalAttempt), 5)
 	assert.Equal(t, int32(1), prover.callCount.Load())
 
 	// Even an unavailable commitment checker cannot bypass the proof budget.
@@ -569,8 +569,8 @@ func TestProcessor_BroadcastScheduleBoundsProofsUntilCommitment(t *testing.T) {
 	}
 	assert.Equal(t, int32(1), prover.callCount.Load())
 
-	for slot := 1; slot < len(plan.Slots); slot++ {
-		now = plan.Slots[slot]
+	for slot := 1; slot < len(retryTimes(plan.FirstAttempt, plan.FinalAttempt)); slot++ {
+		now = retryTimes(plan.FirstAttempt, plan.FinalAttempt)[slot]
 		tree.blockHeight.Store(uint64(slot + 10))
 		share = run()
 		assert.Equal(t, ShareStateReceived, share.State)
@@ -602,16 +602,16 @@ func TestProcessor_BroadcastScheduleBoundsProofsUntilCommitment(t *testing.T) {
 	assert.False(t, scheduled)
 }
 
-// advanceRelaySlot moves a focused test to its next persisted proof slot.
-func advanceRelaySlot(t *testing.T, proc *Processor, store *ShareStore, roundID string) {
+// advanceRetrySlot moves a focused test to its next persisted proof slot.
+func advanceRetrySlot(t *testing.T, proc *Processor, store *ShareStore, roundID string) {
 	t.Helper()
 	share, ok := store.loadShare(roundID, 0, 1, 0)
 	require.True(t, ok)
-	plan, err := decodeRelayPlan(share.relayPlan)
+	plan, err := decodeRetryState(share.retryState, share.VoteEndTime)
 	require.NoError(t, err)
 	require.NotNil(t, plan)
-	require.Less(t, plan.Next, len(plan.Slots))
-	now := plan.Slots[plan.Next]
+	require.Less(t, plan.NextSlot, len(retryTimes(plan.FirstAttempt, plan.FinalAttempt)))
+	now := retryTimes(plan.FirstAttempt, plan.FinalAttempt)[plan.NextSlot]
 	proc.now = func() time.Time { return now }
 }
 
@@ -790,7 +790,7 @@ func TestProcessor_ProcessBatch_ChainRejects(t *testing.T) {
 	assert.Equal(t, int32(1), submitCalls.Load())
 
 	tree.blockHeight.Store(2)
-	advanceRelaySlot(t, proc, store, roundID)
+	advanceRetrySlot(t, proc, store, roundID)
 	store.mu.Lock()
 	store.schedule[key] = time.Now().Add(-time.Second)
 	store.mu.Unlock()
@@ -952,7 +952,7 @@ func TestProcessor_ProcessBatch_SystemSubmitErrorPreservesFailedAttempts(t *test
 
 	responseStatus.Store(http.StatusBadRequest)
 	tree.blockHeight.Store(2)
-	advanceRelaySlot(t, proc, store, roundID)
+	advanceRetrySlot(t, proc, store, roundID)
 	proc.processBatch(context.Background())
 
 	status := store.Status()
@@ -1934,7 +1934,7 @@ func TestProcessorCleanupAfterRestartAndClosure(t *testing.T) {
 	require.Empty(t, store.schedule)
 }
 
-func TestProcessor_RestartHonorsRelayHeightAndCutoff(t *testing.T) {
+func TestProcessor_RestartHonorsRetryHeightAndCutoff(t *testing.T) {
 	store := newTestStore(t)
 	prover := &mockProver{}
 	tree := newMockTreeReader()
@@ -1950,14 +1950,14 @@ func TestProcessor_RestartHonorsRelayHeightAndCutoff(t *testing.T) {
 	ready := store.TakeReady()
 	require.Len(t, ready, 1)
 	start := time.Now()
-	plan := newRelayPlan(start, ready[0].VoteEndTime)
-	plan.Next, plan.LastStart, plan.LastHeight = 1, start, 100
-	require.NoError(t, store.reserveRelaySlot(ready[0], plan))
+	plan := newRetryState(start, ready[0].VoteEndTime)
+	plan.NextSlot, plan.LastAttempt, plan.LastHeight = 1, start, 100
+	require.NoError(t, store.reserveProofAttempt(ready[0], plan))
 	store.MarkRetry(roundID, 0, 1, 0)
 
 	// A new processor has an empty height cache, but the reservation is durable.
 	proc := NewProcessor(store, tree, prover, NewChainSubmitter(server.URL), log.NewNopLogger(), 1, nil)
-	now := plan.Slots[1]
+	now := retryTimes(plan.FirstAttempt, plan.FinalAttempt)[1]
 	proc.now = func() time.Time { return now }
 	key := schedKey(roundID, 0, 1, 0)
 	run := func() {
@@ -1974,7 +1974,7 @@ func TestProcessor_RestartHonorsRelayHeightAndCutoff(t *testing.T) {
 	assert.Equal(t, int32(1), calls.Load())
 
 	// A late wakeup skips the remaining budget once the safety cutoff passed.
-	now = plan.Cutoff.Add(time.Second)
+	now = retryCutoff(plan.FirstAttempt, ready[0].VoteEndTime).Add(time.Second)
 	tree.blockHeight.Store(102)
 	run()
 	assert.Equal(t, int32(1), prover.callCount.Load())

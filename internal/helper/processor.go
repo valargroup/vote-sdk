@@ -21,7 +21,7 @@ const (
 	processingReadinessRetryInterval = 10 * time.Second
 )
 
-var errAwaitingRelaySlot = errors.New("waiting for scheduled relay attempt")
+var errAwaitingRetrySlot = errors.New("waiting for scheduled retry attempt")
 
 var errAwaitingCommit = errors.New("broadcast accepted; awaiting committed transaction")
 
@@ -446,10 +446,10 @@ func (p *Processor) processQueuedShare(ctx context.Context, share QueuedShare) {
 			p.store.MarkStalledRetry(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition, retryCount)
 			return
 		}
-		if errors.Is(err, errAwaitingCommit) || errors.Is(err, errAwaitingRelaySlot) {
+		if errors.Is(err, errAwaitingCommit) || errors.Is(err, errAwaitingRetrySlot) {
 			shareSpan.SetData("outcome", "awaiting_commit")
 			spanErr = nil
-			// Waiting does not spend failed attempts. The persisted relay plan
+			// Waiting does not spend failed attempts. The persisted retry state
 			// bounds proof work while committed-state checks continue.
 			p.store.MarkRetry(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
 			return
@@ -607,13 +607,13 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 		}
 	}
 
-	plan, err := decodeRelayPlan(share.relayPlan)
+	retry, err := decodeRetryState(share.retryState, share.VoteEndTime)
 	if err != nil {
-		return retryableShareError("relay_schedule", err)
+		return retryableShareError("retry_schedule", err)
 	}
-	if plan != nil {
-		if slot, _ := plan.due(p.now()); slot < 0 {
-			return retryableShareError(failureStageSubmitChain, errAwaitingRelaySlot)
+	if retry != nil {
+		if slot, _ := retry.due(p.now(), share.VoteEndTime); slot < 0 {
+			return retryableShareError(failureStageSubmitChain, errAwaitingRetrySlot)
 		}
 	}
 
@@ -698,22 +698,22 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	// Reserve the proof attempt durably after cheap validation. Crashes and
 	// ambiguous submissions consume the slot rather than repeating proof work.
 	now := p.now()
-	if plan == nil {
-		initial := newRelayPlan(now, share.VoteEndTime)
-		plan = &initial
+	if retry == nil {
+		initial := newRetryState(now, share.VoteEndTime)
+		retry = &initial
 	}
-	slot, _ := plan.due(now)
+	slot, _ := retry.due(now, share.VoteEndTime)
 	if slot < 0 {
-		return retryableShareError(failureStageSubmitChain, errAwaitingRelaySlot)
+		return retryableShareError(failureStageSubmitChain, errAwaitingRetrySlot)
 	}
-	if blockHeight <= plan.LastHeight {
+	if blockHeight <= retry.LastHeight {
 		return retryableShareError(failureStageSubmitChain, &waitingForNewBlockError{height: blockHeight})
 	}
-	plan.Next = slot + 1
-	plan.LastStart = now
-	plan.LastHeight = blockHeight
-	if err := p.store.reserveRelaySlot(share, *plan); err != nil {
-		return retryableShareError("relay_schedule", err)
+	retry.NextSlot = slot + 1
+	retry.LastAttempt = now
+	retry.LastHeight = blockHeight
+	if err := p.store.reserveProofAttempt(share, *retry); err != nil {
+		return retryableShareError("retry_schedule", err)
 	}
 
 	// Generate ZKP #3 proof.

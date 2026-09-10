@@ -203,7 +203,7 @@ def print_plan(
     print(f"  failed shares:     {len(rows)}")
     print(f"  new state:         Received ({RECEIVED})")
     print("  new attempts:      0")
-    print("  relay schedule:    reset if present")
+    print("  retry state:       reset if present")
     print(f"  new submit_at:     {submit_at}")
     print("  witness fields and original_submit_at remain unchanged")
     print("  rows:")
@@ -253,14 +253,14 @@ def reset_failed_shares(
                     raise RecoveryError(
                         "failed share set changed during recovery; no update was committed"
                     )
-                # Explicit operator recovery grants a new relay budget. Older
-                # databases do not have a persisted relay schedule yet.
+                # Explicit operator recovery grants a new attempt budget. Older
+                # databases do not have a persisted retry state yet.
                 columns = {row[1] for row in db.execute("PRAGMA table_info(shares)")}
-                relay_reset = ", relay_plan = ''" if "relay_plan" in columns else ""
+                retry_reset = ", retry_state = ''" if "retry_state" in columns else ""
                 result = db.execute(
                     f"""
                     UPDATE shares
-                       SET state = 0, attempts = 0, submit_at = ?{relay_reset}
+                       SET state = 0, attempts = 0, submit_at = ?{retry_reset}
                      WHERE round_id = ? AND state = 3
                     """,
                     (submit_at, args.round_id),

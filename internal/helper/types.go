@@ -142,7 +142,7 @@ const (
 
 // QueuedShare is a share payload with processing metadata.
 type QueuedShare struct {
-	relayPlan   string // persisted local proof schedule and consumed slots
+	retryState  string // persisted retry inputs and progress
 	Payload     SharePayload
 	State       ShareState
 	Attempts    int
