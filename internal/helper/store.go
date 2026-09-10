@@ -689,11 +689,6 @@ func (s *ShareStore) markRetry(roundID string, shareIndex, proposalID uint32, tr
 	} else {
 		s.schedule[key] = nextShareStalledRetryTime(now, voteEndTime, stalledRetryCount)
 	}
-	// A passed local deadline must not turn commitment-only polling into a
-	// busy loop while committed round closure is still unavailable.
-	if retryRaw != "" && !s.schedule[key].After(now) {
-		s.schedule[key] = now.Add(shareSystemRetryBackoff)
-	}
 	// Poll cheaply, but do not sleep past a future proof slot near the cutoff.
 	if retry, err := decodeRetryState(retryRaw, voteEndTime); err == nil && retry != nil {
 		if _, next := retry.due(now, voteEndTime); next.After(now) && next.Before(s.schedule[key]) {
@@ -704,26 +699,9 @@ func (s *ShareStore) markRetry(roundID string, shareIndex, proposalID uint32, tr
 	s.notifyScheduleChangedLocked()
 }
 
-// nextShareSystemRetryTime returns the next retry time without intentionally
-// leaving too little processing time before the round's vote end time.
+// nextShareSystemRetryTime uses the standard polling backoff.
 func nextShareSystemRetryTime(now time.Time, voteEndTime uint64) time.Time {
-	scheduled := now.Add(shareSystemRetryBackoff)
-	if voteEndTime == 0 {
-		return scheduled
-	}
-	deadline := time.Unix(int64(voteEndTime), 0)
-	if scheduled.After(deadline.Add(-shareSystemRetryDeadlineBuffer)) {
-		remaining := deadline.Sub(now)
-		if remaining <= 0 {
-			return now
-		}
-		urgentBackoff := shareSystemRetryUrgentBackoff
-		if halfRemaining := remaining / 2; halfRemaining < urgentBackoff {
-			urgentBackoff = halfRemaining
-		}
-		return now.Add(urgentBackoff)
-	}
-	return scheduled
+	return nextSharePollTime(now, voteEndTime, shareSystemRetryBackoff)
 }
 
 // nextShareStalledRetryTime backs off repeated checks at one committed height
@@ -736,7 +714,13 @@ func nextShareStalledRetryTime(now time.Time, voteEndTime uint64, retryCount uin
 	if backoff > shareStalledRetryMaxBackoff {
 		backoff = shareStalledRetryMaxBackoff
 	}
+	return nextSharePollTime(now, voteEndTime, backoff)
+}
 
+// nextSharePollTime wakes by the urgent window and tightens polling inside it.
+// At or after the deadline it uses the standard backoff, even before any proof
+// was reserved. Polling must not spin while committed closure is unavailable.
+func nextSharePollTime(now time.Time, voteEndTime uint64, backoff time.Duration) time.Time {
 	scheduled := now.Add(backoff)
 	if voteEndTime == 0 {
 		return scheduled
@@ -745,7 +729,7 @@ func nextShareStalledRetryTime(now time.Time, voteEndTime uint64, retryCount uin
 	deadline := time.Unix(int64(voteEndTime), 0)
 	remaining := deadline.Sub(now)
 	if remaining <= 0 {
-		return now
+		return now.Add(shareSystemRetryBackoff)
 	}
 	urgentStart := deadline.Add(-shareSystemRetryDeadlineBuffer)
 	if now.Before(urgentStart) {
@@ -755,10 +739,7 @@ func nextShareStalledRetryTime(now time.Time, voteEndTime uint64, retryCount uin
 		return scheduled
 	}
 
-	urgentBackoff := shareSystemRetryUrgentBackoff
-	if halfRemaining := remaining / 2; halfRemaining < urgentBackoff {
-		urgentBackoff = halfRemaining
-	}
+	urgentBackoff := max(time.Nanosecond, min(shareSystemRetryUrgentBackoff, remaining/2))
 	return now.Add(urgentBackoff)
 }
 

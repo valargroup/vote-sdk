@@ -1259,7 +1259,7 @@ func TestProcessor_PreProofNullifierNotRevealedFallsThroughToProof(t *testing.T)
 	assert.Equal(t, 1, status[roundID].Pending)
 }
 
-func TestProcessor_PreProofNullifierCheckErrorFallsThroughToProof(t *testing.T) {
+func TestProcessor_InvalidNullifierInputsSkipProof(t *testing.T) {
 	store := newTestStore(t)
 	prover := &mockProver{}
 	tree := newMockTreeReader()
@@ -1304,10 +1304,13 @@ func TestProcessor_PreProofNullifierCheckErrorFallsThroughToProof(t *testing.T) 
 	proc.processBatch(context.Background())
 
 	assert.Equal(t, int32(1), shareHashCalls.Load())
-	assert.Equal(t, int32(1), prover.callCount.Load())
+	assert.Zero(t, prover.callCount.Load())
 	status := store.Status()
 	assert.Equal(t, 0, status[roundID].Submitted)
 	assert.Equal(t, 1, status[roundID].Pending)
+	share, ok := store.loadShare(roundID, 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, 1, share.Attempts)
 }
 
 func TestProcessor_Run_CancelContext(t *testing.T) {

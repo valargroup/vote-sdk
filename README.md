@@ -509,13 +509,22 @@ Shares with 30 seconds or less remaining, or without a known deadline, get one
 immediate attempt. Missing round creation metadata uses the late-share fallback.
 
 Retries still require a newer committed block height. The helper skips missed
-slots after delays and keeps checking commitment between attempts and after the
-last slot, without generating more proofs. A passed local deadline does not
-terminalize or delete a share. Committed round closure controls cleanup and
-unsubmitted-share alerts. A queued share still checks commitment before being
-rejected for an inactive round. Deterministic failures still spend the existing
-failure budget and can terminalize the share earlier. Existing terminal rows
-are not automatically revived by this change.
+slots after delays. Each queue pass checks commitment once before deciding
+whether to prove, wait for a slot, or reject an inactive round. Confirmed shares
+stop immediately, including after the final slot or round closure.
+
+Invalid local inputs spend the existing failure budget without starting a
+proof. At closure they remain counted as unsubmitted and are purged. A temporary
+chain lookup error still allows a scheduled proof in an active round, within
+the same budget and cutoff. After closure, lookup errors defer cleanup so
+unknown outcomes are not reported as unsubmitted.
+
+Normal and stalled polling share one deadline rule. At or after the local
+deadline, checks wait ten seconds before retrying, even when no proof schedule
+exists. A passed local deadline does not terminalize or delete a share.
+Committed round closure controls cleanup and unsubmitted-share alerts.
+Deterministic failures can terminalize a share earlier. Existing terminal rows
+are not automatically revived.
 
 ### On-Chain State (KV Store Keys)
 

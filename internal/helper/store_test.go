@@ -443,6 +443,30 @@ func TestNextShareSystemRetryTime_HalvesRemainingNearDeadline(t *testing.T) {
 	assert.Equal(t, now.Add(1500*time.Millisecond), next)
 }
 
+func TestPollingBackoffAcrossDeadline(t *testing.T) {
+	deadline := time.Unix(1000, 0)
+	for _, tc := range []struct {
+		name      string
+		remaining time.Duration
+		want      time.Duration
+	}{
+		{"before urgent window", 35 * time.Second, 5 * time.Second},
+		{"urgent window start", 30 * time.Second, 2 * time.Second},
+		{"before deadline", time.Second, 500 * time.Millisecond},
+		{"last clock tick", time.Nanosecond, time.Nanosecond},
+		{"at deadline", 0, shareSystemRetryBackoff},
+		{"after deadline", -time.Hour, shareSystemRetryBackoff},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := deadline.Add(-tc.remaining)
+			assert.Equal(t, now.Add(tc.want), nextShareSystemRetryTime(now, uint64(deadline.Unix())))
+			for _, retryCount := range []uint8{1, 2, shareStalledRetryMaxCount} {
+				assert.Equal(t, now.Add(tc.want), nextShareStalledRetryTime(now, uint64(deadline.Unix()), retryCount))
+			}
+		})
+	}
+}
+
 func TestNextShareStalledRetryTime_BackoffAndCap(t *testing.T) {
 	now := time.Unix(1000, 0)
 	tests := []struct {
