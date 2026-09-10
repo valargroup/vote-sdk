@@ -103,6 +103,29 @@ func TestProcessorRecordsRetryStage(t *testing.T) {
 	))
 }
 
+func TestProcessorRecordsScheduledRetry(t *testing.T) {
+	store := newTestStore(t)
+	roundID := hex.EncodeToString(make([]byte, 32))
+	enqueueInserted(t, store, testPayload(roundID, 0))
+	ready := store.TakeReady()
+	require.Len(t, ready, 1)
+	now := time.Now()
+	state := newRetryState(now, uint64(now.Unix()), ready[0].VoteEndTime)
+	state.NextSlot, state.LastAttempt, state.LastHeight = 1, now, 100
+	require.NoError(t, store.reserveProofAttempt(ready[0], state))
+	share, ok := store.loadShare(roundID, 0, 1, 0)
+	require.True(t, ok)
+	processor := NewProcessor(store, nil, nil, nil, log.NewNopLogger(), 1, nil)
+	processor.metrics = newHelperMetrics(prometheus.NewRegistry())
+	processor.now = func() time.Time { return now }
+	processor.processQueuedShare(context.Background(), share)
+	require.Equal(t, float64(1), testutil.ToFloat64(
+		processor.metrics.shareProcessingAttempts.WithLabelValues("waiting_for_retry", "retry_schedule"),
+	))
+	require.Zero(t, testutil.ToFloat64(processor.metrics.shareProcessingInFlight))
+	require.Equal(t, 1, store.Status()[roundID].Pending)
+}
+
 func TestMetricResult(t *testing.T) {
 	tests := []struct {
 		name string

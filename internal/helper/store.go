@@ -255,6 +255,16 @@ func migrate(db *sql.DB) error {
 		}
 	}
 
+	hasRetryState, err := tableHasColumn(db, "shares", "retry_state")
+	if err != nil {
+		return fmt.Errorf("check retry state schema: %w", err)
+	}
+	if !hasRetryState {
+		if _, err := db.Exec("ALTER TABLE shares ADD COLUMN retry_state TEXT NOT NULL DEFAULT ''"); err != nil {
+			return fmt.Errorf("add shares.retry_state: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -648,10 +658,11 @@ func (s *ShareStore) markRetry(roundID string, shareIndex, proposalID uint32, tr
 	defer s.mu.Unlock()
 
 	var voteEndTime uint64
+	var retryRaw string
 	if err := s.db.QueryRow(
-		"SELECT vote_end_time FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = 1",
+		"SELECT vote_end_time, retry_state FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ? AND state = 1",
 		roundID, shareIndex, proposalID, treePosition,
-	).Scan(&voteEndTime); err != nil {
+	).Scan(&voteEndTime, &retryRaw); err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			s.logError("MarkRetry: db query failed", "round_id", roundID, "share_index", shareIndex, "proposal_id", proposalID, "tree_position", treePosition, "error", err)
 		}
@@ -678,29 +689,19 @@ func (s *ShareStore) markRetry(roundID string, shareIndex, proposalID uint32, tr
 	} else {
 		s.schedule[key] = nextShareStalledRetryTime(now, voteEndTime, stalledRetryCount)
 	}
+	// Poll cheaply, but do not sleep past a future proof slot near the cutoff.
+	if retry, err := decodeRetryState(retryRaw, voteEndTime); err == nil && retry != nil {
+		if _, next := retry.due(now, voteEndTime); next.After(now) && next.Before(s.schedule[key]) {
+			s.schedule[key] = next
+		}
+	}
+
 	s.notifyScheduleChangedLocked()
 }
 
-// nextShareSystemRetryTime returns the next retry time without intentionally
-// leaving too little processing time before the round's vote end time.
+// nextShareSystemRetryTime uses the standard polling backoff.
 func nextShareSystemRetryTime(now time.Time, voteEndTime uint64) time.Time {
-	scheduled := now.Add(shareSystemRetryBackoff)
-	if voteEndTime == 0 {
-		return scheduled
-	}
-	deadline := time.Unix(int64(voteEndTime), 0)
-	if scheduled.After(deadline.Add(-shareSystemRetryDeadlineBuffer)) {
-		remaining := deadline.Sub(now)
-		if remaining <= 0 {
-			return now
-		}
-		urgentBackoff := shareSystemRetryUrgentBackoff
-		if halfRemaining := remaining / 2; halfRemaining < urgentBackoff {
-			urgentBackoff = halfRemaining
-		}
-		return now.Add(urgentBackoff)
-	}
-	return scheduled
+	return nextSharePollTime(now, voteEndTime, shareSystemRetryBackoff)
 }
 
 // nextShareStalledRetryTime backs off repeated checks at one committed height
@@ -713,7 +714,13 @@ func nextShareStalledRetryTime(now time.Time, voteEndTime uint64, retryCount uin
 	if backoff > shareStalledRetryMaxBackoff {
 		backoff = shareStalledRetryMaxBackoff
 	}
+	return nextSharePollTime(now, voteEndTime, backoff)
+}
 
+// nextSharePollTime wakes by the urgent window and tightens polling inside it.
+// At or after the deadline it uses the standard backoff, even before any proof
+// was reserved. Polling must not spin while committed closure is unavailable.
+func nextSharePollTime(now time.Time, voteEndTime uint64, backoff time.Duration) time.Time {
 	scheduled := now.Add(backoff)
 	if voteEndTime == 0 {
 		return scheduled
@@ -722,7 +729,7 @@ func nextShareStalledRetryTime(now time.Time, voteEndTime uint64, retryCount uin
 	deadline := time.Unix(int64(voteEndTime), 0)
 	remaining := deadline.Sub(now)
 	if remaining <= 0 {
-		return now
+		return now.Add(shareSystemRetryBackoff)
 	}
 	urgentStart := deadline.Add(-shareSystemRetryDeadlineBuffer)
 	if now.Before(urgentStart) {
@@ -732,10 +739,7 @@ func nextShareStalledRetryTime(now time.Time, voteEndTime uint64, retryCount uin
 		return scheduled
 	}
 
-	urgentBackoff := shareSystemRetryUrgentBackoff
-	if halfRemaining := remaining / 2; halfRemaining < urgentBackoff {
-		urgentBackoff = halfRemaining
-	}
+	urgentBackoff := max(time.Nanosecond, min(shareSystemRetryUrgentBackoff, remaining/2))
 	return now.Add(urgentBackoff)
 }
 
@@ -1251,9 +1255,9 @@ func queueSummaryPolicyBucketSeconds(durationSeconds uint64) uint64 {
 	}
 }
 
-// queueSummaryLastMinuteStart returns the start of the final public summary
-// window. The window is 40% of the round duration, capped at 6 hours.
-func queueSummaryLastMinuteStart(createdAtTime, voteEndTime uint64) uint64 {
+// lastMinuteWindowStart is shared by retry scheduling and the public queue
+// summary. The final window is 40% of the round duration, capped at 6 hours.
+func lastMinuteWindowStart(createdAtTime, voteEndTime uint64) uint64 {
 	if voteEndTime <= createdAtTime {
 		return createdAtTime
 	}
@@ -1316,7 +1320,7 @@ func (s *ShareStore) QueueSummary(roundID string, now time.Time) (QueueSummary, 
 		CreatedAtTime:   info.CreatedAtTime,
 		VoteEndTime:     info.VoteEndTime,
 		GeneratedAt:     generatedAt,
-		LastMinuteStart: queueSummaryLastMinuteStart(info.CreatedAtTime, info.VoteEndTime),
+		LastMinuteStart: lastMinuteWindowStart(info.CreatedAtTime, info.VoteEndTime),
 		Buckets:         make([]QueueSummaryBucket, bucketCount),
 	}
 	for i := range summary.Buckets {
@@ -1455,6 +1459,35 @@ func (s *ShareStore) ExpiredRoundSummaries(now time.Time) ([]ExpiredRoundSummary
 		summaries = append(summaries, *byRound[roundID])
 	}
 	return summaries, nil
+}
+
+// unsubmittedSharesBeforeClose loads only the inputs needed to check commitment
+// for pending and failed rows counted by ExpiredRoundSummaries. Submitted rows
+// have no witness left, and shares received after closure are not reported.
+func (s *ShareStore) unsubmittedSharesBeforeClose(roundID string, now time.Time) ([]QueuedShare, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rows, err := s.db.Query(`SELECT share_index, shares_hash, proposal_id,
+		vote_decision, primary_blind, tree_position, state
+		FROM shares WHERE round_id = ? AND state IN (0, 1, 3)
+		AND vote_end_time > 0 AND vote_end_time < ?
+		AND (received_at = 0 OR received_at < vote_end_time)`, roundID, now.Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var shares []QueuedShare
+	for rows.Next() {
+		var share QueuedShare
+		share.Payload.VoteRoundID = roundID
+		if err := rows.Scan(&share.Payload.EncShare.ShareIndex, &share.Payload.SharesHash,
+			&share.Payload.ProposalID, &share.Payload.VoteDecision, &share.Payload.PrimaryBlind,
+			&share.Payload.TreePosition, &share.State); err != nil {
+			return nil, err
+		}
+		shares = append(shares, share)
+	}
+	return shares, rows.Err()
 }
 
 // Close closes the database connection.
@@ -1616,7 +1649,7 @@ func (s *ShareStore) loadShare(roundID string, shareIndex, proposalID uint32, tr
 
 	err := s.db.QueryRow(
 		`SELECT shares_hash, proposal_id, vote_decision, enc_share_c1, enc_share_c2,
-		        tree_position, share_comms, primary_blind, state, attempts, vote_end_time, submit_at
+		        tree_position, share_comms, primary_blind, state, attempts, vote_end_time, submit_at, retry_state
 		 FROM shares WHERE round_id = ? AND share_index = ? AND proposal_id = ? AND tree_position = ?`,
 		roundID, shareIndex, proposalID, treePosition,
 	).Scan(
@@ -1632,6 +1665,7 @@ func (s *ShareStore) loadShare(roundID string, shareIndex, proposalID uint32, tr
 		&attempts,
 		&q.VoteEndTime,
 		&q.Payload.SubmitAt,
+		&q.retryState,
 	)
 	if err != nil {
 		return q, false

@@ -21,6 +21,8 @@ const (
 	processingReadinessRetryInterval = 10 * time.Second
 )
 
+var errAwaitingRetrySlot = errors.New("waiting for scheduled retry attempt")
+
 var errAwaitingCommit = errors.New("broadcast accepted; awaiting committed transaction")
 
 // ErrCheckTxNotReady means BaseApp has not received its first post-restart
@@ -38,6 +40,7 @@ func (e *waitingForNewBlockError) Error() string {
 const (
 	failureStagePanic            = "panic"
 	failureStageRoundStatusCheck = "round_status_check"
+	failureStageCommitmentCheck  = "commitment_check"
 	failureStageRoundClosed      = "round_closed_unsubmitted_shares"
 	failureStageDecodeRoundID    = "decode_round_id"
 	failureStageTreeStatus       = "tree_status"
@@ -136,6 +139,7 @@ func isCanceledShareError(err error) bool {
 // when wallet-provided submit_at times arrive, generates Merkle paths and ZKP
 // 3 proofs, and submits MsgRevealShare to the chain.
 type Processor struct {
+	now               func() time.Time
 	store             *ShareStore
 	tree              TreeReader
 	prover            ProofGenerator
@@ -178,9 +182,9 @@ func WithProcessingReadinessCheck(isNodeReady func() bool) ProcessorOption {
 }
 
 // WithPreProofShareDeduper enables an optional cheap share-nullifier lookup
-// before proof generation. When the pre-proof check reports an existing reveal,
-// the processor skips proof generation; when the check fails, processing falls
-// through to the normal proof and submit path.
+// before proof generation and closure handling. Committed shares skip proving,
+// and invalid local inputs spend a failed attempt. Unavailable chain lookups
+// still allow scheduled proofs in active rounds, but defer closure cleanup.
 func WithPreProofShareDeduper(
 	vcHash VCHashFunc,
 	shareNFHash ShareNullifierHashFunc,
@@ -224,6 +228,7 @@ func NewProcessor(
 	}
 
 	p := &Processor{
+		now:               time.Now,
 		store:             store,
 		tree:              tree,
 		prover:            prover,
@@ -407,10 +412,12 @@ func (p *Processor) processQueuedShare(ctx context.Context, share QueuedShare) {
 	default:
 	}
 
+	active := true
 	if p.isRoundActive != nil {
 		_, statusSpan := StartTrace(shareCtx, "helper.round_status_check", "helper.round_status_check", nil, nil)
 		stageStart := time.Now()
-		active, err := p.isRoundActive(share.Payload.VoteRoundID)
+		var err error
+		active, err = p.isRoundActive(share.Payload.VoteRoundID)
 		p.metrics.observeProcessingStage("round_status", stageStart, err)
 		if errors.Is(err, ErrCheckTxNotReady) {
 			metricOutcome = "waiting_for_readiness"
@@ -439,17 +446,51 @@ func (p *Processor) processQueuedShare(ctx context.Context, share QueuedShare) {
 			p.markShareFailure(share, err)
 			return
 		}
-		if !active {
-			metricOutcome = "inactive"
-			metricStage = "round_status"
-			shareSpan.SetData("outcome", "round_inactive")
-			p.logger.Info("round no longer active, skipping share",
-				"round_id", share.Payload.VoteRoundID,
-				"share_index", share.Payload.EncShare.ShareIndex,
-			)
-			p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+	}
+
+	// Commitment is independent of proof timing and round activity. Use the
+	// same lookup and error classification as closed-round reconciliation.
+	stageStart := time.Now()
+	committed, err := p.shareAlreadyRevealed(shareCtx, share)
+	p.metrics.observeProcessingStage("preproof_dedupe", stageStart, err)
+	if err != nil {
+		action, _ := classifyShareFailure(err)
+		if !active || action == shareFailureFail {
+			metricOutcome = "failed"
+			if action == shareFailureRetry {
+				metricOutcome = "retry"
+			}
+			metricStage = failureStageCommitmentCheck
+			spanErr = err
+			p.logger.Warn("share commitment check failed", "round_id", share.Payload.VoteRoundID, "error", err)
+			if action == shareFailureFail {
+				captureShareProcessingFailure(share, failureStageCommitmentCheck, err)
+			}
+			p.markShareFailure(share, err)
 			return
 		}
+		// Lookup availability must not prevent an otherwise eligible reveal.
+		// The persisted schedule still bounds proof work on this fallback path.
+		p.logger.Warn("share commitment lookup unavailable, continuing with scheduled proof",
+			"round_id", share.Payload.VoteRoundID, "error", err)
+	}
+	if committed {
+		metricOutcome = "confirmed"
+		metricStage = "confirmation"
+		shareSpan.SetData("outcome", "submitted")
+		p.markShareSubmitted(share)
+		return
+	}
+	if !active {
+		metricOutcome = "inactive"
+		metricStage = "round_status"
+		shareSpan.SetData("outcome", "round_inactive")
+		p.logger.Info("round no longer active, skipping share",
+			"round_id", share.Payload.VoteRoundID,
+			"share_index", share.Payload.EncShare.ShareIndex,
+		)
+		p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+		return
 	}
 
 	if err := p.processShare(shareCtx, share); err != nil {
@@ -465,14 +506,18 @@ func (p *Processor) processQueuedShare(ctx context.Context, share QueuedShare) {
 			p.store.MarkStalledRetry(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition, retryCount)
 			return
 		}
-		if errors.Is(err, errAwaitingCommit) {
+		if errors.Is(err, errAwaitingCommit) || errors.Is(err, errAwaitingRetrySlot) {
 			metricOutcome = "awaiting_commit"
 			metricStage = "chain_broadcast"
+			if errors.Is(err, errAwaitingRetrySlot) {
+				metricOutcome = "waiting_for_retry"
+				metricStage = "retry_schedule"
+			}
 			shareSpan.SetData("outcome", "awaiting_commit")
 			spanErr = nil
-			// Bound accepted-but-unconfirmed broadcasts so an unavailable
-			// committed-state check cannot trigger proof generation forever.
-			p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+			// Waiting does not spend failed attempts. The persisted retry state
+			// bounds proof work while committed-state checks continue.
+			p.store.MarkRetry(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
 			return
 		}
 		if isCanceledShareError(err) {
@@ -505,6 +550,10 @@ func (p *Processor) processQueuedShare(ctx context.Context, share QueuedShare) {
 	metricOutcome = "confirmed"
 	metricStage = "confirmation"
 	shareSpan.SetData("outcome", "submitted")
+	p.markShareSubmitted(share)
+}
+
+func (p *Processor) markShareSubmitted(share QueuedShare) {
 	p.store.MarkSubmitted(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
 	p.clearSubmitHeight(share)
 	p.logger.Info("share submitted",
@@ -526,7 +575,6 @@ func (p *Processor) cleanupClosedRounds() {
 		return
 	}
 	closed := make(map[string]bool, len(roundIDs))
-	confirmed := make([]string, 0, len(roundIDs))
 	for _, roundID := range roundIDs {
 		isClosed, err := p.isRoundClosed(roundID)
 		if err != nil {
@@ -535,7 +583,6 @@ func (p *Processor) cleanupClosedRounds() {
 		}
 		if isClosed {
 			closed[roundID] = true
-			confirmed = append(confirmed, roundID)
 		}
 	}
 	summaries, err := p.store.ExpiredRoundSummaries(now)
@@ -545,6 +592,11 @@ func (p *Processor) cleanupClosedRounds() {
 	}
 	for _, summary := range summaries {
 		if !closed[summary.RoundID] {
+			continue
+		}
+		if err := p.reconcileClosedRoundSummary(&summary, now); err != nil {
+			delete(closed, summary.RoundID)
+			p.logger.Warn("retaining shares: commitment reconciliation unavailable", "round_id", summary.RoundID, "error", err)
 			continue
 		}
 		unsubmitted := summary.Unsubmitted()
@@ -571,7 +623,48 @@ func (p *Processor) cleanupClosedRounds() {
 			"unsubmitted", unsubmitted,
 		)
 	}
+	confirmed := make([]string, 0, len(closed))
+	for _, roundID := range roundIDs {
+		if closed[roundID] {
+			confirmed = append(confirmed, roundID)
+		}
+	}
 	p.store.PurgeRounds(confirmed)
+}
+
+// reconcileClosedRoundSummary accounts for commits missed by queue polling,
+// including failed rows. The rows are purged after reporting, so only the
+// summary needs updating. Invalid local rows remain counted as unsubmitted.
+// Unavailable chain lookups defer this round's cleanup.
+func (p *Processor) reconcileClosedRoundSummary(summary *ExpiredRoundSummary, now time.Time) error {
+	if p.preProofDedupe == nil || summary.Unsubmitted() == 0 {
+		return nil
+	}
+	shares, err := p.store.unsubmittedSharesBeforeClose(summary.RoundID, now)
+	if err != nil {
+		return err
+	}
+	for _, share := range shares {
+		committed, err := p.shareAlreadyRevealed(context.Background(), share)
+		if err != nil {
+			if action, _ := classifyShareFailure(err); action == shareFailureRetry {
+				return err
+			}
+			p.logger.Warn("invalid share remains unsubmitted at round closure",
+				"round_id", summary.RoundID, "share_index", share.Payload.EncShare.ShareIndex, "error", err)
+			continue
+		}
+		if !committed {
+			continue
+		}
+		if share.State == ShareStateFailed {
+			summary.Failed--
+		} else {
+			summary.Pending--
+		}
+		summary.Submitted++
+	}
+	return nil
 }
 
 // captureShareProcessingFailure groups repeated attempts from the local helper
@@ -607,40 +700,34 @@ func (p *Processor) markShareFailure(share QueuedShare, err error) {
 	p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
 }
 
-// processShare handles a single share: Merkle path → proof → submit.
+// processShare builds the Merkle path and reserves a due attempt before proving
+// and submitting. The caller checks commitment and round activity first.
 func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	// Scope the tree reader to this share's voting round.
 	stageStart := time.Now()
-	roundBytes, err := hex.DecodeString(share.Payload.VoteRoundID)
+	roundID, err := decodeShareRoundID(share.Payload.VoteRoundID)
+	p.metrics.observeProcessingStage("payload_decode", stageStart, err)
 	if err != nil {
-		p.metrics.observeProcessingStage("payload_decode", stageStart, err)
-		return failedShareAttemptError(failureStageDecodeRoundID, fmt.Errorf("decode vote_round_id: %w", err))
+		return err
 	}
-	var roundID [32]byte
-	if len(roundBytes) != 32 {
-		err := fmt.Errorf("vote_round_id must be 32 bytes, got %d", len(roundBytes))
-		p.metrics.observeProcessingStage("payload_decode", stageStart, err)
-		return failedShareAttemptError(failureStageDecodeRoundID, err)
-	}
-	copy(roundID[:], roundBytes)
-	p.metrics.observeProcessingStage("payload_decode", stageStart, nil)
+	roundBytes := roundID[:]
 
-	if p.preProofDedupe != nil {
-		stageStart = time.Now()
-		alreadyRevealed, err := p.preProofDedupe.shareAlreadyRevealed(ctx, share, roundID)
-		p.metrics.observeProcessingStage("preproof_dedupe", stageStart, err)
-		if err != nil {
-			p.logger.Warn("pre-proof share nullifier check failed, continuing with proof",
-				"round_id", share.Payload.VoteRoundID,
-				"share_index", share.Payload.EncShare.ShareIndex,
-				"error", err,
-			)
-		} else if alreadyRevealed {
-			p.logger.Info("share already revealed before proof generation",
-				"round_id", share.Payload.VoteRoundID,
-				"share_index", share.Payload.EncShare.ShareIndex,
-			)
-			return nil
+	retry, err := decodeRetryState(share.retryState, share.VoteEndTime)
+	if err != nil {
+		return retryableShareError("retry_schedule", err)
+	}
+	// Empty retry state can belong to a pre-upgrade or imported row. Its old
+	// attempt count must consume slots when we first reserve the new schedule.
+	previousAttempts := 0
+	if retry == nil {
+		previousAttempts = max(0, share.Attempts)
+		if previousAttempts >= 5 {
+			return retryableShareError(failureStageSubmitChain, errAwaitingRetrySlot)
+		}
+	}
+	if retry != nil {
+		if slot, _ := retry.due(p.now(), share.VoteEndTime); slot < 0 {
+			return retryableShareError(failureStageSubmitChain, errAwaitingRetrySlot)
 		}
 	}
 
@@ -747,6 +834,32 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	copy(encC2[:], c2Bytes)
 	p.metrics.observeProcessingStage("payload_decode", stageStart, nil)
 
+	// Reserve the proof attempt durably after cheap validation. Crashes and
+	// ambiguous submissions consume the slot rather than repeating proof work.
+	now := p.now()
+	if retry == nil {
+		info, err := p.store.getRoundInfo(share.Payload.VoteRoundID)
+		if err != nil {
+			return retryableShareError("retry_schedule", fmt.Errorf("read round window: %w", err))
+		}
+		now = p.now()
+		initial := newRetryState(now, info.CreatedAtTime, share.VoteEndTime)
+		retry = &initial
+	}
+	slot, _ := retry.due(now, share.VoteEndTime)
+	if slot < 0 {
+		return retryableShareError(failureStageSubmitChain, errAwaitingRetrySlot)
+	}
+	if blockHeight <= retry.LastHeight {
+		return retryableShareError(failureStageSubmitChain, &waitingForNewBlockError{height: blockHeight})
+	}
+	retry.NextSlot = min(slot+1+previousAttempts, len(retryTimes(retry.FirstAttempt, retry.FinalAttempt)))
+	retry.LastAttempt = now
+	retry.LastHeight = blockHeight
+	if err := p.store.reserveProofAttempt(share, *retry); err != nil {
+		return retryableShareError("retry_schedule", err)
+	}
+
 	// Generate ZKP #3 proof.
 	proofStart := time.Now()
 	_, span := StartTrace(ctx, "zkp.prove", "helper.generate_share_reveal_proof", map[string]string{
@@ -836,8 +949,7 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 
 	// CheckTx acceptance only places the transaction in the mempool. Preserve
 	// the witness until a later pass observes its nullifier in committed state.
-	// That pass returns nil from the pre-proof dedupe above and only then allows
-	// processBatch to call MarkSubmitted and scrub the witness.
+	// That pass confirms commitment in processQueuedShare before scrubbing.
 	p.logger.Debug("MsgRevealShare broadcast accepted; awaiting committed nullifier",
 		"tx_hash", result.TxHash)
 	return retryableShareError(
@@ -925,8 +1037,35 @@ func shareScheduleKey(share QueuedShare) string {
 	)
 }
 
+// shareAlreadyRevealed checks commitment without requiring an active round or
+// a due proof slot. Production helpers always have a deduper configured.
+func (p *Processor) shareAlreadyRevealed(ctx context.Context, share QueuedShare) (bool, error) {
+	if p.preProofDedupe == nil {
+		return false, nil
+	}
+	roundID, err := decodeShareRoundID(share.Payload.VoteRoundID)
+	if err != nil {
+		return false, err
+	}
+	return p.preProofDedupe.shareAlreadyRevealed(ctx, share, roundID)
+}
+
+func decodeShareRoundID(value string) ([32]byte, error) {
+	var roundID [32]byte
+	raw, err := hex.DecodeString(value)
+	if err != nil {
+		return roundID, failedShareAttemptError(failureStageDecodeRoundID, fmt.Errorf("decode vote_round_id: %w", err))
+	}
+	if len(raw) != len(roundID) {
+		return roundID, failedShareAttemptError(failureStageDecodeRoundID, fmt.Errorf("vote_round_id must be 32 bytes, got %d", len(raw)))
+	}
+	copy(roundID[:], raw)
+	return roundID, nil
+}
+
 // shareAlreadyRevealed computes the queued share's nullifier and checks whether
-// the chain has already recorded it for the share's voting round.
+// the chain has already recorded it for the share's voting round. Only chain
+// lookup errors are retryable. Decode and hash errors are local row failures.
 func (d *preProofShareDeduper) shareAlreadyRevealed(ctx context.Context, share QueuedShare, roundID [32]byte) (bool, error) {
 	_, span := StartTrace(ctx, "helper.dedupe", "helper.preproof_share_nullifier_check", map[string]string{
 		"round_id":    share.Payload.VoteRoundID,
@@ -965,7 +1104,7 @@ func (d *preProofShareDeduper) shareAlreadyRevealed(ctx context.Context, share Q
 	already, err = d.shareNF(share.Payload.VoteRoundID, nullifier[:])
 	if err != nil {
 		spanErr = err
-		return false, fmt.Errorf("check share nullifier: %w", err)
+		return false, retryableShareError(failureStageCommitmentCheck, fmt.Errorf("check share nullifier: %w", err))
 	}
 	return already, nil
 }

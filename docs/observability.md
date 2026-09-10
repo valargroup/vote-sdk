@@ -40,6 +40,9 @@ metric labels.
 | `svote_helper_share_processing_duration_seconds{outcome,stage}` | End-to-end latency after a queued share is assigned to a worker. |
 | `svote_helper_share_processing_stage_duration_seconds{stage,result}` | Worker latency split across round status, pre-proof dedupe, tree reads, payload decoding, proof generation, and chain broadcast. |
 
+Commitment polling between proof slots records `waiting_for_retry` at
+`retry_schedule`. A share confirmed after round closure records `confirmed`.
+
 All latency histograms have buckets through 180 seconds, including explicit
 10, 15, 20, and 30 second boundaries. To compare p95 ingress stage latency
 between helpers over five minutes:
@@ -317,6 +320,12 @@ queue depth. These fields use the helper's effective in-memory schedule, so a
 share delayed by retry backoff is `not_yet_due` even when its original
 `submit_at` has passed. Histogram placement remains based on the persisted
 submit time and does not move during retries.
+
+`last_minute_start` marks the final 40% of the round, capped at six hours.
+Older shares target their final retry around the earlier of this boundary or
+48 hours after their first attempt, with jitter clipped at that cap. Shares
+first attempted inside this window can retry through its remainder, leaving a
+separate safety margin before the voting deadline.
 
 The benchmark-only authenticated `/shielded-vote/v1/queue-status` response
 exposes the same three fields per round. Its existing `pending` field remains

@@ -443,6 +443,30 @@ func TestNextShareSystemRetryTime_HalvesRemainingNearDeadline(t *testing.T) {
 	assert.Equal(t, now.Add(1500*time.Millisecond), next)
 }
 
+func TestPollingBackoffAcrossDeadline(t *testing.T) {
+	deadline := time.Unix(1000, 0)
+	for _, tc := range []struct {
+		name      string
+		remaining time.Duration
+		want      time.Duration
+	}{
+		{"before urgent window", 35 * time.Second, 5 * time.Second},
+		{"urgent window start", 30 * time.Second, 2 * time.Second},
+		{"before deadline", time.Second, 500 * time.Millisecond},
+		{"last clock tick", time.Nanosecond, time.Nanosecond},
+		{"at deadline", 0, shareSystemRetryBackoff},
+		{"after deadline", -time.Hour, shareSystemRetryBackoff},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := deadline.Add(-tc.remaining)
+			assert.Equal(t, now.Add(tc.want), nextShareSystemRetryTime(now, uint64(deadline.Unix())))
+			for _, retryCount := range []uint8{1, 2, shareStalledRetryMaxCount} {
+				assert.Equal(t, now.Add(tc.want), nextShareStalledRetryTime(now, uint64(deadline.Unix()), retryCount))
+			}
+		})
+	}
+}
+
 func TestNextShareStalledRetryTime_BackoffAndCap(t *testing.T) {
 	now := time.Unix(1000, 0)
 	tests := []struct {
@@ -605,11 +629,11 @@ func TestQueueSummaryRejectsTooManyBuckets(t *testing.T) {
 
 func TestQueueSummaryLastMinuteStartPolicy(t *testing.T) {
 	start := uint64(1700000000)
-	assert.Equal(t, start+6*60, queueSummaryLastMinuteStart(start, start+10*60))
-	assert.Equal(t, start+36*60, queueSummaryLastMinuteStart(start, start+60*60))
-	assert.Equal(t, start+2*3600-48*60, queueSummaryLastMinuteStart(start, start+2*3600))
-	assert.Equal(t, start+7*24*3600-6*3600, queueSummaryLastMinuteStart(start, start+7*24*3600))
-	assert.Equal(t, start, queueSummaryLastMinuteStart(start, start))
+	assert.Equal(t, start+6*60, lastMinuteWindowStart(start, start+10*60))
+	assert.Equal(t, start+36*60, lastMinuteWindowStart(start, start+60*60))
+	assert.Equal(t, start+2*3600-48*60, lastMinuteWindowStart(start, start+2*3600))
+	assert.Equal(t, start+7*24*3600-6*3600, lastMinuteWindowStart(start, start+7*24*3600))
+	assert.Equal(t, start, lastMinuteWindowStart(start, start))
 }
 
 func TestQueueSummaryAggregatesStatesByBucket(t *testing.T) {

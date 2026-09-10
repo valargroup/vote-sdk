@@ -46,7 +46,8 @@ sudo scripts/retry-failed-helper-shares.py \
 ```
 
 The script stops `svoted`, resets all failed rows for the round to `received`
-with zero attempts in one transaction, and restarts the service. It preserves
+with zero attempts and a fresh retry schedule in one transaction, and restarts
+the service. This explicitly grants a new proof-attempt budget. It preserves
 their witness and original submission time. The helper then checks committed
 nullifiers before proof generation: already revealed shares become submitted
 without another broadcast, while missing shares follow the normal proof and
@@ -58,6 +59,16 @@ can guarantee that every stopped service is restarted, including when the
 database update fails.
 
 ## Export
+
+The wallet's original submission time is stored and included in exports.
+Normal imports preserve it. `--force-ready` makes the share eligible immediately
+while keeping the original time for reference.
+
+The helper's retry schedule and consumed proof-attempt slots are not exported.
+A new helper starts its own attempt budget and retry schedule when it first
+processes the imported share, so its retry times can differ from the source
+helper's. Duplicate imports into the same helper preserve that helper's existing
+retry schedule and attempt budget, even with `--force-ready`.
 
 On the overloaded helper:
 

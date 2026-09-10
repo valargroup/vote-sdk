@@ -439,8 +439,12 @@ tag that identifies the helper code path that emitted the error, such as
 events describe only the helper instance running this process; they do not
 monitor other helper servers.
 
-When a voting round closes, the helper summarizes queued shares before purging
-expired witness data. If any shares for that round are still pending or failed,
+When a voting round closes, the helper reconciles queued shares against committed
+nullifiers before reporting and purging expired witness data. This includes
+failed shares that committed before closure but missed the final queue check.
+An unavailable chain lookup defers that round's reporting and cleanup. Invalid
+stored rows remain counted as unsubmitted and do not block the round's purge.
+If any shares for that round are still pending or failed,
 it emits a Sentry error with `stage=round_closed_unsubmitted_shares` and tags
 for `alert=helper_round_closed`, `round_id`, `total_shares`, `pending_shares`,
 `failed_shares`, `submitted_shares`, and `unsubmitted_shares`. Configure Sentry
@@ -452,6 +456,75 @@ Share-processing attempt failures emit `alert=helper_share_failure` with
 group retries from this helper instance by round, processing stage, and queue
 action. The share index remains diagnostic context, so multiple shares for one
 incident stay grouped.
+
+An accepted reveal broadcast stays pending until the helper observes its
+nullifier in committed chain state. Waiting does not spend the five-attempt
+failure budget or emit a share-failure alert. Each share also has a separate,
+persisted budget of at most five proof-and-broadcast attempts, including failed
+proofs and interrupted submissions. The helper reserves a slot before proving,
+so a crash can consume an attempt but cannot reset the budget.
+Existing attempt counts from upgrades or imports consume the earliest slots
+when the schedule is first reserved. A share with four previous attempts gets
+at most one more immediate attempt, then only commitment checks. The old store
+does not record the first attempt time, so its 48-hour clock starts with the
+first attempt under the new schedule.
+
+The first attempt honors the wallet-provided `submit_at` time. Retries stop
+starting new proof work 48 hours after that first attempt, even if slots were
+missed. The existing last-minute window covers the final 40% of the round,
+capped at six hours. Shares first attempted before that window target the
+earlier of its start or 48 hours later for their final retry, with up to five
+minutes of jitter on either side, clipped at the cap. Shares first attempted
+inside the window can spread retries through the remaining time.
+
+A separate safety margin allows time for proving, submission, and block
+inclusion. It is one eighth of the time remaining at the first attempt, bounded
+between 30 seconds and five minutes. Late shares place the final retry within
+ten minutes before that margin. For short windows, jitter shrinks to one eighth
+of the remaining time and is clipped to keep attempts between now and the
+safety cutoff or the 48-hour cap. The margin does not guarantee inclusion
+under congestion.
+
+Each helper stores the first attempt time, chosen final retry time, progress,
+and last attempt time and height. Intermediate times and the cutoff are derived
+from those inputs and the round deadline. Retries target one minute, ten
+minutes, then halfway from the previous slot to the final slot. Short windows
+also cap earlier retries at halfway to the final slot, omitting slots less than
+ten seconds apart. Example times below are measured from the first attempt
+and use hypothetical jitter draws:
+
+| Round duration | Time left at first attempt | Attempt times |
+| --- | --- | --- |
+| 7 days | 7 days | Now, 1m, 10m, 24h 4m, 47h 58m |
+| 7 days | 7 hours | Now, 1m, 10m, 35m, 1h |
+| 7 days | 6h 1m | Now, 1m, 2m 30s, 3m 15s, 4m |
+| 7 days | 6 hours | Now, 1m, 10m, 3h, 5h 50m |
+| 7 days | 2 hours | Now, 1m, 10m, 1h, 1h 50m |
+| 6 hours | 6 hours | Now, 1m, 10m, 1h 53m, 3h 36m |
+
+Exactly at the window start counts as inside it. Just before it, the final
+retry still targets the start, so the two cases intentionally differ.
+
+Shares with 30 seconds or less remaining, or without a known deadline, get one
+immediate attempt. Missing round creation metadata uses the late-share fallback.
+
+Retries still require a newer committed block height. The helper skips missed
+slots after delays. Each queue pass checks commitment once before deciding
+whether to prove, wait for a slot, or reject an inactive round. Confirmed shares
+stop immediately, including after the final slot or round closure.
+
+Invalid local inputs spend the existing failure budget without starting a
+proof. At closure they remain counted as unsubmitted and are purged. A temporary
+chain lookup error still allows a scheduled proof in an active round, within
+the same budget and cutoff. After closure, lookup errors defer cleanup so
+unknown outcomes are not reported as unsubmitted.
+
+Normal and stalled polling share one deadline rule. At or after the local
+deadline, checks wait ten seconds before retrying, even when no proof schedule
+exists. A passed local deadline does not terminalize or delete a share.
+Committed round closure controls cleanup and unsubmitted-share alerts.
+Deterministic failures can terminalize a share earlier. Existing terminal rows
+are not automatically revived.
 
 ### On-Chain State (KV Store Keys)
 

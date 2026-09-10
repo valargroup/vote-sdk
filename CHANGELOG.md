@@ -8,6 +8,15 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Limit helper reveal retries to 48 hours after the first attempt, with at most
+  five persisted proof attempts, counting attempts recorded before upgrade.
+  Target older shares' final retry around the start of the last-minute window
+  when it is sooner, while late shares can
+  retry through its remainder. Keep checking commitment after the last attempt
+  instead of treating mempool acceptance as failure. Reconcile committed shares
+  before inactive-round rejection and cleanup to avoid false failure reports,
+  while rejecting invalid local inputs before proving and reporting them at
+  closure. Back off polling after the deadline even for rows without retry state.
 - Expose Prometheus APM for helper share ingress and background processing on
   `/metrics`, with bounded outcome and stage labels that identify slow
   validation, tree, proof-generation, enqueue, and chain-broadcast work.
