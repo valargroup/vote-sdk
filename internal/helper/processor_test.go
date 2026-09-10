@@ -522,7 +522,14 @@ func TestProcessor_ProcessBatch_BroadcastAcceptedRetriesOncePerBlock(t *testing.
 	defer chainServer.Close()
 
 	submitter := NewChainSubmitter(chainServer.URL)
-	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
+	var committed atomic.Bool
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil,
+		WithPreProofShareDeduper(
+			func(_, _ [32]byte, _, _ uint32) ([32]byte, error) { return [32]byte{}, nil },
+			func(_ [32]byte, _ uint32, _ [32]byte) ([32]byte, error) { return [32]byte{}, nil },
+			func(_ string, _ []byte) (bool, error) { return committed.Load(), nil },
+		),
+	)
 
 	// Enqueue a share (zero delay in test store means immediately ready).
 	roundID := hex.EncodeToString(make([]byte, 32))
@@ -540,7 +547,7 @@ func TestProcessor_ProcessBatch_BroadcastAcceptedRetriesOncePerBlock(t *testing.
 	assert.Equal(t, 1, status[roundID].Pending)
 	share, ok := store.loadShare(roundID, 0, 1, 0)
 	require.True(t, ok)
-	assert.Equal(t, 1, share.Attempts)
+	assert.Zero(t, share.Attempts)
 	assert.NotEmpty(t, share.Payload.EncShare.C1)
 	assert.NotEmpty(t, share.Payload.EncShare.C2)
 	assert.NotEmpty(t, share.Payload.ShareComms)
@@ -563,7 +570,7 @@ func TestProcessor_ProcessBatch_BroadcastAcceptedRetriesOncePerBlock(t *testing.
 		proc.processBatch(context.Background())
 		share, ok = store.loadShare(roundID, 0, 1, 0)
 		require.True(t, ok)
-		assert.Equal(t, 1, share.Attempts)
+		assert.Zero(t, share.Attempts)
 		store.mu.Lock()
 		next, scheduled := store.schedule[key]
 		store.mu.Unlock()
@@ -573,31 +580,55 @@ func TestProcessor_ProcessBatch_BroadcastAcceptedRetriesOncePerBlock(t *testing.
 	assert.Equal(t, int32(1), prover.callCount.Load())
 	assert.Equal(t, int32(1), submitCalls.Load())
 
-	// The retry budget still applies when the chain commits new blocks without
-	// ever committing the accepted transaction.
-	for height := uint64(2); height <= 5; height++ {
+	// Congestion can delay commitment beyond five accepted broadcasts. Every
+	// new height still permits a retry without spending a failed attempt.
+	for height := uint64(2); height <= 6; height++ {
 		tree.blockHeight.Store(height)
 		store.mu.Lock()
+		_, scheduled := store.schedule[key]
 		store.schedule[key] = time.Now().Add(-time.Second)
 		store.mu.Unlock()
+		require.True(t, scheduled)
 		proc.processBatch(context.Background())
 		share, ok = store.loadShare(roundID, 0, 1, 0)
 		require.True(t, ok)
-		assert.Equal(t, int(height), share.Attempts)
+		assert.Zero(t, share.Attempts)
+		require.Equal(t, ShareStateReceived, share.State)
 	}
 
-	assert.Equal(t, int32(5), prover.callCount.Load())
-	assert.Equal(t, int32(5), submitCalls.Load())
+	assert.Equal(t, int32(6), prover.callCount.Load())
+	assert.Equal(t, int32(6), submitCalls.Load())
 	status = store.Status()
-	assert.Equal(t, 0, status[roundID].Pending)
-	assert.Equal(t, 1, status[roundID].Failed)
+	assert.Equal(t, 1, status[roundID].Pending)
+	assert.Zero(t, status[roundID].Failed)
 	share, ok = store.loadShare(roundID, 0, 1, 0)
 	require.True(t, ok)
-	assert.Equal(t, ShareStateFailed, share.State)
+	assert.Equal(t, ShareStateReceived, share.State)
 	assert.Equal(t, p.EncShare.C1, share.Payload.EncShare.C1)
 	assert.Equal(t, p.EncShare.C2, share.Payload.EncShare.C2)
 	assert.Equal(t, p.ShareComms, share.Payload.ShareComms)
 	assert.Equal(t, p.PrimaryBlind, share.Payload.PrimaryBlind)
+
+	// Commitment is checked before the same-height gate and completes the
+	// share without another proof or broadcast, scrubbing its witness.
+	committed.Store(true)
+	store.mu.Lock()
+	_, scheduled := store.schedule[key]
+	store.schedule[key] = time.Now().Add(-time.Second)
+	store.mu.Unlock()
+	require.True(t, scheduled)
+	proc.processBatch(context.Background())
+	share, ok = store.loadShare(roundID, 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, ShareStateSubmitted, share.State)
+	assert.Empty(t, share.Payload.EncShare.C1)
+	assert.Empty(t, share.Payload.EncShare.C2)
+	assert.Empty(t, share.Payload.ShareComms)
+	assert.Empty(t, share.Payload.PrimaryBlind)
+	assert.Equal(t, int32(6), prover.callCount.Load())
+	assert.Equal(t, int32(6), submitCalls.Load())
+	_, scheduled = store.NextScheduledTime()
+	assert.False(t, scheduled)
 }
 
 func TestProcessor_ProcessShare_RejectsSuccessWithoutTxHash(t *testing.T) {

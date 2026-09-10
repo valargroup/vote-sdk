@@ -445,9 +445,9 @@ func (p *Processor) processQueuedShare(ctx context.Context, share QueuedShare) {
 		if errors.Is(err, errAwaitingCommit) {
 			shareSpan.SetData("outcome", "awaiting_commit")
 			spanErr = nil
-			// Bound accepted-but-unconfirmed broadcasts so an unavailable
-			// committed-state check cannot trigger proof generation forever.
-			p.store.MarkFailed(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
+			// Mempool acceptance is not a failed attempt. Keep the share queued
+			// while the submit-height gate and stalled backoff bound repeat work.
+			p.store.MarkRetry(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
 			return
 		}
 		if isCanceledShareError(err) {

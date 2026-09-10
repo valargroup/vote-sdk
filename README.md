@@ -453,6 +453,13 @@ group retries from this helper instance by round, processing stage, and queue
 action. The share index remains diagnostic context, so multiple shares for one
 incident stay grouped.
 
+An accepted reveal broadcast stays pending until the helper observes its
+nullifier in committed chain state. Waiting for commitment does not spend the
+five-attempt failure budget or emit a share-failure alert. Retries preserve the
+witness, allow at most one broadcast per share per committed block height, and
+back off repeated checks at a stalled height. Deterministic processing failures
+still spend the failure budget.
+
 ### On-Chain State (KV Store Keys)
 
 | Key         | Type                           | Description                                |

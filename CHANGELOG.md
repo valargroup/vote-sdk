@@ -8,6 +8,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Keep accepted helper broadcasts queued until commitment without spending
+  failed-share attempts, so delayed block inclusion does not exhaust retries.
 - Reject casts for nonexistent round proposals before signature and proof
   verification, including atomic batches and mempool rechecks, preventing
   repeated verification of votes that cannot execute. Requires a coordinated
