@@ -35,6 +35,7 @@ printf '[helper]\ndb_path = ""\n' > "${HOME_DIR}/config/app.toml"
 printf 'active\n' > "${SERVICE_STATE}"
 
 python3 - "${DB_PATH}" "${ROUND_ID}" "${ROUND_END}" <<'PY'
+import os
 import sqlite3
 import sys
 
@@ -91,6 +92,8 @@ with sqlite3.connect(db_path) as db:
         """,
         (round_id, int(round_end)),
     )
+    if os.environ.get("TEST_RELAY_PLAN_SCHEMA") == "1":
+        db.execute("ALTER TABLE shares ADD COLUMN relay_plan TEXT NOT NULL DEFAULT 'reserved'")
 PY
 
 python3 - "${PORT_FILE}" "${ROUND_ID}" "${ROUND_END}" <<'PY' &
@@ -274,5 +277,16 @@ if "${SCRIPT}" "${COMMON_ARGS[@]}" > "${TEST_DIR}/second.out" 2>&1; then
   exit 1
 fi
 grep -q 'the round has no failed helper shares' "${TEST_DIR}/second.out"
+
+
+python3 - "${DB_PATH}" <<'PY'
+import sqlite3
+import sys
+with sqlite3.connect(sys.argv[1]) as db:
+    columns = {row[1] for row in db.execute("PRAGMA table_info(shares)")}
+    if "relay_plan" in columns:
+        assert db.execute("SELECT relay_plan FROM shares WHERE share_index IN (12, 13)").fetchall() == [("",), ("",)]
+        assert db.execute("SELECT relay_plan FROM shares WHERE share_index = 14").fetchone() == ("reserved",)
+PY
 
 printf 'retry-failed-helper-shares tests passed\n'

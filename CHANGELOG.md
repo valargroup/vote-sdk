@@ -8,8 +8,10 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
-- Keep accepted helper broadcasts queued until commitment without spending
-  failed-share attempts, so delayed block inclusion does not exhaust retries.
+- Spread helper reveal attempts across the remaining voting window, with at
+  most five persisted proof attempts and a jittered final retry before the
+  closing buffer. Keep checking commitment after the last attempt instead of
+  treating mempool acceptance as failure.
 - Reject casts for nonexistent round proposals before signature and proof
   verification, including atomic batches and mempool rechecks, preventing
   repeated verification of votes that cannot execute. Requires a coordinated

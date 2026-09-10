@@ -507,128 +507,112 @@ func TestProcessor_SubmitHeightCacheEvictsOlderBlocks(t *testing.T) {
 	assert.NotContains(t, proc.stalledRetryCount, shareScheduleKey(shareA))
 }
 
-func TestProcessor_ProcessBatch_BroadcastAcceptedRetriesOncePerBlock(t *testing.T) {
+func TestProcessor_BroadcastScheduleBoundsProofsUntilCommitment(t *testing.T) {
 	store := newTestStore(t)
 	prover := &mockProver{}
 	tree := newMockTreeReader()
 	var submitCalls atomic.Int32
-
-	// Fake chain server that accepts submissions.
+	var committed atomic.Bool
+	var checkUnavailable atomic.Bool
 	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		submitCalls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"tx_hash":"AABB","code":0,"log":""}`))
 	}))
 	defer chainServer.Close()
-
-	submitter := NewChainSubmitter(chainServer.URL)
-	var committed atomic.Bool
-	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil,
+	proc := NewProcessor(store, tree, prover, NewChainSubmitter(chainServer.URL), log.NewNopLogger(), 2, nil,
 		WithPreProofShareDeduper(
 			func(_, _ [32]byte, _, _ uint32) ([32]byte, error) { return [32]byte{}, nil },
 			func(_ [32]byte, _ uint32, _ [32]byte) ([32]byte, error) { return [32]byte{}, nil },
-			func(_ string, _ []byte) (bool, error) { return committed.Load(), nil },
+			func(_ string, _ []byte) (bool, error) {
+				if checkUnavailable.Load() {
+					return false, assert.AnError
+				}
+				return committed.Load(), nil
+			},
 		),
 	)
-
-	// Enqueue a share (zero delay in test store means immediately ready).
+	now := time.Now()
+	proc.now = func() time.Time { return now }
 	roundID := hex.EncodeToString(make([]byte, 32))
-	p := testPayload(roundID, 0)
-	p.TreePosition = 0
-	enqueueAndRequireInserted(t, store, p)
-
-	// Process the batch — processBatch calls TakeReady internally.
-	proc.processBatch(context.Background())
-
-	// CheckTx acceptance is not commitment. The witness remains available for
-	// retry until the pre-proof nullifier check observes committed state.
-	status := store.Status()
-	assert.Equal(t, 0, status[roundID].Submitted)
-	assert.Equal(t, 1, status[roundID].Pending)
-	share, ok := store.loadShare(roundID, 0, 1, 0)
-	require.True(t, ok)
-	assert.Zero(t, share.Attempts)
-	assert.NotEmpty(t, share.Payload.EncShare.C1)
-	assert.NotEmpty(t, share.Payload.EncShare.C2)
-	assert.NotEmpty(t, share.Payload.ShareComms)
-	assert.NotEmpty(t, share.Payload.PrimaryBlind)
-	assert.Equal(t, int32(1), prover.callCount.Load())
-	assert.Equal(t, int32(1), submitCalls.Load())
-
+	payload := testPayload(roundID, 0)
+	enqueueAndRequireInserted(t, store, payload)
 	key := schedKey(roundID, 0, 1, 0)
-	for retry, expected := range []time.Duration{
-		shareSystemRetryBackoff,
-		20 * time.Second,
-		40 * time.Second,
-		80 * time.Second,
-		shareStalledRetryMaxBackoff,
-		shareStalledRetryMaxBackoff,
-	} {
-		store.mu.Lock()
-		store.schedule[key] = time.Now().Add(-time.Second)
-		store.mu.Unlock()
-		proc.processBatch(context.Background())
-		share, ok = store.loadShare(roundID, 0, 1, 0)
-		require.True(t, ok)
-		assert.Zero(t, share.Attempts)
-		store.mu.Lock()
-		next, scheduled := store.schedule[key]
-		store.mu.Unlock()
-		require.True(t, scheduled, "retry %d", retry+1)
-		assert.WithinDuration(t, time.Now().Add(expected), next, 300*time.Millisecond)
-	}
-	assert.Equal(t, int32(1), prover.callCount.Load())
-	assert.Equal(t, int32(1), submitCalls.Load())
-
-	// Congestion can delay commitment beyond five accepted broadcasts. Every
-	// new height still permits a retry without spending a failed attempt.
-	for height := uint64(2); height <= 6; height++ {
-		tree.blockHeight.Store(height)
+	run := func() QueuedShare {
+		t.Helper()
 		store.mu.Lock()
 		_, scheduled := store.schedule[key]
 		store.schedule[key] = time.Now().Add(-time.Second)
 		store.mu.Unlock()
 		require.True(t, scheduled)
 		proc.processBatch(context.Background())
-		share, ok = store.loadShare(roundID, 0, 1, 0)
+		share, ok := store.loadShare(roundID, 0, 1, 0)
 		require.True(t, ok)
-		assert.Zero(t, share.Attempts)
-		require.Equal(t, ShareStateReceived, share.State)
+		require.Zero(t, share.Attempts)
+		return share
+	}
+	share := run()
+	plan, err := decodeRelayPlan(share.relayPlan)
+	require.NoError(t, err)
+	require.Len(t, plan.Slots, 5)
+	assert.Equal(t, int32(1), prover.callCount.Load())
+
+	// Even an unavailable commitment checker cannot bypass the proof budget.
+	checkUnavailable.Store(true)
+	// New blocks alone do not trigger a proof before the next slot.
+	for height := uint64(2); height <= 6; height++ {
+		tree.blockHeight.Store(height)
+		now = now.Add(time.Second)
+		share = run()
+		assert.Equal(t, ShareStateReceived, share.State)
+		assert.Equal(t, payload.PrimaryBlind, share.Payload.PrimaryBlind)
+	}
+	assert.Equal(t, int32(1), prover.callCount.Load())
+
+	for slot := 1; slot < len(plan.Slots); slot++ {
+		now = plan.Slots[slot]
+		tree.blockHeight.Store(uint64(slot + 10))
+		share = run()
+		assert.Equal(t, ShareStateReceived, share.State)
+		assert.Equal(t, int32(slot+1), prover.callCount.Load())
+		assert.Equal(t, int32(slot+1), submitCalls.Load())
 	}
 
-	assert.Equal(t, int32(6), prover.callCount.Load())
-	assert.Equal(t, int32(6), submitCalls.Load())
-	status = store.Status()
-	assert.Equal(t, 1, status[roundID].Pending)
-	assert.Zero(t, status[roundID].Failed)
-	share, ok = store.loadShare(roundID, 0, 1, 0)
-	require.True(t, ok)
-	assert.Equal(t, ShareStateReceived, share.State)
-	assert.Equal(t, p.EncShare.C1, share.Payload.EncShare.C1)
-	assert.Equal(t, p.EncShare.C2, share.Payload.EncShare.C2)
-	assert.Equal(t, p.ShareComms, share.Payload.ShareComms)
-	assert.Equal(t, p.PrimaryBlind, share.Payload.PrimaryBlind)
+	// Exhaustion remains pending even as blocks and time continue advancing.
+	for height := uint64(20); height <= 25; height++ {
+		now = now.Add(time.Minute)
+		tree.blockHeight.Store(height)
+		share = run()
+		assert.Equal(t, ShareStateReceived, share.State)
+		assert.Equal(t, payload.PrimaryBlind, share.Payload.PrimaryBlind)
+	}
+	assert.Equal(t, int32(5), prover.callCount.Load())
+	assert.Equal(t, int32(5), submitCalls.Load())
 
-	// Commitment is checked before the same-height gate and completes the
-	// share without another proof or broadcast, scrubbing its witness.
+	checkUnavailable.Store(false)
 	committed.Store(true)
-	store.mu.Lock()
-	_, scheduled := store.schedule[key]
-	store.schedule[key] = time.Now().Add(-time.Second)
-	store.mu.Unlock()
-	require.True(t, scheduled)
-	proc.processBatch(context.Background())
-	share, ok = store.loadShare(roundID, 0, 1, 0)
-	require.True(t, ok)
+	share = run()
 	assert.Equal(t, ShareStateSubmitted, share.State)
 	assert.Empty(t, share.Payload.EncShare.C1)
 	assert.Empty(t, share.Payload.EncShare.C2)
 	assert.Empty(t, share.Payload.ShareComms)
 	assert.Empty(t, share.Payload.PrimaryBlind)
-	assert.Equal(t, int32(6), prover.callCount.Load())
-	assert.Equal(t, int32(6), submitCalls.Load())
-	_, scheduled = store.NextScheduledTime()
+	assert.Equal(t, int32(5), prover.callCount.Load())
+	_, scheduled := store.NextScheduledTime()
 	assert.False(t, scheduled)
+}
+
+// advanceRelaySlot moves a focused test to its next persisted proof slot.
+func advanceRelaySlot(t *testing.T, proc *Processor, store *ShareStore, roundID string) {
+	t.Helper()
+	share, ok := store.loadShare(roundID, 0, 1, 0)
+	require.True(t, ok)
+	plan, err := decodeRelayPlan(share.relayPlan)
+	require.NoError(t, err)
+	require.NotNil(t, plan)
+	require.Less(t, plan.Next, len(plan.Slots))
+	now := plan.Slots[plan.Next]
+	proc.now = func() time.Time { return now }
 }
 
 func TestProcessor_ProcessShare_RejectsSuccessWithoutTxHash(t *testing.T) {
@@ -654,7 +638,10 @@ func TestProcessor_ProcessShare_RejectsSuccessWithoutTxHash(t *testing.T) {
 	roundID := hex.EncodeToString(make([]byte, 32))
 	payload := testPayload(roundID, 0)
 
-	err := proc.processShare(context.Background(), QueuedShare{Payload: payload})
+	enqueueAndRequireInserted(t, store, payload)
+	ready := store.TakeReady()
+	require.Len(t, ready, 1)
+	err := proc.processShare(context.Background(), ready[0])
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "without a transaction hash")
 	action, stage := classifyShareFailure(err)
@@ -803,6 +790,7 @@ func TestProcessor_ProcessBatch_ChainRejects(t *testing.T) {
 	assert.Equal(t, int32(1), submitCalls.Load())
 
 	tree.blockHeight.Store(2)
+	advanceRelaySlot(t, proc, store, roundID)
 	store.mu.Lock()
 	store.schedule[key] = time.Now().Add(-time.Second)
 	store.mu.Unlock()
@@ -964,6 +952,7 @@ func TestProcessor_ProcessBatch_SystemSubmitErrorPreservesFailedAttempts(t *test
 
 	responseStatus.Store(http.StatusBadRequest)
 	tree.blockHeight.Store(2)
+	advanceRelaySlot(t, proc, store, roundID)
 	proc.processBatch(context.Background())
 
 	status := store.Status()
@@ -1943,4 +1932,54 @@ func TestProcessorCleanupAfterRestartAndClosure(t *testing.T) {
 	proc.cleanupClosedRounds()
 	require.Zero(t, store.Status()["aabbccdd"].Total, "late-received shares must also be cleaned once closure is confirmed")
 	require.Empty(t, store.schedule)
+}
+
+func TestProcessor_RestartHonorsRelayHeightAndCutoff(t *testing.T) {
+	store := newTestStore(t)
+	prover := &mockProver{}
+	tree := newMockTreeReader()
+	tree.blockHeight.Store(100)
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Write([]byte(`{"tx_hash":"OK","code":0}`))
+	}))
+	defer server.Close()
+	roundID := hex.EncodeToString(make([]byte, 32))
+	enqueueAndRequireInserted(t, store, testPayload(roundID, 0))
+	ready := store.TakeReady()
+	require.Len(t, ready, 1)
+	start := time.Now()
+	plan := newRelayPlan(start, ready[0].VoteEndTime)
+	plan.Next, plan.LastStart, plan.LastHeight = 1, start, 100
+	require.NoError(t, store.reserveRelaySlot(ready[0], plan))
+	store.MarkRetry(roundID, 0, 1, 0)
+
+	// A new processor has an empty height cache, but the reservation is durable.
+	proc := NewProcessor(store, tree, prover, NewChainSubmitter(server.URL), log.NewNopLogger(), 1, nil)
+	now := plan.Slots[1]
+	proc.now = func() time.Time { return now }
+	key := schedKey(roundID, 0, 1, 0)
+	run := func() {
+		store.mu.Lock()
+		store.schedule[key] = time.Now().Add(-time.Second)
+		store.mu.Unlock()
+		proc.processBatch(context.Background())
+	}
+	run()
+	assert.Zero(t, prover.callCount.Load(), "same-height reservation survives restart")
+	tree.blockHeight.Store(101)
+	run()
+	assert.Equal(t, int32(1), prover.callCount.Load())
+	assert.Equal(t, int32(1), calls.Load())
+
+	// A late wakeup skips the remaining budget once the safety cutoff passed.
+	now = plan.Cutoff.Add(time.Second)
+	tree.blockHeight.Store(102)
+	run()
+	assert.Equal(t, int32(1), prover.callCount.Load())
+	share, ok := store.loadShare(roundID, 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, ShareStateReceived, share.State)
+	assert.NotEmpty(t, share.Payload.PrimaryBlind)
 }

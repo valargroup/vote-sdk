@@ -454,11 +454,36 @@ action. The share index remains diagnostic context, so multiple shares for one
 incident stay grouped.
 
 An accepted reveal broadcast stays pending until the helper observes its
-nullifier in committed chain state. Waiting for commitment does not spend the
-five-attempt failure budget or emit a share-failure alert. Retries preserve the
-witness, allow at most one broadcast per share per committed block height, and
-back off repeated checks at a stalled height. Deterministic processing failures
-still spend the failure budget.
+nullifier in committed chain state. Waiting does not spend the five-attempt
+failure budget or emit a share-failure alert. Each share also has a separate,
+persisted budget of at most five proof-and-broadcast attempts, including failed
+proofs and interrupted submissions. The helper reserves a slot before proving,
+so a crash can consume an attempt but cannot reset the budget.
+
+The preferred offsets from the first proof attempt are immediate, one minute,
+ten minutes, and two days, followed by a final attempt randomly scheduled before
+the closing safety buffer. The buffer is one eighth of the remaining window,
+bounded between 30 seconds and five minutes. Final jitter covers up to ten
+minutes before that buffer, reduced to one eighth of the window for short
+rounds. Each helper draws and persists a separate schedule for each share.
+The buffer allows time for proving, submission, and block inclusion but does
+not guarantee inclusion under congestion.
+
+When time is short, each intermediate retry is capped at halfway between the
+previous slot and the randomized final slot. Slots less than ten seconds apart
+are omitted. For example, with six hours remaining and a final draw ten minutes
+before close, the schedule is now, one minute, ten minutes, three hours, and
+five hours fifty minutes. With seven days remaining, the two-day slot fits.
+Shares arriving with 30 seconds or less remaining, or without a known deadline,
+get only one immediate attempt.
+
+Retries still require a newer committed block height. The helper skips missed
+slots after delays and keeps checking commitment between attempts and after the
+last slot, without generating more proofs. A passed local deadline does not
+terminalize or delete a share. Committed round closure controls cleanup and
+unsubmitted-share alerts. Deterministic failures still spend the existing
+failure budget and can terminalize the share earlier. Existing terminal rows
+are not automatically revived by this change.
 
 ### On-Chain State (KV Store Keys)
 

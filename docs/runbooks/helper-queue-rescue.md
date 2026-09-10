@@ -46,7 +46,8 @@ sudo scripts/retry-failed-helper-shares.py \
 ```
 
 The script stops `svoted`, resets all failed rows for the round to `received`
-with zero attempts in one transaction, and restarts the service. It preserves
+with zero attempts and a fresh relay schedule in one transaction, and restarts
+the service. This explicitly grants a new proof-attempt budget. It preserves
 their witness and original submission time. The helper then checks committed
 nullifiers before proof generation: already revealed shares become submitted
 without another broadcast, while missing shares follow the normal proof and
@@ -58,6 +59,11 @@ can guarantee that every stopped service is restarted, including when the
 database update fails.
 
 ## Export
+
+Relay schedules are local to each helper and are not transferred by export.
+Importing into a new helper creates a fresh schedule at its first proof attempt.
+Duplicate imports into the same helper preserve the existing relay budget, even
+with `--force-ready`.
 
 On the overloaded helper:
 

@@ -21,6 +21,8 @@ const (
 	processingReadinessRetryInterval = 10 * time.Second
 )
 
+var errAwaitingRelaySlot = errors.New("waiting for scheduled relay attempt")
+
 var errAwaitingCommit = errors.New("broadcast accepted; awaiting committed transaction")
 
 // ErrCheckTxNotReady means BaseApp has not received its first post-restart
@@ -136,6 +138,7 @@ func isCanceledShareError(err error) bool {
 // when wallet-provided submit_at times arrive, generates Merkle paths and ZKP
 // 3 proofs, and submits MsgRevealShare to the chain.
 type Processor struct {
+	now               func() time.Time
 	store             *ShareStore
 	tree              TreeReader
 	prover            ProofGenerator
@@ -223,6 +226,7 @@ func NewProcessor(
 	}
 
 	p := &Processor{
+		now:               time.Now,
 		store:             store,
 		tree:              tree,
 		prover:            prover,
@@ -442,11 +446,11 @@ func (p *Processor) processQueuedShare(ctx context.Context, share QueuedShare) {
 			p.store.MarkStalledRetry(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition, retryCount)
 			return
 		}
-		if errors.Is(err, errAwaitingCommit) {
+		if errors.Is(err, errAwaitingCommit) || errors.Is(err, errAwaitingRelaySlot) {
 			shareSpan.SetData("outcome", "awaiting_commit")
 			spanErr = nil
-			// Mempool acceptance is not a failed attempt. Keep the share queued
-			// while the submit-height gate and stalled backoff bound repeat work.
+			// Waiting does not spend failed attempts. The persisted relay plan
+			// bounds proof work while committed-state checks continue.
 			p.store.MarkRetry(share.Payload.VoteRoundID, share.Payload.EncShare.ShareIndex, share.Payload.ProposalID, share.Payload.TreePosition)
 			return
 		}
@@ -603,6 +607,16 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 		}
 	}
 
+	plan, err := decodeRelayPlan(share.relayPlan)
+	if err != nil {
+		return retryableShareError("relay_schedule", err)
+	}
+	if plan != nil {
+		if slot, _ := plan.due(p.now()); slot < 0 {
+			return retryableShareError(failureStageSubmitChain, errAwaitingRelaySlot)
+		}
+	}
+
 	tree := p.tree.ForRound(roundBytes)
 
 	// Read tree status (leaf count + anchor height) without loading leaf data.
@@ -680,6 +694,27 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	var encC1, encC2 [32]byte
 	copy(encC1[:], c1Bytes)
 	copy(encC2[:], c2Bytes)
+
+	// Reserve the proof attempt durably after cheap validation. Crashes and
+	// ambiguous submissions consume the slot rather than repeating proof work.
+	now := p.now()
+	if plan == nil {
+		initial := newRelayPlan(now, share.VoteEndTime)
+		plan = &initial
+	}
+	slot, _ := plan.due(now)
+	if slot < 0 {
+		return retryableShareError(failureStageSubmitChain, errAwaitingRelaySlot)
+	}
+	if blockHeight <= plan.LastHeight {
+		return retryableShareError(failureStageSubmitChain, &waitingForNewBlockError{height: blockHeight})
+	}
+	plan.Next = slot + 1
+	plan.LastStart = now
+	plan.LastHeight = blockHeight
+	if err := p.store.reserveRelaySlot(share, *plan); err != nil {
+		return retryableShareError("relay_schedule", err)
+	}
 
 	// Generate ZKP #3 proof.
 	proofStart := time.Now()
