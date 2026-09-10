@@ -463,6 +463,11 @@ failure budget or emit a share-failure alert. Each share also has a separate,
 persisted budget of at most five proof-and-broadcast attempts, including failed
 proofs and interrupted submissions. The helper reserves a slot before proving,
 so a crash can consume an attempt but cannot reset the budget.
+Existing attempt counts from upgrades or imports consume the earliest slots
+when the schedule is first reserved. A share with four previous attempts gets
+at most one more immediate attempt, then only commitment checks. The old store
+does not record the first attempt time, so its 48-hour clock starts with the
+first attempt under the new schedule.
 
 The first attempt honors the wallet-provided `submit_at` time. Retries stop
 starting new proof work 48 hours after that first attempt, even if slots were

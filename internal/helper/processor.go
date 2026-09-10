@@ -719,6 +719,15 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	if err != nil {
 		return retryableShareError("retry_schedule", err)
 	}
+	// Empty retry state can belong to a pre-upgrade or imported row. Its old
+	// attempt count must consume slots when we first reserve the new schedule.
+	previousAttempts := 0
+	if retry == nil {
+		previousAttempts = max(0, share.Attempts)
+		if previousAttempts >= 5 {
+			return retryableShareError(failureStageSubmitChain, errAwaitingRetrySlot)
+		}
+	}
 	if retry != nil {
 		if slot, _ := retry.due(p.now(), share.VoteEndTime); slot < 0 {
 			return retryableShareError(failureStageSubmitChain, errAwaitingRetrySlot)
@@ -847,7 +856,7 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 	if blockHeight <= retry.LastHeight {
 		return retryableShareError(failureStageSubmitChain, &waitingForNewBlockError{height: blockHeight})
 	}
-	retry.NextSlot = slot + 1
+	retry.NextSlot = min(slot+1+previousAttempts, len(retryTimes(retry.FirstAttempt, retry.FinalAttempt)))
 	retry.LastAttempt = now
 	retry.LastHeight = blockHeight
 	if err := p.store.reserveProofAttempt(share, *retry); err != nil {

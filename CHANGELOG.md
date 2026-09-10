@@ -9,8 +9,9 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 ## Unreleased
 
 - Limit helper reveal retries to 48 hours after the first attempt, with at most
-  five persisted proof attempts. Target older shares' final retry around the
-  start of the last-minute window when it is sooner, while late shares can
+  five persisted proof attempts, counting attempts recorded before upgrade.
+  Target older shares' final retry around the start of the last-minute window
+  when it is sooner, while late shares can
   retry through its remainder. Keep checking commitment after the last attempt
   instead of treating mempool acceptance as failure. Reconcile committed shares
   before inactive-round rejection and cleanup to avoid false failure reports,

@@ -16,7 +16,8 @@ const (
 )
 
 // retryState records the inputs and progress needed to derive retry times.
-// NextSlot skips missed slots and is separate from the failed-attempt count.
+// NextSlot skips missed slots and accounts for attempts before the schedule
+// was created. Later failures have a separate failed-attempt count.
 type retryState struct {
 	FirstAttempt time.Time `json:"first_attempt"`
 	FinalAttempt time.Time `json:"final_attempt"`
@@ -105,7 +106,8 @@ func retryTimes(start, final time.Time) []time.Time {
 }
 
 // decodeRetryState rejects malformed persisted progress instead of granting
-// a fresh budget. Empty state means no proof attempt has been reserved yet.
+// a fresh budget. Empty state means no scheduled proof attempt has been
+// reserved yet. The row's old attempt count still reduces the initial budget.
 func decodeRetryState(raw string, voteEndTime uint64) (*retryState, error) {
 	if raw == "" {
 		return nil, nil

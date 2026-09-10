@@ -929,7 +929,7 @@ func TestProcessor_ProcessBatch_SystemSubmitErrorPreservesFailedAttempts(t *test
 	enqueueAndRequireInserted(t, store, p)
 	key := schedKey(roundID, 0, 1, 0)
 
-	preloadFailedAttempts(t, store, roundID, 4)
+	preloadFailedAttempts(t, store, roundID, 3)
 
 	for i := range 2 {
 		proc.processBatch(context.Background())
@@ -937,7 +937,7 @@ func TestProcessor_ProcessBatch_SystemSubmitErrorPreservesFailedAttempts(t *test
 		share, ok := store.loadShare(roundID, 0, 1, 0)
 		require.True(t, ok, "system retry %d", i)
 		assert.Equal(t, ShareStateReceived, share.State)
-		assert.Equal(t, 4, share.Attempts)
+		assert.Equal(t, 3, share.Attempts)
 
 		store.mu.Lock()
 		next, ok := store.schedule[key]
@@ -956,12 +956,13 @@ func TestProcessor_ProcessBatch_SystemSubmitErrorPreservesFailedAttempts(t *test
 	proc.processBatch(context.Background())
 
 	status := store.Status()
-	assert.Equal(t, 0, status[roundID].Pending)
-	assert.Equal(t, 1, status[roundID].Failed)
+	assert.Equal(t, 1, status[roundID].Pending)
+	assert.Equal(t, 0, status[roundID].Failed)
 	share, ok := store.loadShare(roundID, 0, 1, 0)
 	require.True(t, ok)
-	assert.Equal(t, ShareStateFailed, share.State)
-	assert.Equal(t, 5, share.Attempts)
+	assert.Equal(t, ShareStateReceived, share.State)
+	assert.Equal(t, 4, share.Attempts)
+	assert.Equal(t, int32(2), prover.callCount.Load())
 }
 
 func TestProcessor_ProcessBatch_SystemErrorsPreserveExistingFailedAttempts(t *testing.T) {
@@ -1932,6 +1933,90 @@ func TestProcessorCleanupAfterRestartAndClosure(t *testing.T) {
 	proc.cleanupClosedRounds()
 	require.Zero(t, store.Status()["aabbccdd"].Total, "late-received shares must also be cleaned once closure is confirmed")
 	require.Empty(t, store.schedule)
+}
+
+func TestProcessor_MigratedAttemptsReduceRetryBudget(t *testing.T) {
+	for _, remaining := range []time.Duration{7 * 24 * time.Hour, 45 * time.Second} {
+		for previousAttempts := 0; previousAttempts <= 5; previousAttempts++ {
+			t.Run(fmt.Sprintf("%s/%d previous attempts", remaining, previousAttempts), func(t *testing.T) {
+				start := time.Now().Truncate(time.Second)
+				path := filepath.Join(t.TempDir(), "helper.db")
+				store, err := NewShareStore(path, func(string) (RoundInfo, error) {
+					return RoundInfo{CreatedAtTime: uint64(start.Unix()), VoteEndTime: uint64(start.Add(remaining).Unix())}, nil
+				})
+				require.NoError(t, err)
+				t.Cleanup(func() { store.Close() })
+				roundID := hex.EncodeToString(make([]byte, 32))
+				enqueueAndRequireInserted(t, store, testPayload(roundID, 0))
+				// Reopen an old schema with accepted broadcasts recorded as attempts.
+				_, err = store.db.Exec("UPDATE shares SET attempts = ?", previousAttempts)
+				require.NoError(t, err)
+				_, err = store.db.Exec("ALTER TABLE shares DROP COLUMN retry_state")
+				require.NoError(t, err)
+				require.NoError(t, store.Close())
+				store, err = NewShareStore(path, nil)
+				require.NoError(t, err)
+
+				prover := &mockProver{}
+				tree := newMockTreeReader()
+				tree.blockHeight.Store(100)
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Write([]byte(`{"tx_hash":"OK","code":0}`))
+				}))
+				defer server.Close()
+				now := start
+				committed := false
+				checks := 0
+				run := func() {
+					// Reopening also verifies the migration and reservation cannot reset
+					// the budget or apply the previous attempt count a second time.
+					require.NoError(t, store.Close())
+					store, err = NewShareStore(path, nil)
+					require.NoError(t, err)
+					proc := NewProcessor(store, tree, prover, NewChainSubmitter(server.URL), log.NewNopLogger(), 1, nil,
+						testCommitmentDeduper(func(string, []byte) (bool, error) {
+							checks++
+							return committed, nil
+						}))
+					proc.now = func() time.Time { return now }
+					store.schedule[schedKey(roundID, 0, 1, 0)] = time.Now().Add(-time.Second)
+					tree.blockHeight.Add(1)
+					proc.processBatch(context.Background())
+				}
+				run()
+				share, ok := store.loadShare(roundID, 0, 1, 0)
+				require.True(t, ok)
+				wantProofs := 0
+				if previousAttempts < 5 {
+					require.Equal(t, int32(1), prover.callCount.Load(), "the remaining first attempt is immediate")
+					state, err := decodeRetryState(share.retryState, share.VoteEndTime)
+					require.NoError(t, err)
+					require.NotNil(t, state)
+					times := retryTimes(state.FirstAttempt, state.FinalAttempt)
+					require.Equal(t, min(previousAttempts+1, len(times)), state.NextSlot)
+					wantProofs = 1 + max(0, len(times)-previousAttempts-1)
+					for _, slotTime := range times[1:] {
+						now = slotTime
+						run()
+					}
+				}
+				// Exhaustion still polls for commitment, including on another restart.
+				now = now.Add(time.Second)
+				run()
+				require.Equal(t, int32(wantProofs), prover.callCount.Load())
+				require.LessOrEqual(t, previousAttempts+wantProofs, 5)
+				beforeChecks := checks
+				committed = true
+				run()
+				require.Equal(t, beforeChecks+1, checks)
+				require.Equal(t, int32(wantProofs), prover.callCount.Load())
+				share, ok = store.loadShare(roundID, 0, 1, 0)
+				require.True(t, ok)
+				require.Equal(t, ShareStateSubmitted, share.State)
+				require.Equal(t, previousAttempts, share.Attempts)
+			})
+		}
+	}
 }
 
 func TestProcessor_RestartHonorsRetryHeightAndCutoff(t *testing.T) {
