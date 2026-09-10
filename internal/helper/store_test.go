@@ -550,13 +550,33 @@ func failSharePermanently(t *testing.T, s *ShareStore, payload SharePayload) {
 func TestStatus(t *testing.T) {
 	s := newTestStore(t)
 
-	// Enqueue 2 shares for the same round.
-	enqueueAndRequireInserted(t, s, testPayload("round1", 0))
-	enqueueAndRequireInserted(t, s, testPayload("round1", 1))
+	ready := testPayload("round1", 0)
+	future := testPayload("round1", 1)
+	future.TreePosition = 1
+	future.SubmitAt = uint64(time.Now().Add(time.Hour).Unix())
+	enqueueAndRequireInserted(t, s, ready)
+	enqueueAndRequireInserted(t, s, future)
 
 	status := s.Status()
 	assert.Equal(t, 2, status["round1"].Total)
 	assert.Equal(t, 2, status["round1"].Pending)
+	assert.Equal(t, 1, status["round1"].Ready)
+	assert.Equal(t, 1, status["round1"].NotYetDue)
+	assert.Equal(t, 0, status["round1"].Processing)
+
+	taken := s.TakeReady()
+	require.Len(t, taken, 1)
+	status = s.Status()
+	assert.Equal(t, 0, status["round1"].Ready)
+	assert.Equal(t, 1, status["round1"].NotYetDue)
+	assert.Equal(t, 1, status["round1"].Processing)
+
+	s.MarkRetry("round1", 0, 1, 0)
+	status = s.Status()
+	assert.Equal(t, 0, status["round1"].Ready)
+	assert.Equal(t, 2, status["round1"].NotYetDue)
+	assert.Equal(t, 0, status["round1"].Processing)
+	assert.Equal(t, status["round1"].Pending, status["round1"].Ready+status["round1"].NotYetDue+status["round1"].Processing)
 }
 
 func TestQueueSummaryBucketPolicy(t *testing.T) {
@@ -655,6 +675,46 @@ func TestQueueSummaryAggregatesStatesByBucket(t *testing.T) {
 		total += bucket.Total
 	}
 	assert.Equal(t, 6, total)
+}
+
+func TestQueueSummaryDepthUsesEffectiveSchedule(t *testing.T) {
+	s := newTestStore(t)
+	now := time.Now()
+
+	ready := testPayload("round1", 0)
+	future := testPayload("round1", 1)
+	future.TreePosition = 1
+	future.SubmitAt = uint64(now.Add(time.Hour).Unix())
+	enqueueAndRequireInserted(t, s, ready)
+	enqueueAndRequireInserted(t, s, future)
+
+	taken := s.TakeReady()
+	require.Len(t, taken, 1)
+	s.MarkRetry("round1", 0, 1, 0)
+
+	summary, err := s.QueueSummary("round1", now)
+	require.NoError(t, err)
+	assert.Equal(t, 0, summary.Ready)
+	assert.Equal(t, 2, summary.NotYetDue)
+	assert.Equal(t, 0, summary.Processing)
+
+	s.mu.Lock()
+	s.schedule[schedKey("round1", 0, 1, 0)] = now.Add(-time.Second)
+	s.mu.Unlock()
+
+	summary, err = s.QueueSummary("round1", now)
+	require.NoError(t, err)
+	assert.Equal(t, 1, summary.Ready)
+	assert.Equal(t, 1, summary.NotYetDue)
+	assert.Equal(t, 0, summary.Processing)
+
+	taken = s.TakeReady()
+	require.Len(t, taken, 1)
+	summary, err = s.QueueSummary("round1", time.Now())
+	require.NoError(t, err)
+	assert.Equal(t, 0, summary.Ready)
+	assert.Equal(t, 1, summary.NotYetDue)
+	assert.Equal(t, 1, summary.Processing)
 }
 
 func TestQueueSummaryReportsCurrentBucketStates(t *testing.T) {

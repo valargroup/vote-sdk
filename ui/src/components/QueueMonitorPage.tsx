@@ -19,6 +19,7 @@ import {
   isQueueSummaryStale,
   queueAggregateMaxBucketTotal,
   queueNextBucketRefreshAt,
+  queueSummaryDepth,
   queueSummaryDomain,
   queueSummaryTotals,
   splitQueueResults,
@@ -718,6 +719,7 @@ function ServerStatusRow({
   }
 
   const totals = queueSummaryTotals(result.summary);
+  const depth = queueSummaryDepth(result.summary);
   const stale = isQueueSummaryStale(result.summary, nowSeconds);
 
   return (
@@ -742,17 +744,17 @@ function ServerStatusRow({
           <span className="mr-1 font-sans text-text-muted">submitted</span>
           {totals.submitted.toLocaleString()}
         </span>
+        <span className={depth.ready > 0 ? "text-warning" : ""}>
+          <span className="mr-1 font-sans text-text-muted">ready</span>
+          {depth.ready.toLocaleString()}
+        </span>
         <span>
-          <span className="mr-1 font-sans text-text-muted">future</span>
-          {totals.pending_future.toLocaleString()}
+          <span className="mr-1 font-sans text-text-muted">not yet due</span>
+          {depth.not_yet_due.toLocaleString()}
         </span>
         <span>
           <span className="mr-1 font-sans text-text-muted">processing</span>
-          {totals.processing.toLocaleString()}
-        </span>
-        <span className={totals.overdue_pending > 0 ? "text-warning" : ""}>
-          <span className="mr-1 font-sans text-text-muted">overdue</span>
-          {totals.overdue_pending.toLocaleString()}
+          {depth.processing.toLocaleString()}
         </span>
         <span className={totals.failed > 0 ? "text-danger" : ""}>
           <span className="mr-1 font-sans text-text-muted">failed</span>

@@ -185,6 +185,17 @@ Each bucket reports `submitted`, `pending_future`, `overdue_pending`,
 `processing`, `failed`, and `total`. `overdue_pending` means a share is still
 waiting in the helper DB even though its `submit_at` time has passed.
 
+The response also reports top-level `ready`, `not_yet_due`, and `processing`
+queue depth. These fields use the helper's effective in-memory schedule, so a
+share delayed by retry backoff is `not_yet_due` even when its original
+`submit_at` has passed. Histogram placement remains based on the persisted
+submit time and does not move during retries.
+
+The benchmark-only authenticated `/shielded-vote/v1/queue-status` response
+exposes the same three fields per round. Its existing `pending` field remains
+the aggregate of all nonterminal shares for compatibility; normally,
+`pending = ready + not_yet_due + processing`.
+
 The admin UI has a monitor route at `/queue-monitor` that reads `vote_servers[]`
 from `/api/voting-config`, queries each helper's queue summary, and overlays the
 bucket histograms across the vote period. It also highlights unavailable
@@ -231,6 +242,13 @@ regressions visible in the Sentry releases dashboard.
   failed, preventing a single bad share from crashing the processor loop.
 
 ## Proof generation logging
+
+Successful helper construction logs the effective proof worker width at
+`INFO` level, regardless of timing diagnostics:
+
+```
+INF helper constructed proof_concurrency=<n>
+```
 
 The processor logs the wall-clock duration of every ZKP #3 proof generation
 at `INFO` level:

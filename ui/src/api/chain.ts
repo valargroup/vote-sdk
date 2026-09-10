@@ -424,6 +424,9 @@ export interface QueueSummaryResponse {
   vote_end_time: number;
   generated_at: number;
   last_minute_start: number;
+  ready?: number;
+  not_yet_due?: number;
+  processing?: number;
   buckets: QueueSummaryBucket[];
 }
 

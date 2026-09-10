@@ -8,6 +8,7 @@ import {
   queueAggregateMaxBucketTotal,
   queueNextBucketRefreshAt,
   queueSingleShareWindowStart,
+  queueSummaryDepth,
   queueSummaryMaxBucketTotal,
   queueSummaryTotals,
   splitQueueResults,
@@ -26,6 +27,9 @@ function summary(patch: Partial<QueueSummaryResponse> = {}): QueueSummaryRespons
     vote_end_time: 1180,
     generated_at: 1120,
     last_minute_start: 1120,
+    ready: 2,
+    not_yet_due: 4,
+    processing: 3,
     buckets: [
       {
         start: 1000,
@@ -53,6 +57,26 @@ function summary(patch: Partial<QueueSummaryResponse> = {}): QueueSummaryRespons
 }
 
 describe("queue summary helpers", () => {
+  it("reports scheduler-aware queue depth separately", () => {
+    expect(queueSummaryDepth(summary())).toEqual({
+      ready: 2,
+      not_yet_due: 4,
+      processing: 3,
+    });
+  });
+
+  it("falls back to histogram depth for older helpers", () => {
+    expect(queueSummaryDepth(summary({
+      ready: undefined,
+      not_yet_due: undefined,
+      processing: undefined,
+    }))).toEqual({
+      ready: 2,
+      not_yet_due: 4,
+      processing: 3,
+    });
+  });
+
   it("aligns bucket windows across servers", () => {
     const a: QueueServerOK = { state: "ok", server: serverA, summary: summary() };
     const b: QueueServerOK = {

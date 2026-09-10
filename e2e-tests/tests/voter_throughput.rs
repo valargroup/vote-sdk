@@ -841,6 +841,9 @@ fn voter_throughput_stress() {
             if status.submitted != last_queue_status.submitted
                 || status.failed != last_queue_status.failed
                 || status.pending != last_queue_status.pending
+                || status.ready != last_queue_status.ready
+                || status.not_yet_due != last_queue_status.not_yet_due
+                || status.processing != last_queue_status.processing
                 || last_log_time.elapsed() > Duration::from_secs(30)
             {
                 let elapsed = phase5_start.elapsed();
@@ -850,9 +853,12 @@ fn voter_throughput_stress() {
                     0.0
                 };
                 eprintln!(
-                    "[shares] terminal {terminal}/{total_enqueued} (submitted={}, failed={}, pending={}) ({:.1} submitted/sec, {:.0}s elapsed)",
+                    "[shares] terminal {terminal}/{total_enqueued} (submitted={}, failed={}, ready={}, not_yet_due={}, processing={}, pending_total={}) ({:.1} submitted/sec, {:.0}s elapsed)",
                     status.submitted,
                     status.failed,
+                    status.ready,
+                    status.not_yet_due,
+                    status.processing,
                     status.pending,
                     rate,
                     elapsed.as_secs_f64()
@@ -879,10 +885,13 @@ fn voter_throughput_stress() {
         if let Some(stall_timeout) = share_stall {
             if last_progress_time.elapsed() > stall_timeout {
                 panic!(
-                    "share processing stalled for {:.0}s with submitted={}, failed={}, pending={} (target terminal count={})",
+                    "share processing stalled for {:.0}s with submitted={}, failed={}, ready={}, not_yet_due={}, processing={}, pending_total={} (target terminal count={})",
                     last_progress_time.elapsed().as_secs_f64(),
                     last_queue_status.submitted,
                     last_queue_status.failed,
+                    last_queue_status.ready,
+                    last_queue_status.not_yet_due,
+                    last_queue_status.processing,
                     last_queue_status.pending,
                     total_enqueued
                 );

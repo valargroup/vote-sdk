@@ -150,10 +150,13 @@ type QueuedShare struct {
 
 // QueueStatus holds per-round queue statistics.
 type QueueStatus struct {
-	Total     int `json:"total"`
-	Pending   int `json:"pending"`
-	Submitted int `json:"submitted"`
-	Failed    int `json:"failed"`
+	Total      int `json:"total"`
+	Pending    int `json:"pending"`
+	Ready      int `json:"ready"`
+	NotYetDue  int `json:"not_yet_due"`
+	Processing int `json:"processing"`
+	Submitted  int `json:"submitted"`
+	Failed     int `json:"failed"`
 }
 
 // QueueSummary holds the public, round-level helper queue histogram.
@@ -166,6 +169,9 @@ type QueueSummary struct {
 	VoteEndTime     uint64               `json:"vote_end_time"`
 	GeneratedAt     uint64               `json:"generated_at"`
 	LastMinuteStart uint64               `json:"last_minute_start"`
+	Ready           int                  `json:"ready"`
+	NotYetDue       int                  `json:"not_yet_due"`
+	Processing      int                  `json:"processing"`
 	Buckets         []QueueSummaryBucket `json:"buckets"`
 }
 

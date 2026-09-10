@@ -109,6 +109,11 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundI
 		WithPreProofShareDeduper(vcHash, shareNFHash, shareNF),
 	)
 
+	logger.Info(
+		"helper constructed",
+		"proof_concurrency", cfg.MaxConcurrentProofs,
+	)
+
 	return &Helper{
 		Store:                 store,
 		Processor:             processor,
