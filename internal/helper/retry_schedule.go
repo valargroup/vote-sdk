@@ -8,6 +8,7 @@ import (
 )
 
 const (
+	retryMaxDuration  = 48 * time.Hour
 	retrySafetyBuffer = 5 * time.Minute
 	retryMinBuffer    = 30 * time.Second
 	retryFinalJitter  = 10 * time.Minute
@@ -33,8 +34,9 @@ func newRetryState(now time.Time, createdAtTime, voteEndTime uint64) retryState 
 }
 
 // finalRetryWindow centers older shares' final retry on the start of the
-// round's last-minute window. Shares first attempted inside that window can
-// retry through its remainder, stopping before the inclusion safety margin.
+// round's last-minute window, capped at 48 hours after the first attempt.
+// Shares first attempted inside that window can retry through its remainder,
+// stopping before the inclusion safety margin.
 // Missing round creation metadata uses the same deadline-based fallback.
 func finalRetryWindow(now time.Time, createdAtTime, voteEndTime uint64) (earliest, latest time.Time) {
 	cutoff := retryCutoff(now, voteEndTime)
@@ -62,8 +64,9 @@ func finalRetryWindow(now time.Time, createdAtTime, voteEndTime uint64) (earlies
 	return cutoff.Add(-jitter), cutoff
 }
 
-// retryCutoff reserves time for proving and block inclusion. Late shares or
-// shares without a known deadline get only their immediate first attempt.
+// retryCutoff limits new proof attempts to 48 hours and reserves time for
+// proving and block inclusion. Late shares or shares without a known deadline
+// get only their immediate first attempt.
 func retryCutoff(firstAttempt time.Time, voteEndTime uint64) time.Time {
 	deadline := time.Unix(int64(voteEndTime), 0)
 	remaining := deadline.Sub(firstAttempt)
@@ -71,7 +74,11 @@ func retryCutoff(firstAttempt time.Time, voteEndTime uint64) time.Time {
 		return firstAttempt
 	}
 	buffer := min(retrySafetyBuffer, max(retryMinBuffer, remaining/8))
-	return deadline.Add(-buffer)
+	cutoff := deadline.Add(-buffer)
+	if maxCutoff := firstAttempt.Add(retryMaxDuration); cutoff.After(maxCutoff) {
+		cutoff = maxCutoff
+	}
+	return cutoff
 }
 
 // retryTimes preserves preferred offsets when there is room, otherwise each
@@ -80,7 +87,7 @@ func retryCutoff(firstAttempt time.Time, voteEndTime uint64) time.Time {
 func retryTimes(start, final time.Time) []time.Time {
 	slots := []time.Time{start}
 	previous := start
-	for _, offset := range []time.Duration{time.Minute, 10 * time.Minute, 48 * time.Hour} {
+	for _, offset := range []time.Duration{time.Minute, 10 * time.Minute, retryMaxDuration} {
 		next := start.Add(offset)
 		halfway := previous.Add(final.Sub(previous) / 2)
 		if next.After(halfway) {

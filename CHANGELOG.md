@@ -8,11 +8,11 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
-- Spread helper reveal attempts across the remaining voting window, with at
-  most five persisted proof attempts. Target older shares' final retry around
-  the start of the last-minute window, while late shares can retry through its
-  remainder. Keep checking commitment after the last attempt instead of treating
-  mempool acceptance as failure.
+- Limit helper reveal retries to 48 hours after the first attempt, with at most
+  five persisted proof attempts. Target older shares' final retry around the
+  start of the last-minute window when it is sooner, while late shares can
+  retry through its remainder. Keep checking commitment after the last attempt
+  instead of treating mempool acceptance as failure.
 - Reject casts for nonexistent round proposals before signature and proof
   verification, including atomic batches and mempool rechecks, preventing
   repeated verification of votes that cannot execute. Requires a coordinated

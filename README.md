@@ -460,33 +460,41 @@ persisted budget of at most five proof-and-broadcast attempts, including failed
 proofs and interrupted submissions. The helper reserves a slot before proving,
 so a crash can consume an attempt but cannot reset the budget.
 
-The first attempt honors the wallet-provided `submit_at` time. After that,
-retries target one minute, ten minutes, and two days after the first proof
-attempt, followed by a jittered final retry. The existing last-minute window
-covers the final 40% of the round, capped at six hours. Shares first attempted
-before that window target its start for their final retry, with up to five
-minutes of jitter on either side. Shares first attempted inside the window can
-spread retries through the remaining time.
+The first attempt honors the wallet-provided `submit_at` time. Retries stop
+starting new proof work 48 hours after that first attempt, even if slots were
+missed. The existing last-minute window covers the final 40% of the round,
+capped at six hours. Shares first attempted before that window target the
+earlier of its start or 48 hours later for their final retry, with up to five
+minutes of jitter on either side, clipped at the cap. Shares first attempted
+inside the window can spread retries through the remaining time.
 
 A separate safety margin allows time for proving, submission, and block
 inclusion. It is one eighth of the time remaining at the first attempt, bounded
 between 30 seconds and five minutes. Late shares place the final retry within
 ten minutes before that margin. For short windows, jitter shrinks to one eighth
 of the remaining time and is clipped to keep attempts between now and the
-safety cutoff. The margin does not guarantee inclusion under congestion.
+safety cutoff or the 48-hour cap. The margin does not guarantee inclusion
+under congestion.
 
 Each helper stores the first attempt time, chosen final retry time, progress,
 and last attempt time and height. Intermediate times and the cutoff are derived
-from those inputs and the round deadline. Short windows cap each intermediate
-retry at halfway between the previous slot and the final slot, omitting slots
-less than ten seconds apart. Example times below are measured from the first
-attempt and use hypothetical jitter draws:
+from those inputs and the round deadline. Retries target one minute, ten
+minutes, then halfway from the previous slot to the final slot. Short windows
+also cap earlier retries at halfway to the final slot, omitting slots less than
+ten seconds apart. Example times below are measured from the first attempt
+and use hypothetical jitter draws:
 
 | Round duration | Time left at first attempt | Attempt times |
 | --- | --- | --- |
-| 7 days | 7 days | Now, 1m, 10m, 2d, 6d 18h |
-| 6 hours | 6 hours | Now, 1m, 10m, 1h 53m, 3h 36m |
+| 7 days | 7 days | Now, 1m, 10m, 24h 4m, 47h 58m |
+| 7 days | 7 hours | Now, 1m, 10m, 35m, 1h |
+| 7 days | 6h 1m | Now, 1m, 2m 30s, 3m 15s, 4m |
 | 7 days | 6 hours | Now, 1m, 10m, 3h, 5h 50m |
+| 7 days | 2 hours | Now, 1m, 10m, 1h, 1h 50m |
+| 6 hours | 6 hours | Now, 1m, 10m, 1h 53m, 3h 36m |
+
+Exactly at the window start counts as inside it. Just before it, the final
+retry still targets the start, so the two cases intentionally differ.
 
 Shares with 30 seconds or less remaining, or without a known deadline, get one
 immediate attempt. Missing round creation metadata uses the late-share fallback.

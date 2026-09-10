@@ -1935,51 +1935,60 @@ func TestProcessorCleanupAfterRestartAndClosure(t *testing.T) {
 }
 
 func TestProcessor_RestartHonorsRetryHeightAndCutoff(t *testing.T) {
-	store := newTestStore(t)
-	prover := &mockProver{}
-	tree := newMockTreeReader()
-	tree.blockHeight.Store(100)
-	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		w.Write([]byte(`{"tx_hash":"OK","code":0}`))
-	}))
-	defer server.Close()
-	roundID := hex.EncodeToString(make([]byte, 32))
-	enqueueAndRequireInserted(t, store, testPayload(roundID, 0))
-	ready := store.TakeReady()
-	require.Len(t, ready, 1)
-	start := time.Now()
-	plan := newRetryState(start, uint64(start.Unix()), ready[0].VoteEndTime)
-	plan.NextSlot, plan.LastAttempt, plan.LastHeight = 1, start, 100
-	require.NoError(t, store.reserveProofAttempt(ready[0], plan))
-	store.MarkRetry(roundID, 0, 1, 0)
+	for _, duration := range []time.Duration{12 * time.Hour, 7 * 24 * time.Hour} {
+		t.Run(duration.String(), func(t *testing.T) {
+			start := time.Now()
+			store, err := NewShareStore(":memory:", func(string) (RoundInfo, error) {
+				return RoundInfo{CreatedAtTime: uint64(start.Unix()), VoteEndTime: uint64(start.Add(duration).Unix())}, nil
+			})
+			require.NoError(t, err)
+			t.Cleanup(func() { store.Close() })
+			prover := &mockProver{}
+			tree := newMockTreeReader()
+			tree.blockHeight.Store(100)
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				w.Write([]byte(`{"tx_hash":"OK","code":0}`))
+			}))
+			defer server.Close()
+			roundID := hex.EncodeToString(make([]byte, 32))
+			enqueueAndRequireInserted(t, store, testPayload(roundID, 0))
+			ready := store.TakeReady()
+			require.Len(t, ready, 1)
+			plan := newRetryState(start, uint64(start.Unix()), ready[0].VoteEndTime)
+			plan.NextSlot, plan.LastAttempt, plan.LastHeight = 1, start, 100
+			require.NoError(t, store.reserveProofAttempt(ready[0], plan))
+			store.MarkRetry(roundID, 0, 1, 0)
 
-	// A new processor has an empty height cache, but the reservation is durable.
-	proc := NewProcessor(store, tree, prover, NewChainSubmitter(server.URL), log.NewNopLogger(), 1, nil)
-	now := retryTimes(plan.FirstAttempt, plan.FinalAttempt)[1]
-	proc.now = func() time.Time { return now }
-	key := schedKey(roundID, 0, 1, 0)
-	run := func() {
-		store.mu.Lock()
-		store.schedule[key] = time.Now().Add(-time.Second)
-		store.mu.Unlock()
-		proc.processBatch(context.Background())
+			// A new processor has an empty height cache, but the reservation is durable.
+			proc := NewProcessor(store, tree, prover, NewChainSubmitter(server.URL), log.NewNopLogger(), 1, nil)
+			now := retryTimes(plan.FirstAttempt, plan.FinalAttempt)[1]
+			proc.now = func() time.Time { return now }
+			key := schedKey(roundID, 0, 1, 0)
+			run := func() {
+				store.mu.Lock()
+				store.schedule[key] = time.Now().Add(-time.Second)
+				store.mu.Unlock()
+				proc.processBatch(context.Background())
+			}
+			run()
+			assert.Zero(t, prover.callCount.Load(), "same-height reservation survives restart")
+			tree.blockHeight.Store(101)
+			run()
+			assert.Equal(t, int32(1), prover.callCount.Load())
+			assert.Equal(t, int32(1), calls.Load())
+
+			// A late wakeup skips unused attempts after either the deadline safety
+			// margin or 48 hours, even if the round still has days remaining.
+			now = retryCutoff(plan.FirstAttempt, ready[0].VoteEndTime).Add(time.Second)
+			tree.blockHeight.Store(102)
+			run()
+			assert.Equal(t, int32(1), prover.callCount.Load())
+			share, ok := store.loadShare(roundID, 0, 1, 0)
+			require.True(t, ok)
+			assert.Equal(t, ShareStateReceived, share.State)
+			assert.NotEmpty(t, share.Payload.PrimaryBlind)
+		})
 	}
-	run()
-	assert.Zero(t, prover.callCount.Load(), "same-height reservation survives restart")
-	tree.blockHeight.Store(101)
-	run()
-	assert.Equal(t, int32(1), prover.callCount.Load())
-	assert.Equal(t, int32(1), calls.Load())
-
-	// A late wakeup skips the remaining budget once the safety cutoff passed.
-	now = retryCutoff(plan.FirstAttempt, ready[0].VoteEndTime).Add(time.Second)
-	tree.blockHeight.Store(102)
-	run()
-	assert.Equal(t, int32(1), prover.callCount.Load())
-	share, ok := store.loadShare(roundID, 0, 1, 0)
-	require.True(t, ok)
-	assert.Equal(t, ShareStateReceived, share.State)
-	assert.NotEmpty(t, share.Payload.PrimaryBlind)
 }

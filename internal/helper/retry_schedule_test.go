@@ -17,8 +17,11 @@ func TestRetrySlots(t *testing.T) {
 		final time.Duration
 		want  []time.Duration
 	}{
-		{"seven-day round", 7*24*time.Hour - 6*time.Hour, []time.Duration{0, time.Minute, 10 * time.Minute, 48 * time.Hour, 7*24*time.Hour - 6*time.Hour}},
+		{"48-hour cap", 48*time.Hour - 2*time.Minute, []time.Duration{0, time.Minute, 10 * time.Minute, 24*time.Hour + 4*time.Minute, 48*time.Hour - 2*time.Minute}},
+		{"one hour before last-minute window", time.Hour, []time.Duration{0, time.Minute, 10 * time.Minute, 35 * time.Minute, time.Hour}},
+		{"one minute before last-minute window", 4 * time.Minute, []time.Duration{0, time.Minute, 150 * time.Second, 195 * time.Second, 4 * time.Minute}},
 		{"last six hours of a long round", 6*time.Hour - 10*time.Minute, []time.Duration{0, time.Minute, 10 * time.Minute, 3 * time.Hour, 6*time.Hour - 10*time.Minute}},
+		{"last two hours of a long round", 110 * time.Minute, []time.Duration{0, time.Minute, 10 * time.Minute, time.Hour, 110 * time.Minute}},
 		{"six-hour round", 216 * time.Minute, []time.Duration{0, time.Minute, 10 * time.Minute, 113 * time.Minute, 216 * time.Minute}},
 		{"short window", 200 * time.Second, []time.Duration{0, time.Minute, 130 * time.Second, 165 * time.Second, 200 * time.Second}},
 		{"too close", 15 * time.Second, []time.Duration{0, 15 * time.Second}},
@@ -40,7 +43,11 @@ func TestFinalRetryWindow(t *testing.T) {
 		name                             string
 		age, remaining, earliest, latest time.Duration
 	}{
-		{"seven-day round", 0, 7 * 24 * time.Hour, 7*24*time.Hour - 6*time.Hour - 5*time.Minute, 7*24*time.Hour - 6*time.Hour + 5*time.Minute},
+		{"seven-day round", 0, 7 * 24 * time.Hour, 48*time.Hour - 5*time.Minute, 48 * time.Hour},
+		{"window starts at the cap", 7 * 24 * time.Hour, 54 * time.Hour, 48*time.Hour - 5*time.Minute, 48 * time.Hour},
+		{"jitter crosses the cap", 7 * 24 * time.Hour, 54*time.Hour - 2*time.Minute, 48*time.Hour - 7*time.Minute, 48 * time.Hour},
+		{"window starts before the cap", 7 * 24 * time.Hour, 36 * time.Hour, 30*time.Hour - 5*time.Minute, 30*time.Hour + 5*time.Minute},
+		{"one hour before window start", 7 * 24 * time.Hour, 7 * time.Hour, 55 * time.Minute, 65 * time.Minute},
 		{"six-hour round", 0, 6 * time.Hour, 211 * time.Minute, 221 * time.Minute},
 		{"at the six-hour window start", 7 * 24 * time.Hour, 6 * time.Hour, 345 * time.Minute, 355 * time.Minute},
 		{"inside the six-hour window", 7 * 24 * time.Hour, 2 * time.Hour, 105 * time.Minute, 115 * time.Minute},
@@ -61,6 +68,7 @@ func TestFinalRetryWindow(t *testing.T) {
 				assert.False(t, state.FinalAttempt.Before(earliest))
 				assert.False(t, state.FinalAttempt.After(latest))
 				assert.False(t, state.FinalAttempt.After(retryCutoff(now, end)))
+				assert.False(t, state.FinalAttempt.After(now.Add(48*time.Hour)))
 				seen[state.FinalAttempt] = true
 			}
 			assert.Greater(t, len(seen), 1, "helpers and shares choose independent final times")
@@ -70,10 +78,33 @@ func TestFinalRetryWindow(t *testing.T) {
 		state := newRetryState(now, uint64(now.Unix()), end)
 		assert.Equal(t, []time.Time{now}, retryTimes(state.FirstAttempt, state.FinalAttempt))
 	}
-	// Migrated rows with no creation timestamp retain the deadline-based fallback.
+	// Missing creation metadata still honors the maximum retry duration.
 	earliest, latest := finalRetryWindow(now, 0, uint64(now.Add(7*24*time.Hour).Unix()))
-	assert.Equal(t, now.Add(7*24*time.Hour-15*time.Minute), earliest)
-	assert.Equal(t, now.Add(7*24*time.Hour-5*time.Minute), latest)
+	assert.Equal(t, now.Add(48*time.Hour-10*time.Minute), earliest)
+	assert.Equal(t, now.Add(48*time.Hour), latest)
+}
+
+func TestRetryDueCapsAttemptsAt48Hours(t *testing.T) {
+	start := time.Unix(1_800_000_000, 0)
+	end := uint64(start.Add(7 * 24 * time.Hour).Unix())
+	state := newRetryState(start, uint64(start.Unix()), end)
+	state.NextSlot, state.LastAttempt = 1, start
+	cutoff := start.Add(48 * time.Hour)
+	require.Equal(t, cutoff, retryCutoff(start, end))
+
+	// A delayed helper can use its last slot at the cap, but never after it,
+	// even with unused attempts and days left in the round.
+	slot, _ := state.due(cutoff, end)
+	assert.Equal(t, 4, slot)
+	slot, next := state.due(cutoff.Add(time.Nanosecond), end)
+	assert.Equal(t, -1, slot)
+	assert.True(t, next.IsZero())
+
+	// Minimum spacing cannot push a remaining attempt past the cap either.
+	state.NextSlot, state.LastAttempt = 4, cutoff.Add(-5*time.Second)
+	slot, next = state.due(cutoff, end)
+	assert.Equal(t, -1, slot)
+	assert.True(t, next.IsZero())
 }
 
 func TestRetryDueSkipsMissedSlotsAndHonorsCutoff(t *testing.T) {

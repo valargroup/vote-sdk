@@ -192,7 +192,8 @@ share delayed by retry backoff is `not_yet_due` even when its original
 submit time and does not move during retries.
 
 `last_minute_start` marks the final 40% of the round, capped at six hours.
-Older shares target their final retry around this boundary with jitter. Shares
+Older shares target their final retry around the earlier of this boundary or
+48 hours after their first attempt, with jitter clipped at that cap. Shares
 first attempted inside this window can retry through its remainder, leaving a
 separate safety margin before the voting deadline.
 
