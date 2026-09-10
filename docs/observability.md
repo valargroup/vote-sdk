@@ -4,6 +4,86 @@ This document covers error tracking and diagnostic tooling for `svoted`,
 including the ABCI consensus handlers, the public vote API, and the
 Helper server.
 
+## Prometheus metrics
+
+`svoted` exposes Prometheus text on the REST API listener at:
+
+```
+GET /metrics
+```
+
+Newly generated `app.toml` files enable Cosmos SDK telemetry and its
+Prometheus sink by default. The helper collectors and endpoint are also
+available after a binary upgrade when an older `app.toml` still has telemetry
+disabled. The historical `?format=prometheus` query remains compatible, but is
+not required.
+
+The endpoint gathers the process-wide Prometheus registry. Its response
+therefore contains both the direct `svote_*` collectors and metrics emitted
+through the Cosmos SDK HashiCorp Prometheus sink.
+
+Prometheus scrape-target labels such as `instance` identify the helper host.
+The application does not put hostnames, voting round IDs, share indexes,
+proposal IDs, tree positions, transaction hashes, or payload fields into
+metric labels.
+
+### Helper APM metrics
+
+| Metric | Meaning |
+|--------|---------|
+| `svote_helper_share_submission_requests_total{outcome,reason}` | Wallet-facing share requests by bounded final result. |
+| `svote_helper_share_submission_in_flight` | Share requests currently executing. |
+| `svote_helper_share_submission_duration_seconds{outcome,reason}` | End-to-end latency for `POST /shielded-vote/v1/shares`. |
+| `svote_helper_share_submission_stage_duration_seconds{stage,result}` | Ingress latency split across readiness, decoding, validation, round checks, commitment-tree verification, and enqueue. |
+| `svote_helper_share_processing_attempts_total{outcome,stage}` | Background processing attempts by bounded final result and stage. |
+| `svote_helper_share_processing_in_flight` | Worker attempts currently executing. Compare this with the configured proof concurrency to detect saturation. |
+| `svote_helper_share_processing_duration_seconds{outcome,stage}` | End-to-end latency after a queued share is assigned to a worker. |
+| `svote_helper_share_processing_stage_duration_seconds{stage,result}` | Worker latency split across round status, pre-proof dedupe, tree reads, payload decoding, proof generation, and chain broadcast. |
+
+All latency histograms have buckets through 180 seconds, including explicit
+10, 15, 20, and 30 second boundaries. To compare p95 ingress stage latency
+between helpers over five minutes:
+
+```promql
+histogram_quantile(
+  0.95,
+  sum by (instance, stage, le) (
+    rate(svote_helper_share_submission_stage_duration_seconds_bucket[5m])
+  )
+)
+```
+
+To count requests taking longer than 15 seconds:
+
+```promql
+sum by (instance) (
+  rate(svote_helper_share_submission_duration_seconds_count[5m])
+  - ignoring(le) rate(svote_helper_share_submission_duration_seconds_bucket{le="15"}[5m])
+)
+```
+
+Use the equivalent processing-stage histogram to distinguish proof generation
+from local chain broadcast latency:
+
+```promql
+histogram_quantile(
+  0.95,
+  sum by (instance, stage, le) (
+    rate(svote_helper_share_processing_stage_duration_seconds_bucket[5m])
+  )
+)
+```
+
+Ingress infrastructure failures and worker saturation are visible with:
+
+```promql
+sum by (instance, outcome, reason) (
+  rate(svote_helper_share_submission_requests_total{outcome=~"failed|unavailable"}[5m])
+)
+
+svote_helper_share_processing_in_flight
+```
+
 ## Sentry error tracking
 
 Sentry project: **svote-helper** (slug: `svote-helper-vm`) in the

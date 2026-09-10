@@ -118,6 +118,9 @@ func initAppConfig() (string, interface{}) {
 	srvCfg := serverconfig.DefaultConfig()
 	// Set default min gas prices to 0 for the vote chain (no fees needed).
 	srvCfg.MinGasPrices = "0usvote"
+	// Expose application and helper Prometheus metrics on the REST server.
+	srvCfg.Telemetry.Enabled = true
+	srvCfg.Telemetry.PrometheusRetentionTime = 60
 	// Keep validator nodes compact by default; archive nodes override this to
 	// pruning=nothing in their deployment scripts.
 	srvCfg.Pruning = pruningtypes.PruningOptionEverything

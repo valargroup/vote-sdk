@@ -360,6 +360,10 @@ func (app *SvoteApp) SimulationManager() *module.SimulationManager {
 // RegisterAPIRoutes registers all application module routes with the provided API server.
 func (app *SvoteApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIConfig) {
 	app.App.RegisterAPIRoutes(apiSvr, apiConfig)
+	// Cosmos SDK appends its own /metrics route after RegisterAPIRoutes returns.
+	// Gorilla/mux selects this earlier route, and its DefaultGatherer contains
+	// both our collectors and the SDK's HashiCorp Prometheus sink.
+	helper.RegisterMetricsRoute(apiSvr.Router)
 
 	// Register vote module REST endpoints (tx submission + queries).
 	// Use the CometBFT RPC address from app.toml [vote] section so it

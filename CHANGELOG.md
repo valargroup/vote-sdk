@@ -8,6 +8,9 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Expose Prometheus APM for helper share ingress and background processing on
+  `/metrics`, with bounded outcome and stage labels that identify slow
+  validation, tree, proof-generation, enqueue, and chain-broadcast work.
 - Reject casts for nonexistent round proposals before signature and proof
   verification, including atomic batches and mempool rechecks, preventing
   repeated verification of votes that cannot execute. Requires a coordinated
