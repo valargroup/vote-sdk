@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -80,10 +81,74 @@ func (p *trackingProver) GenerateShareRevealProof(
 	return proof, nullifier, treeRoot, nil
 }
 
+type gatedProver struct {
+	started     chan uint32
+	release     chan struct{}
+	inFlight    atomic.Int32
+	maxInFlight atomic.Int32
+}
+
+func newGatedProver() *gatedProver {
+	return &gatedProver{
+		started: make(chan uint32, 16),
+		release: make(chan struct{}, 16),
+	}
+}
+
+func (p *gatedProver) GenerateShareRevealProof(
+	merklePath []byte,
+	shareComms [16][32]byte,
+	primaryBlind [32]byte,
+	encC1 [32]byte,
+	encC2 [32]byte,
+	shareIndex uint32,
+	proposalID, voteDecision uint32,
+	roundID [32]byte,
+) (proof []byte, nullifier [32]byte, treeRoot [32]byte, err error) {
+	current := p.inFlight.Add(1)
+	defer p.inFlight.Add(-1)
+	for {
+		seen := p.maxInFlight.Load()
+		if current <= seen || p.maxInFlight.CompareAndSwap(seen, current) {
+			break
+		}
+	}
+
+	p.started <- shareIndex
+	<-p.release
+
+	proof = make([]byte, 64)
+	nullifier[0] = byte(shareIndex + 1)
+	treeRoot[0] = 0x22
+	return proof, nullifier, treeRoot, nil
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
+}
+
+// processBatch runs one bounded cycle for focused per-share outcome tests.
+// Production dispatch is exercised through Processor.Run.
+func (p *Processor) processBatch(ctx context.Context) bool {
+	if p.isNodeReady != nil && !p.isNodeReady() {
+		return false
+	}
+	ready := p.store.TakeReadyBatch(p.maxConcurrent)
+	if len(ready) == 0 {
+		return true
+	}
+	var workers sync.WaitGroup
+	for _, share := range ready {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			p.processQueuedShare(ctx, share)
+		}()
+	}
+	workers.Wait()
+	return true
 }
 
 func preloadFailedAttempts(t *testing.T, store *ShareStore, roundID string, attempts int) {
@@ -1283,6 +1348,303 @@ func TestProcessor_Run_ImmediateEnqueueWakesProcessor(t *testing.T) {
 		status := store.Status()
 		return prover.callCount.Load() == 1 && status[roundID].Pending == 1
 	}, time.Second, 10*time.Millisecond)
+
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+}
+
+func TestProcessor_Run_RefillsFreedSlotWithoutBatchBarrier(t *testing.T) {
+	store := newTestStore(t)
+	prover := newGatedProver()
+	tree := newMockTreeReader()
+
+	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"tx_hash":"","code":2,"log":"nullifier already spent"}`))
+	}))
+	defer chainServer.Close()
+
+	proc := NewProcessor(store, tree, prover, NewChainSubmitter(chainServer.URL), log.NewNopLogger(), 2, nil)
+	roundID := hex.EncodeToString(make([]byte, 32))
+	for i := range uint32(2) {
+		enqueueAndRequireInserted(t, store, testPayload(roundID, i))
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- proc.Run(ctx) }()
+
+	started := map[uint32]bool{
+		<-prover.started: true,
+		<-prover.started: true,
+	}
+	require.Len(t, started, 2)
+
+	enqueueAndRequireInserted(t, store, testPayload(roundID, 2))
+	prover.release <- struct{}{}
+	select {
+	case third := <-prover.started:
+		assert.False(t, started[third], "a queued share should fill the freed slot")
+	case <-time.After(time.Second):
+		t.Fatal("third share did not start when one worker became free")
+	}
+	assert.Equal(t, int32(2), prover.maxInFlight.Load())
+
+	prover.release <- struct{}{}
+	prover.release <- struct{}{}
+	require.Eventually(t, func() bool {
+		return store.Status()[roundID].Submitted == 3
+	}, time.Second, 10*time.Millisecond)
+
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+}
+
+func TestProcessor_Run_PausesRefillUntilNodeReady(t *testing.T) {
+	store := newTestStore(t)
+	prover := newGatedProver()
+	tree := newMockTreeReader()
+	var nodeReady atomic.Bool
+	nodeReady.Store(true)
+
+	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"tx_hash":"","code":2,"log":"nullifier already spent"}`))
+	}))
+	defer chainServer.Close()
+
+	proc := NewProcessor(
+		store,
+		tree,
+		prover,
+		NewChainSubmitter(chainServer.URL),
+		log.NewNopLogger(),
+		2,
+		nil,
+		WithProcessingReadinessCheck(nodeReady.Load),
+	)
+	proc.readinessRetry = 20 * time.Millisecond
+
+	roundID := hex.EncodeToString(make([]byte, 32))
+	for i := range uint32(3) {
+		enqueueAndRequireInserted(t, store, testPayload(roundID, i))
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- proc.Run(ctx) }()
+
+	<-prover.started
+	<-prover.started
+	nodeReady.Store(false)
+	prover.release <- struct{}{}
+
+	select {
+	case shareIndex := <-prover.started:
+		t.Fatalf("share %d started while node readiness was false", shareIndex)
+	case <-time.After(60 * time.Millisecond):
+	}
+
+	nodeReady.Store(true)
+	select {
+	case <-prover.started:
+	case <-time.After(time.Second):
+		t.Fatal("queued share did not resume after node readiness recovered")
+	}
+
+	prover.release <- struct{}{}
+	prover.release <- struct{}{}
+	require.Eventually(t, func() bool {
+		return store.Status()[roundID].Submitted == 3
+	}, time.Second, 10*time.Millisecond)
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+}
+
+func TestProcessor_Run_CancellationWaitsAndReturnsTakenShares(t *testing.T) {
+	store := newTestStore(t)
+	prover := newGatedProver()
+	tree := newMockTreeReader()
+	submitter := NewChainSubmitter("http://localhost:0")
+	proc := NewProcessor(store, tree, prover, submitter, log.NewNopLogger(), 2, nil)
+
+	roundID := hex.EncodeToString(make([]byte, 32))
+	for i := range uint32(3) {
+		enqueueAndRequireInserted(t, store, testPayload(roundID, i))
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- proc.Run(ctx) }()
+	<-prover.started
+	<-prover.started
+
+	cancel()
+	select {
+	case err := <-done:
+		t.Fatalf("Run returned before non-cancelable proofs exited: %v", err)
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	prover.release <- struct{}{}
+	prover.release <- struct{}{}
+	require.ErrorIs(t, <-done, context.Canceled)
+
+	status := store.Status()[roundID]
+	assert.Equal(t, 3, status.Pending)
+	for i := range uint32(3) {
+		share, ok := store.loadShare(roundID, i, 1, 0)
+		require.True(t, ok)
+		assert.Equal(t, ShareStateReceived, share.State)
+		assert.Zero(t, share.Attempts)
+	}
+}
+
+func TestProcessor_Run_MaintenanceRunsUnderDeepQueue(t *testing.T) {
+	now := uint64(time.Now().Unix())
+	maintenanceRoundBytes := make([]byte, 32)
+	maintenanceRoundBytes[31] = 1
+	maintenanceRound := hex.EncodeToString(maintenanceRoundBytes)
+	deepRoundBytes := make([]byte, 32)
+	deepRoundBytes[31] = 2
+	deepRound := hex.EncodeToString(deepRoundBytes)
+
+	store, err := NewShareStore(filepath.Join(t.TempDir(), "helper.db"), func(roundID string) (RoundInfo, error) {
+		if roundID == maintenanceRound {
+			return RoundInfo{CreatedAtTime: now - 100, VoteEndTime: now - 1}, nil
+		}
+		return RoundInfo{CreatedAtTime: now, VoteEndTime: now + testVoteEndOffset}, nil
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { store.Close() })
+
+	enqueueAndRequireInserted(t, store, testPayload(maintenanceRound, 0))
+	store.mu.Lock()
+	delete(store.schedule, schedKey(maintenanceRound, 0, 1, 0))
+	store.mu.Unlock()
+
+	for i := range uint32(80) {
+		enqueueAndRequireInserted(t, store, testPayload(deepRound, i))
+	}
+
+	prover := &trackingProver{sleep: 3 * time.Millisecond}
+	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"tx_hash":"","code":2,"log":"nullifier already spent"}`))
+	}))
+	defer chainServer.Close()
+
+	var closureChecks atomic.Int32
+	proc := NewProcessor(
+		store,
+		newMockTreeReader(),
+		prover,
+		NewChainSubmitter(chainServer.URL),
+		log.NewNopLogger(),
+		2,
+		nil,
+		WithProcessingReadinessCheck(func() bool { return true }),
+		WithRoundClosureCheck(func(roundID string) (bool, error) {
+			if roundID == maintenanceRound {
+				closureChecks.Add(1)
+			}
+			return false, nil
+		}),
+	)
+	proc.maintenanceEvery = 15 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- proc.Run(ctx) }()
+
+	require.Eventually(t, func() bool {
+		return closureChecks.Load() >= 2
+	}, 2*time.Second, 10*time.Millisecond)
+	assert.LessOrEqual(t, prover.maxInFlight.Load(), int32(2))
+
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+}
+
+func TestProcessor_Run_MaintenanceWaitsForActiveWorkerBeforePurge(t *testing.T) {
+	now := uint64(time.Now().Unix())
+	closedBytes := make([]byte, 32)
+	closedBytes[31] = 3
+	closedRound := hex.EncodeToString(closedBytes)
+	pendingBytes := make([]byte, 32)
+	pendingBytes[31] = 4
+	pendingRound := hex.EncodeToString(pendingBytes)
+
+	store, err := NewShareStore(filepath.Join(t.TempDir(), "helper.db"), func(roundID string) (RoundInfo, error) {
+		if roundID == closedRound {
+			return RoundInfo{CreatedAtTime: now - 100, VoteEndTime: now - 1}, nil
+		}
+		return RoundInfo{CreatedAtTime: now, VoteEndTime: now + testVoteEndOffset}, nil
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { store.Close() })
+
+	closedShare := testPayload(closedRound, 0)
+	enqueueAndRequireInserted(t, store, closedShare)
+	pendingShare := testPayload(pendingRound, 0)
+	pendingShare.SubmitAt = now + 60
+	enqueueAndRequireInserted(t, store, pendingShare)
+
+	prover := newGatedProver()
+	chainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"tx_hash":"","code":2,"log":"nullifier already spent"}`))
+	}))
+	defer chainServer.Close()
+
+	var closed atomic.Bool
+	proc := NewProcessor(
+		store,
+		newMockTreeReader(),
+		prover,
+		NewChainSubmitter(chainServer.URL),
+		log.NewNopLogger(),
+		1,
+		nil,
+		WithRoundClosureCheck(func(roundID string) (bool, error) {
+			return roundID == closedRound && closed.Load(), nil
+		}),
+		WithProcessingReadinessCheck(func() bool { return true }),
+	)
+	proc.maintenanceEvery = 10 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- proc.Run(ctx) }()
+
+	// The share is active and still owns its witness when the round becomes
+	// closed. Maintenance must not purge it until the worker has completed.
+	<-prover.started
+	closed.Store(true)
+	require.Eventually(t, func() bool {
+		share, ok := store.loadShare(closedRound, 0, 1, 0)
+		return ok && share.State == ShareStateWitnessed
+	}, time.Second, 10*time.Millisecond)
+	share, ok := store.loadShare(closedRound, 0, 1, 0)
+	require.True(t, ok)
+	assert.Equal(t, ShareStateWitnessed, share.State)
+	assert.NotEmpty(t, share.Payload.PrimaryBlind)
+
+	// Release the worker. Its duplicate result completes the share, after which
+	// the next maintenance pass may safely purge the closed round.
+	prover.release <- struct{}{}
+	require.Eventually(t, func() bool {
+		return store.Status()[closedRound].Total == 0
+	}, time.Second, 10*time.Millisecond)
+	assert.Equal(t, 1, store.Status()[pendingRound].Pending)
+	queuedPending, pendingExists := store.loadShare(pendingRound, 0, 1, 0)
+	require.True(t, pendingExists)
+	assert.Equal(t, ShareStateReceived, queuedPending.State)
 
 	cancel()
 	require.ErrorIs(t, <-done, context.Canceled)
