@@ -45,4 +45,23 @@ checks that oversized uploads still hit the body-size limit.
 Roll out server support first. Verify a controlled incomplete upload through
 Caddy returns the complete matching receipt with zero broadcast calls; verify
 normal requests and generic proxy errors. Then release client recognition.
-No timeout extension or concurrency change is part of this contract.
+## Read deadline
+
+New vote-sdk configurations default to a 30-second REST read deadline, increased
+from the inherited 10 seconds. This gives large uploads more time to complete
+through transient transport loss; it does not repair that loss. Both chain and
+helper requests use this REST listener. Body-size limits remain enforced.
+
+Existing nodes keep their explicit `app.toml` settings. To adopt the longer
+window, set this value in the existing `[api]` section and restart the node:
+
+```toml
+[api]
+rpc-read-timeout = 30
+```
+
+Despite the field name, this setting controls the Cosmos REST listener; it does
+not change the separate consensus JSON-RPC listener. The deadline bounds request
+reading, not proof generation or committed confirmation. Slow clients can hold
+an upload connection longer, but the read deadline remains finite. Client-side
+timeouts are independent and are not extended by this setting.
