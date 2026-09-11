@@ -20,6 +20,7 @@ import (
 	"github.com/mikelodder7/curvey/native/pasta/fp"
 
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
+	"github.com/valargroup/vote-sdk/internal/restingress"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
@@ -229,6 +230,10 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 	stageStart = time.Now()
 	if err := decoder.Decode(&payload); err != nil {
 		h.metrics.observeSubmissionStage("body_decode", stageStart, err)
+		if restingress.WriteTimeout(w, r, err) {
+			observation.recordOutcome("rejected", "body_timeout")
+			return
+		}
 		observation.recordOutcome("rejected", "invalid_json")
 		jsonError(w, fmt.Sprintf("invalid JSON: %v", err), http.StatusBadRequest)
 		return
@@ -239,6 +244,10 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 			stageErr = errors.New("multiple JSON objects")
 		}
 		h.metrics.observeSubmissionStage("body_decode", stageStart, stageErr)
+		if restingress.WriteTimeout(w, r, stageErr) {
+			observation.recordOutcome("rejected", "body_timeout")
+			return
+		}
 		observation.recordOutcome("rejected", "invalid_json")
 		jsonError(w, "invalid JSON: expected one object", http.StatusBadRequest)
 		return

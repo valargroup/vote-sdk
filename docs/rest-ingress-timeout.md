@@ -3,7 +3,12 @@
 The vote API can return HTTP 408 with a non-broadcast receipt when its original
 synchronous body read times out. It must return immediately without invoking
 broadcast or scheduling asynchronous work. This applies to the delegation, cast,
-batch, combined batch and reveal-share mutation routes, not helper placement.
+batch, combined batch and reveal-share mutation routes. It also applies to
+helper `POST /shares`: there, `dispatch: "not_started"` guarantees that this
+attempt never invoked enqueue or scheduled work. Both the initial JSON decode
+and the trailing-content check must finish before helper validation/enqueue.
+A failure after enqueue, including a lost acceptance response, cannot emit this
+receipt. Earlier attempts may already have enqueued the same share.
 
 Clients opt in with one `X-Vote-Ingress-Attempt-V1` header containing a fresh
 32-byte lowercase-hex token for each HTTP attempt. A valid receipt is:
@@ -45,6 +50,15 @@ checks that oversized uploads still hit the body-size limit.
 Roll out server support first. Verify a controlled incomplete upload through
 Caddy returns the complete matching receipt with zero broadcast calls; verify
 normal requests and generic proxy errors. Then release client recognition.
+Helper regressions: `TestHelperIngressTimeoutNeverEnqueues` checks both decode
+boundaries and invalid/missing tokens. `TestHelperRESTListenerStalledUploadReturnsBoundTimeout`
+exercises both boundaries over TCP through the Cosmos REST listener.
+`TestHelperLostAcceptanceResponseRemainsEnqueued` verifies a failed response
+write cannot undo durable acceptance and an identical retry reports duplicate.
+The shared `internal/restingress` writer preserves the chain receipt format.
+Helper body-size, authentication, scheduling, and durable acceptance rules remain
+unchanged. Roll out helper server support before enabling client recognition.
+
 ## Read deadline
 
 New vote-sdk configurations default to a 30-second REST read deadline, increased

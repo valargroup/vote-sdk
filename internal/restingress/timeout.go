@@ -1,4 +1,4 @@
-package api
+package restingress
 
 import (
 	"encoding/hex"
@@ -8,11 +8,12 @@ import (
 	"net/http"
 )
 
-// writeIngressTimeout emits non-broadcast evidence only while a synchronous
-// request-body read is failing. Callers must return without dispatching work.
+// WriteTimeout emits attempt-bound non-dispatch evidence only for a synchronous
+// original request-body read timeout. Callers must return without broadcasting,
+// enqueueing, or scheduling work. It says nothing about earlier attempts.
 // The token opts into v1 and binds the receipt to one HTTP attempt, not a vote.
 // Unknown clients retain the existing generic error response.
-func writeIngressTimeout(w http.ResponseWriter, r *http.Request, err error) bool {
+func WriteTimeout(w http.ResponseWriter, r *http.Request, err error) bool {
 	var timeout net.Error
 	if !errors.As(err, &timeout) || !timeout.Timeout() {
 		return false
