@@ -238,4 +238,4 @@ replace (
 	github.com/syndtr/goleveldb => github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
 )
 
-replace github.com/cosmos/cosmos-sdk => github.com/valargroup/cosmos-sdk v0.53.5-valar.2
+replace github.com/cosmos/cosmos-sdk => github.com/valargroup/cosmos-sdk v0.53.5-valar.2.0.20260911042941-f3c9895f4833

@@ -778,6 +778,9 @@ type voteProtoMessage interface {
 func (h *Handler) decodeAndValidate(w http.ResponseWriter, r *http.Request, msg voteProtoMessage) bool {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MB limit
 	if err != nil {
+		if writeIngressTimeout(w, r, err) {
+			return false
+		}
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("read body: %v", err))
 		return false
 	}
@@ -809,6 +812,9 @@ func (h *Handler) decodeAndValidate(w http.ResponseWriter, r *http.Request, msg 
 func (h *Handler) decodeAndValidateCanonicalJSON(w http.ResponseWriter, r *http.Request, msg voteProtoMessage) bool {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
+		if writeIngressTimeout(w, r, err) {
+			return false
+		}
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("read body: %v", err))
 		return false
 	}
