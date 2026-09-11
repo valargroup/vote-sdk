@@ -42,6 +42,15 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertIsNone(parser(console.replace('chain_status','private')))
         self.assertIsNone(parser('ordinary message payload=private'))
 
+    def test_journal_byte_arrays_and_colored_console(self):
+        parser = module('helper-diagnostic-records').application_record
+        console = '\x1b[32mINF\x1b[0m vote HTTP timing \x1b[36mrequest_id=\x1b[0m' + 'e'*32 + ' \x1b[36mroute=\x1b[0mshares duration_us=12 token=private'
+        record = parser(list(console.encode()))
+        self.assertEqual(record['duration_us'], 12)
+        self.assertNotIn('private', json.dumps(record))
+        for invalid in ([256], [-1], [True], [255], ['private']):
+            self.assertIsNone(parser(invalid))
+
     def test_analysis_exposes_missing_correlations(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -8,6 +8,14 @@ ENUMS = {'method': {'GET', 'POST'}, 'protocol': {'HTTP/1.0', 'HTTP/1.1', 'HTTP/2
 
 
 def application_record(message):
+    # journalctl -o json uses a byte array for messages containing ANSI escapes.
+    if isinstance(message, list):
+        if len(message) > 65536 or not all(type(value) is int and 0 <= value <= 255 for value in message):
+            return None
+        try:
+            message = bytes(message).decode('utf-8')
+        except UnicodeDecodeError:
+            return None
     if not isinstance(message, str):
         return None
     try:
