@@ -23,6 +23,7 @@ import (
 	"github.com/gorilla/mux"
 	protov2 "google.golang.org/protobuf/proto"
 
+	"github.com/valargroup/vote-sdk/internal/restingress"
 	"github.com/valargroup/vote-sdk/sentry"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
@@ -778,7 +779,7 @@ type voteProtoMessage interface {
 func (h *Handler) decodeAndValidate(w http.ResponseWriter, r *http.Request, msg voteProtoMessage) bool {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MB limit
 	if err != nil {
-		if writeIngressTimeout(w, r, err) {
+		if restingress.WriteTimeout(w, r, err) {
 			return false
 		}
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("read body: %v", err))
@@ -812,7 +813,7 @@ func (h *Handler) decodeAndValidate(w http.ResponseWriter, r *http.Request, msg 
 func (h *Handler) decodeAndValidateCanonicalJSON(w http.ResponseWriter, r *http.Request, msg voteProtoMessage) bool {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
-		if writeIngressTimeout(w, r, err) {
+		if restingress.WriteTimeout(w, r, err) {
 			return false
 		}
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("read body: %v", err))
