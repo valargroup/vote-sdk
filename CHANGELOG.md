@@ -8,6 +8,10 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Move every upgraded validator helper to the benchmarked default of two
+  concurrent proof workers by introducing `max_concurrent_proofs_v3` and
+  ignoring the legacy unversioned and v2 settings. Fresh validator, local, and
+  benchmark configurations now emit the v3 key.
 - Reduce the default REST request upload timeout from 30 seconds to 15 seconds,
   while preserving operator overrides in existing `app.toml` files.
 - Keep Sentry error capture at 100% while disabling performance spans in

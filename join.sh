@@ -1211,7 +1211,7 @@ chain_api_port = 1317
 # Maximum concurrent proof generation goroutines. Each holds roughly 500 MB
 # while proving, so two needs about 1 GB of headroom beyond the validator's
 # own usage. Lower it on a host that does not have that.
-max_concurrent_proofs_v2 = 2
+max_concurrent_proofs_v3 = 2
 
 HELPERCFG
 

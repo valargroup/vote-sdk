@@ -25,8 +25,9 @@ import (
 )
 
 const (
-	helperMaxConcurrentProofsV2Key     = "helper.max_concurrent_proofs_v2"
-	legacyHelperMaxConcurrentProofsKey = "helper.max_concurrent_proofs"
+	helperMaxConcurrentProofsV3Key       = "helper.max_concurrent_proofs_v3"
+	legacyHelperMaxConcurrentProofsV2Key = "helper.max_concurrent_proofs_v2"
+	legacyHelperMaxConcurrentProofsKey   = "helper.max_concurrent_proofs"
 )
 
 // addHelperFlags registers helper server CLI flags on the start command.
@@ -123,9 +124,9 @@ func helperPostSetup(
 	}
 }
 
-// readHelperConfig reads the [helper] section from app.toml via viper. The v2
-// proof-concurrency key intentionally does not inherit the legacy value so a
-// binary upgrade safely resets existing validator-hosted helpers to one worker.
+// readHelperConfig reads the [helper] section from app.toml via viper. The v3
+// proof-concurrency key intentionally does not inherit either legacy value so a
+// binary upgrade safely resets existing validator-hosted helpers to two workers.
 func readHelperConfig(v *viper.Viper, logger log.Logger) helper.Config {
 	cfg := helper.DefaultConfig()
 
@@ -147,27 +148,32 @@ func readHelperConfig(v *viper.Viper, logger log.Logger) helper.Config {
 	if v.IsSet("helper.chain_api_port") {
 		cfg.ChainAPIPort = v.GetInt("helper.chain_api_port")
 	}
-	proofConcurrencySource := "v2 default"
-	if v.IsSet(helperMaxConcurrentProofsV2Key) {
-		cfg.MaxConcurrentProofs = v.GetInt(helperMaxConcurrentProofsV2Key)
-		proofConcurrencySource = helperMaxConcurrentProofsV2Key
+	proofConcurrencySource := "v3 default"
+	if v.IsSet(helperMaxConcurrentProofsV3Key) {
+		cfg.MaxConcurrentProofs = v.GetInt(helperMaxConcurrentProofsV3Key)
+		proofConcurrencySource = helperMaxConcurrentProofsV3Key
 	}
 	if cfg.MaxConcurrentProofs < 1 {
 		logger.Warn(
 			"invalid helper proof concurrency, using fallback",
-			"key", helperMaxConcurrentProofsV2Key,
+			"key", helperMaxConcurrentProofsV3Key,
 			"configured", cfg.MaxConcurrentProofs,
-			"fallback", 1,
+			"fallback", 2,
 		)
-		cfg.MaxConcurrentProofs = 1
+		cfg.MaxConcurrentProofs = 2
 	}
-	if v.IsSet(legacyHelperMaxConcurrentProofsKey) {
-		logger.Warn(
-			"deprecated helper proof concurrency setting ignored",
-			"key", legacyHelperMaxConcurrentProofsKey,
-			"configured", v.GetInt(legacyHelperMaxConcurrentProofsKey),
-			"replacement", helperMaxConcurrentProofsV2Key,
-		)
+	for _, key := range []string{
+		legacyHelperMaxConcurrentProofsKey,
+		legacyHelperMaxConcurrentProofsV2Key,
+	} {
+		if v.IsSet(key) {
+			logger.Warn(
+				"deprecated helper proof concurrency setting ignored",
+				"key", key,
+				"configured", v.GetInt(key),
+				"replacement", helperMaxConcurrentProofsV3Key,
+			)
+		}
 	}
 	logger.Info(
 		"helper proof concurrency configured",

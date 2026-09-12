@@ -90,7 +90,7 @@ api_token = ""
 expose_queue_summary = true
 db_path = ""
 chain_api_port = 1419
-max_concurrent_proofs_v2 = 2
+max_concurrent_proofs_v3 = 2
 HELPERCFG
 
 # ─── Step 4: Start joiner and wait for sync ──────────────────────────────────

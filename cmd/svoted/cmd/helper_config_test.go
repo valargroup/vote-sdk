@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestReadHelperConfigProofConcurrencyV2(t *testing.T) {
+func TestReadHelperConfigProofConcurrencyV3(t *testing.T) {
 	tests := []struct {
 		name            string
 		toml            string
@@ -20,42 +20,65 @@ func TestReadHelperConfigProofConcurrencyV2(t *testing.T) {
 		wantLogContains []string
 	}{
 		{
-			name: "no setting uses safe v2 default",
-			want: 1,
-		},
-		{
-			name: "legacy setting is ignored",
-			toml: "[helper]\n" +
-				"max_concurrent_proofs = 8\n",
-			want: 1,
+			name: "no setting uses v3 default",
+			want: 2,
 			wantLogContains: []string{
-				"deprecated helper proof concurrency setting ignored",
-				"helper.max_concurrent_proofs_v2",
+				"source=\"v3 default\"",
 			},
 		},
 		{
-			name: "explicit v2 setting is honored",
+			name: "v1 setting is ignored",
 			toml: "[helper]\n" +
-				"max_concurrent_proofs_v2 = 3\n",
-			want: 3,
-		},
-		{
-			name: "v2 setting wins when both are present",
-			toml: "[helper]\n" +
-				"max_concurrent_proofs = 8\n" +
-				"max_concurrent_proofs_v2 = 2\n",
+				"max_concurrent_proofs = 8\n",
 			want: 2,
 			wantLogContains: []string{
 				"deprecated helper proof concurrency setting ignored",
+				"key=helper.max_concurrent_proofs ",
+				"replacement=helper.max_concurrent_proofs_v3",
 			},
 		},
 		{
-			name: "invalid v2 setting falls back to one",
+			name: "v2 setting is ignored",
 			toml: "[helper]\n" +
-				"max_concurrent_proofs_v2 = 0\n",
-			want: 1,
+				"max_concurrent_proofs_v2 = 1\n",
+			want: 2,
+			wantLogContains: []string{
+				"deprecated helper proof concurrency setting ignored",
+				"key=helper.max_concurrent_proofs_v2",
+				"replacement=helper.max_concurrent_proofs_v3",
+			},
+		},
+		{
+			name: "explicit v3 setting is honored",
+			toml: "[helper]\n" +
+				"max_concurrent_proofs_v3 = 3\n",
+			want: 3,
+			wantLogContains: []string{
+				"source=helper.max_concurrent_proofs_v3",
+			},
+		},
+		{
+			name: "v3 setting wins when all versions are present",
+			toml: "[helper]\n" +
+				"max_concurrent_proofs = 8\n" +
+				"max_concurrent_proofs_v2 = 1\n" +
+				"max_concurrent_proofs_v3 = 4\n",
+			want: 4,
+			wantLogContains: []string{
+				"deprecated helper proof concurrency setting ignored",
+				"key=helper.max_concurrent_proofs ",
+				"key=helper.max_concurrent_proofs_v2",
+				"source=helper.max_concurrent_proofs_v3",
+			},
+		},
+		{
+			name: "invalid v3 setting falls back to two",
+			toml: "[helper]\n" +
+				"max_concurrent_proofs_v3 = 0\n",
+			want: 2,
 			wantLogContains: []string{
 				"invalid helper proof concurrency, using fallback",
+				"fallback=2",
 			},
 		},
 	}

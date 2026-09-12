@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDefaultConfigUsesSingleProofWorker(t *testing.T) {
-	require.Equal(t, 1, DefaultConfig().MaxConcurrentProofs)
+func TestDefaultConfigUsesTwoProofWorkers(t *testing.T) {
+	require.Equal(t, 2, DefaultConfig().MaxConcurrentProofs)
 }
 
 func TestNewRequiresValidationDependencies(t *testing.T) {
@@ -35,7 +35,7 @@ func TestNewLogsEffectiveProofConcurrency(t *testing.T) {
 		effective  int
 	}{
 		{configured: 3, effective: 3},
-		{configured: 0, effective: 1},
+		{configured: 0, effective: 2},
 	} {
 		t.Run(fmt.Sprintf("configured_%d", tt.configured), func(t *testing.T) {
 			cfg := DefaultConfig()
