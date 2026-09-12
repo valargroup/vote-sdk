@@ -8,6 +8,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Reduce the default REST request upload timeout from 30 seconds to 15 seconds,
+  while preserving operator overrides in existing `app.toml` files.
 - Keep Sentry error capture at 100% while disabling performance spans in
   staging and sampling high-volume helper processing and polling traces at 10%
   in production. Retain full production tracing for write routes and use
