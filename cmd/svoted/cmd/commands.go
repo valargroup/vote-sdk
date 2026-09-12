@@ -118,7 +118,7 @@ func initAppConfig() (string, interface{}) {
 	srvCfg := serverconfig.DefaultConfig()
 	// Allow bounded headroom for large vote uploads over lossy connections.
 	// Existing app.toml values remain operator-controlled overrides.
-	srvCfg.API.RPCReadTimeout = 30
+	srvCfg.API.RPCReadTimeout = 15
 	// Set default min gas prices to 0 for the vote chain (no fees needed).
 	srvCfg.MinGasPrices = "0usvote"
 	// Expose application and helper Prometheus metrics on the REST server.
