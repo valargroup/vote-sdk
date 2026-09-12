@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -54,6 +55,11 @@ func TestInitCommandSetsBlockLimitAtConfiguredGenesisPath(t *testing.T) {
 	root.SetOut(io.Discard)
 	root.SetErr(io.Discard)
 	require.NoError(t, root.Execute())
+
+	// Check the rendered file that subsequent starts actually read.
+	appConfig, err := os.ReadFile(filepath.Join(home, "config", "app.toml"))
+	require.NoError(t, err)
+	require.Contains(t, string(appConfig), "rpc-read-timeout = 30")
 
 	updated, err := genutiltypes.AppGenesisFromFile(config.GenesisFile())
 	require.NoError(t, err)

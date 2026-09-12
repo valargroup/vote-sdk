@@ -116,6 +116,9 @@ config_url = "https://voting.valargroup.dev/prod/"
 // initAppConfig helps to override default appConfig template and configs.
 func initAppConfig() (string, interface{}) {
 	srvCfg := serverconfig.DefaultConfig()
+	// Allow bounded headroom for large vote uploads over lossy connections.
+	// Existing app.toml values remain operator-controlled overrides.
+	srvCfg.API.RPCReadTimeout = 30
 	// Set default min gas prices to 0 for the vote chain (no fees needed).
 	srvCfg.MinGasPrices = "0usvote"
 	// Expose application and helper Prometheus metrics on the REST server.
