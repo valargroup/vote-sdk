@@ -23,10 +23,10 @@ zakura = [
 ]
 
 [dependencies]
-voting-crypto-deps = { version = "=0.2.2", default-features = false }
-vote-commitment-tree = { version = "=0.6.0", default-features = false }
-voting-circuits = { version = "=0.12.0-rc.1", default-features = false }
-imt-tree = { version = "=0.5.2", default-features = false }
+voting-crypto-deps = { version = "=0.2.3", default-features = false }
+vote-commitment-tree = { version = "=0.6.1", default-features = false }
+voting-circuits = { version = "=0.12.0", default-features = false }
+imt-tree = { version = "=0.5.3", default-features = false }
 incrementalmerkletree = "0.8"
 nonempty = "0.11"
 zcash_protocol = "0.10"
