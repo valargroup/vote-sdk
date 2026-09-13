@@ -430,14 +430,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: release-tarball-darwin-arm64
-      - name: Download linux-amd64 Cosmovisor archive
-        uses: actions/download-artifact@v4
-        with:
-          name: cosmovisor-tarball-linux-amd64
-      - name: Download linux-arm64 Cosmovisor archive
-        uses: actions/download-artifact@v4
-        with:
-          name: cosmovisor-tarball-linux-arm64
       - name: Set version
         run: echo "VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
       - name: Upload to DigitalOcean Spaces
@@ -466,10 +458,6 @@ jobs:
             TARBALL="shielded-vote-${VERSION}-${PLATFORM}.tar.gz"
             s3cmd -c /tmp/do-spaces.s3cfg put "${TARBALL}" "s3://${DO_SPACES_BUCKET}/binaries/vote-sdk/" --acl-public --force
             s3cmd -c /tmp/do-spaces.s3cfg put "${TARBALL}.sha256" "s3://${DO_SPACES_BUCKET}/binaries/vote-sdk/" --acl-public --force
-          done
-          for PLATFORM in linux-amd64 linux-arm64; do
-            ARCHIVE="shielded-vote-${VERSION}-cosmovisor-v1-${PLATFORM}.tar.gz"
-            s3cmd -c /tmp/do-spaces.s3cfg put "$ARCHIVE" "${ARCHIVE}.sha256" "s3://${DO_SPACES_BUCKET}/binaries/vote-sdk/" --acl-public --force
           done
           VERSIONED_UPDATE_CHAIN="$(mktemp)"
           scripts/render-update-chain.sh \

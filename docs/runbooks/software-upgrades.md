@@ -14,30 +14,17 @@ future checksum-pinned plans.
 
 ## Preparing production v1.6.0
 
-Production's v1.4.0 chain already has x/upgrade. Its v1.6.0 cutover is
-state-preserving and requires no reset. Staging has already applied the
-`v1.6.0` plan; do not schedule it there again.
+Production's v1.4.0 chain already has x/upgrade; the v1.6.0 cutover requires no
+reset. Staging has already applied the `v1.6.0` plan and must not reuse it.
+Validate locally using [upgrade-validation-checklist.md](upgrade-validation-checklist.md)
+before publishing a candidate. RC binaries still use plan name `v1.6.0`.
 
-Validate the updated installers and scripts with the local-only procedure in
-[upgrade-validation-checklist.md](upgrade-validation-checklist.md) before
-publishing another candidate or preparing any live node. Keep the release tag,
-plan name, and updater version separate: RC binaries still use plan `v1.6.0`.
-
-Early preparation uses `--allow-no-plan` on `prepare`, `migrate`, and the early
-`verify-prestage` check. Remove it for final readiness after a plan is scheduled.
-An unavailable RPC is an error, not evidence that no plan exists.
-
-The updater records verified release identity in `prepared-artifact.json` beside
-the target `bin/` directory. Readiness checks rehash the staged executable and
-bind it to the plan's release tag and platform archive checksum. Old preparations
-without this identity must rerun `prepare` with the new versioned updater.
-
-Preparation never changes an active Cosmovisor link or overwrites its historical
-genesis binary. Migration uses a dedicated service override, preserves operator
-settings and backup policy, and starts the current binary. It does not delete
-old backups. The infrastructure installer's `--stage-only` option downloads a
-release without switching the active release link or restarting services;
-`ensure_cosmovisor_runtime.sh` is a post-deployment helper, not a preparation tool.
+The updater records `prepared-artifact.json` alongside the staged binary and
+checks its hash, release tag, and platform archive checksum against the plan.
+Preparations made with older scripts must rerun `prepare` to create that record.
+Migration preserves operator service settings and starts the current binary.
+Use the infrastructure installer's `--stage-only` option to extract a release
+without switching the active release link or restarting services.
 
 ## Validator upgrade model
 
