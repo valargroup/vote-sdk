@@ -7,11 +7,12 @@ share reveal proof, and submits `MsgRevealShare` to the chain.
 Timing privacy is owned by the wallet. The helper does not add random
 submission delays, random processor wakeups, or intra-batch jitter. If multiple
 shares become ready in the same second, the helper processes them together up to
-`helper.max_concurrent_proofs_v2`, which fresh configs set to two. The legacy
-`helper.max_concurrent_proofs` key is ignored, so a validator carrying only that
-key falls back to a single worker until the v2 key is set. One worker drains
-about 0.58 shares per second, which a wide ballot outruns; each worker holds
-roughly 500 MB while proving, so size the value against the host.
+`helper.max_concurrent_proofs_v3`, which defaults to two. The legacy unversioned
+and v2 keys are ignored so the binary upgrade moves every validator to the
+benchmarked two-worker setting without coordinated local config edits. One
+worker drains about 0.58 shares per second, which a wide ballot outruns; each
+worker holds roughly 500 MB while proving, so size an explicit v3 override
+against the host.
 
 ## Client-controlled `submit_at`
 

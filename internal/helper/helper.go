@@ -91,9 +91,9 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundI
 		logger.Info(
 			"invalid helper proof concurrency, using fallback",
 			"configured", cfg.MaxConcurrentProofs,
-			"fallback", 1,
+			"fallback", 2,
 		)
-		cfg.MaxConcurrentProofs = 1
+		cfg.MaxConcurrentProofs = 2
 	}
 
 	processor := NewProcessor(

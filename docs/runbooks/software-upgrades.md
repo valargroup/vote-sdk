@@ -21,6 +21,10 @@ RC binaries still use plan name `v1.6.0`.
 The updater records `prepared-artifact.json` alongside the staged binary and
 checks its hash, release tag, and platform archive checksum against the plan.
 Preparations made with older scripts must rerun `prepare` to create that record.
+Preparation validates candidate metadata against the scheduled plan before replacing
+the staged executable. A rejected candidate leaves the previous preparation intact.
+For an RC-to-stable replacement, first update the scheduled tag and archive checksums,
+then rerun `prepare` and `verify-prestage` with the stable tag on every prepared node.
 Migration preserves operator service settings and starts the current binary.
 Use the infrastructure installer's `--stage-only` option to extract a release
 without switching the active release link or restarting services.
@@ -417,6 +421,16 @@ binaries on hosts that have not run `--mode migrate` yet.
 Before rolling coordinated upgrades to production validators, follow the gated
 checklist in [upgrade-validation-checklist.md](upgrade-validation-checklist.md).
 Post-release artifact smoke checks: `scripts/verify_upgrade_release_artifacts.sh`.
+
+## Helper proof concurrency v3 migration
+
+The current binary reads `helper.max_concurrent_proofs_v3`, defaults it to two,
+and ignores both `helper.max_concurrent_proofs` and
+`helper.max_concurrent_proofs_v2`. Consequently, upgrading the binary moves
+every validator to two proof workers without coordinated edits to existing
+`app.toml` files. Operators that need a different width must set the v3 key.
+Each worker holds roughly 500 MB while proving, so the default needs about 1 GB
+free beyond the validator's own footprint.
 
 ## v1.4.0 bounded vote share submission activation
 

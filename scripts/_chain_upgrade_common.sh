@@ -384,7 +384,7 @@ svote_upgrade_verify_cosmovisor_archive() {
   SVOTE_PREPARED_ARCHIVE_SHA256="$actual"
 }
 
-# Write identity only after both release archives have passed verification.
+# Write and verify identity beside a candidate or staged binary after archive verification.
 svote_upgrade_write_artifact_identity() {
   local plan="$1" tag="$2" binary="$3" identity
   identity="$(dirname "$(dirname "$binary")")/prepared-artifact.json"
@@ -395,14 +395,15 @@ svote_upgrade_write_artifact_identity() {
     '{plan:$plan,tag:$tag,platform:$platform,chain_id:$chain,binary_sha256:$binary,archive_sha256:$archive}' \
     > "${identity}.tmp"
   mv -f "${identity}.tmp" "$identity"
-  svote_upgrade_verify_artifact_identity "$plan" "$tag"
+  svote_upgrade_verify_artifact_identity "$plan" "$tag" "$binary"
 }
 
 # Recheck local integrity and, when scheduled, the checksum-pinned plan. This
 # performs no downloads and never treats a failed query as an absent plan.
+# An optional candidate binary path permits verification before replacing staged files.
 svote_upgrade_verify_artifact_identity() {
   local plan="$1" tag="$2" binary identity plan_json info url checksum
-  binary=$(svote_upgrade_upgrade_bin_path "$plan")
+  binary="${3:-$(svote_upgrade_upgrade_bin_path "$plan")}"
   identity="$(dirname "$(dirname "$binary")")/prepared-artifact.json"
   [ -f "$identity" ] || svote_upgrade_die "Prepared artifact identity missing; rerun prepare."
   jq -e --arg plan "$plan" --arg tag "$tag" --arg platform "${SVOTE_PLATFORM/-//}" \
@@ -425,6 +426,34 @@ svote_upgrade_verify_artifact_identity() {
   [ -n "$checksum" ] && [ "$checksum" = "$(jq -r .archive_sha256 "$identity")" ] \
     || svote_upgrade_die "Scheduled archive checksum differs from prepared release."
 }
+
+# Commit an already-verified candidate and its identity on the destination filesystem.
+# Publish identity first, then atomically replace the executable. If executable
+# replacement fails, restore the previous identity; the previous binary is untouched.
+svote_upgrade_commit_prepared_artifact() (
+  local candidate="$1" target="$2" identity candidate_identity stage_dir had_identity=0
+  identity="$(dirname "$(dirname "$target")")/prepared-artifact.json"
+  candidate_identity="$(dirname "$(dirname "$candidate")")/prepared-artifact.json"
+  install -d -m 0755 "$(dirname "$target")"
+  stage_dir=$(mktemp -d "$(dirname "$target")/.prepare.XXXXXX")
+  trap 'rm -rf "$stage_dir"' EXIT
+  install -m 0755 "$candidate" "${stage_dir}/svoted"
+  cp "$candidate_identity" "${stage_dir}/prepared-artifact.json"
+  if [ -e "$identity" ]; then
+    cp -p "$identity" "${stage_dir}/previous-identity.json"
+    had_identity=1
+  fi
+  svote_upgrade_fixup_cosmovisor_ownership
+  mv -f "${stage_dir}/prepared-artifact.json" "$identity"
+  if ! mv -f "${stage_dir}/svoted" "$target"; then
+    if [ "$had_identity" = 1 ]; then
+      mv -f "${stage_dir}/previous-identity.json" "$identity"
+    else
+      rm -f "$identity"
+    fi
+    svote_upgrade_die "Could not replace staged executable; previous preparation preserved."
+  fi
+)
 
 # svote_upgrade_verify_binary_tag binary expected_tag
 # Die if binary version output does not exactly match expected_tag.
