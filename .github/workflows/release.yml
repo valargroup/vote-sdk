@@ -473,8 +473,12 @@ jobs:
             "s3://${DO_SPACES_BUCKET}/scripts/upgrade/${VERSION}/_chain_upgrade_common.sh"
           s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force scripts/prepare-upgrade-artifacts.sh \
             "s3://${DO_SPACES_BUCKET}/scripts/upgrade/${VERSION}/prepare-upgrade-artifacts.sh"
-          s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force join.sh \
+          VERSIONED_JOIN="$(mktemp)"
+          sed "s|^SVOTE_UPGRADE_SCRIPT_VERSION=.*|SVOTE_UPGRADE_SCRIPT_VERSION=\"\${SVOTE_UPGRADE_SCRIPT_VERSION:-${VERSION}}\"|" \
+            join.sh > "$VERSIONED_JOIN"
+          s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force "$VERSIONED_JOIN" \
             "s3://${DO_SPACES_BUCKET}/scripts/join/${VERSION}/join.sh"
+          rm -f "$VERSIONED_JOIN"
           VERSIONED_JOIN_FULL="$(mktemp)"
           sed "s|^SVOTE_JOIN_COMMON_VERSION=.*|SVOTE_JOIN_COMMON_VERSION=\"\${SVOTE_JOIN_COMMON_VERSION:-${VERSION}}\"|" \
             join-full.sh > "${VERSIONED_JOIN_FULL}"

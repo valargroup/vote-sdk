@@ -33,6 +33,8 @@
 
 set -euo pipefail
 
+SVOTE_UPGRADE_SCRIPT_VERSION="${SVOTE_UPGRADE_SCRIPT_VERSION:-}"
+
 main() {
 if [ -z "${HOME:-}" ]; then
   if command -v getent > /dev/null 2>&1; then
@@ -1590,7 +1592,7 @@ LOG_FOLLOW_COMMAND=""
 SVOTED_BIN=$(command -v svoted)
 WRAPPER_BIN="${INSTALL_DIR}/svoted-wrapper.sh"
 SERVICE_NAME="svoted"
-SERVICE_PATH="${INSTALL_DIR}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+SERVICE_EXEC_PATH="${INSTALL_DIR}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
 # Install svoted-wrapper.sh next to svoted/create-val-tx.
 if [ -n "${SVOTE_WRAPPER_SCRIPT:-}" ] && [ -f "${SVOTE_WRAPPER_SCRIPT}" ]; then
@@ -1614,14 +1616,15 @@ setup_cosmovisor_for_join() {
 
   echo "=== Configuring Cosmovisor layout ==="
   local common_lib=""
-  if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" != "bash" ] && \
+  local helper_version="${SVOTE_UPGRADE_SCRIPT_VERSION:-${CHAIN_BINARY_VERSION}}"
+  if [ -z "$SVOTE_UPGRADE_SCRIPT_VERSION" ] && [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" != "bash" ] && \
      [ -f "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/_chain_upgrade_common.sh" ]; then
     common_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/_chain_upgrade_common.sh"
-  elif curl -fsSL "${DO_BASE}/scripts/_chain_upgrade_common.sh" -o /tmp/_chain_upgrade_common.sh 2>/dev/null; then
+  elif curl -fsSL "${DO_BASE}/scripts/upgrade/${helper_version}/_chain_upgrade_common.sh" -o /tmp/_chain_upgrade_common.sh 2>/dev/null; then
     common_lib="/tmp/_chain_upgrade_common.sh"
   fi
   if [ -z "${common_lib}" ] || [ ! -f "${common_lib}" ]; then
-    echo "ERROR: _chain_upgrade_common.sh not found locally or at ${DO_BASE}/scripts/_chain_upgrade_common.sh" >&2
+    echo "ERROR: _chain_upgrade_common.sh not found locally or at ${DO_BASE}/scripts/upgrade/${helper_version}/_chain_upgrade_common.sh" >&2
     exit 1
   fi
   # shellcheck source=scripts/_chain_upgrade_common.sh
@@ -1683,7 +1686,7 @@ if [ "$OS_NAME" = "Darwin" ]; then
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>${SERVICE_PATH}</string>
+        <string>${SERVICE_EXEC_PATH}</string>
         <key>SVOTE_HOME</key>
         <string>${HOME_DIR}</string>
         <key>VALIDATOR_ADDR</key>
@@ -1771,7 +1774,7 @@ else
   # ── Linux: systemd ──────────────────────────────────────────────────────────
   echo "=== Installing systemd service ==="
 
-  SYSTEMD_PATH=$(systemd_env_quote "PATH=${SERVICE_PATH}")
+  SYSTEMD_PATH=$(systemd_env_quote "PATH=${SERVICE_EXEC_PATH}")
   SYSTEMD_HOME=$(systemd_env_quote "SVOTE_HOME=${HOME_DIR}")
   SYSTEMD_ADDR=$(systemd_env_quote "VALIDATOR_ADDR=${VALIDATOR_ADDR}")
   SYSTEMD_VALOPER=$(systemd_env_quote "VALIDATOR_VALOPER=${VALIDATOR_VALOPER}")
@@ -1783,13 +1786,14 @@ else
   SYSTEMD_DAEMON_HOME=$(systemd_env_quote "DAEMON_HOME=${HOME_DIR}")
   SYSTEMD_DAEMON_NAME=$(systemd_env_quote "DAEMON_NAME=svoted")
   SYSTEMD_COSMOVISOR=$(systemd_env_quote "COSMOVISOR_BIN=${INSTALL_DIR}/cosmovisor")
+  SYSTEMD_RESTART_UPGRADE=$(systemd_env_quote "DAEMON_RESTART_AFTER_UPGRADE=true")
   SYSTEMD_ALLOW_DOWNLOAD=$(systemd_env_quote "DAEMON_ALLOW_DOWNLOAD_BINARIES=true")
   SYSTEMD_MUST_CHECKSUM=$(systemd_env_quote "DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM=true")
   SYSTEMD_SKIP_BACKUP=$(systemd_env_quote "UNSAFE_SKIP_BACKUP=true")
 
   SYSTEMD_ENV="${SYSTEMD_PATH} ${SYSTEMD_HOME} ${SYSTEMD_ADDR} ${SYSTEMD_VALOPER} ${SYSTEMD_MONIKER} ${SYSTEMD_CHAIN_ID} ${SYSTEMD_INSTALL} ${SYSTEMD_SVOTED} ${SYSTEMD_UPGRADE_MODE}"
   if [ "${SVOTE_UPGRADE_MODE}" = "cosmovisor" ]; then
-    SYSTEMD_ENV="${SYSTEMD_ENV} ${SYSTEMD_DAEMON_HOME} ${SYSTEMD_DAEMON_NAME} ${SYSTEMD_COSMOVISOR} ${SYSTEMD_ALLOW_DOWNLOAD} ${SYSTEMD_MUST_CHECKSUM} ${SYSTEMD_SKIP_BACKUP}"
+    SYSTEMD_ENV="${SYSTEMD_ENV} ${SYSTEMD_DAEMON_HOME} ${SYSTEMD_DAEMON_NAME} ${SYSTEMD_COSMOVISOR} ${SYSTEMD_RESTART_UPGRADE} ${SYSTEMD_ALLOW_DOWNLOAD} ${SYSTEMD_MUST_CHECKSUM} ${SYSTEMD_SKIP_BACKUP}"
   fi
 
   sudo tee /etc/systemd/system/${SERVICE_NAME}.service > /dev/null <<SVCEOF

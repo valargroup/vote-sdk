@@ -163,13 +163,15 @@ svote_upgrade_autodetect_from_systemd_unit() {
 
   [ -f "$SERVICE_PATH" ] || return 0
 
-  unit_user=$(grep -E '^User=' "$SERVICE_PATH" 2>/dev/null | head -n 1 | cut -d= -f2- | tr -d '[:space:]' || true)
+  unit_user=$(systemctl show "$SERVICE_NAME" -p User --value 2>/dev/null || true)
+  [ -n "$unit_user" ] || unit_user=$(grep -E '^User=' "$SERVICE_PATH" 2>/dev/null | head -n 1 | cut -d= -f2- | tr -d '[:space:]' || true)
   if [ -n "$unit_user" ] && [ "$unit_user" != "root" ]; then
     SERVICE_USER="$unit_user"
   fi
 
   if [ "$home_cli_set" != "1" ]; then
-    detected_home=$(svote_upgrade_systemd_unit_value "SVOTE_HOME" "$SERVICE_PATH" || true)
+    detected_home=$(svote_upgrade_systemd_effective_env_value "SVOTE_HOME" || true)
+    [ -n "$detected_home" ] || detected_home=$(svote_upgrade_systemd_unit_value "SVOTE_HOME" "$SERVICE_PATH" || true)
     if [ -z "$detected_home" ]; then
       detected_home=$(svote_upgrade_systemd_unit_value "DAEMON_HOME" "$SERVICE_PATH" || true)
     fi
@@ -186,7 +188,8 @@ svote_upgrade_autodetect_from_systemd_unit() {
   fi
 
   local detected_exec
-  detected_exec=$(grep -E '^ExecStart=' "$SERVICE_PATH" 2>/dev/null | head -n 1 | cut -d= -f2- || true)
+  detected_exec=$(svote_upgrade_detect_existing_execstart || true)
+  [ -n "$detected_exec" ] || detected_exec=$(grep -E '^ExecStart=' "$SERVICE_PATH" 2>/dev/null | head -n 1 | cut -d= -f2- || true)
   if [ "$home_cli_set" != "1" ] && [ -z "$detected_home" ] && [ -n "$detected_exec" ]; then
     # Direct-mode units commonly set --home in ExecStart without SVOTE_HOME/DAEMON_HOME env.
     detected_home=$(printf '%s\n' "$detected_exec" | sed -n 's/.*--home[ =]\([^[:space:]]*\).*/\1/p' | head -n 1)
@@ -356,6 +359,73 @@ svote_upgrade_extract_svoted() {
   printf '%s\n' "$output_bin"
 }
 
+# Verify the automatic-download archive contains the same executable as the full
+# release. Keep its digest for binding the prepared executable to the on-chain plan.
+svote_upgrade_verify_cosmovisor_archive() {
+  local tag="$1" tmp_dir="$2" binary="$3" asset url expected actual
+  asset="shielded-vote-${tag}-cosmovisor-v1-${SVOTE_PLATFORM}.tar.gz"
+  url="${DO_BASE}/binaries/vote-sdk/${asset}"
+  svote_upgrade_download_with_fallback "${tmp_dir}/${asset}" "$url" \
+    "https://github.com/${GITHUB_REPO}/releases/download/${tag}/${asset}" "$asset"
+  svote_upgrade_download_with_fallback "${tmp_dir}/${asset}.sha256" "${url}.sha256" \
+    "https://github.com/${GITHUB_REPO}/releases/download/${tag}/${asset}.sha256" "${asset}.sha256"
+  expected=$(awk 'NR == 1 {print tolower($1)}' "${tmp_dir}/${asset}.sha256")
+  actual=$(svote_upgrade_sha256_file "${tmp_dir}/${asset}")
+  [ "$expected" = "$actual" ] || svote_upgrade_die "Cosmovisor archive checksum mismatch."
+  [ "$(tar tzf "${tmp_dir}/${asset}")" = "bin/svoted" ] \
+    || svote_upgrade_die "Unexpected Cosmovisor archive layout."
+  mkdir -p "${tmp_dir}/cosmovisor-archive"
+  tar xzf "${tmp_dir}/${asset}" -C "${tmp_dir}/cosmovisor-archive"
+  [ -f "${tmp_dir}/cosmovisor-archive/bin/svoted" ] && \
+    [ ! -L "${tmp_dir}/cosmovisor-archive/bin/svoted" ] \
+    || svote_upgrade_die "Cosmovisor archive must contain a regular executable."
+  cmp -s "$binary" "${tmp_dir}/cosmovisor-archive/bin/svoted" \
+    || svote_upgrade_die "Full release and Cosmovisor archive contain different binaries."
+  SVOTE_PREPARED_ARCHIVE_SHA256="$actual"
+}
+
+# Write identity only after both release archives have passed verification.
+svote_upgrade_write_artifact_identity() {
+  local plan="$1" tag="$2" binary="$3" identity
+  identity="$(dirname "$(dirname "$binary")")/prepared-artifact.json"
+  jq -n --arg plan "$plan" --arg tag "$tag" --arg platform "${SVOTE_PLATFORM/-//}" \
+    --arg chain "$(svote_upgrade_derive_chain_id_from_home "$DAEMON_HOME")" \
+    --arg binary "$(svote_upgrade_sha256_file "$binary")" \
+    --arg archive "$SVOTE_PREPARED_ARCHIVE_SHA256" \
+    '{plan:$plan,tag:$tag,platform:$platform,chain_id:$chain,binary_sha256:$binary,archive_sha256:$archive}' \
+    > "${identity}.tmp"
+  mv -f "${identity}.tmp" "$identity"
+  svote_upgrade_verify_artifact_identity "$plan" "$tag"
+}
+
+# Recheck local integrity and, when scheduled, the checksum-pinned plan. This
+# performs no downloads and never treats a failed query as an absent plan.
+svote_upgrade_verify_artifact_identity() {
+  local plan="$1" tag="$2" binary identity plan_json info url checksum
+  binary=$(svote_upgrade_upgrade_bin_path "$plan")
+  identity="$(dirname "$(dirname "$binary")")/prepared-artifact.json"
+  [ -f "$identity" ] || svote_upgrade_die "Prepared artifact identity missing; rerun prepare."
+  jq -e --arg plan "$plan" --arg tag "$tag" --arg platform "${SVOTE_PLATFORM/-//}" \
+    --arg chain "$(svote_upgrade_derive_chain_id_from_home "$DAEMON_HOME")" \
+    --arg binary "$(svote_upgrade_sha256_file "$binary")" \
+    '.plan == $plan and .tag == $tag and .platform == $platform and .chain_id == $chain
+     and .binary_sha256 == $binary and (.archive_sha256 | test("^[0-9a-f]{64}$"))' \
+    "$identity" >/dev/null || svote_upgrade_die "Prepared artifact identity or binary checksum mismatch; rerun prepare."
+  plan_json=$(svote_upgrade_query_upgrade_plan) || return 1
+  [ -n "$plan_json" ] && [ "$plan_json" != "null" ] || return 0
+  [ "$(svote_upgrade_parse_plan_name "$plan_json")" = "$plan" ] \
+    || svote_upgrade_die "Scheduled plan changed during verification."
+  info=$(printf '%s' "$plan_json" | jq -er '(.plan // .).info | fromjson') \
+    || svote_upgrade_die "Scheduled plan must contain release metadata."
+  [ "$(printf '%s' "$info" | jq -r '.tag')" = "$tag" ] \
+    || svote_upgrade_die "Scheduled release tag differs from prepared release."
+  url=$(printf '%s' "$info" | jq -er --arg platform "${SVOTE_PLATFORM/-//}" '.binaries[$platform]') \
+    || svote_upgrade_die "Scheduled plan does not include this platform."
+  checksum=$(printf '%s' "$url" | sed -nE 's/.*[?&]checksum=sha256:([a-fA-F0-9]{64})(&.*)?$/\1/p' | tr 'A-F' 'a-f')
+  [ -n "$checksum" ] && [ "$checksum" = "$(jq -r .archive_sha256 "$identity")" ] \
+    || svote_upgrade_die "Scheduled archive checksum differs from prepared release."
+}
+
 # svote_upgrade_verify_binary_tag binary expected_tag
 # Die if binary version output does not exactly match expected_tag.
 svote_upgrade_verify_binary_tag() {
@@ -440,6 +510,26 @@ svote_upgrade_resolve_runtime_svoted() {
   local target_tag="${1:-}"
   local candidate exec_cmd first_token line cmd pid exe
 
+  # 3. The actual running signer process binary, scoped to DAEMON_HOME (cosmovisor supervisor skipped).
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    pid="${line%% *}"
+    cmd="${line#* }"
+    case "${cmd%% *}" in
+      *cosmovisor*) continue ;;
+    esac
+    case "$pid" in
+      ''|*[!0-9]*) continue ;;
+    esac
+    exe=$(readlink -f "/proc/${pid}/exe" 2>/dev/null || true)
+    if [ -x "$exe" ] && [ "$("$exe" version 2>/dev/null)" = "$target_tag" ]; then
+      svote_upgrade_die "The running binary is already the target release; refusing pre-upgrade staging."
+    fi
+    if svote_upgrade_runtime_svoted_candidate_ok "$exe" "$target_tag"; then
+      printf '%s\n' "$exe"
+      return 0
+    fi
+  done < <(svote_upgrade_find_signer_processes 2>/dev/null || true)
   # 1. SVOTED_BIN declared in the systemd unit (join.sh records the absolute path here).
   candidate=$(svote_upgrade_systemd_unit_value "SVOTED_BIN" "$SERVICE_PATH" 2>/dev/null || true)
   if svote_upgrade_runtime_svoted_candidate_ok "$candidate" "$target_tag"; then
@@ -458,23 +548,6 @@ svote_upgrade_resolve_runtime_svoted() {
     fi
   fi
 
-  # 3. The actual running signer process binary, scoped to DAEMON_HOME (cosmovisor supervisor skipped).
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    pid="${line%% *}"
-    cmd="${line#* }"
-    case "${cmd%% *}" in
-      *cosmovisor*) continue ;;
-    esac
-    case "$pid" in
-      ''|*[!0-9]*) continue ;;
-    esac
-    exe=$(readlink -f "/proc/${pid}/exe" 2>/dev/null || true)
-    if svote_upgrade_runtime_svoted_candidate_ok "$exe" "$target_tag"; then
-      printf '%s\n' "$exe"
-      return 0
-    fi
-  done < <(svote_upgrade_find_signer_processes 2>/dev/null || true)
 
   # 4. Reuse an already-staged pre-upgrade genesis binary.
   if svote_upgrade_runtime_svoted_candidate_ok "$GENESIS_BIN" "$target_tag"; then
@@ -974,16 +1047,20 @@ svote_upgrade_query_upgrade_plan() {
     query_err=$(mktemp)
     if plan_json=$("$query_bin" query upgrade plan --home "$DAEMON_HOME" --output json 2>"$query_err"); then
       rm -f "$query_err"
-      if [ -z "$plan_json" ] || [ "$plan_json" = "null" ]; then
+      [ -n "$plan_json" ] || svote_upgrade_die "Upgrade plan query returned an empty response."
+      if [ "$plan_json" = "null" ]; then
         return 0
       fi
       if ! printf '%s\n' "$plan_json" | jq empty >/dev/null 2>&1; then
         svote_upgrade_die "Upgrade plan query returned invalid JSON."
       fi
+      if printf '%s\n' "$plan_json" | jq -e '. == {} or (type == "object" and has("plan") and .plan == null)' >/dev/null; then
+        return 0
+      fi
       printf '%s\n' "$plan_json"
       return 0
     fi
-    if grep -qi 'no upgrade plan\|not found\|no plan' "$query_err" 2>/dev/null; then
+    if grep -qi 'no upgrade plan found\|no upgrade plan scheduled' "$query_err" 2>/dev/null; then
       rm -f "$query_err"
       return 0
     fi
@@ -998,7 +1075,9 @@ svote_upgrade_query_upgrade_plan() {
     if ! printf '%s\n' "$plan_json" | jq empty >/dev/null 2>&1; then
       svote_upgrade_die "Chain API returned invalid current-plan JSON."
     fi
-    if [ "$(printf '%s\n' "$plan_json" | jq -r '.plan // empty')" = "" ]; then
+    printf '%s\n' "$plan_json" | jq -e 'type == "object" and has("plan")' >/dev/null \
+      || svote_upgrade_die "Chain API current-plan response is missing the plan field."
+    if printf '%s\n' "$plan_json" | jq -e '.plan == null' >/dev/null; then
       return 0
     fi
     printf '%s\n' "$plan_json"
@@ -1014,7 +1093,7 @@ svote_upgrade_query_upgrade_plan() {
 # svote_upgrade_query_applied_plan_height plan_name
 # Print the applied height for plan_name, using the local RPC with chain API fallback.
 svote_upgrade_query_applied_plan_height() {
-  local plan_name="$1"
+  local plan_name="$1" allow_unapplied="${2:-0}"
   local query_bin result query_err local_error="" height
   case "$plan_name" in
     ''|*[!A-Za-z0-9._-]*) svote_upgrade_die "Unsafe upgrade plan name: ${plan_name:-<empty>}." ;;
@@ -1025,10 +1104,11 @@ svote_upgrade_query_applied_plan_height() {
     query_err=$(mktemp)
     if result=$("$query_bin" query upgrade applied "$plan_name" --home "$DAEMON_HOME" --output json 2>"$query_err"); then
       rm -f "$query_err"
-      height=$(printf '%s\n' "$result" | jq -r '.height // empty' 2>/dev/null || true)
+      height=$(printf '%s\n' "$result" | jq -r 'if . == {} then "0" else .height // empty end' 2>/dev/null || true)
       case "$height" in
-        ''|0|*[!0-9]*) svote_upgrade_die "Applied-plan query returned an invalid height for ${plan_name}." ;;
+        ''|*[!0-9]*) svote_upgrade_die "Applied-plan query returned an invalid height for ${plan_name}." ;;
       esac
+      [ "$height" != 0 ] || [ "$allow_unapplied" = 1 ] || svote_upgrade_die "Plan ${plan_name} has not been applied."
       printf '%s\n' "$height"
       return 0
     fi
@@ -1040,10 +1120,11 @@ svote_upgrade_query_applied_plan_height() {
     svote_upgrade_validate_chain_api
     result=$(svote_upgrade_chain_api_get "/cosmos/upgrade/v1beta1/applied_plan/${plan_name}") \
       || svote_upgrade_die "Chain API does not confirm applied plan ${plan_name}."
-    height=$(printf '%s\n' "$result" | jq -r '.height // empty' 2>/dev/null || true)
+    height=$(printf '%s\n' "$result" | jq -r 'if . == {} then "0" else .height // empty end' 2>/dev/null || true)
     case "$height" in
-      ''|0|*[!0-9]*) svote_upgrade_die "Chain API returned an invalid applied height for ${plan_name}." ;;
+      ''|*[!0-9]*) svote_upgrade_die "Chain API returned an invalid applied height for ${plan_name}." ;;
     esac
+    [ "$height" != 0 ] || [ "$allow_unapplied" = 1 ] || svote_upgrade_die "Plan ${plan_name} has not been applied."
     printf '%s\n' "$height"
     return 0
   fi
@@ -1056,9 +1137,11 @@ svote_upgrade_query_applied_plan_height() {
 svote_upgrade_validate_scheduled_plan() {
   local expected_name="$1"
   local allow_no_plan="${2:-0}"
-  local plan_json plan_name plan_height current_height
+  local plan_json plan_name plan_height current_height applied_height
 
-  plan_json=$(svote_upgrade_query_upgrade_plan)
+  applied_height=$(svote_upgrade_query_applied_plan_height "$expected_name" 1) || return 1
+  [ "$applied_height" = 0 ] || svote_upgrade_die "Plan ${expected_name} was already applied at height ${applied_height}; refusing to prepare it again."
+  plan_json=$(svote_upgrade_query_upgrade_plan) || return 1
   if [ -z "$plan_json" ] || [ "$plan_json" = "null" ]; then
     if [ "$allow_no_plan" = "1" ]; then
       svote_upgrade_warn "No upgrade plan is currently scheduled (--allow-no-plan set)."
@@ -1069,25 +1152,17 @@ svote_upgrade_validate_scheduled_plan() {
 
   plan_name=$(svote_upgrade_parse_plan_name "$plan_json")
   plan_height=$(svote_upgrade_parse_plan_height "$plan_json")
-  if [ -z "$plan_name" ] || [ "$plan_name" = "null" ]; then
-    if [ "$allow_no_plan" = "1" ]; then
-      svote_upgrade_warn "No upgrade plan name present in chain response (--allow-no-plan set)."
-      return 0
-    fi
-    svote_upgrade_die "Could not parse scheduled upgrade plan name."
-  fi
-  if [ "$plan_name" != "$expected_name" ]; then
-    svote_upgrade_die "Scheduled plan name mismatch: expected ${expected_name}, chain has ${plan_name}."
-  fi
-
-  current_height=$(
-    svote_upgrade_query_block_height || echo "0"
-  )
-  if [ "$current_height" != "0" ] && [ -n "$plan_height" ] && [ "$plan_height" != "null" ]; then
-    if [ "$current_height" -ge "$plan_height" ]; then
-      svote_upgrade_die "Scheduled upgrade height ${plan_height} has already passed (current=${current_height})."
-    fi
-  fi
+  [ -n "$plan_name" ] && [ "$plan_name" != "null" ] \
+    || svote_upgrade_die "Could not parse scheduled upgrade plan name."
+  [ "$plan_name" = "$expected_name" ] \
+    || svote_upgrade_die "Scheduled plan name mismatch: expected ${expected_name}, chain has ${plan_name}."
+  current_height=$(svote_upgrade_query_block_height) \
+    || svote_upgrade_die "Cannot verify current block height."
+  case "$plan_height:$current_height" in
+    *[!0-9:]*|:*|*:) svote_upgrade_die "Invalid scheduled or current height." ;;
+  esac
+  [ "$plan_height" -gt "$current_height" ] \
+    || svote_upgrade_die "Scheduled upgrade height ${plan_height} has already passed (current=${current_height})."
   SVOTE_SCHEDULED_PLAN_NAME="$plan_name"
   SVOTE_SCHEDULED_PLAN_HEIGHT="$plan_height"
   export SVOTE_SCHEDULED_PLAN_NAME SVOTE_SCHEDULED_PLAN_HEIGHT
@@ -1240,9 +1315,11 @@ svote_upgrade_verify_prestage() {
   upgrade_bin=$(svote_upgrade_upgrade_bin_path "$plan_name")
 
   svote_upgrade_verify_validator_identity_files
+  svote_upgrade_validate_scheduled_plan "$plan_name" "$allow_no_plan"
+  svote_upgrade_verify_artifact_identity "$plan_name" "$expected_tag"
 
   echo "=== Staging checks ==="
-  plan_json=$(svote_upgrade_query_upgrade_plan)
+  plan_json=$(svote_upgrade_query_upgrade_plan) || return 1
   plan_name_on_chain=$(svote_upgrade_parse_plan_name "$plan_json")
   if [ -n "$plan_name_on_chain" ] && [ "$plan_name_on_chain" != "null" ]; then
     if [ "$plan_name_on_chain" = "$plan_name" ]; then
@@ -1483,8 +1560,12 @@ svote_upgrade_extract_effective_env_value() {
 # Extract the runtime-effective key from `systemctl show SERVICE_NAME -p Environment`.
 svote_upgrade_systemd_effective_env_value() {
   local key="$1"
-  local env_blob
-
+  local env_blob main_pid
+  main_pid=$(systemctl show "$SERVICE_NAME" -p MainPID --value 2>/dev/null || true)
+  if [[ "$main_pid" =~ ^[1-9][0-9]*$ ]] && [ -r "/proc/${main_pid}/environ" ]; then
+    svote_upgrade_process_env_value "$main_pid" "$key"
+    return
+  fi
   env_blob=$(systemctl show "$SERVICE_NAME" -p Environment --value 2>/dev/null || true)
   [ -n "$env_blob" ] || return 1
   svote_upgrade_extract_effective_env_value "$env_blob" "$key"
@@ -1592,7 +1673,12 @@ svote_upgrade_configure_autodownload_dropin() {
     printf '[Service]\n'
     printf 'Environment="DAEMON_ALLOW_DOWNLOAD_BINARIES=true"\n'
     printf 'Environment="DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM=true"\n'
+    printf 'Environment="DAEMON_RESTART_AFTER_UPGRADE=true"\n'
+    printf 'EnvironmentFile=%s\n' "${dropin_dir}/cosmovisor-autodownload.env"
   } > "${dropin_path}.new"
+  printf '%s\n' 'DAEMON_ALLOW_DOWNLOAD_BINARIES=true' 'DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM=true' 'DAEMON_RESTART_AFTER_UPGRADE=true' > "${dropin_dir}/cosmovisor-autodownload.env.new"
+  chmod 0600 "${dropin_dir}/cosmovisor-autodownload.env.new"
+  mv -f "${dropin_dir}/cosmovisor-autodownload.env.new" "${dropin_dir}/cosmovisor-autodownload.env"
   chmod 0644 "${dropin_path}.new"
   mv -f "${dropin_path}.new" "$dropin_path"
   svote_upgrade_log "Enabled checksum-required Cosmovisor auto-download in ${dropin_path}."
@@ -1631,7 +1717,7 @@ svote_upgrade_detect_existing_execstart() {
 }
 
 # svote_upgrade_patch_systemd_unit_for_cosmovisor
-# Rewrite main unit for direct cosmovisor startup and remove drop-ins; print backup path.
+# Add a Cosmovisor launch override while preserving operator settings; print backup path.
 svote_upgrade_patch_systemd_unit_for_cosmovisor() {
   local backup_path
   backup_path="${SERVICE_PATH}.bak.$(date +%Y%m%d%H%M%S)"
@@ -1687,51 +1773,35 @@ svote_upgrade_patch_systemd_unit_for_cosmovisor() {
     start_args_escaped=" $(svote_upgrade_escape_systemd_env_value "${SVOTE_WRAPPER_SVOTED_START_ARGS}")"
   fi
 
+  # Preserve the original unit and all operator drop-ins. Override only launch
+  # and runtime environment in a dedicated drop-in, leaving limits, credentials,
+  # backup policy, and primary UI configuration intact.
+  mkdir -p "$dropin_dir"
+  local runtime_dropin="${dropin_dir}/zz-svote-upgrade-runtime.conf"
+  local runtime_env="${dropin_dir}/svote-upgrade-runtime.env"
+  [ ! -f "$runtime_dropin" ] || cp -p "$runtime_dropin" "${runtime_dropin}.bak.$(date +%s)"
   {
-    printf '[Unit]\n'
-    printf 'Description=%s\n' "$service_desc"
-    printf 'After=network.target\n'
-    printf '\n'
-    printf '[Service]\n'
-    printf 'Type=simple\n'
-    printf 'User=%s\n' "$service_user"
-    printf 'EnvironmentFile=-/etc/default/svoted\n'
+    printf 'SVOTE_UPGRADE_MODE=cosmovisor\n'
+    printf 'DAEMON_HOME=%s\nSVOTE_HOME=%s\n' "$daemon_home_escaped" "$daemon_home_escaped"
+    printf 'DAEMON_NAME=svoted\n'
+    printf 'COSMOVISOR_BIN=%s\n' "$cosmovisor_bin_escaped"
+    printf 'SVOTE_CHAIN_ID=%s\n' "$chain_id_escaped"
+    printf 'DAEMON_ALLOW_DOWNLOAD_BINARIES=true\n'
+    printf 'DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM=true\n'
+    printf 'DAEMON_RESTART_AFTER_UPGRADE=true\n'
+    printf 'SVOTE_INSTALL_DIR=%s\nSVOTED_BIN=%s\n' "$install_dir_escaped" "$svoted_bin_escaped"
+  } > "${runtime_env}.tmp"
+  chmod 0600 "${runtime_env}.tmp"
+  mv -f "${runtime_env}.tmp" "$runtime_env"
+  {
+    printf '[Service]\nExecStart=\n'
     printf 'ExecStart=%s run start --home %s%s\n' "$cosmovisor_bin_escaped" "$daemon_home_escaped" "$start_args_escaped"
-    printf 'Environment="SVOTE_UPGRADE_MODE=cosmovisor"\n'
-    printf 'Environment="DAEMON_HOME=%s"\n' "$daemon_home_escaped"
-    printf 'Environment="SVOTE_HOME=%s"\n' "$daemon_home_escaped"
-    printf 'Environment="SVOTE_CHAIN_ID=%s"\n' "$chain_id_escaped"
-    printf 'Environment="COSMOVISOR_BIN=%s"\n' "$cosmovisor_bin_escaped"
-    printf 'Environment="DAEMON_NAME=%s"\n' "$SVOTE_DAEMON_NAME"
-    printf 'Environment="DAEMON_ALLOW_DOWNLOAD_BINARIES=true"\n'
-    printf 'Environment="DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM=true"\n'
-    printf 'Environment="SVOTE_INSTALL_DIR=%s"\n' "$install_dir_escaped"
-    printf 'Environment="SVOTED_BIN=%s"\n' "$svoted_bin_escaped"
-    if [ -n "${SVOTE_WRAPPER_SVOTED_START_ARGS:-}" ]; then
-      printf 'Environment="SVOTE_WRAPPER_SVOTED_START_ARGS=%s"\n' "$(svote_upgrade_escape_systemd_env_value "$SVOTE_WRAPPER_SVOTED_START_ARGS")"
-    fi
-    printf 'Restart=on-failure\n'
-    printf 'RestartSec=5\n'
-    printf 'StandardOutput=journal\n'
-    printf 'StandardError=journal\n'
-    printf '\n'
-    printf '[Install]\n'
-    printf 'WantedBy=multi-user.target\n'
-  } > "${SERVICE_PATH}.tmp"
-  mv -f "${SERVICE_PATH}.tmp" "$SERVICE_PATH"
-  chmod 0644 "$SERVICE_PATH"
+    printf 'EnvironmentFile=%s\n' "$runtime_env"
+  } > "${runtime_dropin}.tmp"
+  mv -f "${runtime_dropin}.tmp" "$runtime_dropin"
+  chmod 0644 "$runtime_dropin"
+  svote_upgrade_log "Configured ${runtime_dropin}; existing unit and operator settings preserved"
 
-  if [ -d "$dropin_dir" ]; then
-    backup_suffix="$(date +%Y%m%d%H%M%S)"
-    for dropin in "$dropin_dir"/*.conf; do
-      [ -f "$dropin" ] || continue
-      cp -p "$dropin" "${dropin}.bak.pre-migrate.${backup_suffix}"
-      rm -f "$dropin"
-      svote_upgrade_log "Removed drop-in override ${dropin}"
-    done
-  fi
-
-  svote_upgrade_log "Rewrote ${SERVICE_PATH} for direct cosmovisor startup"
   printf '%s\n' "$backup_path"
 }
 
