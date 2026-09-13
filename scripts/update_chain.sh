@@ -7,7 +7,7 @@
 #   migrate        One-time migration from direct svoted service to a plain Cosmovisor service.
 #                  Requires a prior `prepare` run; migrate never downloads or stages binaries and
 #                  refuses to run if the genesis binary already equals the target tag.
-#                  Rewrites the main systemd unit and removes conflicting drop-ins (e.g. primary.conf).
+#                  Adds a launch override while preserving the original unit and operator drop-ins.
 #                  Can infer --serve-ui style args from the current direct ExecStart when not supplied.
 #   configure-autodownload
 #                  Enable checksum-required Cosmovisor downloads and safely restart the service.
@@ -24,26 +24,78 @@ readonly UPDATE_DEFAULT_DO_BASE='https://shielded-vote.nyc3.digitaloceanspaces.c
 readonly UPDATE_DEFAULT_COMMON_URL='https://shielded-vote.nyc3.digitaloceanspaces.com/scripts/_chain_upgrade_common.sh'
 readonly UPDATE_DEFAULT_UPDATER_URL='https://shielded-vote.nyc3.digitaloceanspaces.com/update_chain.sh'
 
+readonly UPDATE_COMMON_SHA256='ad7258d622631d7d0c76d4fd3eddef45c950c48a41ef36bddeda72a645f647de'
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
 COMMON_LIB=""
-if [ -n "$SCRIPT_DIR" ] && [ -f "${SCRIPT_DIR}/_chain_upgrade_common.sh" ]; then
-  COMMON_LIB="${SCRIPT_DIR}/_chain_upgrade_common.sh"
-elif [ -f "/opt/shielded-vote/scripts/_chain_upgrade_common.sh" ]; then
-  COMMON_LIB="/opt/shielded-vote/scripts/_chain_upgrade_common.sh"
+COMMON_TMP=""
+COMMON_RENDERED=1
+
+bootstrap_sha256_file() {
+  local file="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$file" | awk '{print $1}'
+  else
+    echo "ERROR: sha256sum or shasum is required." >&2
+    return 1
+  fi
+}
+
+if [ "$UPDATE_DEFAULT_COMMON_URL" = '__COMMON_''URL__' ] || \
+   [ "$UPDATE_COMMON_SHA256" = '__COMMON_''SHA256__' ]; then
+  COMMON_RENDERED=0
+fi
+
+select_local_common() {
+  local candidate="$1"
+  local actual_sha256
+
+  [ -f "$candidate" ] || return 1
+  if [ "$COMMON_RENDERED" = "0" ]; then
+    COMMON_LIB="$candidate"
+    return 0
+  fi
+  actual_sha256="$(bootstrap_sha256_file "$candidate")"
+  if [ "$actual_sha256" = "$UPDATE_COMMON_SHA256" ]; then
+    COMMON_LIB="$candidate"
+    return 0
+  fi
+  echo "WARNING: Ignoring local shared helper with an unexpected checksum: ${candidate}." >&2
+  return 1
+}
+
+if [ -n "$SCRIPT_DIR" ]; then
+  select_local_common "${SCRIPT_DIR}/_chain_upgrade_common.sh" || true
 fi
 if [ -z "$COMMON_LIB" ]; then
+  select_local_common "/opt/shielded-vote/scripts/_chain_upgrade_common.sh" || true
+fi
+
+if [ -z "$COMMON_LIB" ]; then
+  if [ "$COMMON_RENDERED" = "0" ]; then
+    echo "ERROR: This source copy has not been rendered for publication." >&2
+    echo "Run it from a vote-sdk checkout or use the versioned operator URL." >&2
+    exit 1
+  fi
+  printf '%s\n' "$UPDATE_COMMON_SHA256" | grep -Eq '^[0-9a-f]{64}$' \
+    || { echo "ERROR: Embedded helper checksum is invalid." >&2; exit 1; }
+  command -v curl >/dev/null 2>&1 \
+    || { echo "ERROR: curl is required." >&2; exit 1; }
   COMMON_TMP="$(mktemp)"
-  DO_BASE_FOR_COMMON="${SVOTE_DO_SPACES_BASE:-${UPDATE_DEFAULT_DO_BASE}}"
-  if [ "$DO_BASE_FOR_COMMON" = '__DO_''BASE__' ]; then
-    DO_BASE_FOR_COMMON='https://shielded-vote.nyc3.digitaloceanspaces.com'
+  curl -fsSL --retry 3 --connect-timeout 15 "$UPDATE_DEFAULT_COMMON_URL" -o "$COMMON_TMP" \
+    || { echo "ERROR: Could not download ${UPDATE_DEFAULT_COMMON_URL}." >&2; exit 1; }
+  actual_common_sha256="$(bootstrap_sha256_file "$COMMON_TMP")"
+  if [ "$actual_common_sha256" != "$UPDATE_COMMON_SHA256" ]; then
+    echo "ERROR: Shared helper checksum mismatch." >&2
+    echo "  Expected: ${UPDATE_COMMON_SHA256}" >&2
+    echo "  Actual:   ${actual_common_sha256}" >&2
+    exit 1
   fi
-  COMMON_URL="$UPDATE_DEFAULT_COMMON_URL"
-  if [ "$COMMON_URL" = '__COMMON_''URL__' ]; then
-    COMMON_URL="${DO_BASE_FOR_COMMON%/}/scripts/_chain_upgrade_common.sh"
-  fi
-  curl -fsSL "$COMMON_URL" -o "$COMMON_TMP"
   COMMON_LIB="$COMMON_TMP"
 fi
+
 # shellcheck source=scripts/_chain_upgrade_common.sh
 source "$COMMON_LIB"
 
@@ -87,9 +139,8 @@ Migrate notes:
   Requires a prior 'prepare' run for the same --plan-name/--tag; migrate no longer downloads or
   stages binaries. It fails fast if the staged layout is missing or the genesis binary already
   equals the target tag (which would let cosmovisor run the upgrade build before the trigger height).
-  Rewrites /etc/systemd/system/<service>.service to launch cosmovisor directly and removes
-  active drop-ins under /etc/systemd/system/<service>.service.d/*.conf (backing them up as
-  *.bak.pre-migrate.<timestamp>). Direct-mode ExecStart flags (e.g. --serve-ui) are copied
+  Preserves the original service and operator drop-ins. Adds a dedicated Cosmovisor launch
+  override and runtime environment file. Direct-mode ExecStart flags (e.g. --serve-ui) are copied
   into the migrated cosmovisor run start command unless --wrapper-svoted-start-args is provided.
   Migrate validates effective runtime mode, effective ExecStart, and a live cosmovisor process.
 
@@ -261,6 +312,7 @@ TMP_DIR=""
 # cleanup
 # Remove TMP_DIR on EXIT when set by run_stage_first.
 cleanup() {
+  [ -z "${COMMON_TMP:-}" ] || rm -f "$COMMON_TMP"
   if [ -n "$TMP_DIR" ] && [ -d "$TMP_DIR" ]; then
     rm -rf "$TMP_DIR"
   fi
@@ -308,15 +360,19 @@ run_stage_first() {
   extracted_svoted=$(svote_upgrade_extract_svoted "$tarball_path" "$TMP_DIR" "$RELEASE_TAG")
   svote_upgrade_verify_binary_tag "$extracted_svoted" "$RELEASE_TAG"
 
+  svote_upgrade_verify_cosmovisor_archive "$RELEASE_TAG" "$TMP_DIR" "$extracted_svoted"
   svote_upgrade_install_cosmovisor "$TMP_DIR"
 
   svote_upgrade_log "Staging genesis binary at ${GENESIS_BIN} (source: ${staged_svoted})"
-  svote_upgrade_stage_binary "$staged_svoted" "$GENESIS_BIN"
+  if ! svote_upgrade_has_cosmovisor_runtime_for_home; then
+    svote_upgrade_stage_binary "$staged_svoted" "$GENESIS_BIN"
+  fi
 
   upgrade_bin=$(svote_upgrade_upgrade_bin_path "$PLAN_NAME")
   svote_upgrade_log "Staging upgrade binary for plan ${PLAN_NAME} at ${upgrade_bin}"
   svote_upgrade_stage_binary "$extracted_svoted" "$upgrade_bin"
 
+  svote_upgrade_write_artifact_identity "$PLAN_NAME" "$RELEASE_TAG" "$upgrade_bin"
   svote_upgrade_assert_layout_ready "$PLAN_NAME"
   svote_upgrade_assert_genesis_pre_upgrade "$RELEASE_TAG"
   svote_upgrade_fixup_cosmovisor_ownership
@@ -341,6 +397,7 @@ run_migrate() {
   svote_upgrade_verify_binary_tag "$(svote_upgrade_upgrade_bin_path "$PLAN_NAME")" "$RELEASE_TAG"
   svote_upgrade_assert_genesis_pre_upgrade "$RELEASE_TAG"
   svote_upgrade_validate_scheduled_plan "$PLAN_NAME" "$ALLOW_NO_PLAN"
+  svote_upgrade_verify_artifact_identity "$PLAN_NAME" "$RELEASE_TAG"
   svote_upgrade_prepare_stale_plan_recovery "$PLAN_NAME"
 
   svote_upgrade_stop_validator_service

@@ -275,7 +275,8 @@ svote_acquire_binaries() {
     fi
     rm -f "${archive}.sha256"
   else
-    echo "WARNING: Checksum file not available - skipping verification."
+    echo "ERROR: Release checksum file is required." >&2
+    exit 1
   fi
 
   local members=("${tarball_dir}/bin/svoted")
@@ -325,7 +326,7 @@ svote_fetch_genesis() {
   echo "Genesis validated (${genesis_source})."
 }
 
-svote_restore_latest_snapshot() {
+svote_restore_latest_snapshot() (
   if [ "${SVOTE_SKIP_SNAPSHOT:-0}" = "1" ]; then
     echo "SVOTE_SKIP_SNAPSHOT=1: skipping snapshot restore; node will sync from genesis."
     return 0
@@ -338,7 +339,7 @@ svote_restore_latest_snapshot() {
   archive="${tmp}/snapshot.tar.lz4"
   listing="${tmp}/snapshot.files"
   state_file="${tmp}/priv_validator_state.json"
-  trap 'rm -rf "${tmp}"' RETURN
+  trap 'rm -rf "${tmp}"' EXIT
 
   echo "Fetching snapshot metadata from ${SNAPSHOT_BASE_URL%/}/latest.json..."
   if ! curl -fsSL --connect-timeout 15 --max-time 60 -o "${metadata}" "${SNAPSHOT_BASE_URL%/}/latest.json"; then
@@ -379,4 +380,4 @@ svote_restore_latest_snapshot() {
   cp "${state_file}" "${HOME_DIR}/data/priv_validator_state.json"
   rm -rf "${HOME_DIR}/data/cs.wal"
   echo "Snapshot restored."
-}
+)

@@ -12,11 +12,18 @@ enabled and checksums required. Pre-staging through `update_chain.sh` removes th
 network dependency at the halt, while the automatic path remains available for
 future checksum-pinned plans.
 
-## First rollout with x/upgrade
+## Preparing production v1.6.0
 
-The first release that adds `x/upgrade` must use **Reset SDK Chain**, not a
-state-preserving deploy. Adding the `upgrade` KV store is itself a store/state
-change, and existing live state does not contain that store.
+Production's v1.4.0 chain already has x/upgrade; the v1.6.0 cutover requires no
+reset. Staging has already applied the `v1.6.0` plan and must not reuse it.
+RC binaries still use plan name `v1.6.0`.
+
+The updater records `prepared-artifact.json` alongside the staged binary and
+checks its hash, release tag, and platform archive checksum against the plan.
+Preparations made with older scripts must rerun `prepare` to create that record.
+Migration preserves operator service settings and starts the current binary.
+Use the infrastructure installer's `--stage-only` option to extract a release
+without switching the active release link or restarting services.
 
 ## Validator upgrade model
 
@@ -505,7 +512,7 @@ journalctl -u svoted -b --no-pager | \
 | `UPGRADE "<name>" NEEDED at height ...` persists | Missing/incorrect staged binary | Re-run `--mode prepare` with exact plan name |
 | `Scheduled plan name mismatch` | Wrong `--plan-name` | Match `svoted query upgrade plan` exactly |
 | `priv_validator_state.json is missing` | Data dir incomplete | Restore from backup or snapshot reset script; do not proceed |
-| Service restart loop after migrate | Bad unit env or cosmovisor path | Check `journalctl -u svoted`; restore unit backup under `/etc/systemd/system/svoted.service.bak.*` |
+| Service restart loop after migrate | Bad unit env or cosmovisor path | Check `journalctl -u svoted` and `svoted.service.d/zz-svote-upgrade-runtime.conf`; correct the error and rerun migrate |
 | Cosmovisor requests an old plan such as `v1` | Direct-mode history left a stale applied-plan marker | Re-run the current migrate instructions with `--chain-api`; do not delete the marker or start `svoted` manually |
 | Checksum mismatch | Corrupted download | Retry; verify tag exists in Spaces/GitHub release |
 
