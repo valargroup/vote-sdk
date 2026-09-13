@@ -27,6 +27,22 @@ if grep -F "SYSTEMD_ENV=\"\${SYSTEMD_PATH}" "$JOIN_SCRIPT" | grep -Fq 'SYSTEMD_S
   fail "join.sh adds skip-backup to direct-mode services"
 fi
 
+echo "=== full-node join: preserve default and explicit service names ==="
+for requested_service in '' custom-full svoted; do
+  (
+    unset SVOTE_SERVICE_NAME
+    if [ -n "$requested_service" ]; then export SVOTE_SERVICE_NAME="$requested_service"; fi
+    export HOME_DIR=/tmp/full-node-home
+    INSTALL_DIR=/tmp/full-node-bin
+    eval "$(sed -n '/^SERVICE_NAME=/p' "${REPO_ROOT}/join-full.sh")"
+    expected_service="$SERVICE_NAME"
+    eval "$(sed -n '/^[[:space:]]*export SVOTE_HOME=/p' "${REPO_ROOT}/join-full.sh")"
+    svote_upgrade_resolve_paths
+    [ "$SERVICE_NAME" = "$expected_service" ] || fail "full-node service changed to $SERVICE_NAME"
+    [ "$SERVICE_PATH" = "/etc/systemd/system/${expected_service}.service" ] || fail "wrong full-node unit path"
+  )
+done
+
 echo "=== env parser: last duplicate value wins ==="
 ENV_BLOB='PATH=/usr/local/bin SVOTE_UPGRADE_MODE=cosmovisor SVOTE_UPGRADE_MODE=direct DAEMON_HOME=/tmp/a DAEMON_HOME=/tmp/b'
 mode=$(svote_upgrade_extract_effective_env_value "$ENV_BLOB" "SVOTE_UPGRADE_MODE")

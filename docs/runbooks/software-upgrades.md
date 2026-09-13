@@ -21,6 +21,10 @@ RC binaries still use plan name `v1.6.0`.
 The updater records `prepared-artifact.json` alongside the staged binary and
 checks its hash, release tag, and platform archive checksum against the plan.
 Preparations made with older scripts must rerun `prepare` to create that record.
+Preparation validates candidate metadata against the scheduled plan before replacing
+the staged executable. A rejected candidate leaves the previous preparation intact.
+For an RC-to-stable replacement, first update the scheduled tag and archive checksums,
+then rerun `prepare` and `verify-prestage` with the stable tag on every prepared node.
 Migration preserves operator service settings and starts the current binary.
 Use the infrastructure installer's `--stage-only` option to extract a release
 without switching the active release link or restarting services.

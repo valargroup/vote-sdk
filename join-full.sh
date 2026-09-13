@@ -219,7 +219,7 @@ PLISTEOF
     # shellcheck disable=SC1090
     source "$upgrade_common"
     rm -f "$upgrade_common"
-    export SVOTE_HOME="$HOME_DIR" SVOTE_INSTALL_DIR="$INSTALL_DIR"
+    export SVOTE_HOME="$HOME_DIR" SVOTE_INSTALL_DIR="$INSTALL_DIR" SVOTE_SERVICE_NAME="$SERVICE_NAME"
     svote_upgrade_resolve_paths
     upgrade_tmp=$(mktemp -d)
     svote_upgrade_install_cosmovisor "$upgrade_tmp"
