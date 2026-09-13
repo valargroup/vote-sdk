@@ -411,6 +411,16 @@ Before rolling coordinated upgrades to production validators, follow the gated
 checklist in [upgrade-validation-checklist.md](upgrade-validation-checklist.md).
 Post-release artifact smoke checks: `scripts/verify_upgrade_release_artifacts.sh`.
 
+## Helper proof concurrency v3 migration
+
+The current binary reads `helper.max_concurrent_proofs_v3`, defaults it to two,
+and ignores both `helper.max_concurrent_proofs` and
+`helper.max_concurrent_proofs_v2`. Consequently, upgrading the binary moves
+every validator to two proof workers without coordinated edits to existing
+`app.toml` files. Operators that need a different width must set the v3 key.
+Each worker holds roughly 500 MB while proving, so the default needs about 1 GB
+free beyond the validator's own footprint.
+
 ## v1.4.0 bounded vote share submission activation
 
 The `v1.4.0` binary enforces round-scoped vote share submission deduplication and

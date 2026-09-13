@@ -202,13 +202,13 @@ jobs:
             echo "  FAIL  [helper] section missing"
             fail=1
           fi
-          if grep -qE '^max_concurrent_proofs_v2 = 2$' "${D}/config/app.toml"; then
-            echo "  OK  helper proof concurrency v2 defaults to 2"
+          if grep -qE '^max_concurrent_proofs_v3 = 2$' "${D}/config/app.toml"; then
+            echo "  OK  helper proof concurrency v3 defaults to 2"
           else
-            echo "  FAIL  helper proof concurrency v2 default is not 2"
+            echo "  FAIL  helper proof concurrency v3 default is not 2"
             fail=1
           fi
-          if grep -qE '^max_concurrent_proofs[[:space:]]*=' "${D}/config/app.toml"; then
+          if grep -qE '^max_concurrent_proofs(_v2)?[[:space:]]*=' "${D}/config/app.toml"; then
             echo "  FAIL  deprecated helper proof concurrency key is still emitted"
             fail=1
           else
