@@ -95,7 +95,7 @@ svote_upgrade_autodetect_from_systemd_unit 0 0 >/dev/null
 [ "$INSTALL_DIR" = "/usr/local/bin" ] || fail "autodetect failed to infer install dir from ExecStart wrapper: ${INSTALL_DIR}"
 [ "$WRAPPER_BIN" = "/tmp/default-install/svoted-wrapper.sh" ] || fail "autodetect must not replace WRAPPER_BIN from direct ExecStart: ${WRAPPER_BIN}"
 
-echo "=== migrate patch: rewrites main unit for cosmovisor and removes drop-ins ==="
+echo "=== migrate patch: preserves main unit and operator drop-ins ==="
 SERVICE_NAME="svoted"
 SERVICE_PATH="${TMP_MIGRATE}/svoted.service"
 DAEMON_HOME="${TMP_MIGRATE}/home"
@@ -142,28 +142,22 @@ svote_upgrade_patch_systemd_unit_for_cosmovisor >/dev/null
 
 grep -q '^Description=svoted$' "${SERVICE_PATH}" || fail "service description not preserved"
 grep -q '^User=root$' "${SERVICE_PATH}" || fail "service user not preserved"
-grep -q "^ExecStart=${COSMOVISOR_BIN} run start --home ${DAEMON_HOME} --serve-ui --ui-dist /opt/ui/dist$" "${SERVICE_PATH}" || fail "service ExecStart is not cosmovisor run start"
-grep -q 'Environment="SVOTE_UPGRADE_MODE=cosmovisor"' "${SERVICE_PATH}" || fail "service missing cosmovisor mode env"
-grep -q "Environment=\"DAEMON_HOME=${DAEMON_HOME}\"" "${SERVICE_PATH}" || fail "service missing daemon home env"
-grep -q 'Environment="DAEMON_NAME=svoted"' "${SERVICE_PATH}" || fail "service missing daemon name env"
-grep -q "Environment=\"COSMOVISOR_BIN=${COSMOVISOR_BIN}\"" "${SERVICE_PATH}" || fail "service missing cosmovisor env"
-grep -q 'Environment="DAEMON_ALLOW_DOWNLOAD_BINARIES=true"' "${SERVICE_PATH}" || fail "service missing auto-download env"
-grep -q 'Environment="DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM=true"' "${SERVICE_PATH}" || fail "service missing checksum requirement"
-grep -q '^EnvironmentFile=-/etc/default/svoted$' "${SERVICE_PATH}" || fail "service missing default env file"
-grep -q '^Restart=on-failure$' "${SERVICE_PATH}" || fail "service missing restart policy"
-
-[ ! -f "${TMP_MIGRATE}/svoted.service.d/primary.conf" ] || fail "primary.conf should be removed"
-[ ! -f "${TMP_MIGRATE}/svoted.service.d/zz-rogue.conf" ] || fail "zz-rogue.conf should be removed"
-[ ! -f "${TMP_MIGRATE}/svoted.service.d/99-cosmovisor-migrate.conf" ] || fail "legacy drop-in should be removed"
-ls "${TMP_MIGRATE}/svoted.service.d/primary.conf.bak.pre-migrate."* >/dev/null 2>&1 || fail "primary.conf backup missing"
-ls "${TMP_MIGRATE}/svoted.service.d/zz-rogue.conf.bak.pre-migrate."* >/dev/null 2>&1 || fail "zz-rogue.conf backup missing"
-ls "${TMP_MIGRATE}/svoted.service.d/99-cosmovisor-migrate.conf.bak.pre-migrate."* >/dev/null 2>&1 || fail "legacy drop-in backup missing"
+runtime_dropin="${TMP_MIGRATE}/svoted.service.d/zz-svote-upgrade-runtime.conf"
+runtime_env="${TMP_MIGRATE}/svoted.service.d/svote-upgrade-runtime.env"
+grep -q "^ExecStart=${COSMOVISOR_BIN} run start --home ${DAEMON_HOME} --serve-ui --ui-dist /opt/ui/dist$" "$runtime_dropin" || fail "Cosmovisor launch missing"
+grep -q '^SVOTE_UPGRADE_MODE=cosmovisor$' "$runtime_env" || fail "runtime mode missing"
+grep -q '^DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM=true$' "$runtime_env" || fail "checksum requirement missing"
+grep -q '^DAEMON_RESTART_AFTER_UPGRADE=true$' "$runtime_env" || fail "automatic restart missing"
+for name in primary.conf zz-rogue.conf 99-cosmovisor-migrate.conf; do
+  [ -f "${TMP_MIGRATE}/svoted.service.d/$name" ] || fail "operator drop-in removed: $name"
+done
+cmp -s "$SERVICE_PATH" "$(ls "${SERVICE_PATH}.bak."* | head -1)" || fail "original unit changed"
 
 first_unit="$(cat "$SERVICE_PATH")"
 svote_upgrade_patch_systemd_unit_for_cosmovisor >/dev/null
 second_unit="$(cat "$SERVICE_PATH")"
 [ "$first_unit" = "$second_unit" ] || fail "rewritten service changed across repeated runs"
-[ ! -f "${TMP_MIGRATE}/svoted.service.d/primary.conf" ] || fail "primary.conf reappeared after second migrate"
+[ -f "${TMP_MIGRATE}/svoted.service.d/primary.conf" ] || fail "primary.conf removed on retry"
 
 echo "=== deploy helper: detects cosmovisor execstart ==="
 TMP_HELPER_UNIT="$(mktemp)"

@@ -12,7 +12,10 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 [ -n "$common_url" ] || { echo "ERROR: common library URL is required." >&2; exit 1; }
 [ -n "$updater_url" ] || { echo "ERROR: updater URL is required." >&2; exit 1; }
 
+common_sha256="$(shasum -a 256 "${repo_root}/scripts/_chain_upgrade_common.sh" | awk '{print $1}')"
+
 sed \
+  -e "s|__COMMON_SHA256__|${common_sha256}|g" \
   -e "s|__RELEASE_TAG__|${version}|g" \
   -e "s|__GITHUB_REPO__|valargroup/vote-sdk|g" \
   -e "s|__DO_BASE__|${do_base}|g" \
