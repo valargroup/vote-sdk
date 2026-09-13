@@ -7,41 +7,6 @@ approval.**
 Related runbooks: [software-upgrades.md](software-upgrades.md),
 [join-chain.md](join-chain.md), [genesis-setup.md](genesis-setup.md).
 
-## Local rehearsal before publication
-
-Run `scripts/test_upgrade_localnet.py` against the matching vote-infrastructure
-checkout before publishing a candidate. It creates an isolated `upgrade-test-1`
-network with real systemd and Cosmovisor, and tests both cutover paths, snapshots,
-real-proof voting, and validator registration/funding/bonding.
-
-Use a native Linux ARM64 or AMD64 runtime. The settings below are for ARM64;
-for native AMD64, set `PLATFORM=linux/amd64` and `UBUNTU_VERSION=22.04`.
-The candidate tag is a local build label; these commands do not publish a tag.
-
-```bash
-PLATFORM=linux/arm64
-UBUNTU_VERSION=24.04
-RUN_DIR=$(mktemp -d)
-docker build --platform "$PLATFORM" --build-arg UBUNTU_VERSION="$UBUNTU_VERSION" \
-  -t svote-upgrade-systemd:local docker/upgrade
-docker build --platform "$PLATFORM" --target e2e-export \
-  -f docker/upgrade/Dockerfile.build \
-  --build-arg VERSION=v1.6.0-rc.999 --build-arg COMMIT="$(git rev-parse HEAD)" \
-  --output "type=local,dest=$RUN_DIR/candidate" .
-for SCENARIO in prestage autodownload; do
-  python3 scripts/test_upgrade_localnet.py --infra ../vote-infrastructure \
-    --platform "$PLATFORM" --candidate-tag v1.6.0-rc.999 \
-    --candidate-binary "$RUN_DIR/candidate/svoted" \
-    --proof-binary "$RUN_DIR/candidate/atomic-delegate-cast" \
-    --scenario "$SCENARIO" --output "$RUN_DIR/$SCENARIO"
-done
-```
-
-Results and logs remain in the output directories; containers are removed by
-default. Both runs must pass before published-artifact validation. The manual
-**Test coordinated upgrade locally** workflow in vote-infrastructure runs this
-rehearsal on native AMD64 with an explicit SDK ref.
-
 ## Stop Point 0 — Pre-merge / pre-release gate
 
 **Gate:** All items PASS before merging PR and cutting a release tag.

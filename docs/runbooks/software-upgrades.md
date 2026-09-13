@@ -16,8 +16,7 @@ future checksum-pinned plans.
 
 Production's v1.4.0 chain already has x/upgrade; the v1.6.0 cutover requires no
 reset. Staging has already applied the `v1.6.0` plan and must not reuse it.
-Validate locally using [upgrade-validation-checklist.md](upgrade-validation-checklist.md)
-before publishing a candidate. RC binaries still use plan name `v1.6.0`.
+RC binaries still use plan name `v1.6.0`.
 
 The updater records `prepared-artifact.json` alongside the staged binary and
 checks its hash, release tag, and platform archive checksum against the plan.
@@ -513,7 +512,7 @@ journalctl -u svoted -b --no-pager | \
 | `UPGRADE "<name>" NEEDED at height ...` persists | Missing/incorrect staged binary | Re-run `--mode prepare` with exact plan name |
 | `Scheduled plan name mismatch` | Wrong `--plan-name` | Match `svoted query upgrade plan` exactly |
 | `priv_validator_state.json is missing` | Data dir incomplete | Restore from backup or snapshot reset script; do not proceed |
-| Service restart loop after migrate | Bad unit env or cosmovisor path | Check `journalctl -u svoted`; restore unit backup under `/etc/systemd/system/svoted.service.bak.*` |
+| Service restart loop after migrate | Bad unit env or cosmovisor path | Check `journalctl -u svoted` and `svoted.service.d/zz-svote-upgrade-runtime.conf`; correct the error and rerun migrate |
 | Cosmovisor requests an old plan such as `v1` | Direct-mode history left a stale applied-plan marker | Re-run the current migrate instructions with `--chain-api`; do not delete the marker or start `svoted` manually |
 | Checksum mismatch | Corrupted download | Retry; verify tag exists in Spaces/GitHub release |
 
