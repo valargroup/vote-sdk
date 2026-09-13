@@ -38,9 +38,9 @@ type Config struct {
 	ChainAPIPort int `mapstructure:"chain_api_port"`
 
 	// MaxConcurrentProofs limits concurrent proof generation goroutines. The
-	// command config layer populates it only from the v2 key and intentionally
-	// ignores the legacy key during the v1.4 cutover.
-	MaxConcurrentProofs int `mapstructure:"max_concurrent_proofs_v2"`
+	// command config layer populates it only from the v3 key and intentionally
+	// ignores both legacy keys during the two-worker cutover.
+	MaxConcurrentProofs int `mapstructure:"max_concurrent_proofs_v3"`
 
 	// SentryDSN is the Sentry DSN for error tracking. When empty, Sentry is
 	// disabled. Can also be set via the SENTRY_DSN environment variable at
@@ -57,7 +57,7 @@ func DefaultConfig() Config {
 		ExposeQueueSummary:  true,
 		DBPath:              "",
 		ChainAPIPort:        1317,
-		MaxConcurrentProofs: 1,
+		MaxConcurrentProofs: 2,
 	}
 }
 
