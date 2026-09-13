@@ -152,10 +152,15 @@ dependencies = [
  "bitvec",
  "blake2s_simd",
  "byteorder",
+ "crossbeam-channel",
  "ff",
  "group",
+ "lazy_static",
+ "log",
+ "num_cpus",
  "pairing",
  "rand_core",
+ "rayon",
  "subtle",
 ]
 
@@ -430,6 +435,15 @@ name = "critical-section"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
+
+[[package]]
+name = "crossbeam-channel"
+version = "0.5.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "98b0cc327b5bc766e7fda9c9260cc0fa81b43a8e240440422dff70788e3f9ef1"
+dependencies = [
+ "crossbeam-utils",
+]
 
 [[package]]
 name = "crossbeam-deque"
@@ -1197,6 +1211,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
+name = "hermit-abi"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e17592d60ebacc7d5e169f4663c5f84f9161cc90328abcfe8456f41e4dfcb284"
+
+[[package]]
 name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1469,9 +1489,23 @@ dependencies = [
 
 [[package]]
 name = "imt-tree"
-version = "0.5.2"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c2c80d291f1fbd82527aa29a194f09b76a2df8f2e92d90a2709355d682a9e26"
+checksum = "0aad3e3ab5a46f4a08d00f5525b86cd0d5204cba64ba68f46e20a590e1808aec"
+dependencies = [
+ "anyhow",
+ "ff",
+ "halo2_gadgets",
+ "hex",
+ "pasta_curves",
+ "rayon",
+]
+
+[[package]]
+name = "imt-tree"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f92c99eb90cebfcd9697072e01c55eb7313297405dd59890556ba808ecea03c8"
 dependencies = [
  "anyhow",
  "hex",
@@ -1798,6 +1832,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "num_cpus"
+version = "1.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91df4bbde75afed763b708b7eee1e8e7651e02d97f6d5dd763e89367e957b23b"
+dependencies = [
+ "hermit-abi",
+ "libc",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1996,32 +2040,34 @@ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
 name = "pir-client"
-version = "0.7.2"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba1965648d9ea094809794710b0a654c9376d034b38405fba610905d91150bbd"
+checksum = "350efadb12ec2d11c8966cd376d9677c9e0038e3bb4aa2acfc69a8edc25700c9"
 dependencies = [
  "anyhow",
+ "ff",
  "futures",
  "hex",
- "imt-tree",
+ "imt-tree 0.2.1",
  "log",
+ "pasta_curves",
  "pir-types",
  "serde_json",
  "tokio",
  "valar-ypir",
- "voting-crypto-deps",
 ]
 
 [[package]]
 name = "pir-types"
-version = "0.6.2"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "334dfc8e3e5b5f06b82bf6f1373b36a35a53d7f3cd44e7c71fab579fef99727a"
+checksum = "635f27cfabeca929f821a0f1c934a15f27fd2922a61c487ecf1daa43b20dfd3e"
 dependencies = [
  "anyhow",
- "imt-tree",
+ "ff",
+ "imt-tree 0.2.1",
+ "pasta_curves",
  "serde",
- "voting-crypto-deps",
 ]
 
 [[package]]
@@ -2745,7 +2791,7 @@ name = "shielded-vote-circuits"
 version = "0.1.0"
 dependencies = [
  "hex",
- "imt-tree",
+ "imt-tree 0.5.3",
  "incrementalmerkletree",
  "nonempty",
  "vote-commitment-tree",
@@ -3375,11 +3421,12 @@ dependencies = [
 
 [[package]]
 name = "vote-commitment-tree"
-version = "0.6.0"
-source = "git+https://github.com/valargroup/zcash_voting?rev=0d209d4c1be59a21f014d21dfc71634a0d942c51#0d209d4c1be59a21f014d21dfc71634a0d942c51"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96c3cd8d61342d6f6643710abdb4f43be542af65e56680836d216b5fe4da6bb9"
 dependencies = [
  "anyhow",
- "imt-tree",
+ "imt-tree 0.5.3",
  "incrementalmerkletree",
  "lazy_static",
  "libc",
@@ -3389,8 +3436,9 @@ dependencies = [
 
 [[package]]
 name = "vote-commitment-tree-client"
-version = "0.8.0"
-source = "git+https://github.com/valargroup/zcash_voting?rev=0d209d4c1be59a21f014d21dfc71634a0d942c51#0d209d4c1be59a21f014d21dfc71634a0d942c51"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24d6aea25b42da138799b32a8fa03047249ddf669eb3203aa3b6fb324038b727"
 dependencies = [
  "base64",
  "hex",
@@ -3403,9 +3451,9 @@ dependencies = [
 
 [[package]]
 name = "voting-circuits"
-version = "0.12.0-rc.1"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ab06fda6c50abd8539e56f7f20f26c99b02e7f2f292e34b7bb35ff10475edbd"
+checksum = "85340971c7e98468ed71856c65b82ae461fb968f7d9c788566f7ea8b799e260e"
 dependencies = [
  "blake2b_simd",
  "incrementalmerkletree",
@@ -3416,9 +3464,9 @@ dependencies = [
 
 [[package]]
 name = "voting-crypto-deps"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4d510090b7c0948010682561d4bea6c1aa4c28f6f6bdb38f24fd12098156287"
+checksum = "7093c43ce71cde30f4d9c1154fa6f0b69c6866a4efb9cb582055a81dcf438a6e"
 dependencies = [
  "halo2_gadgets",
  "halo2_poseidon",
@@ -3682,20 +3730,6 @@ dependencies = [
  "quote",
  "syn 2.0.119",
  "synstructure",
-]
-
-[[package]]
-name = "zakura-wallet-lib"
-version = "0.1.0-rc4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6a1fc54320ff537b9086e618901d1725fe45a9e898d2a953236deda4fcd4421"
-dependencies = [
- "orchard",
- "pczt",
- "zcash_client_backend",
- "zcash_client_sqlite",
- "zcash_keys",
- "zcash_primitives",
 ]
 
 [[package]]
@@ -3976,23 +4010,31 @@ dependencies = [
 
 [[package]]
 name = "zcash_voting"
-version = "3.1.0-rc.13"
-source = "git+https://github.com/valargroup/zcash_voting?rev=0d209d4c1be59a21f014d21dfc71634a0d942c51#0d209d4c1be59a21f014d21dfc71634a0d942c51"
+version = "4.0.0-rc.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4fbceb379555f9450523762c78e488c5e12495d95f9389864468a0b89f8262a"
 dependencies = [
  "anyhow",
  "base64",
  "blake2b_simd",
  "bytes",
  "ed25519-dalek",
+ "ff",
+ "group",
+ "halo2_gadgets",
+ "halo2_proofs",
  "hex",
  "http",
  "http-body-util",
  "hyper",
  "hyper-rustls",
  "hyper-util",
- "imt-tree",
+ "imt-tree 0.5.3",
  "incrementalmerkletree",
  "nonempty",
+ "orchard",
+ "pasta_curves",
+ "pczt",
  "pir-client",
  "pir-types",
  "prost",
@@ -4002,19 +4044,21 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "sinsemilla",
  "subtle",
  "thiserror 2.0.20",
  "tokio",
  "tonic",
- "url",
  "uuid",
  "valar-spiral-rs",
  "valar-ypir",
  "vote-commitment-tree",
  "vote-commitment-tree-client",
  "voting-circuits",
- "voting-crypto-deps",
- "zakura-wallet-lib",
+ "zcash_client_backend",
+ "zcash_client_sqlite",
+ "zcash_keys",
+ "zcash_primitives",
  "zcash_protocol",
  "zeroize",
  "zip32",
