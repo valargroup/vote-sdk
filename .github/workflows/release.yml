@@ -430,6 +430,14 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: release-tarball-darwin-arm64
+      - name: Download linux-amd64 Cosmovisor archive
+        uses: actions/download-artifact@v4
+        with:
+          name: cosmovisor-tarball-linux-amd64
+      - name: Download linux-arm64 Cosmovisor archive
+        uses: actions/download-artifact@v4
+        with:
+          name: cosmovisor-tarball-linux-arm64
       - name: Set version
         run: echo "VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
       - name: Upload to DigitalOcean Spaces
@@ -459,6 +467,10 @@ jobs:
             s3cmd -c /tmp/do-spaces.s3cfg put "${TARBALL}" "s3://${DO_SPACES_BUCKET}/binaries/vote-sdk/" --acl-public --force
             s3cmd -c /tmp/do-spaces.s3cfg put "${TARBALL}.sha256" "s3://${DO_SPACES_BUCKET}/binaries/vote-sdk/" --acl-public --force
           done
+          for PLATFORM in linux-amd64 linux-arm64; do
+            ARCHIVE="shielded-vote-${VERSION}-cosmovisor-v1-${PLATFORM}.tar.gz"
+            s3cmd -c /tmp/do-spaces.s3cfg put "$ARCHIVE" "${ARCHIVE}.sha256" "s3://${DO_SPACES_BUCKET}/binaries/vote-sdk/" --acl-public --force
+          done
           VERSIONED_UPDATE_CHAIN="$(mktemp)"
           scripts/render-update-chain.sh \
             "$VERSION" \
@@ -473,8 +485,12 @@ jobs:
             "s3://${DO_SPACES_BUCKET}/scripts/upgrade/${VERSION}/_chain_upgrade_common.sh"
           s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force scripts/prepare-upgrade-artifacts.sh \
             "s3://${DO_SPACES_BUCKET}/scripts/upgrade/${VERSION}/prepare-upgrade-artifacts.sh"
-          s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force join.sh \
+          VERSIONED_JOIN="$(mktemp)"
+          sed "s|^SVOTE_UPGRADE_SCRIPT_VERSION=.*|SVOTE_UPGRADE_SCRIPT_VERSION=\"\${SVOTE_UPGRADE_SCRIPT_VERSION:-${VERSION}}\"|" \
+            join.sh > "$VERSIONED_JOIN"
+          s3cmd -c /tmp/do-spaces.s3cfg put -m text/plain --acl-public --force "$VERSIONED_JOIN" \
             "s3://${DO_SPACES_BUCKET}/scripts/join/${VERSION}/join.sh"
+          rm -f "$VERSIONED_JOIN"
           VERSIONED_JOIN_FULL="$(mktemp)"
           sed "s|^SVOTE_JOIN_COMMON_VERSION=.*|SVOTE_JOIN_COMMON_VERSION=\"\${SVOTE_JOIN_COMMON_VERSION:-${VERSION}}\"|" \
             join-full.sh > "${VERSIONED_JOIN_FULL}"

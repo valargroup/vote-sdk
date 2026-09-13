@@ -205,7 +205,12 @@ svote_ci_configure_autodownload() {
 [Service]
 Environment="DAEMON_ALLOW_DOWNLOAD_BINARIES=true"
 Environment="DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM=true"
+Environment="DAEMON_RESTART_AFTER_UPGRADE=true"
+EnvironmentFile=${dropin_dir}/cosmovisor-autodownload.env
 EOF
+  printf '%s\n' 'DAEMON_ALLOW_DOWNLOAD_BINARIES=true' 'DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM=true' 'DAEMON_RESTART_AFTER_UPGRADE=true' > "${dropin_dir}/cosmovisor-autodownload.env.new"
+  chmod 0600 "${dropin_dir}/cosmovisor-autodownload.env.new"
+  mv -f "${dropin_dir}/cosmovisor-autodownload.env.new" "${dropin_dir}/cosmovisor-autodownload.env"
   mv -f "${dropin_path}.new" "$dropin_path"
   svote_ci_log "configured checksum-required Cosmovisor auto-download"
 }
@@ -219,12 +224,19 @@ svote_ci_migrate_direct_service_to_cosmovisor() {
   local dropin_dir="${systemd_unit_dir%/}/${service_name}.service.d"
   local dropin_path="${dropin_dir}/99-cosmovisor-runtime.conf"
   local genesis_bin="${daemon_home%/}/cosmovisor/genesis/bin/svoted"
+  local start_args="${SVOTE_WRAPPER_SVOTED_START_ARGS:-}" existing_exec=""
   local applied_plan=""
   local applied_plan_bin=""
   local current_target=""
 
   cosmovisor_bin="$(svote_ci_resolve_cosmovisor_binary "$daemon_home" "$source_bin")"
 
+  existing_exec=$(systemctl cat "$service_name" 2>/dev/null | awk '/^ExecStart=/{sub(/^ExecStart=/, ""); command=$0} END {print command}' || true)
+  if [ -z "$start_args" ]; then
+    case "$existing_exec" in
+      *"svoted start --home ${daemon_home} "*) start_args="${existing_exec#*svoted start --home ${daemon_home} }" ;;
+    esac
+  fi
   svote_ci_log "migrating ${service_name} from direct mode to cosmovisor"
   svote_ci_stage_binary_atomically "$source_bin" "$genesis_bin"
   if applied_plan="$(svote_ci_read_applied_plan_from_upgrade_info "$daemon_home" 2>/dev/null || true)"; then
@@ -244,13 +256,14 @@ svote_ci_migrate_direct_service_to_cosmovisor() {
   cat > "$dropin_path" <<EOF
 [Service]
 ExecStart=
-ExecStart=${cosmovisor_bin} run start --home ${daemon_home}
+ExecStart=${cosmovisor_bin} run start --home ${daemon_home}${start_args:+ ${start_args}}
 Environment="SVOTE_UPGRADE_MODE=cosmovisor"
 Environment="DAEMON_HOME=${daemon_home}"
 Environment="SVOTE_HOME=${daemon_home}"
 Environment="DAEMON_NAME=svoted"
 Environment="DAEMON_ALLOW_DOWNLOAD_BINARIES=true"
 Environment="DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM=true"
+Environment="DAEMON_RESTART_AFTER_UPGRADE=true"
 Environment="COSMOVISOR_BIN=${cosmovisor_bin}"
 Environment="SVOTED_BIN=${source_bin}"
 EOF

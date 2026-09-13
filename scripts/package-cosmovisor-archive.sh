@@ -41,7 +41,7 @@ install -m 0755 "$SVOTED" "$STAGE_DIR/bin/svoted"
 
 ARCHIVE_NAME="shielded-vote-${TAG}-cosmovisor-v1-${PLATFORM}.tar.gz"
 ARCHIVE_PATH="${OUTPUT_DIR}/${ARCHIVE_NAME}"
-tar czf "$ARCHIVE_PATH" -C "$STAGE_DIR" bin/svoted
+COPYFILE_DISABLE=1 tar --format=ustar -czf "$ARCHIVE_PATH" -C "$STAGE_DIR" bin/svoted
 
 if [ "$(tar tzf "$ARCHIVE_PATH")" != "bin/svoted" ]; then
   echo "Cosmovisor archive must contain only bin/svoted" >&2

@@ -213,7 +213,18 @@ PLISTEOF
     LOG_FOLLOW_COMMAND="tail -f ${LOG_FILE}"
     ;;
   Linux)
-    echo "=== Installing systemd service ==="
+    echo "=== Installing Cosmovisor systemd service ==="
+    upgrade_common=$(mktemp)
+    curl -fsSL "${DO_BASE}/scripts/upgrade/${SVOTE_JOIN_COMMON_VERSION:-${CHAIN_BINARY_VERSION}}/_chain_upgrade_common.sh" -o "$upgrade_common"
+    # shellcheck disable=SC1090
+    source "$upgrade_common"
+    rm -f "$upgrade_common"
+    export SVOTE_HOME="$HOME_DIR" SVOTE_INSTALL_DIR="$INSTALL_DIR"
+    svote_upgrade_resolve_paths
+    upgrade_tmp=$(mktemp -d)
+    svote_upgrade_install_cosmovisor "$upgrade_tmp"
+    rm -rf "$upgrade_tmp"
+    svote_upgrade_stage_binary "$SVOTED_BIN" "$GENESIS_BIN"
     sudo tee "/etc/systemd/system/${SERVICE_NAME}.service" >/dev/null <<SVCEOF
 [Unit]
 Description=Shielded-Vote full node (${MONIKER})
@@ -223,7 +234,9 @@ After=network.target
 Type=simple
 User=$(whoami)
 Environment="PATH=${INSTALL_DIR}:/usr/local/bin:/usr/bin:/bin" "SVOTE_CHAIN_ID=${CHAIN_ID}"
-ExecStart=${SVOTED_BIN} start --home ${HOME_DIR}
+Environment="SVOTE_UPGRADE_MODE=cosmovisor" "SVOTE_HOME=${HOME_DIR}" "DAEMON_HOME=${HOME_DIR}" "DAEMON_NAME=svoted"
+Environment="DAEMON_ALLOW_DOWNLOAD_BINARIES=true" "DAEMON_DOWNLOAD_MUST_HAVE_CHECKSUM=true" "DAEMON_RESTART_AFTER_UPGRADE=true" "UNSAFE_SKIP_BACKUP=true"
+ExecStart=${COSMOVISOR_BIN} run start --home ${HOME_DIR}
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal

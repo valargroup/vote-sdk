@@ -1,0 +1,39 @@
+{
+  "compose_project": "svote-upgrade-4e140b2843",
+  "chain_id": "upgrade-test-1",
+  "plan": "v1.6.0",
+  "candidate": "v1.6.0-rc.6",
+  "platform": "linux/arm64",
+  "scenario": "autodownload",
+  "sdk_commit": "9c462421eb315a9d931960d33283e025d1fdf594",
+  "checks": [
+    "release and supervisor checksums verified before network isolation",
+    "two equal-power validators produce blocks using v1.4.0",
+    "coordinator transaction creates non-genesis state before the upgrade",
+    "observer: actual full-node installer starts Cosmovisor and synchronizes",
+    "primary: repeat preparation does not restart the running validator",
+    "secondary: repeat preparation does not restart the running validator",
+    "observer: repeat preparation does not restart the running validator",
+    "migration preserves backup policy and resource limits; both nodes are ready",
+    "infrastructure stage-only leaves current release unchanged",
+    "scheduled plan and exact prepared release pass strict verification",
+    "automatic cutover, applied height, executable hashes, app hashes, and restart recovery",
+    "fresh: actual full-node installer starts Cosmovisor and synchronizes",
+    "post-upgrade snapshot restores into a new Cosmovisor full node",
+    "real-proof atomic delegation, cast, helper processing, and tally",
+    "actual validator installer registers, synchronizes, receives coordinator funding, and bonds"
+  ],
+  "infra_commit": "476150bb4d2bc376432fada29ede49a9fb02518e",
+  "source_sha256": {
+    "scripts/_chain_upgrade_common.sh": "ad7258d622631d7d0c76d4fd3eddef45c950c48a41ef36bddeda72a645f647de",
+    "scripts/update_chain.sh.template": "018369988a6435ecb0e5654c87557ca4e517e3c8ee924192b03a4daa4b410669",
+    "join.sh": "a073d7e0e9a0cbd3ef7de60d737b3b8a38b47793b3165b8d5669c71f8a8f07ca",
+    "join-full.sh": "07b027bd7aa84a92af17b526542a5a815a12d4b5d29eeb144c7dfb0522bf17b3",
+    "scripts/test_upgrade_localnet.py": "22d682c5cc6d0fc47bdeecf8a1e588568531446f433d91930ba2872921c79516"
+  },
+  "candidate_binary_sha256": "459418c83288283811d332981f57de05d7ad758b5fc4a889b5bc7a799f7b99b6",
+  "state_account": "sv159ur2acgwjy472xv47k4ctqu9ur54mrey94c8m",
+  "applied_height": 97,
+  "real_proof_test": "passed",
+  "success": true
+}

@@ -543,7 +543,7 @@ pub fn default_cosmos_tx_config() -> CosmosTxConfig {
     CosmosTxConfig {
         key_name: "validator".to_string(),
         home_dir,
-        chain_id: "svote-1".to_string(),
+        chain_id: std::env::var("SVOTE_CHAIN_ID").unwrap_or_else(|_| "svote-1".to_string()),
         node_url,
     }
 }

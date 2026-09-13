@@ -1,0 +1,8 @@
+.git
+.env
+.env.*
+**/target
+**/node_modules
+**/.cache
+svoted
+create-val-tx
