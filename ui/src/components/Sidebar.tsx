@@ -11,6 +11,7 @@ import {
   Users,
   UserPlus,
   Database,
+  PackageCheck,
   ShieldCheck,
   Rocket,
   ClipboardCheck,
@@ -264,10 +265,18 @@ export function Sidebar({
           Attest round
         </button>
 
-        <button onClick={() => onNavigate("pir-update")}
-          className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs ${currentSection === "pir-update" ? "bg-surface-3 text-text-primary" : "text-text-secondary hover:bg-surface-2"}`}>
-          <ShieldCheck size={15} />Authorize PIR update
+        <button
+          onClick={() => onNavigate("pir-update")}
+          className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs transition-colors cursor-pointer ${
+            currentSection === "pir-update"
+              ? "bg-surface-3 text-text-primary"
+              : "text-text-secondary hover:bg-surface-2 hover:text-text-primary"
+          }`}
+        >
+          <PackageCheck size={15} />
+          Authorize PIR update
         </button>
+
         {showBatchRounds && (
           <button
             onClick={() => onNavigate("batch-rounds")}
