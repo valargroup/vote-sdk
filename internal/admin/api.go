@@ -16,6 +16,8 @@ func RegisterRoutes(
 ) {
 	h := &apiHandler{getAdmin: getAdmin, logger: logger}
 	router.HandleFunc("/api/voting-config", h.handleGetVotingConfig).Methods("GET", "OPTIONS")
+	router.HandleFunc("/api/pir-update-proposal", h.handlePIRUpdateProposal).Methods("POST", "OPTIONS")
+	router.HandleFunc("/api/pir-update-prs", h.handlePIRUpdatePR).Methods("POST", "OPTIONS")
 	router.HandleFunc("/api/sign-config-entry", h.handleSignConfigEntry).Methods("POST", "OPTIONS")
 	router.HandleFunc("/api/config-prs", h.handleCreateConfigPR).Methods("POST", "OPTIONS")
 	router.HandleFunc("/api/register-validator", h.handleRegisterValidator).Methods("POST", "OPTIONS")
