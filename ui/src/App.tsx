@@ -1,3 +1,4 @@
+import { PIRUpdatePage } from "./components/PIRUpdatePage";
 // Tailwind safelist for dynamically-constructed binary-vote classes:
 // bg-success bg-success/10 bg-success/60 bg-danger bg-danger/10 bg-danger/60 text-success text-danger
 import { Fragment, useState, useCallback, useRef, useEffect, useMemo } from "react";
@@ -83,6 +84,7 @@ type Section =
   | "validators"
   | "validator-join"
   | "coordinator-actions"
+  | "pir-update"
   | "attest-round"
   | "endorsers"
   | "upgrades"
@@ -104,6 +106,7 @@ const SECTION_PATHS: Record<Section, string> = {
   "validator-join": "/validator-join",
   "coordinator-actions": "/approvals",
   "attest-round": "/attest-round",
+  "pir-update": "/pir-update",
   endorsers: "/endorsements",
   upgrades: "/upgrades",
   snapshot: "/snapshot",
@@ -601,6 +604,7 @@ function App() {
         {section === "coordinator-actions" && <CoordinatorActionsPage wallet={wallet} />}
 
         {section === "attest-round" && <AttestRoundEntryPage />}
+        {section === "pir-update" && <PIRUpdatePage />}
 
         {section === "vote-manager-keys" && <VoteManagerKeysPage wallet={wallet} />}
 
