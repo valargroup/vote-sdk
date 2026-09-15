@@ -1181,3 +1181,44 @@ export async function rejectRegistration(params: ApproveRegistrationParams): Pro
 
 // submitSession was removed: MsgCreateVotingSession is now proposed as a
 // coordinator action signed client-side. See cosmosTx.ts.
+
+// -- Coordinator-authorized PIR updates --
+
+/** Binary/snapshot target the coordinator asks svoted to prepare. */
+export interface PIRConfigRequest {
+  schema_version: 1;
+  binary_tag: string;
+  snapshot_height: number;
+}
+
+/** Signed attestations submitted alongside the proposed pir.json. */
+export interface PIRUpdatePRRequest {
+  base_sha: string;
+  config: string;
+  attestations: unknown;
+}
+
+/**
+ * Ask svoted to prepare a PIR update proposal for the given binary and
+ * snapshot. The environment is not a parameter: svoted derives the scope and
+ * Zcash network itself and echoes them back on the proposal.
+ */
+export async function createPIRUpdateProposal<T>(cfg: PIRConfigRequest): Promise<T> {
+  return fetchJson<T>("/api/pir-update-proposal", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(cfg),
+  });
+}
+
+/**
+ * Open the token-holder-voting-config pull request carrying the proposed
+ * pir.json and its coordinator attestations as a single commit.
+ */
+export async function createPIRUpdatePR(req: PIRUpdatePRRequest): Promise<{ html_url: string }> {
+  return fetchJson<{ html_url: string }>("/api/pir-update-prs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+}

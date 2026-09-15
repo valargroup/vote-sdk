@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  createPIRUpdatePR,
+  createPIRUpdateProposal,
   fetchChainId,
   getActiveRounds,
   getActiveRoundsFromList,
@@ -320,5 +322,58 @@ describe("active round helpers", () => {
       "/shielded-vote/v1/rounds/overview",
       undefined,
     );
+  });
+});
+
+describe("PIR update admin requests", () => {
+  // Regression: these endpoints are served by svoted in-process alongside the
+  // UI, so they must be fetched same-origin. Prefixing them with the
+  // configurable chain URL sent them to a host that serves chain REST but not
+  // /api/*, which failed with an opaque network error.
+  function captureFetch(payload: unknown): string[] {
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", async (input: string) => {
+      urls.push(input);
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify(payload),
+      };
+    });
+    return urls;
+  }
+
+  it("posts the proposal same-origin despite a chain URL override", async () => {
+    vi.stubGlobal("localStorage", {
+      getItem: () => "https://stage.vote-chain-primary.example",
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+    });
+    const urls = captureFetch({ scope: "stage" });
+
+    await createPIRUpdateProposal({
+      schema_version: 1,
+      binary_tag: "v1.2.3",
+      snapshot_height: 4245460,
+    });
+
+    expect(urls).toEqual(["/api/pir-update-proposal"]);
+  });
+
+  it("posts the pull request same-origin despite a chain URL override", async () => {
+    vi.stubGlobal("localStorage", {
+      getItem: () => "https://stage.vote-chain-primary.example",
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+    });
+    const urls = captureFetch({ html_url: "https://github.com/x/y/pull/1" });
+
+    await createPIRUpdatePR({
+      base_sha: "a".repeat(40),
+      config: "{}",
+      attestations: {},
+    });
+
+    expect(urls).toEqual(["/api/pir-update-prs"]);
   });
 });

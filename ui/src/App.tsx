@@ -1,4 +1,3 @@
-import { PIRUpdatePage } from "./components/PIRUpdatePage";
 // Tailwind safelist for dynamically-constructed binary-vote classes:
 // bg-success bg-success/10 bg-success/60 bg-danger bg-danger/10 bg-danger/60 text-success text-danger
 import { Fragment, useState, useCallback, useRef, useEffect, useMemo } from "react";
@@ -17,6 +16,7 @@ import { EndorsersPage } from "./components/EndorsersPage";
 import { UpgradesPage } from "./components/UpgradesPage";
 import { QueueMonitorPage } from "./components/QueueMonitorPage";
 import { VoteManagerKeysPage } from "./components/VoteManagerKeysPage";
+import { PIRUpdatePage } from "./components/PIRUpdatePage";
 import { useDetectedChainId, useSelectedChainUrl } from "./hooks/useDetectedChainId";
 import { useStore } from "./store/useStore";
 import { SAMPLE_ROUND_TEMPLATES, type SampleRoundTemplateId } from "./store/sampleRounds";
