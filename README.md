@@ -556,3 +556,20 @@ message CeremonyState {
   uint64                      phase_timeout = 8;  // Timeout in seconds for current phase
 }
 ```
+
+### Coordinator-authorized PIR updates
+
+The **Authorize PIR update** admin page prepares a `pir.json` containing only
+`schema_version`, `snapshot_height`, and `binary_tag`, plus adjacent
+`pir_attestations.json`. The coordinator signs locally, and `/api/pir-update-prs`
+creates one commit containing both files in token-holder-voting-config. Configure
+`admin.config_url`, the existing config-PR GitHub integration, and
+`SVOTE_ZCASH_NETWORK` for the intended environment.
+
+Only the compiled `valargroup` key can authorize PIR software updates, including
+staging. This is a separate signing domain from voting-round attestations.
+There is no expiry or replay counter. Artifact hashes are bound to the signature;
+selecting an older signed target permits a downgrade. The matching host workflow
+and wire format are documented in vote-nullifier-pir's
+`docs/runbooks/automatic-pir-updates.md`. The three repositories share
+`pir-update-vector.json` as a cross-language verification fixture.
