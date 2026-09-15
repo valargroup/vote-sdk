@@ -21,7 +21,13 @@ export function pirSigningBytes(scope: string, p: PIRPayload): Uint8Array {
   return new TextEncoder().encode(`valargroup/pir-update/v1\n${scope}\n${hashes.join('\n')}\n`);
 }
 export async function validatePIRProposal(proposal: PIRProposal, scope: string, tag: string, height: number) {
-  if (proposal.scope !== scope) throw new Error('Dashboard environment differs from selected environment');
+  // The scope is derived from the connected chain, so a mismatch means the
+  // wallet or endpoint points at a different environment than this svoted.
+  if (proposal.scope !== scope) {
+    throw new Error(
+      `This dashboard authorizes the ${proposal.scope} environment, but the connected chain resolves to ${scope}. Connect to the matching chain and retry.`
+    );
+  }
   const cfg = JSON.parse(proposal.config);
   if (cfg.schema_version !== 1 || cfg.binary_tag !== tag || cfg.snapshot_height !== height ||
       Object.keys(cfg).sort().join(',') !== 'binary_tag,schema_version,snapshot_height') {

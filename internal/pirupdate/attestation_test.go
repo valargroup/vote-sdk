@@ -54,3 +54,27 @@ func TestSharedVector(t *testing.T) {
 		require.Error(t, err)
 	}
 }
+
+// The pinned coordinator keys must differ per scope. Sharing one key across
+// prod and stage would leave SigningBytes' domain prefix as the only thing
+// separating the environments, and would force a stage coordinator to
+// re-derive the prod key against the prod chain ID.
+func TestTrustedKeysDifferPerScope(t *testing.T) {
+	prod := TrustedKeys("prod")
+	stage := TrustedKeys("stage")
+	require.NotEmpty(t, prod)
+	require.NotEmpty(t, stage)
+
+	prodKeys := map[string]bool{}
+	for _, k := range prod {
+		require.NotEmpty(t, k.Pubkey)
+		prodKeys[k.Pubkey] = true
+	}
+	for _, k := range stage {
+		require.NotEmpty(t, k.Pubkey)
+		require.False(t, prodKeys[k.Pubkey],
+			"stage pins a key that is also trusted for prod: %s", k.Pubkey)
+	}
+
+	require.Empty(t, TrustedKeys("nonsense"))
+}
