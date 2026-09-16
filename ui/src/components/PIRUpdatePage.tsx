@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   AlertCircle,
   AlertTriangle,
@@ -10,7 +10,11 @@ import { useWallet } from "../hooks/useWallet";
 import { useDetectedChainId } from "../hooks/useDetectedChainId";
 import { useUIConfig } from "../store/uiConfigContext";
 import { deriveEd25519FromKeplr } from "../api/votingKey";
-import { createPIRUpdateProposal, createPIRUpdatePR } from "../api/chain";
+import {
+  createPIRUpdateProposal,
+  createPIRUpdatePR,
+  getNullifierStatus,
+} from "../api/chain";
 import {
   signPIRProposal,
   validatePIRProposal,
@@ -24,6 +28,9 @@ import { CopyButton } from "./CopyButton";
 
 const INPUT_CLASS =
   "w-full px-3 py-2 rounded-lg bg-surface-2 border border-border text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 font-mono";
+
+const SECONDARY_BUTTON_CLASS =
+  "px-3 py-2 bg-surface-3 hover:bg-surface-2 text-text-secondary hover:text-text-primary rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-default inline-flex items-center gap-1.5 shrink-0";
 
 const PRIMARY_BUTTON_CLASS =
   "px-3 py-2 bg-accent/90 hover:bg-accent text-surface-0 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-default inline-flex items-center gap-1.5";
@@ -45,6 +52,30 @@ export function PIRUpdatePage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [pr, setPR] = useState("");
+
+  // The height the PIR fleet is currently serving, shown in Settings as
+  // "Latest ingested height". Offered as a one-click fill because it is the
+  // usual starting point when only the binary is being rolled forward.
+  const [servedHeight, setServedHeight] = useState<number | null>(null);
+  const [servedHeightLoaded, setServedHeightLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getNullifierStatus()
+      .then((status) => {
+        if (cancelled) return;
+        setServedHeight(status.latest_height);
+        setServedHeightLoaded(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setServedHeight(null);
+        setServedHeightLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function resetResults() {
     setProposal(null);
@@ -198,18 +229,55 @@ export function PIRUpdatePage() {
                   >
                     Published snapshot height
                   </label>
-                  <input
-                    id="pir-snapshot-height"
-                    disabled={busy}
-                    value={height}
-                    inputMode="numeric"
-                    placeholder="must be divisible by 10"
-                    onChange={(e) => {
-                      setHeight(e.target.value);
-                      resetResults();
-                    }}
-                    className={`${INPUT_CLASS} mt-1`}
-                  />
+                  <div className="mt-1 flex gap-2">
+                    <input
+                      id="pir-snapshot-height"
+                      disabled={busy}
+                      value={height}
+                      inputMode="numeric"
+                      placeholder="must be divisible by 10"
+                      onChange={(e) => {
+                        setHeight(e.target.value);
+                        resetResults();
+                      }}
+                      className={`${INPUT_CLASS} flex-1`}
+                    />
+                    <button
+                      type="button"
+                      disabled={busy || servedHeight == null}
+                      onClick={() => {
+                        if (servedHeight == null) return;
+                        setHeight(String(servedHeight));
+                        resetResults();
+                      }}
+                      title={
+                        servedHeight != null
+                          ? `Fill in ${servedHeight.toLocaleString()}, the height the PIR fleet is currently serving`
+                          : "The PIR service did not report a height"
+                      }
+                      className={SECONDARY_BUTTON_CLASS}
+                    >
+                      {!servedHeightLoaded && (
+                        <Loader2 size={12} className="animate-spin" />
+                      )}
+                      Select latest ingested height
+                    </button>
+                  </div>
+                  {servedHeightLoaded && servedHeight == null && (
+                    <p className="mt-1 text-[10px] text-text-muted">
+                      The PIR service did not report a height, so it cannot be
+                      filled in automatically. Enter the published snapshot
+                      height manually.
+                    </p>
+                  )}
+                  {servedHeight != null && (
+                    <p className="mt-1 text-[10px] text-text-muted">
+                      Latest ingested height:{" "}
+                      <span className="font-mono text-text-secondary">
+                        {servedHeight.toLocaleString()}
+                      </span>
+                    </p>
+                  )}
                 </div>
               </div>
 
