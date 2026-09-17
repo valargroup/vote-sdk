@@ -88,7 +88,7 @@ func TestConfigPRReusePreservesSignaturesAndAcknowledgments(t *testing.T) {
 			require.NoError(t, err)
 			priorBody := "Existing reviewer notes.\n\nPrevious manager acknowledged verifying the IMT."
 			savedBody := priorBody
-			patches, creates := 0, 0
+			patches, creates, updates := 0, 0, 0
 			gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch {
 				case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/git/ref/"):
@@ -104,6 +104,7 @@ func TestConfigPRReusePreservesSignaturesAndAcknowledgments(t *testing.T) {
 						writeContent(t, w, branchContent, "branch-file-sha")
 					}
 				case r.Method == http.MethodPut:
+					updates++
 					if rejectUpdate {
 						http.Error(w, `{"message":"update rejected"}`, 422)
 						return
@@ -114,8 +115,13 @@ func TestConfigPRReusePreservesSignaturesAndAcknowledgments(t *testing.T) {
 					}
 					require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
 					require.Equal(t, "branch-file-sha", request.SHA)
-					branchContent, err = base64.StdEncoding.DecodeString(request.Content)
+					updated, err := base64.StdEncoding.DecodeString(request.Content)
 					require.NoError(t, err)
+					if bytes.Equal(updated, branchContent) {
+						http.Error(w, `{"message":"redundant content update"}`, 422)
+						return
+					}
+					branchContent = updated
 					var cfg votingconfig.SignedConfig
 					require.NoError(t, json.Unmarshal(branchContent, &cfg))
 					require.Len(t, cfg.Rounds[body.RoundID].Signatures, 2)
@@ -160,6 +166,20 @@ func TestConfigPRReusePreservesSignaturesAndAcknowledgments(t *testing.T) {
 			resp = serveCreateConfigPR(t, router, body)
 			require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
 			require.Equal(t, 1, patches, "retry must not duplicate acknowledgment")
+			require.Equal(t, 1, updates, "retry must not rewrite unchanged content")
+			var retry createConfigPRResponse
+			require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &retry))
+			require.Empty(t, retry.CommitSHA, "no new commit was created")
+
+			firstManager := body.Auth.SignerAddress
+			body.Auth = signTestIntent(t, body.Auth.Payload)
+			require.NotEqual(t, firstManager, body.Auth.SignerAddress)
+			resp = serveCreateConfigPR(t, router, body)
+			require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+			require.Equal(t, 1, updates, "another manager's acknowledgment does not change the config")
+			require.Equal(t, 2, patches)
+			require.Contains(t, savedBody, firstManager)
+			require.Contains(t, savedBody, body.Auth.SignerAddress)
 		})
 	}
 }

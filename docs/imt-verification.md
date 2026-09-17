@@ -61,5 +61,6 @@ The PR body records the authenticated vote-manager address, round ID, and signed
 round-authorization hash with the acknowledgment. It records the person's
 statement, not an independently certified test result. Reusing an open PR
 preserves its existing branch signatures and body, appends the new acknowledgment,
-and avoids duplicate records on retry. Updates are serialized within one admin
+and avoids duplicate records on retry. An unchanged config skips the file write
+while still recording a new manager's acknowledgment. Updates are serialized within one admin
 server. GitHub content conflicts fail and can be retried.

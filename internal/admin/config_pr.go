@@ -510,7 +510,7 @@ func (a *Admin) createConfigPR(ctx context.Context, body createConfigPRRequest) 
 		if branchExists {
 			return nil, err
 		}
-		_, branchFileSHA, err = client.getContent(ctx, dynamicPath, a.configPR.BaseBranch)
+		branchContent, branchFileSHA, err = client.getContent(ctx, dynamicPath, a.configPR.BaseBranch)
 		if err != nil {
 			return nil, err
 		}
@@ -555,9 +555,13 @@ func (a *Admin) createConfigPR(ctx context.Context, body createConfigPRRequest) 
 	if body.isBatch() {
 		message = fmt.Sprintf("Add signed config entries for %d rounds", len(rounds))
 	}
-	commitSHA, err := client.updateContent(ctx, dynamicPath, branch, branchFileSHA, message, mergedContent)
-	if err != nil {
-		return nil, err
+	var commitSHA string
+	// An acknowledgment can change even when the signed config is unchanged.
+	if !bytes.Equal(branchContent, mergedContent) {
+		commitSHA, err = client.updateContent(ctx, dynamicPath, branch, branchFileSHA, message, mergedContent)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	prBody := appendIMTAcknowledgments(configPRBody(body, mergedExisting, resolvedKeyIDs, a.configPR), body)
