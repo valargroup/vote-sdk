@@ -11,7 +11,9 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 - Add a read-only round identity query and require an IMT verification
   acknowledgment in dashboard attestation and endorsement flows. Config PRs
   record the signed acknowledgment and preserve earlier signatures and records.
-  No verification report upload is required. Older config-PR clients must refresh.
+  The linked instructions repeat PIR's normal sync and tree construction, with
+  raw-block verification available as an optional mode. No verification report
+  upload is required. Older config-PR clients must refresh.
 
 - Move every upgraded validator helper to the benchmarked default of two
   concurrent proof workers by introducing `max_concurrent_proofs_v3` and

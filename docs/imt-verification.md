@@ -25,9 +25,14 @@ the round ID using `ffi/roundid.DeriveRoundID`. A mismatch exits nonzero.
 The JSON result includes the on-chain and computed round IDs, snapshot height
 and hash, IMT root, and other round identity inputs. This command checks the
 round ID's commitment to the root. It does **not** rebuild the tree. Use the
-linked `verify-round-imt.sh` wrapper to combine this query with `nf-server
-verify-root` and an independently authenticated Zcash snapshot hash. Use a voting
-node you trust. This query does not independently authenticate voting consensus.
+linked `verify-round-imt.sh` wrapper to combine this query with `nf-server sync`
+in a fresh directory. The default mode repeats PIR's normal lightwalletd sync
+and tree construction, requires the exact snapshot height, and compares the
+exported circuit root with the on-chain root. It trusts the selected lightwalletd
+source and shares PIR's tree implementation. Authenticated raw-block rebuilding
+remains available with `--mode raw-blocks` for an explicit stronger check. Use a
+voting node you trust. This query does not independently authenticate voting
+consensus.
 
 ## Dashboard flows
 
