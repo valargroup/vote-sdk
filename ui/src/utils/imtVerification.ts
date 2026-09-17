@@ -6,7 +6,7 @@ export const IMT_VERIFICATION_ACKNOWLEDGMENT = {
 } as const;
 
 export const IMT_VERIFICATION_GUIDE_URL =
-  "https://github.com/valargroup/vote-nullifier-pir/blob/33da107e1c743a1301520596eec39c29586e0cb7/docs/verify-round-imt-ai.md";
+  "https://github.com/valargroup/vote-nullifier-pir/blob/main/docs/verify-round-imt-ai.md";
 
 export interface IMTVerificationRound {
   roundId: string;
@@ -17,7 +17,7 @@ export interface IMTVerificationRound {
 export function imtVerificationPrompt(roundId: string, chainId: string, network: string | null): string {
   return `Follow ${IMT_VERIFICATION_GUIDE_URL} to reproduce PIR's IMT root for round ${roundId} on voting chain ${chainId || "(confirm with me)"}.
 Zcash network: ${network || "confirm with me"}.
-Use a trusted voting node and the lightwalletd endpoint used for PIR sync in this environment from my available context. Ask if either is missing.
+Use my supplied voting CometBFT RPC and lightwalletd endpoints for this environment. For any endpoint I have not supplied, use the matching public default in the guide without asking. Ask only if required inputs remain missing or the chain and network are unclear or inconsistent.
 Verify this exact round whether or not it is approved, attested, or endorsed. Run the normal PIR sync and tree construction in a fresh directory at the exact snapshot height, compare the circuit root, and check the round ID. Print the results. Do not substitute a newer round.
 Use the default pir-sync mode. Raw-block verification is optional and only needed if I explicitly request it.
 No file upload is needed. Do not sign, attest, endorse, check the acknowledgment, or create a PR.`;
