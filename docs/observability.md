@@ -387,8 +387,10 @@ regressions visible in the Sentry releases dashboard.
   middleware, which recovers panics and reports them to Sentry before
   returning a 500 response. It can also create sampled transactions for 4xx
   responses. Ordinary 4xx responses do not create Sentry error events. The
-  Sentry hooks remove helper request bodies and the `X-Helper-Token` header from
-  both error and transaction events.
+  Sentry hooks remove helper request bodies and client address fields from
+  both error and transaction events. Request headers are limited to `Accept`,
+  `Content-Type`, `Content-Length`, and `Host`, which also omits `X-Helper-Token`
+  and proxy forwarding headers.
 - **Processor goroutines** -- each share processing goroutine has a
   `recover()` guard that captures panics to Sentry and marks the share as
   failed, preventing a single bad share from crashing the processor loop.

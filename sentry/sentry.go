@@ -58,6 +58,7 @@ func InitSentry(dsn, release, serverName string, logger log.Logger) error {
 		ServerName:       serverName,
 		SampleRate:       1.0,
 		TracesSampler:    newTraceSampler(env),
+		SendDefaultPII:   false,
 		AttachStacktrace: true,
 		EnableTracing:    enableTracing,
 		BeforeSend:       filterNoisyErrorEvents,
@@ -128,11 +129,16 @@ func scrubSensitiveRequestEvent(event *sentrylib.Event) *sentrylib.Event {
 	if event == nil {
 		return nil
 	}
+	event.User.IPAddress = ""
 	if event.Request == nil {
 		return event
 	}
+	event.Request.Env = nil
+	// Keep basic HTTP metadata without depending on proxy-specific header names.
 	for header := range event.Request.Headers {
-		if strings.EqualFold(header, "X-Helper-Token") {
+		switch strings.ToLower(header) {
+		case "accept", "content-type", "content-length", "host":
+		default:
 			delete(event.Request.Headers, header)
 		}
 	}
