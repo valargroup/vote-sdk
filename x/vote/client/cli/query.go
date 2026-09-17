@@ -32,7 +32,7 @@ func GetQueryCmd() *cobra.Command {
 		RunE:                       client.ValidateCmd,
 	}
 
-	cmd.AddCommand(CmdVerifyTally())
+	cmd.AddCommand(CmdVerifyTally(), CmdVerifyRound())
 	return cmd
 }
 

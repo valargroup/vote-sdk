@@ -504,6 +504,7 @@ func signedConfigPRAuth(t *testing.T, body createConfigPRRequest) configPRAuth {
 		RoundID:           body.RoundID,
 		SignedPayloadHash: body.SignedPayloadHash,
 		EntrySHA256:       entryHash,
+		IMTVerification:   imtVerificationAcknowledgment{Acknowledged: true, StatementVersion: 1},
 		Timestamp:         time.Now().Unix(),
 	})
 	if err != nil {
@@ -671,6 +672,7 @@ func signedConfigPRBatchAuth(t *testing.T, body createConfigPRRequest) configPRA
 			RoundID:           in.RoundID,
 			SignedPayloadHash: in.SignedPayloadHash,
 			EntrySHA256:       entryHash,
+			IMTVerification:   imtVerificationAcknowledgment{Acknowledged: true, StatementVersion: 1},
 		})
 	}
 	payloadBytes, err := marshalConfigPRIntentPayload(configPRBatchIntentPayload{

@@ -1,3 +1,4 @@
+import { IMT_VERIFICATION_ACKNOWLEDGMENT } from "./imtVerification";
 import type { ChainRound } from "../api/chain";
 import { isActiveRoundStatus } from "../api/chain";
 import { normalizeRoundId } from "./attestEntry";
@@ -52,6 +53,7 @@ export function buildBatchConfigPrIntent(
       round_id: r.round_id,
       signed_payload_hash: r.signed_payload_hash,
       entry_sha256: r.entry_sha256,
+      imt_verification: IMT_VERIFICATION_ACKNOWLEDGMENT,
     })),
     timestamp,
   });
