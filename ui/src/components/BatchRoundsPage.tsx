@@ -26,6 +26,12 @@ import {
   matchBatchRounds,
 } from "../utils/batchRounds";
 import { buildChainOptions, isProposalValid } from "../utils/proposals";
+import { IMTVerificationAcknowledgment } from "./IMTVerificationAcknowledgment";
+import { useIMTAcknowledgment } from "../hooks/useIMTAcknowledgment";
+import { useDetectedChainId, useSelectedChainUrl } from "../hooks/useDetectedChainId";
+import { imtVerificationChainError, rootHex } from "../utils/imtVerification";
+
+interface PreparedRound { name: string; roundIdHex: string; eaPk: string; snapshotHeight?: string; snapshotBlockhash?: string; circuitRoot: string; }
 
 const MAX_BATCH_ROUNDS = 20;
 const POLL_INTERVAL_MS = 5_000;
@@ -52,6 +58,7 @@ type BatchPhase =
   | "idle"
   | "confirm-resume"
   | "running-create"
+  | "review-imt"
   | "signing"
   | "creating-pr"
   | "done"
@@ -94,6 +101,11 @@ export function BatchRoundsPage({
   // Rounds share this end time instead of the template's, which may be stale
   // by the time a batch runs. Defaults to 24 hours from when the page opened.
   const [endTimeLocal, setEndTimeLocal] = useState(defaultEndTimeLocal);
+  const [prepared, setPrepared] = useState<PreparedRound[]>([]);
+  const endpoint = useSelectedChainUrl();
+  const chainId = useDetectedChainId();
+  const chainError = imtVerificationChainError(chainId, wallet.chainId);
+  const acknowledgment = useIMTAcknowledgment(JSON.stringify([endpoint, chainId, zcashNetwork, wallet.address, wallet.chainId, prepared]));
   const [items, setItems] = useState<BatchRoundItem[]>([]);
   const [phase, setPhase] = useState<BatchPhase>("idle");
   const [runError, setRunError] = useState("");
@@ -220,6 +232,7 @@ export function BatchRoundsPage({
     const runId = runIdRef.current + 1;
     runIdRef.current = runId;
     setRunError("");
+    setPrepared([]);
     setPrUrl("");
     setResumeNames([]);
 
@@ -260,7 +273,7 @@ export function BatchRoundsPage({
       // PENDING round at a time, and signAndBroadcast refetches the account
       // sequence per call, so each create must be awaited (never parallel)
       // and each round must activate before the next create.
-      const ready: Array<{ name: string; roundIdHex: string; eaPk: string }> = [];
+      const ready: PreparedRound[] = [];
       for (const [i, name] of names.entries()) {
         if (runIdRef.current !== runId) return;
         const adopted = matchBatchRounds([name], overview.current_rounds).get(name);
@@ -293,7 +306,9 @@ export function BatchRoundsPage({
             roundIdHex: active.roundIdHex,
             eaPk: active.eaPk,
           });
-          ready.push({ name, ...active });
+          const current = await chainApi.getRound(active.roundIdHex);
+          if (current.round.ea_pk !== active.eaPk) throw new Error("Round election authority key changed. Resume the batch to review it.");
+          ready.push({ name, ...active, snapshotHeight: current.round.snapshot_height, snapshotBlockhash: current.round.snapshot_blockhash, circuitRoot: rootHex(current.round.nullifier_imt_root) });
         } catch (err) {
           throw Object.assign(
             err instanceof Error ? err : new Error(String(err)),
@@ -302,19 +317,52 @@ export function BatchRoundsPage({
         }
       }
 
-      // Phase B: derive the Ed25519 key once (one Keplr popup) and sign all
-      // entries locally, then a single intent signature and one batch PR.
       if (runIdRef.current !== runId) return;
+      setPrepared(ready);
+      setPhase("review-imt");
+    } catch (err) {
+      if (runIdRef.current !== runId) return;
+      const message = err instanceof Error ? err.message : String(err);
+      if (message === "cancelled") return;
+      const itemIndex = (err as { itemIndex?: number }).itemIndex;
+      if (itemIndex !== undefined) {
+        updateItem(runId, itemIndex, { state: "error", error: message });
+      }
+      setRunError(message);
+      setPhase("error");
+    }
+  };
+
+  const handleAttest = async () => {
+    const runId = runIdRef.current;
+    const ready = prepared;
+    setRunError("");
+    try {
+      if (chainError) throw new Error(chainError);
+      const assertCurrent = acknowledgment.capture();
+      if (ready.length === 0) throw new Error("Create the rounds before attesting them.");
+      if (!keplrConnected) throw new Error("Connect Keplr before attesting the rounds.");
       setPhase("signing");
+      for (const round of ready) {
+        const current = (await chainApi.getRound(round.roundIdHex)).round;
+        assertCurrent();
+        if (current.ea_pk !== round.eaPk || current.snapshot_height !== round.snapshotHeight ||
+          current.snapshot_blockhash !== round.snapshotBlockhash || rootHex(current.nullifier_imt_root) !== round.circuitRoot) {
+          throw new Error("Round fields changed. Resume the batch and acknowledge the current rounds.");
+        }
+      }
+      if (runIdRef.current !== runId) return;
       const key = await votingKey.deriveEd25519FromKeplr(
         wallet.address!,
         wallet.chainId!,
         wallet.signKeplrPayload
       );
+      assertCurrent();
       const signedRounds: chainApi.ConfigPRBatchRoundInput[] = [];
       const intentRounds = [];
       for (const round of ready) {
         const signed = await buildSignedRoundEntry(round.roundIdHex, round.eaPk, key);
+        assertCurrent();
         signedRounds.push({
           round_id: round.roundIdHex,
           entry: signed.entry,
@@ -342,7 +390,9 @@ export function BatchRoundsPage({
         intentRounds,
         Math.floor(Date.now() / 1000)
       );
+      assertCurrent();
       const signature = await wallet.signPayload(payload);
+      assertCurrent();
       const resp = await chainApi.createConfigPrBatch({
         rounds: signedRounds,
         pir_layout: AUTHORIZATION_PIR_LAYOUT,
@@ -355,18 +405,13 @@ export function BatchRoundsPage({
         },
       });
       if (runIdRef.current !== runId) return;
+      assertCurrent();
       setItems((prev) => prev.map((item) => ({ ...item, state: "attested" as const })));
       setPrUrl(resp.html_url);
       setPhase("done");
     } catch (err) {
       if (runIdRef.current !== runId) return;
-      const message = err instanceof Error ? err.message : String(err);
-      if (message === "cancelled") return;
-      const itemIndex = (err as { itemIndex?: number }).itemIndex;
-      if (itemIndex !== undefined) {
-        updateItem(runId, itemIndex, { state: "error", error: message });
-      }
-      setRunError(message);
+      setRunError(err instanceof Error ? err.message : String(err));
       setPhase("error");
     }
   };
@@ -385,7 +430,7 @@ export function BatchRoundsPage({
           <p className="text-[11px] text-text-muted max-w-2xl">
             Creates a configured number of voting rounds sharing one draft
             configuration, waits for each ceremony to complete (the chain
-            allows only one pending round at a time), then signs attestations
+            allows only one pending round at a time), then pauses for IMT verification acknowledgment before signing attestations
             for all of them and opens a single config pull request. Expect one
             Keplr signature per created round plus two for the attestation.
             Rounds only activate when enough ceremony validators are online.
@@ -522,7 +567,7 @@ export function BatchRoundsPage({
                     <RefreshCw size={12} /> Retry
                   </span>
                 ) : (
-                  `Create ${count} round${count === 1 ? "" : "s"} + attest`
+                  `Create ${count} round${count === 1 ? "" : "s"}`
                 )}
               </button>
             )}
@@ -593,6 +638,19 @@ export function BatchRoundsPage({
                   : "Opening the combined config pull request…"}
               </p>
             )}
+          </section>
+        )}
+
+        {prepared.length > 0 && phase !== "done" && phase !== "running-create" && (
+          <section className="space-y-3">
+            <IMTVerificationAcknowledgment
+              rounds={prepared.map((round) => ({ roundId: round.roundIdHex, snapshotHeight: round.snapshotHeight, circuitRoot: round.circuitRoot }))}
+              chainId={chainId || ""} network={zcashNetwork} disabledReason={chainError}
+              checked={acknowledgment.checked} onChange={acknowledgment.setChecked} />
+            <button onClick={handleAttest} disabled={!!chainError || !acknowledgment.checked || !keplrConnected || running}
+              className="px-3 py-2 bg-accent text-surface-0 rounded-lg text-xs disabled:opacity-50">
+              Attest rounds and open PR
+            </button>
           </section>
         )}
 

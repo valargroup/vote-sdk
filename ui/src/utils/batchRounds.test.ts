@@ -85,7 +85,7 @@ describe("buildBatchConfigPrIntent", () => {
       1700000000
     );
     expect(intent).toBe(
-      `{"action":"create_config_pr_batch","rounds":[{"round_id":"${ROUND_ID_A}","signed_payload_hash":"hash-a","entry_sha256":"entry-a"}],"timestamp":1700000000}`
+      `{"action":"create_config_pr_batch","rounds":[{"round_id":"${ROUND_ID_A}","signed_payload_hash":"hash-a","entry_sha256":"entry-a","imt_verification":{"acknowledged":true,"statement_version":1}}],"timestamp":1700000000}`
     );
   });
 });

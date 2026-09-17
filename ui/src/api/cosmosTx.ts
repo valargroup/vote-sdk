@@ -621,6 +621,7 @@ interface SignAndBroadcastOptions {
   messages: Array<{ typeUrl: string; value: Record<string, unknown> }>;
   memo?: string;
   gas?: string;
+  assertContext?: (address: string, chainId: string) => void;
 }
 
 async function signAndBroadcast({
@@ -629,6 +630,7 @@ async function signAndBroadcast({
   messages,
   memo = "",
   gas = DEFAULT_GAS,
+  assertContext,
 }: SignAndBroadcastOptions): Promise<BroadcastResult> {
   const [account] = await signer.getAccounts();
 
@@ -652,7 +654,9 @@ async function signAndBroadcast({
   );
 
   const signDoc = makeSignDoc(txBodyBytes, authInfoBytes, chainId, accountNumber);
+  assertContext?.(account.address, chainId);
   const { signature, signed } = await signer.signDirect(account.address, signDoc);
+  assertContext?.(account.address, chainId);
 
   const txRaw = TxRaw.fromPartial({
     bodyBytes: signed.bodyBytes,
@@ -883,11 +887,13 @@ export async function endorseRound(
   signer: OfflineDirectSigner,
   endorserId: string,
   roundIdHex: string,
+  assertContext?: (address: string, chainId: string) => void,
 ): Promise<BroadcastResult> {
   const [account] = await signer.getAccounts();
   return signAndBroadcast({
     apiBase,
     signer,
+    assertContext,
     messages: [
       {
         typeUrl: "/svote.v1.MsgEndorseRound",

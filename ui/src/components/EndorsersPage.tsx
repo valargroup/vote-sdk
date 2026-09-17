@@ -3,6 +3,11 @@ import { CheckCircle2, Loader2, Plus, RefreshCw, ShieldCheck, Trash2 } from "luc
 import * as chainApi from "../api/chain";
 import * as cosmosTx from "../api/cosmosTx";
 import type { UseWallet } from "../hooks/useWallet";
+import { IMTVerificationAcknowledgment } from "./IMTVerificationAcknowledgment";
+import { useIMTAcknowledgment } from "../hooks/useIMTAcknowledgment";
+import { useDetectedChainId, useSelectedChainUrl } from "../hooks/useDetectedChainId";
+import { useUIConfig } from "../store/uiConfigContext";
+import { imtVerificationChainError, rootHex } from "../utils/imtVerification";
 
 interface EndorsersPageProps {
   wallet: UseWallet;
@@ -18,6 +23,10 @@ function shortHex(value: string): string {
 }
 
 export function EndorsersPage({ wallet }: EndorsersPageProps) {
+  const detectedChainId = useDetectedChainId();
+  const endpoint = useSelectedChainUrl();
+  const chainId = detectedChainId || "";
+  const { zcashNetwork } = useUIConfig();
   const [endorsers, setEndorsers] = useState<chainApi.EndorserEntry[]>([]);
   const [rounds, setRounds] = useState<chainApi.ChainRound[]>([]);
   const [selectedEndorserID, setSelectedEndorserID] = useState("");
@@ -90,13 +99,24 @@ export function EndorsersPage({ wallet }: EndorsersPageProps) {
   );
 
   const submitEndorseRound = useCallback(
-    async (endorserID: string, roundIDHex: string) => {
+    async (endorserID: string, roundIDHex: string, assertCurrent: () => void, expectedChainId: string) => {
       if (!wallet.signer) throw new Error("Connect a wallet first");
+      const chainError = imtVerificationChainError(expectedChainId, wallet.chainId);
+      if (chainError) throw new Error(chainError);
       setBusy(`endorse:${roundIDHex}`);
       setError(null);
       setMessage(null);
       try {
-        const result = await cosmosTx.endorseRound(chainApi.getApiBase(), wallet.signer, endorserID, roundIDHex);
+        assertCurrent();
+        const currentEndorsers = await chainApi.getEndorsers();
+        assertCurrent();
+        if (!currentEndorsers.endorsers.some((entry) => entry.endorser_id === endorserID && entry.address === wallet.address)) {
+          throw new Error("The connected wallet no longer controls this endorser.");
+        }
+        const result = await cosmosTx.endorseRound(chainApi.getApiBase(), wallet.signer, endorserID, roundIDHex, (address, chainId) => {
+          assertCurrent();
+          if (address !== wallet.address || chainId !== expectedChainId) throw new Error("The signing wallet or chain changed. Review the round again.");
+        });
         if (result.code !== 0) throw new Error(result.log || `Transaction failed with code ${result.code}`);
         setMessage(`Endorsed ${shortHex(roundIDHex)} as ${endorserID}`);
         await refreshEndorsedRounds(endorserID);
@@ -104,7 +124,7 @@ export function EndorsersPage({ wallet }: EndorsersPageProps) {
         setBusy(null);
       }
     },
-    [refreshEndorsedRounds, wallet.signer],
+    [refreshEndorsedRounds, wallet.signer, wallet.address, wallet.chainId],
   );
 
   const submitClearRoundEndorsement = useCallback(
@@ -307,17 +327,11 @@ export function EndorsersPage({ wallet }: EndorsersPageProps) {
                         )}
                       </div>
                     ) : (
-                      <button
-                        disabled={!canEndorse || !roundIDHex || busy !== null}
-                        onClick={() =>
-                          submitEndorseRound(selectedEndorserID, roundIDHex).catch((err) =>
-                            setError(err instanceof Error ? err.message : String(err)),
-                          )
-                        }
-                        className="px-3 py-2 rounded-lg bg-accent/90 hover:bg-accent disabled:opacity-50 text-surface-0 text-xs font-semibold cursor-pointer"
-                      >
-                        {busy === `endorse:${roundIDHex}` ? "Endorsing..." : "Endorse"}
-                      </button>
+                      <EndorseRoundAction wallet={wallet} round={round} endorserID={selectedEndorserID}
+                        canEndorse={canEndorse} busy={busy !== null} chainId={chainId} endpoint={endpoint}
+                        network={zcashNetwork} endorserAddress={selectedEndorser?.address || ""}
+                        onEndorse={(guard, chainId) => submitEndorseRound(selectedEndorserID, roundIDHex, guard, chainId)}
+                        onError={(err) => setError(err instanceof Error ? err.message : String(err))} />
                     )}
                   </div>
                 );
@@ -328,4 +342,23 @@ export function EndorsersPage({ wallet }: EndorsersPageProps) {
       </div>
     </div>
   );
+}
+
+function EndorseRoundAction({ wallet, round, endorserID, endorserAddress, chainId, endpoint, network, canEndorse, busy, onEndorse, onError }: {
+  chainId: string; endpoint: string; network: string | null; endorserAddress: string;
+  wallet: UseWallet; round: chainApi.ChainRound; endorserID: string; canEndorse: boolean; busy: boolean;
+  onEndorse: (guard: () => void, chainId: string) => Promise<void>; onError: (error: unknown) => void;
+}) {
+  const roundId = round.vote_round_id ? base64ToHex(round.vote_round_id) : "";
+  const chainError = imtVerificationChainError(chainId, wallet.chainId);
+  const acknowledgment = useIMTAcknowledgment(JSON.stringify([endpoint, chainId, wallet.chainId, wallet.address, endorserID, endorserAddress, network, roundId, round.snapshot_height, round.snapshot_blockhash, round.nullifier_imt_root]));
+  return <div className="max-w-xl space-y-2">
+    <IMTVerificationAcknowledgment rounds={[{ roundId, snapshotHeight: round.snapshot_height, circuitRoot: rootHex(round.nullifier_imt_root) }]}
+      chainId={chainId} network={network} disabledReason={chainError} checked={acknowledgment.checked} onChange={acknowledgment.setChecked} />
+    <button disabled={!!chainError || !canEndorse || !roundId || !chainId || busy || !acknowledgment.checked}
+      onClick={async () => { try { await onEndorse(acknowledgment.capture(), chainId); } catch (error) { onError(error); } }}
+      className="px-3 py-2 rounded-lg bg-accent/90 hover:bg-accent disabled:opacity-50 text-surface-0 text-xs font-semibold cursor-pointer">
+      {busy ? "Endorsing..." : "Endorse"}
+    </button>
+  </div>;
 }
