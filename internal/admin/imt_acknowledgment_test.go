@@ -62,12 +62,9 @@ func TestConfigPRRequiresSignedIMTAcknowledgment(t *testing.T) {
 }
 
 func TestConfigPRReusePreservesSignaturesAndAcknowledgments(t *testing.T) {
-	for _, rejectUpdate := range []bool{false, true} {
-		name := "append and retry"
-		if rejectUpdate {
-			name = "failed content update"
-		}
+	for _, name := range []string{"append and retry", "failed content update", "rotated trusted key"} {
 		t.Run(name, func(t *testing.T) {
+			rejectUpdate := name == "failed content update"
 			body := validCreateConfigPRRequest(t)
 			dynamic, static := configDocuments(t, nil)
 			previous := body.Entry
@@ -83,7 +80,9 @@ func TestConfigPRReusePreservesSignaturesAndAcknowledgments(t *testing.T) {
 			branchContent, _ := configDocuments(t, map[string]votingconfig.RoundEntry{body.RoundID: previous})
 			var trusted votingconfig.StaticConfig
 			require.NoError(t, json.Unmarshal(static, &trusted))
-			trusted.TrustedKeys = append(trusted.TrustedKeys, votingconfig.TrustedKey{KeyID: "previous", Alg: votingconfig.AlgEd25519, Pubkey: base64.StdEncoding.EncodeToString(otherKey.Public().(ed25519.PublicKey))})
+			if name != "rotated trusted key" {
+				trusted.TrustedKeys = append(trusted.TrustedKeys, votingconfig.TrustedKey{KeyID: "previous", Alg: votingconfig.AlgEd25519, Pubkey: base64.StdEncoding.EncodeToString(otherKey.Public().(ed25519.PublicKey))})
+			}
 			static, err = json.Marshal(trusted)
 			require.NoError(t, err)
 			priorBody := "Existing reviewer notes.\n\nPrevious manager acknowledged verifying the IMT."
@@ -180,6 +179,52 @@ func TestConfigPRReusePreservesSignaturesAndAcknowledgments(t *testing.T) {
 			require.Equal(t, 2, patches)
 			require.Contains(t, savedBody, firstManager)
 			require.Contains(t, savedBody, body.Auth.SignerAddress)
+		})
+	}
+}
+
+func TestMergeConfigPREntryValidatesCombinedSignatures(t *testing.T) {
+	for _, mode := range []string{"replacement trusted", "same key ID", "no trusted signature", "EA key changed", "unsupported version", "legacy signature"} {
+		t.Run(mode, func(t *testing.T) {
+			body := validCreateConfigPRRequest(t)
+			dynamic, static := configDocuments(t, nil)
+			// The branch was attested by a key that is no longer trusted.
+			prior := body.Entry
+			prior.Signatures = []votingconfig.Signature{{KeyID: "retired-key", Alg: votingconfig.AlgEd25519, Sig: base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{42}, 64))}}
+			switch mode {
+			case "same key ID":
+				prior.Signatures[0].KeyID = body.Entry.Signatures[0].KeyID
+			case "no trusted signature":
+				body.Entry.Signatures = prior.Signatures
+			case "EA key changed":
+				prior.EaPK = base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32))
+			case "unsupported version":
+				prior.AuthVersion = 3
+			case "legacy signature":
+				prior.AuthVersion = votingconfig.AuthVersionV1
+			}
+			merged, existed, _, err := mergeConfigPREntry(dynamic, static, body.RoundID, body.Entry, body.PIRLayout, prior)
+			switch mode {
+			case "no trusted signature":
+				require.ErrorContains(t, err, "no valid signature")
+			case "EA key changed":
+				require.ErrorContains(t, err, "ea_pk mismatch")
+			case "unsupported version":
+				require.ErrorContains(t, err, "cannot merge")
+			default:
+				require.NoError(t, err)
+				require.True(t, existed)
+				var cfg votingconfig.SignedConfig
+				require.NoError(t, json.Unmarshal(merged, &cfg))
+				var trust votingconfig.StaticConfig
+				require.NoError(t, json.Unmarshal(static, &trust))
+				require.True(t, votingconfig.VerifyEntrySignatures(body.RoundID, cfg.Rounds[body.RoundID], trust.TrustedKeys, body.PIRLayout))
+				if mode == "same key ID" || mode == "legacy signature" {
+					require.Equal(t, body.Entry.Signatures, cfg.Rounds[body.RoundID].Signatures)
+				} else {
+					require.Len(t, cfg.Rounds[body.RoundID].Signatures, 2)
+				}
+			}
 		})
 	}
 }

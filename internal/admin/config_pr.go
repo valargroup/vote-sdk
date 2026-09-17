@@ -530,16 +530,14 @@ func (a *Admin) createConfigPR(ctx context.Context, body createConfigPRRequest) 
 	mergedExisting := false
 	var resolvedKeyIDs []string
 	for _, in := range rounds {
+		var preserved []votingconfig.RoundEntry
 		if existing, ok := branchConfig.Rounds[in.RoundID]; ok {
-			mergedContent, _, _, err = mergeConfigPREntry(mergedContent, staticContent, in.RoundID, existing, body.PIRLayout)
-			if err != nil {
-				return nil, err
-			}
+			preserved = append(preserved, existing)
 		}
 
 		var roundMerged bool
 		var keyIDs []string
-		mergedContent, roundMerged, keyIDs, err = mergeConfigPREntry(mergedContent, staticContent, in.RoundID, in.Entry, body.PIRLayout)
+		mergedContent, roundMerged, keyIDs, err = mergeConfigPREntry(mergedContent, staticContent, in.RoundID, in.Entry, body.PIRLayout, preserved...)
 		if err != nil {
 			return nil, err
 		}
@@ -591,7 +589,9 @@ func (a *Admin) createConfigPR(ctx context.Context, body createConfigPRRequest) 
 	}, nil
 }
 
-func mergeConfigPREntry(dynamicContent, staticContent []byte, roundID string, entry votingconfig.RoundEntry, signedLayout votingconfig.PIRLayout) ([]byte, bool, []string, error) {
+// mergeConfigPREntry combines base, preserved branch, and incoming signatures
+// before validating against current trusted keys. Incoming signatures win ties.
+func mergeConfigPREntry(dynamicContent, staticContent []byte, roundID string, entry votingconfig.RoundEntry, signedLayout votingconfig.PIRLayout, preserved ...votingconfig.RoundEntry) ([]byte, bool, []string, error) {
 	var cfg votingconfig.SignedConfig
 	if err := json.Unmarshal(dynamicContent, &cfg); err != nil {
 		return nil, false, nil, fmt.Errorf("parse dynamic-voting-config.json: %w", err)
@@ -626,26 +626,39 @@ func mergeConfigPREntry(dynamicContent, staticContent []byte, roundID string, en
 		resolvedKeyIDs = append(resolvedKeyIDs, sig.KeyID)
 	}
 
-	mergedExisting := false
 	if cfg.Rounds == nil {
 		cfg.Rounds = map[string]votingconfig.RoundEntry{}
 	}
+	var existingEntries []votingconfig.RoundEntry
 	if existing, ok := cfg.Rounds[roundID]; ok {
+		existingEntries = append(existingEntries, existing)
+	}
+	for _, existing := range preserved {
+		if existing.AuthVersion == entry.AuthVersion {
+			existing, err = resolveConfigPREntrySignatureKeyIDs(roundID, existing, staticCfg.TrustedKeys, cfg.PIRLayout)
+			if err != nil {
+				return nil, false, nil, err
+			}
+		}
+		existingEntries = append(existingEntries, existing)
+	}
+	var signatures []votingconfig.Signature
+	for _, existing := range existingEntries {
 		if existing.EaPK != entry.EaPK {
 			return nil, false, nil, fmt.Errorf("round %s: ea_pk mismatch in merge target", roundID)
 		}
 		switch existing.AuthVersion {
 		case votingconfig.AuthVersionV1:
-			// Legacy v1 signatures cover a different preimage; replace the
-			// entry outright instead of merging incompatible signatures.
-			mergedExisting = true
+			// Legacy v1 signatures cover a different preimage.
+			continue
 		case entry.AuthVersion:
-			entry.Signatures = mergeConfigPRSignatures(existing.Signatures, entry.Signatures)
-			mergedExisting = true
+			signatures = mergeConfigPRSignatures(signatures, existing.Signatures)
 		default:
 			return nil, false, nil, fmt.Errorf("round %s: cannot merge into auth_version %d", roundID, existing.AuthVersion)
 		}
 	}
+	entry.Signatures = mergeConfigPRSignatures(signatures, entry.Signatures)
+	mergedExisting := len(existingEntries) > 0
 	cfg.Rounds[roundID] = entry
 
 	// Mixed v1/v2 files remain valid during migration: VerifyEntrySignatures
