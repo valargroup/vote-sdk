@@ -7,6 +7,11 @@ snapshot and matched its circuit root to the root on chain. The linked AI guide
 and Copy AI prompt provide tools to do that. No report upload or proof of running
 the verifier is required.
 
+The dashboard links to the AI guide on `main`, so later instruction updates do
+not require another dashboard release. Each verification resolves that branch
+to one commit and uses its guide and wrapper throughout the run. User-supplied
+endpoints take precedence over the guide's public stage and mainnet defaults.
+
 ## Round query
 
 Build `svoted` with its existing Rust circuit library, then run:
