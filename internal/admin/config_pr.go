@@ -212,18 +212,34 @@ type createConfigPRResponse struct {
 	MergedExistingSignature bool   `json:"merged_existing_signature"`
 }
 
+// imtVerificationAcknowledgment records the signer's statement, not proof that
+// a verifier ran. Version 1 acknowledges rebuilding the round's snapshot IMT.
+type imtVerificationAcknowledgment struct {
+	Acknowledged     bool `json:"acknowledged"`
+	StatementVersion int  `json:"statement_version"`
+}
+
+func (a imtVerificationAcknowledgment) validate() error {
+	if !a.Acknowledged || a.StatementVersion != 1 {
+		return fmt.Errorf("acknowledge IMT root verification before opening a PR; refresh the dashboard if needed")
+	}
+	return nil
+}
+
 type configPRIntentPayload struct {
-	Action            string `json:"action"`
-	RoundID           string `json:"round_id"`
-	SignedPayloadHash string `json:"signed_payload_hash"`
-	EntrySHA256       string `json:"entry_sha256"`
-	Timestamp         int64  `json:"timestamp"`
+	Action            string                        `json:"action"`
+	RoundID           string                        `json:"round_id"`
+	SignedPayloadHash string                        `json:"signed_payload_hash"`
+	EntrySHA256       string                        `json:"entry_sha256"`
+	IMTVerification   imtVerificationAcknowledgment `json:"imt_verification"`
+	Timestamp         int64                         `json:"timestamp"`
 }
 
 type configPRBatchIntentRound struct {
-	RoundID           string `json:"round_id"`
-	SignedPayloadHash string `json:"signed_payload_hash"`
-	EntrySHA256       string `json:"entry_sha256"`
+	RoundID           string                        `json:"round_id"`
+	SignedPayloadHash string                        `json:"signed_payload_hash"`
+	EntrySHA256       string                        `json:"entry_sha256"`
+	IMTVerification   imtVerificationAcknowledgment `json:"imt_verification"`
 }
 
 type configPRBatchIntentPayload struct {
@@ -305,6 +321,9 @@ func authorizeConfigPRRequest(a *Admin, body createConfigPRRequest) error {
 					return 0, nil, err
 				}
 				got := intent.Rounds[i]
+				if err := got.IMTVerification.validate(); err != nil {
+					return 0, nil, err
+				}
 				if got.RoundID != in.RoundID ||
 					got.SignedPayloadHash != in.SignedPayloadHash ||
 					got.EntrySHA256 != entryHash {
@@ -326,6 +345,9 @@ func authorizeConfigPRRequest(a *Admin, body createConfigPRRequest) error {
 			var intent configPRIntentPayload
 			if err := json.Unmarshal([]byte(body.Auth.Payload), &intent); err != nil {
 				return 0, nil, fmt.Errorf("invalid auth payload")
+			}
+			if err := intent.IMTVerification.validate(); err != nil {
+				return 0, nil, err
 			}
 			if intent.Action != configPRAction ||
 				intent.RoundID != body.RoundID ||
@@ -444,6 +466,8 @@ func hashRoundEntry(entry votingconfig.RoundEntry) (string, error) {
 }
 
 func (a *Admin) createConfigPR(ctx context.Context, body createConfigPRRequest) (*createConfigPRResponse, error) {
+	a.configPRMu.Lock()
+	defer a.configPRMu.Unlock()
 	client := newGitHubConfigClient(a.configPR)
 	rounds := body.roundInputs()
 	var branch string
@@ -481,10 +505,38 @@ func (a *Admin) createConfigPR(ctx context.Context, body createConfigPRRequest) 
 		return nil, err
 	}
 
+	branchContent, branchFileSHA, err := client.getContent(ctx, dynamicPath, branch)
+	if err != nil {
+		if branchExists {
+			return nil, err
+		}
+		_, branchFileSHA, err = client.getContent(ctx, dynamicPath, a.configPR.BaseBranch)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	var branchConfig votingconfig.SignedConfig
+	if branchExists {
+		if err := json.Unmarshal(branchContent, &branchConfig); err != nil {
+			return nil, fmt.Errorf("parse branch config: %w", err)
+		}
+		if branchConfig.PIRLayout != body.PIRLayout {
+			return nil, fmt.Errorf("branch pir_layout differs from signed layout")
+		}
+	}
+
 	mergedContent := dynamicContent
 	mergedExisting := false
 	var resolvedKeyIDs []string
 	for _, in := range rounds {
+		if existing, ok := branchConfig.Rounds[in.RoundID]; ok {
+			mergedContent, _, _, err = mergeConfigPREntry(mergedContent, staticContent, in.RoundID, existing, body.PIRLayout)
+			if err != nil {
+				return nil, err
+			}
+		}
+
 		var roundMerged bool
 		var keyIDs []string
 		mergedContent, roundMerged, keyIDs, err = mergeConfigPREntry(mergedContent, staticContent, in.RoundID, in.Entry, body.PIRLayout)
@@ -499,33 +551,29 @@ func (a *Admin) createConfigPR(ctx context.Context, body createConfigPRRequest) 
 		}
 	}
 
-	_, branchFileSHA, err := client.getContent(ctx, dynamicPath, branch)
-	if err != nil {
-		if branchExists {
-			return nil, err
-		}
-		_, branchFileSHA, err = client.getContent(ctx, dynamicPath, a.configPR.BaseBranch)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	message := fmt.Sprintf("Add signed config entry for round %s", rounds[0].RoundID[:12])
 	if body.isBatch() {
 		message = fmt.Sprintf("Add signed config entries for %d rounds", len(rounds))
 	}
 	commitSHA, err := client.updateContent(ctx, dynamicPath, branch, branchFileSHA, message, mergedContent)
 	if err != nil {
-		if ghErr, ok := err.(*githubAPIError); !ok || ghErr.Status != http.StatusUnprocessableEntity {
-			return nil, err
-		}
+		return nil, err
 	}
 
-	prBody := configPRBody(body, mergedExisting, resolvedKeyIDs, a.configPR)
+	prBody := appendIMTAcknowledgments(configPRBody(body, mergedExisting, resolvedKeyIDs, a.configPR), body)
 	pr, err := client.createPullRequest(ctx, branch, a.configPR.BaseBranch, configPRTitle(body), prBody)
 	if err != nil {
 		if ghErr, ok := err.(*githubAPIError); ok && ghErr.Status == http.StatusUnprocessableEntity {
 			pr, err = client.findOpenPullRequest(ctx, branch, a.configPR.BaseBranch)
+			if err == nil {
+				updatedBody := appendIMTAcknowledgments(pr.Body, body)
+				if updatedBody != pr.Body {
+					if pr.Number <= 0 {
+						return nil, fmt.Errorf("existing PR has no number")
+					}
+					err = client.doJSON(ctx, http.MethodPatch, client.repoPath(fmt.Sprintf("pulls/%d", pr.Number)), nil, map[string]string{"body": updatedBody}, nil)
+				}
+			}
 		}
 		if err != nil {
 			return nil, err
@@ -740,6 +788,22 @@ func configPRBody(body createConfigPRRequest, mergedExisting bool, trustedKeyIDs
 `, automation.environmentLabel(), body.RoundID, automation.dynamicConfigPath(), automation.staticConfigPath(), keyIDsLine, body.Auth.SignerAddress, mergeNote, body.SignedPayloadHash, automation.dynamicConfigPath(), automation.staticConfigPath())
 }
 
+// appendIMTAcknowledgments preserves previous signers' records when a PR is
+// reused. The marker identifies a signer, round, and signed authorization so
+// retries do not duplicate the statement.
+func appendIMTAcknowledgments(existing string, body createConfigPRRequest) string {
+	result := existing
+	for _, in := range body.roundInputs() {
+		sum := sha256.Sum256([]byte(body.Auth.SignerAddress + "|" + in.RoundID + "|" + in.SignedPayloadHash))
+		marker := fmt.Sprintf("<!-- imt-verification-v1:%x -->", sum)
+		if strings.Contains(result, marker) {
+			continue
+		}
+		result += fmt.Sprintf("\n\n%s\nVote manager `%s` acknowledged independently rebuilding the IMT for round `%s` and obtaining the matching on-chain root. Signed round authorization: `%s`.\n", marker, body.Auth.SignerAddress, in.RoundID, in.SignedPayloadHash)
+	}
+	return result
+}
+
 type githubConfigClient struct {
 	cfg        configPRAutomation
 	httpClient *http.Client
@@ -825,6 +889,8 @@ func (c *githubConfigClient) updateContent(ctx context.Context, path, branch, sh
 }
 
 type githubPullRequest struct {
+	Number  int    `json:"number"`
+	Body    string `json:"body"`
 	HTMLURL string `json:"html_url"`
 }
 

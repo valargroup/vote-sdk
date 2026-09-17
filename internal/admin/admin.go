@@ -33,8 +33,10 @@ type Admin struct {
 	checkValidatorExists ValidatorChecker
 	checkVoteManager     VoteManagerChecker
 
-	mu     sync.RWMutex
-	cached *VotingConfig
+	mu sync.RWMutex
+	// Serialize config branch and acknowledgment updates within this admin server.
+	configPRMu sync.Mutex
+	cached     *VotingConfig
 }
 
 // New creates a new Admin from the given configuration.

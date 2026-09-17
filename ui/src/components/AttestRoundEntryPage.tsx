@@ -22,6 +22,10 @@ import {
   validateEaPK,
 } from "../utils/attestEntry";
 import { CopyButton } from "./CopyButton";
+import { IMTVerificationAcknowledgment } from "./IMTVerificationAcknowledgment";
+import { useIMTAcknowledgment } from "../hooks/useIMTAcknowledgment";
+import { useUIConfig } from "../store/uiConfigContext";
+import { IMT_VERIFICATION_ACKNOWLEDGMENT, rootHex } from "../utils/imtVerification";
 
 interface RoundOption {
   roundIdHex: string;
@@ -31,6 +35,9 @@ interface RoundOption {
   createdAtHeight: number | null;
   voteEndTime: number | null;
   isActive: boolean;
+  snapshotHeight?: string;
+  snapshotBlockhash?: string;
+  circuitRoot: string;
 }
 
 interface DerivedPublicKeyInfo {
@@ -46,6 +53,7 @@ interface ConfigPRIntentPayload {
   round_id: string;
   signed_payload_hash: string;
   entry_sha256: string;
+  imt_verification: typeof IMT_VERIFICATION_ACKNOWLEDGMENT;
   timestamp: number;
 }
 
@@ -75,6 +83,7 @@ function getDefaultRound(rounds: RoundOption[]): RoundOption | null {
 
 export function AttestRoundEntryPage() {
   const wallet = useWallet();
+  const { zcashNetwork } = useUIConfig();
   const detectedChainId = useDetectedChainId();
   const chainId = wallet.chainId || detectedChainId;
   const staticConfigBlobUrl =
@@ -101,12 +110,13 @@ export function AttestRoundEntryPage() {
   const [configPrUrl, setConfigPrUrl] = useState("");
   const [configPrError, setConfigPrError] = useState("");
 
-  const selectedRoundKey = useMemo(() => `${roundId}|${eaPK}`, [roundId, eaPK]);
   const latestRound = useMemo(() => getLatestRound(rounds), [rounds]);
   const selectedRound = useMemo(
     () => rounds.find((round) => round.roundIdHex === roundId) ?? null,
     [roundId, rounds]
   );
+  const selectedRoundKey = JSON.stringify([chainId, chainApi.getApiBase(), zcashNetwork, wallet.address, roundId, eaPK, selectedRound?.snapshotHeight, selectedRound?.snapshotBlockhash, selectedRound?.circuitRoot]);
+  const acknowledgment = useIMTAcknowledgment(selectedRoundKey);
   const selectedRoundIsActive = selectedRound?.isActive ?? false;
   const selectedRoundIsLatest =
     !!selectedRound && latestRound?.roundIdHex === selectedRound.roundIdHex;
@@ -139,11 +149,15 @@ export function AttestRoundEntryPage() {
             createdAtHeight: optionalNumber(round.created_at_height),
             voteEndTime: optionalNumber(round.vote_end_time),
             isActive: chainApi.isActiveRoundStatus(round.status),
+            snapshotHeight: round.snapshot_height,
+            snapshotBlockhash: round.snapshot_blockhash,
+            circuitRoot: rootHex(round.nullifier_imt_root),
           };
         })
         .filter((round): round is RoundOption => round !== null);
       setRounds(options);
       const currentSelectionStillExists = options.some((round) => round.roundIdHex === roundId);
+      if (currentSelectionStillExists) setEaPK(options.find((round) => round.roundIdHex === roundId)!.eaPK);
       if (!roundId || !currentSelectionStillExists) {
         const defaultRound = getDefaultRound(options);
         if (defaultRound) {
@@ -206,18 +220,17 @@ export function AttestRoundEntryPage() {
     });
   };
 
-  const createSignedJSON = async (key: votingKey.VotingKeyInfo) => {
+  const createSignedJSON = async (key: votingKey.VotingKeyInfo, assertCurrent: () => void) => {
     if (!canSignRound) {
-      setError(
-        "Pick a round with a 64-character hex round_id and base64 32-byte ea_pk."
-      );
-      return;
+      throw new Error("Pick a round with a 64-character hex round_id and base64 32-byte ea_pk.");
     }
     setSigning(true);
     setError("");
     setPayloadNotice("");
     try {
+      assertCurrent();
       const signed = await buildSignedRoundEntry(roundId, eaPK, key);
+      assertCurrent();
       if (signed.usedLocalFallback) {
         setPayloadNotice(
           "Remote /api/sign-config-entry was unavailable or returned an incompatible payload, so this used the auth_version 2 local payload fallback (domain tag + round id + ea_pk + pir_layout including poly_len)."
@@ -228,8 +241,6 @@ export function AttestRoundEntryPage() {
       setConfigPrStatus("idle");
       setConfigPrUrl("");
       setConfigPrError("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSigning(false);
     }
@@ -259,9 +270,11 @@ export function AttestRoundEntryPage() {
     setDeriveNotice("");
     setSigning(true);
     try {
+      const assertCurrent = acknowledgment.capture();
       const derived = await deriveEphemeralKey();
+      assertCurrent();
       rememberPublicKey(derived);
-      await createSignedJSON(derived);
+      await createSignedJSON(derived, assertCurrent);
       setDeriveNotice("Signed with a freshly derived key. Secret material was discarded after signing.");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -287,6 +300,7 @@ export function AttestRoundEntryPage() {
     setConfigPrError("");
     setConfigPrUrl("");
     try {
+      const assertCurrent = acknowledgment.capture();
       if (!wallet.address) {
         throw new Error("Connect a vote-manager wallet before opening a config PR.");
       }
@@ -298,6 +312,7 @@ export function AttestRoundEntryPage() {
         throw new Error("Connected wallet is not in the current vote-manager set.");
       }
 
+      assertCurrent();
       const parsed = JSON.parse(snippet) as Record<string, chainApi.ConfigRoundEntry>;
       const entry = parsed[roundId];
       if (!entry) {
@@ -309,10 +324,13 @@ export function AttestRoundEntryPage() {
         round_id: roundId,
         signed_payload_hash: hash,
         entry_sha256: entryHash,
+        imt_verification: IMT_VERIFICATION_ACKNOWLEDGMENT,
         timestamp: Math.floor(Date.now() / 1000),
       };
       const payload = JSON.stringify(intent);
+      assertCurrent();
       const signature = await wallet.signPayload(payload);
+      assertCurrent();
       const selectedRound = rounds.find((round) => round.roundIdHex === roundId);
       const resp = await chainApi.createConfigPr({
         round_id: roundId,
@@ -327,6 +345,7 @@ export function AttestRoundEntryPage() {
           pub_key: signature.pubKey,
         },
       });
+      assertCurrent();
       setConfigPrUrl(resp.html_url);
       setConfigPrStatus("ok");
     } catch (err) {
@@ -740,6 +759,12 @@ export function AttestRoundEntryPage() {
             </p>
           </div>
 
+          {selectedRound && <IMTVerificationAcknowledgment
+            rounds={[{ roundId, snapshotHeight: selectedRound.snapshotHeight, circuitRoot: selectedRound.circuitRoot }]}
+            chainId={chainId || ""} network={zcashNetwork}
+            checked={acknowledgment.checked} onChange={acknowledgment.setChecked}
+          />}
+
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <p className="text-[10px] text-text-muted">
               Signing asks Keplr again, derives the Ed25519 key in flight, and
@@ -752,6 +777,7 @@ export function AttestRoundEntryPage() {
                 wallet.source !== "keplr" ||
                 !wallet.chainId ||
                 !canSignRound ||
+                !acknowledgment.checked ||
                 signing
               }
               className="px-3 py-2 bg-accent/90 hover:bg-accent text-surface-0 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
@@ -791,7 +817,8 @@ export function AttestRoundEntryPage() {
                       !wallet.address ||
                       !hash ||
                       !snippet ||
-                      !canSignRound
+                      !canSignRound ||
+                      !acknowledgment.checked
                     }
                     className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-accent/90 hover:bg-accent text-surface-0 rounded-md text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
                   >

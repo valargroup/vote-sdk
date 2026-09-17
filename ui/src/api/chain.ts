@@ -330,6 +330,9 @@ export interface CeremonyState {
 export interface ChainRound {
   vote_round_id?: string; // base64
   snapshot_height?: string;
+  snapshot_blockhash?: string; // base64
+  nullifier_imt_root?: string; // base64, depth-29 circuit root
+  nc_root?: string; // base64
   vote_end_time?: string;
   creator?: string;
   status?: string | number;
