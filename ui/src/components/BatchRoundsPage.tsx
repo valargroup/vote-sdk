@@ -28,8 +28,8 @@ import {
 import { buildChainOptions, isProposalValid } from "../utils/proposals";
 import { IMTVerificationAcknowledgment } from "./IMTVerificationAcknowledgment";
 import { useIMTAcknowledgment } from "../hooks/useIMTAcknowledgment";
-import { useSelectedChainUrl } from "../hooks/useDetectedChainId";
-import { rootHex } from "../utils/imtVerification";
+import { useDetectedChainId, useSelectedChainUrl } from "../hooks/useDetectedChainId";
+import { imtVerificationChainError, rootHex } from "../utils/imtVerification";
 
 interface PreparedRound { name: string; roundIdHex: string; eaPk: string; snapshotHeight?: string; snapshotBlockhash?: string; circuitRoot: string; }
 
@@ -103,7 +103,9 @@ export function BatchRoundsPage({
   const [endTimeLocal, setEndTimeLocal] = useState(defaultEndTimeLocal);
   const [prepared, setPrepared] = useState<PreparedRound[]>([]);
   const endpoint = useSelectedChainUrl();
-  const acknowledgment = useIMTAcknowledgment(JSON.stringify([endpoint, zcashNetwork, wallet.address, wallet.chainId, prepared]));
+  const chainId = useDetectedChainId();
+  const chainError = imtVerificationChainError(chainId, wallet.chainId);
+  const acknowledgment = useIMTAcknowledgment(JSON.stringify([endpoint, chainId, zcashNetwork, wallet.address, wallet.chainId, prepared]));
   const [items, setItems] = useState<BatchRoundItem[]>([]);
   const [phase, setPhase] = useState<BatchPhase>("idle");
   const [runError, setRunError] = useState("");
@@ -336,6 +338,7 @@ export function BatchRoundsPage({
     const ready = prepared;
     setRunError("");
     try {
+      if (chainError) throw new Error(chainError);
       const assertCurrent = acknowledgment.capture();
       if (ready.length === 0) throw new Error("Create the rounds before attesting them.");
       if (!keplrConnected) throw new Error("Connect Keplr before attesting the rounds.");
@@ -642,9 +645,9 @@ export function BatchRoundsPage({
           <section className="space-y-3">
             <IMTVerificationAcknowledgment
               rounds={prepared.map((round) => ({ roundId: round.roundIdHex, snapshotHeight: round.snapshotHeight, circuitRoot: round.circuitRoot }))}
-              chainId={wallet.chainId || ""} network={zcashNetwork}
+              chainId={chainId || ""} network={zcashNetwork} disabledReason={chainError}
               checked={acknowledgment.checked} onChange={acknowledgment.setChecked} />
-            <button onClick={handleAttest} disabled={!acknowledgment.checked || !keplrConnected || running}
+            <button onClick={handleAttest} disabled={!!chainError || !acknowledgment.checked || !keplrConnected || running}
               className="px-3 py-2 bg-accent text-surface-0 rounded-lg text-xs disabled:opacity-50">
               Attest rounds and open PR
             </button>

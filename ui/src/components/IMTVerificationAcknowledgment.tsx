@@ -2,13 +2,14 @@ import { useId } from "react";
 import { CopyButton } from "./CopyButton";
 import { IMT_VERIFICATION_GUIDE_URL, imtVerificationPrompt, type IMTVerificationRound } from "../utils/imtVerification";
 
-export function IMTVerificationAcknowledgment({ rounds, chainId, network, checked, onChange, disabled = false }: {
+export function IMTVerificationAcknowledgment({ rounds, chainId, network, checked, onChange, disabled = false, disabledReason }: {
   rounds: IMTVerificationRound[];
   chainId: string;
   network: string | null;
   checked: boolean;
   onChange: (checked: boolean) => void;
   disabled?: boolean;
+  disabledReason?: string | null;
 }) {
   const id = useId();
   return (
@@ -22,7 +23,7 @@ export function IMTVerificationAcknowledgment({ rounds, chainId, network, checke
         </div>
       ))}
       <div className="flex items-start gap-2 text-xs text-text-primary">
-        <input id={id} type="checkbox" checked={checked} disabled={disabled}
+        <input id={id} type="checkbox" checked={checked} disabled={disabled || !!disabledReason}
           onChange={(event) => onChange(event.target.checked)} className="mt-0.5" />
         <label htmlFor={id}>
           I have <a href={IMT_VERIFICATION_GUIDE_URL} target="_blank" rel="noreferrer"
@@ -31,6 +32,7 @@ export function IMTVerificationAcknowledgment({ rounds, chainId, network, checke
           for {rounds.length === 1 ? "this round’s" : "each listed round’s"} Zcash snapshot and confirmed that the rebuilt root matches the on-chain root.
         </label>
       </div>
+      {disabledReason && <p className="text-[11px] text-warning">{disabledReason}</p>}
       <p className="text-[11px] text-text-muted">
         Give the linked instructions to your AI assistant to run the verification. Review the results, then check the box to continue. No file upload is needed.
       </p>

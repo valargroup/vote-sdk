@@ -32,3 +32,11 @@ export function rootHex(base64: string | undefined): string {
     return "";
   }
 }
+
+// The verification target comes from the selected server, not a cached wallet connection.
+// Local private-key signers have no stored chain ID and sign for the selected server.
+export function imtVerificationChainError(chainId: string | null, walletChainId: string | null): string | null {
+  if (!chainId) return "Waiting to identify the selected voting server's chain.";
+  if (walletChainId && walletChainId !== chainId) return `The selected voting server is on ${chainId}, but the wallet is connected to ${walletChainId}. Reconnect the wallet before acknowledging verification.`;
+  return null;
+}

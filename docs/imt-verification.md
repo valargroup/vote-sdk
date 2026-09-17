@@ -32,7 +32,9 @@ node you trust. This query does not independently authenticate voting consensus.
 ## Dashboard flows
 
 A checked box belongs to the displayed round, snapshot, chain, and connected
-wallet. Changing that context clears it. Changing the account in Keplr or clearing
+wallet. The chain ID comes from the selected voting server. An unknown chain or
+a wallet connected to a different chain blocks acknowledgment and signing.
+Changing that context clears it. Changing the account in Keplr or clearing
 the box also invalidates an in-flight signing action. Batch creation pauses after
 the rounds are created so the person can review and acknowledge the listed
 rounds before attesting them.

@@ -7,7 +7,7 @@ import { IMTVerificationAcknowledgment } from "./IMTVerificationAcknowledgment";
 import { useIMTAcknowledgment } from "../hooks/useIMTAcknowledgment";
 import { useDetectedChainId, useSelectedChainUrl } from "../hooks/useDetectedChainId";
 import { useUIConfig } from "../store/uiConfigContext";
-import { rootHex } from "../utils/imtVerification";
+import { imtVerificationChainError, rootHex } from "../utils/imtVerification";
 
 interface EndorsersPageProps {
   wallet: UseWallet;
@@ -25,7 +25,7 @@ function shortHex(value: string): string {
 export function EndorsersPage({ wallet }: EndorsersPageProps) {
   const detectedChainId = useDetectedChainId();
   const endpoint = useSelectedChainUrl();
-  const chainId = wallet.chainId || detectedChainId || "";
+  const chainId = detectedChainId || "";
   const { zcashNetwork } = useUIConfig();
   const [endorsers, setEndorsers] = useState<chainApi.EndorserEntry[]>([]);
   const [rounds, setRounds] = useState<chainApi.ChainRound[]>([]);
@@ -101,6 +101,8 @@ export function EndorsersPage({ wallet }: EndorsersPageProps) {
   const submitEndorseRound = useCallback(
     async (endorserID: string, roundIDHex: string, assertCurrent: () => void, expectedChainId: string) => {
       if (!wallet.signer) throw new Error("Connect a wallet first");
+      const chainError = imtVerificationChainError(expectedChainId, wallet.chainId);
+      if (chainError) throw new Error(chainError);
       setBusy(`endorse:${roundIDHex}`);
       setError(null);
       setMessage(null);
@@ -122,7 +124,7 @@ export function EndorsersPage({ wallet }: EndorsersPageProps) {
         setBusy(null);
       }
     },
-    [refreshEndorsedRounds, wallet.signer, wallet.address],
+    [refreshEndorsedRounds, wallet.signer, wallet.address, wallet.chainId],
   );
 
   const submitClearRoundEndorsement = useCallback(
@@ -348,11 +350,12 @@ function EndorseRoundAction({ wallet, round, endorserID, endorserAddress, chainI
   onEndorse: (guard: () => void, chainId: string) => Promise<void>; onError: (error: unknown) => void;
 }) {
   const roundId = round.vote_round_id ? base64ToHex(round.vote_round_id) : "";
-  const acknowledgment = useIMTAcknowledgment(JSON.stringify([endpoint, chainId, wallet.address, endorserID, endorserAddress, network, roundId, round.snapshot_height, round.snapshot_blockhash, round.nullifier_imt_root]));
+  const chainError = imtVerificationChainError(chainId, wallet.chainId);
+  const acknowledgment = useIMTAcknowledgment(JSON.stringify([endpoint, chainId, wallet.chainId, wallet.address, endorserID, endorserAddress, network, roundId, round.snapshot_height, round.snapshot_blockhash, round.nullifier_imt_root]));
   return <div className="max-w-xl space-y-2">
     <IMTVerificationAcknowledgment rounds={[{ roundId, snapshotHeight: round.snapshot_height, circuitRoot: rootHex(round.nullifier_imt_root) }]}
-      chainId={chainId} network={network} checked={acknowledgment.checked} onChange={acknowledgment.setChecked} />
-    <button disabled={!canEndorse || !roundId || !chainId || busy || !acknowledgment.checked}
+      chainId={chainId} network={network} disabledReason={chainError} checked={acknowledgment.checked} onChange={acknowledgment.setChecked} />
+    <button disabled={!!chainError || !canEndorse || !roundId || !chainId || busy || !acknowledgment.checked}
       onClick={async () => { try { await onEndorse(acknowledgment.capture(), chainId); } catch (error) { onError(error); } }}
       className="px-3 py-2 rounded-lg bg-accent/90 hover:bg-accent disabled:opacity-50 text-surface-0 text-xs font-semibold cursor-pointer">
       {busy ? "Endorsing..." : "Endorse"}

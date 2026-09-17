@@ -25,7 +25,7 @@ import { CopyButton } from "./CopyButton";
 import { IMTVerificationAcknowledgment } from "./IMTVerificationAcknowledgment";
 import { useIMTAcknowledgment } from "../hooks/useIMTAcknowledgment";
 import { useUIConfig } from "../store/uiConfigContext";
-import { IMT_VERIFICATION_ACKNOWLEDGMENT, rootHex } from "../utils/imtVerification";
+import { IMT_VERIFICATION_ACKNOWLEDGMENT, imtVerificationChainError, rootHex } from "../utils/imtVerification";
 
 interface RoundOption {
   roundIdHex: string;
@@ -85,7 +85,8 @@ export function AttestRoundEntryPage() {
   const wallet = useWallet();
   const { zcashNetwork } = useUIConfig();
   const detectedChainId = useDetectedChainId();
-  const chainId = wallet.chainId || detectedChainId;
+  const chainId = detectedChainId;
+  const chainError = imtVerificationChainError(chainId, wallet.chainId);
   const staticConfigBlobUrl =
     tokenHolderConfigUrl({ file: "static", chainId }) ?? TOKEN_HOLDER_VOTING_CONFIG_REPO_URL;
   const staticConfigEditUrl =
@@ -115,7 +116,7 @@ export function AttestRoundEntryPage() {
     () => rounds.find((round) => round.roundIdHex === roundId) ?? null,
     [roundId, rounds]
   );
-  const selectedRoundKey = JSON.stringify([chainId, chainApi.getApiBase(), zcashNetwork, wallet.address, roundId, eaPK, selectedRound?.snapshotHeight, selectedRound?.snapshotBlockhash, selectedRound?.circuitRoot]);
+  const selectedRoundKey = JSON.stringify([chainId, chainApi.getApiBase(), zcashNetwork, wallet.address, wallet.chainId, roundId, eaPK, selectedRound?.snapshotHeight, selectedRound?.snapshotBlockhash, selectedRound?.circuitRoot]);
   const acknowledgment = useIMTAcknowledgment(selectedRoundKey);
   const selectedRoundIsActive = selectedRound?.isActive ?? false;
   const selectedRoundIsLatest =
@@ -270,6 +271,7 @@ export function AttestRoundEntryPage() {
     setDeriveNotice("");
     setSigning(true);
     try {
+      if (chainError) throw new Error(chainError);
       const assertCurrent = acknowledgment.capture();
       const derived = await deriveEphemeralKey();
       assertCurrent();
@@ -300,6 +302,7 @@ export function AttestRoundEntryPage() {
     setConfigPrError("");
     setConfigPrUrl("");
     try {
+      if (chainError) throw new Error(chainError);
       const assertCurrent = acknowledgment.capture();
       if (!wallet.address) {
         throw new Error("Connect a vote-manager wallet before opening a config PR.");
@@ -761,7 +764,7 @@ export function AttestRoundEntryPage() {
 
           {selectedRound && <IMTVerificationAcknowledgment
             rounds={[{ roundId, snapshotHeight: selectedRound.snapshotHeight, circuitRoot: selectedRound.circuitRoot }]}
-            chainId={chainId || ""} network={zcashNetwork}
+            chainId={chainId || ""} network={zcashNetwork} disabledReason={chainError}
             checked={acknowledgment.checked} onChange={acknowledgment.setChecked}
           />}
 
@@ -777,6 +780,7 @@ export function AttestRoundEntryPage() {
                 wallet.source !== "keplr" ||
                 !wallet.chainId ||
                 !canSignRound ||
+                !!chainError ||
                 !acknowledgment.checked ||
                 signing
               }
@@ -818,6 +822,7 @@ export function AttestRoundEntryPage() {
                       !hash ||
                       !snippet ||
                       !canSignRound ||
+                      !!chainError ||
                       !acknowledgment.checked
                     }
                     className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-accent/90 hover:bg-accent text-surface-0 rounded-md text-[11px] font-semibold transition-colors cursor-pointer disabled:opacity-50"
