@@ -112,7 +112,7 @@ test-integration:
 
 ## test-helper: Helper server unit tests (SQLite store, API, processor)
 test-helper:
-	go test -count=1 -race ./internal/helper/...
+	go test -count=1 -race ./internal/helper/... ./sentry/...
 
 ## test: Run all tests (Go only, no Rust dependency)
 test: test-unit test-integration test-helper test-voting-config

@@ -3,12 +3,19 @@ package sentry
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"cosmossdk.io/log"
 	sentrylib "github.com/getsentry/sentry-go"
+	sentryhttp "github.com/getsentry/sentry-go/http"
 )
 
 type captureTransport struct {
@@ -110,14 +117,23 @@ func TestFilterNoisyErrorEvents(t *testing.T) {
 
 func TestScrubSensitiveRequestEvent(t *testing.T) {
 	event := &sentrylib.Event{
+		ServerName: "helper-a",
+		User:       sentrylib.User{IPAddress: "198.51.100.1"},
 		Request: &sentrylib.Request{
 			URL:    "https://helper.example/shielded-vote/v1/shares",
 			Method: "POST",
 			Data:   `{"primary_blind":"secret share material"}`,
 			Headers: map[string]string{
-				"Content-Type":   "application/json",
-				"x-helper-token": "operator-secret",
+				"Content-Type":       "application/json",
+				"x-helper-token":     "operator-secret",
+				"cF-CoNnEcTiNg-Ip":   "198.51.100.1",
+				"X-Forwarded-For":    "198.51.100.1",
+				"X-Real-IP":          "198.51.100.1",
+				"Forwarded":          "for=198.51.100.1",
+				"True-Client-IP":     "198.51.100.1",
+				"X-Custom-Client-IP": "198.51.100.1",
 			},
+			Env: map[string]string{"REMOTE_ADDR": "198.51.100.1", "REMOTE_PORT": "1234"},
 		},
 	}
 
@@ -125,11 +141,88 @@ func TestScrubSensitiveRequestEvent(t *testing.T) {
 	if got.Request.Data != "" {
 		t.Fatalf("request data was not scrubbed")
 	}
-	if _, ok := got.Request.Headers["x-helper-token"]; ok {
-		t.Fatalf("helper token header was not scrubbed")
+	if got.User.IPAddress != "" || len(got.Request.Env) != 0 {
+		t.Fatal("client address fields were not scrubbed")
 	}
-	if got.Request.Headers["Content-Type"] != "application/json" {
-		t.Fatalf("non-sensitive header was removed")
+	if want := map[string]string{"Content-Type": "application/json"}; !reflect.DeepEqual(got.Request.Headers, want) {
+		t.Fatalf("headers = %v, want %v", got.Request.Headers, want)
+	}
+	if got.ServerName != "helper-a" {
+		t.Fatal("server name was changed")
+	}
+}
+
+func TestScrubSensitiveRequestEventWithoutRequest(t *testing.T) {
+	if scrubSensitiveRequestEvent(nil) != nil {
+		t.Fatal("nil event was changed")
+	}
+	event := &sentrylib.Event{User: sentrylib.User{IPAddress: "198.51.100.1"}}
+	if got := scrubSensitiveRequestEvent(event); got.User.IPAddress != "" {
+		t.Fatal("client address was not scrubbed without a request")
+	}
+}
+
+func TestHelperHTTPEventsScrubRequestMetadata(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		environment string
+		panic       bool
+		wantTypes   []string
+	}{
+		{"production success", "production", false, []string{"transaction"}},
+		{"production panic", "production", true, []string{"", "transaction"}},
+		{"staging panic", "staging", true, []string{""}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			transport := initTestSentryWithEnvironment(t, tc.environment)
+			req := httptest.NewRequest(http.MethodPost, "https://helper.example/shielded-vote/v1/shares",
+				strings.NewReader(`{"primary_blind":"synthetic share material"}`))
+			req.RemoteAddr = "198.51.100.1:1234"
+			req.Header.Set("Accept", "application/json")
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Content-Length", strconv.FormatInt(req.ContentLength, 10))
+			for _, header := range []string{
+				"X-Forwarded-For", "X-Real-IP", "CF-Connecting-IP", "CF-Connecting-IPv6",
+				"True-Client-IP", "Forwarded", "X-Envoy-External-Address", "X-Custom-Client-IP",
+			} {
+				req.Header.Set(header, "198.51.100.1")
+			}
+			req.Header.Set("X-Helper-Token", "synthetic-token")
+			req.Header.Set("User-Agent", "synthetic-agent")
+			handler := sentryhttp.New(sentryhttp.Options{Repanic: false}).Handle(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if _, err := io.Copy(io.Discard, r.Body); err != nil {
+					t.Fatal(err)
+				}
+				if tc.panic {
+					panic("synthetic handler failure")
+				}
+				w.WriteHeader(http.StatusOK)
+			}))
+			handler.ServeHTTP(httptest.NewRecorder(), req)
+
+			events := transport.Events()
+			if len(events) != len(tc.wantTypes) {
+				t.Fatalf("sent %d events, want %d", len(events), len(tc.wantTypes))
+			}
+			wantHeaders := map[string]string{
+				"Accept": "application/json", "Content-Type": "application/json",
+				"Content-Length": strconv.FormatInt(req.ContentLength, 10), "Host": "helper.example",
+			}
+			for i, event := range events {
+				if event.Type != tc.wantTypes[i] {
+					t.Fatalf("event type = %q, want %q", event.Type, tc.wantTypes[i])
+				}
+				if event.Request == nil {
+					t.Fatal("missing request metadata")
+				}
+				if !reflect.DeepEqual(event.Request.Headers, wantHeaders) {
+					t.Errorf("headers = %v, want %v", event.Request.Headers, wantHeaders)
+				}
+				if event.Request.Data != "" || len(event.Request.Env) != 0 || event.User.IPAddress != "" {
+					t.Error("request body or client address fields were not scrubbed")
+				}
+			}
+		})
 	}
 }
 
@@ -332,22 +425,23 @@ func initTestSentry(t *testing.T) *captureTransport {
 func initTestSentryWithEnvironment(t *testing.T, environment string) *captureTransport {
 	t.Helper()
 
+	t.Setenv("SENTRY_ENVIRONMENT", environment)
+	if err := InitSentry("https://public@example.com/1", "test", "helper-a", log.NewNopLogger()); err != nil {
+		t.Fatalf("sentry init: %v", err)
+	}
+	initialized := sentrylib.CurrentHub().Client()
+	options := initialized.Options()
+	initialized.Close()
+	// Use the production options and hooks with an in-memory transport.
 	transport := &captureTransport{}
-	enableTracing := environment != "staging"
-	err := sentrylib.Init(sentrylib.ClientOptions{
-		Dsn:           "https://public@example.com/1",
-		Environment:   environment,
-		EnableTracing: enableTracing,
-		ServerName:    "helper-a",
-		TracesSampler: newTraceSampler(environment),
-		Transport:     transport,
-	})
+	options.Transport = transport
+	client, err := sentrylib.NewClient(options)
 	if err != nil {
 		t.Fatalf("sentry init: %v", err)
 	}
-	sentryEnabled.Store(true)
-	tracingEnabled.Store(enableTracing)
+	sentrylib.CurrentHub().BindClient(client)
 	t.Cleanup(func() {
+		client.Close()
 		sentryEnabled.Store(false)
 		tracingEnabled.Store(false)
 		sentrylib.CurrentHub().BindClient(nil)
