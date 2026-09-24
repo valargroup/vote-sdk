@@ -265,8 +265,9 @@ func TestEncodeDecodeAckExecutiveAuthorityKey(t *testing.T) {
 
 func TestEncodeDecodeContributeDKG(t *testing.T) {
 	msg := &types.MsgContributeDKG{
-		Creator:     "svvaloper1val",
-		VoteRoundId: bytes.Repeat([]byte{0xAA}, 32),
+		Creator:           "svvaloper1val",
+		VoteRoundId:       bytes.Repeat([]byte{0xAA}, 32),
+		ConstantTermProof: bytes.Repeat([]byte{0x42}, 64),
 	}
 
 	raw, err := EncodeCeremonyTx(msg, TagContributeDKG)
@@ -281,6 +282,7 @@ func TestEncodeDecodeContributeDKG(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, msg.Creator, decodedMsg.Creator)
 	require.Equal(t, msg.VoteRoundId, decodedMsg.VoteRoundId)
+	require.Equal(t, msg.ConstantTermProof, decodedMsg.ConstantTermProof)
 }
 
 func TestEncodeCeremonyTx_RejectsNonCustomTags(t *testing.T) {

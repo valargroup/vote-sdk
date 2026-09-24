@@ -8,6 +8,13 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Require a round- and dealer-bound Schnorr proof of knowledge for each DKG
+  contribution's constant Feldman commitment. This prevents a last dealer
+  from cancelling prior commitments to choose a known election secret.
+  `MsgContributeDKG` gains `constant_term_proof`; validators must upgrade
+  together before another ceremony because old contribution messages are
+  rejected by the new consensus rule.
+
 - Add a read-only round identity query and require an IMT verification
   acknowledgment in dashboard attestation and endorsement flows. Config PRs
   record the signed acknowledgment and preserve earlier signatures and records.

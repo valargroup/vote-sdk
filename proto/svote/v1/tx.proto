@@ -175,6 +175,7 @@ message MsgContributeDKG {
   bytes                  vote_round_id        = 2;
   repeated bytes         feldman_commitments  = 3; // C_j = a_j*G for j=0..t-1
   repeated DealerPayload payloads             = 4; // One ECIES envelope per ceremony validator
+  bytes                  constant_term_proof  = 5; // Schnorr proof of knowledge of log_G(C_0), R || z (64 bytes)
 }
 
 message MsgContributeDKGResponse {}

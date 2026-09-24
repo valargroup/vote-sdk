@@ -1176,6 +1176,7 @@ type MsgContributeDKG struct {
 	VoteRoundId        []byte                 `protobuf:"bytes,2,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`
 	FeldmanCommitments [][]byte               `protobuf:"bytes,3,rep,name=feldman_commitments,json=feldmanCommitments,proto3" json:"feldman_commitments,omitempty"` // C_j = a_j*G for j=0..t-1
 	Payloads           []*DealerPayload       `protobuf:"bytes,4,rep,name=payloads,proto3" json:"payloads,omitempty"`                                               // One ECIES envelope per ceremony validator
+	ConstantTermProof  []byte                 `protobuf:"bytes,5,opt,name=constant_term_proof,json=constantTermProof,proto3" json:"constant_term_proof,omitempty"`  // Schnorr proof of knowledge of log_G(C_0), R || z (64 bytes)
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -1234,6 +1235,13 @@ func (x *MsgContributeDKG) GetFeldmanCommitments() [][]byte {
 func (x *MsgContributeDKG) GetPayloads() []*DealerPayload {
 	if x != nil {
 		return x.Payloads
+	}
+	return nil
+}
+
+func (x *MsgContributeDKG) GetConstantTermProof() []byte {
+	if x != nil {
+		return x.ConstantTermProof
 	}
 	return nil
 }
@@ -2651,12 +2659,13 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"\x12MsgRotatePallasKey\x12\x18\n" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12\"\n" +
 	"\rnew_pallas_pk\x18\x02 \x01(\fR\vnewPallasPk\"\x1c\n" +
-	"\x1aMsgRotatePallasKeyResponse\"\xb6\x01\n" +
+	"\x1aMsgRotatePallasKeyResponse\"\xe6\x01\n" +
 	"\x10MsgContributeDKG\x12\x18\n" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12\"\n" +
 	"\rvote_round_id\x18\x02 \x01(\fR\vvoteRoundId\x12/\n" +
 	"\x13feldman_commitments\x18\x03 \x03(\fR\x12feldmanCommitments\x123\n" +
-	"\bpayloads\x18\x04 \x03(\v2\x17.svote.v1.DealerPayloadR\bpayloads\"\x1a\n" +
+	"\bpayloads\x18\x04 \x03(\v2\x17.svote.v1.DealerPayloadR\bpayloads\x12.\n" +
+	"\x13constant_term_proof\x18\x05 \x01(\fR\x11constantTermProof\"\x1a\n" +
 	"\x18MsgContributeDKGResponse\"\x80\x01\n" +
 	"\x1bMsgAckExecutiveAuthorityKey\x12\x18\n" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12#\n" +
