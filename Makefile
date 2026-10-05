@@ -102,9 +102,9 @@ fmt:
 lint:
 	go vet ./...
 
-## test-unit: Keeper, validation, codec, module unit tests (fast, parallel)
+## test-unit: ElGamal, keeper, validation, codec, module unit tests (fast, parallel)
 test-unit:
-	go test -count=1 -race -parallel=4 ./x/vote/... ./api/...
+	go test -count=1 -race -parallel=4 ./crypto/elgamal/... ./x/vote/... ./api/...
 
 ## test-integration: Full ABCI pipeline integration tests (in-process chain)
 test-integration:

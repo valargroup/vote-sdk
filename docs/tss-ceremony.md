@@ -171,7 +171,12 @@ Prefix scans:
 
 ### No trusted dealer (Joint-Feldman DKG)
 
-Each validator generates their own polynomial, publishes Feldman commitments, and distributes ECIES-encrypted shares to all other validators. The combined public key `ea_pk = sum(C_{i,0})` is computed on-chain; `ea_sk = sum(s_i)` is never assembled by any party. No single validator can unilaterally determine or learn the group secret.
+Each validator generates their own polynomial, publishes Feldman commitments
+with a proof of knowledge of its constant coefficient, and distributes
+ECIES-encrypted shares to all other validators. The combined public key
+`ea_pk = sum(C_{i,0})` is computed on-chain; `ea_sk = sum(s_i)` is never
+assembled by any party. No single validator can unilaterally determine or
+learn the group secret.
 
 The state machine reuses the same ceremony statuses — the only structural change vs. a single-dealer model is that REGISTERING → DEALT requires `n` contributions instead of 1:
 
@@ -183,17 +188,37 @@ The tally pipeline (partial decryptions, Lagrange interpolation, BSGS) is unchan
 
 #### Why single-phase (no separate COMMITTING phase)
 
-Standard Pedersen DKG separates commitment publication from share distribution to prevent the last participant from biasing the combined public key. On this chain, contributions are sequential (one per proposer turn), so the last contributor can see prior commitments and adapt their `C_{i,0}`.
+Standard Pedersen DKG separates commitment publication from share
+distribution to prevent the last participant from biasing the combined public
+key. On this chain, contributions are sequential (one per proposer turn), so
+the last contributor can see prior commitments. Each contribution must include
+a Schnorr proof that its dealer knows the discrete log of `C_{i,0}`. The proof
+is bound to the chain, round, dealer, and complete commitment vector.
 
-However, **biasing `ea_pk` does not help the attacker** in this protocol:
+The proof prevents a last dealer from setting `C_{i,0} = [x]G - R_pk` for a
+chosen `x`: producing that proof would require knowing the discrete log of
+`R_pk`. A dealer can still choose its own secret after seeing earlier points,
+but cannot force the combined key to one whose secret it knows.
 
-- **The attacker cannot learn `ea_sk`.** An attacker who contributes last knows their own `s_A` and can see the prior commitments `C_{j,0}` for `j ≠ A`, giving them `R_pk = sum(C_{j,0})`. But `ea_sk = s_A + R` where `R = sum(s_j, j ≠ A)` is a random scalar unknown to the attacker (protected by the discrete log assumption against `R_pk`). The attacker can shift `ea_pk` to a chosen point, but doing so does not reveal `R` or `ea_sk`.
+- **The attacker cannot learn `ea_sk` by contributing last.** The proof
+  establishes knowledge of the dealer's own `s_A`. With prior constant
+  commitments totaling `R_pk`, the group secret is `s_A + R`, where the
+  discrete log `R` of `R_pk` remains unknown below the threshold.
 
-- **`ea_pk` is used solely for ElGamal vote encryption.** IND-CPA security of ElGamal holds for any valid generator/key, regardless of how the key was chosen. The attacker gains no advantage in decrypting votes by biasing `ea_pk`.
+- **`ea_pk` is used solely for ElGamal vote encryption.** Its secrecy
+  requires that no coalition below the threshold knows its discrete log.
+  The proof of knowledge preserves that assumption for an adaptive last
+  contribution.
 
-- **Gennaro et al. (2007) proved** that Joint-Feldman DKG is secure for threshold decryption despite the key bias. The bias matters only in protocols that require a provably uniform public key (e.g., common reference string generation for ZK proofs); this system has no such requirement.
+- **The proof of knowledge is essential.** Without it, a last dealer can
+  cancel earlier public commitments, capture the election key, and send
+  selectively valid shares. Feldman checks by recipients detect bad shares,
+  but acknowledgements alone do not prove that the recipients hold them.
 
-A separate COMMITTING phase would add an extra state, an extra message type, and ~n extra blocks of latency for no practical security gain. Even a two-phase design (commit-then-reveal) does not fully prevent bias on a sequential blockchain — the last committer still sees prior commitments. Full prevention requires a three-phase hash-commit-reveal, tripling the latency.
+A separate COMMITTING phase would add an extra state, an extra message type,
+and ~n extra blocks of latency. The proof of knowledge prevents key capture;
+it does not make the aggregate public key provably uniform or resolve bad-share
+complaints.
 
 #### Why not vote extensions (CometBFT ExtendVote)
 
@@ -207,9 +232,13 @@ This approach was rejected because:
 
 3. **Deferred disk writes.** Coefficients cannot be persisted in ExtendVote (no disk I/O guarantees during consensus). They must be written later, creating a window where a crash loses the polynomial.
 
-4. **The bias is harmless.** As analyzed above, `ea_pk` bias provides no advantage to the attacker in this protocol. The additional engineering complexity of vote extensions solves a non-problem.
+4. **Key capture is prevented by the proof of knowledge.** The remaining
+   adaptive choice of a known dealer secret does not reveal the other
+   dealers' secrets. Vote extensions would change scheduling and bias, but
+   are not needed for this protection.
 
-For the current validator set size (n ≤ 9), the `2n`-block contribution + ack latency is negligible relative to the voting period.
+For the current validator set size (about 10), the `2n`-block contribution
+and acknowledgement latency is negligible relative to the voting period.
 
 ### Corrupted shares detected at ack time (Feldman commitments)
 
@@ -247,7 +276,7 @@ Implementation:
 
 | Property | Guarantee |
 |---|---|
-| Who knows `ea_sk` | **Nobody** — `ea_sk = sum(s_i)` is never assembled |
+| Who knows `ea_sk` | No coalition below the threshold under the DKG assumptions |
 | Single party can decrypt votes | No — requires `t` partial decryptions |
 | Malicious contributor sends bad shares | Detected at ack time (Feldman verification per contributor); timeout activation requires `ceil(4n/5)` acks, which can equal the threshold for small validator sets |
 | Malicious validator sabotages tally | Invalid partial decryptions are rejected by DLEQ; withholding is tolerated only while enough honest survivors remain at or above `t` |

@@ -187,6 +187,10 @@ func (ms msgServer) ContributeDKG(goCtx context.Context, msg *types.MsgContribut
 				types.ErrInvalidPallasPoint, p.ValidatorAddress, err)
 		}
 	}
+	if err := elgamal.VerifyConstantTermProof(msg.ConstantTermProof, ctx.ChainID(),
+		msg.VoteRoundId, msg.Creator, msg.FeldmanCommitments); err != nil {
+		return nil, fmt.Errorf("%w: %v", types.ErrInvalidField, err)
+	}
 
 	// Store the contribution.
 	round.DkgContributions = append(round.DkgContributions, &types.DKGContribution{

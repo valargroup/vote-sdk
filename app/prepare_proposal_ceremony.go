@@ -243,6 +243,14 @@ func CeremonyDKGContributionPrepareProposalHandler(
 		for j, c := range commitmentPts {
 			feldmanCommitments[j] = c.ToAffineCompressed()
 		}
+		constantTermProof, err := elgamal.GenerateConstantTermProof(
+			coeffs[0], ctx.ChainID(), round.VoteRoundId,
+			proposerValAddr, feldmanCommitments,
+		)
+		if err != nil {
+			logger.Error("PrepareProposal[dkg-contribute]: constant-term proof failed", "err", err)
+			return txs
+		}
 
 		if ceremonyDir != "" {
 			cp := coeffsPathForRound(ceremonyDir, round.VoteRoundId)
@@ -291,12 +299,12 @@ func CeremonyDKGContributionPrepareProposalHandler(
 				Ciphertext:       env.Ciphertext,
 			})
 		}
-
 		msg := &types.MsgContributeDKG{
 			Creator:            proposerValAddr,
 			VoteRoundId:        round.VoteRoundId,
 			FeldmanCommitments: feldmanCommitments,
 			Payloads:           payloads,
+			ConstantTermProof:  constantTermProof,
 		}
 
 		txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagContributeDKG)

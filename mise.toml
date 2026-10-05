@@ -72,7 +72,7 @@ confirm = "This will delete ALL of ~/.svoted including nullifier data. Continue?
 # ── test:* ──────────────────────────────────────────────────────────
 
 [tasks."test:unit"]
-description = "Go unit tests (keeper, validation, codec)"
+description = "Go unit tests (ElGamal, keeper, validation, codec)"
 run = "make test-unit"
 
 [tasks."test:integration"]

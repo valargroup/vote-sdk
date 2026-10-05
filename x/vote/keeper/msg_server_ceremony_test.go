@@ -120,7 +120,7 @@ func (s *MsgServerTestSuite) dealPendingRound(n int) (roundID []byte, addrs []st
 		if n > 1 {
 			payloads = makeDKGPayloads(addrs, addrs[i])
 		}
-		_, err = s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+		_, err = s.contributeDKG(&types.MsgContributeDKG{
 			Creator:            addrs[i],
 			VoteRoundId:        roundID,
 			FeldmanCommitments: makeDKGCommitments(threshold),
@@ -852,7 +852,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_NextRoundExcludesJailedVali
 
 	for _, addr := range activeAddrs {
 		s.setBlockProposer(addr)
-		_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+		_, err := s.contributeDKG(&types.MsgContributeDKG{
 			Creator:            addr,
 			VoteRoundId:        nextResp.VoteRoundId,
 			FeldmanCommitments: makeDKGCommitments(2),
@@ -908,7 +908,32 @@ func makeDKGCommitments(t int) [][]byte {
 	for i := range c {
 		c[i] = testPallasPK()
 	}
+	if t > 0 {
+		c[0] = elgamal.PallasGenerator().ToAffineCompressed()
+	}
 	return c
+}
+
+// contributeDKG supplies the known test witness for the fixed constant
+// commitment. Tests with other constants set their proof explicitly.
+func (s *MsgServerTestSuite) contributeDKG(msg *types.MsgContributeDKG) (*types.MsgContributeDKGResponse, error) {
+	if len(msg.FeldmanCommitments) > 0 && len(msg.ConstantTermProof) == 0 {
+		G := elgamal.PallasGenerator()
+		var secret curvey.Scalar
+		switch {
+		case bytes.Equal(msg.FeldmanCommitments[0], G.ToAffineCompressed()):
+			secret = new(curvey.ScalarPallas).New(1)
+		case bytes.Equal(msg.FeldmanCommitments[0], G.Neg().ToAffineCompressed()):
+			secret = new(curvey.ScalarPallas).New(1).Neg()
+		}
+		if secret != nil {
+			proof, err := elgamal.GenerateConstantTermProof(secret, s.ctx.ChainID(),
+				msg.VoteRoundId, msg.Creator, msg.FeldmanCommitments)
+			s.Require().NoError(err)
+			msg.ConstantTermProof = proof
+		}
+	}
+	return s.msgServer.ContributeDKG(s.ctx, msg)
 }
 
 func marshalCommitments(points ...curvey.Point) [][]byte {
@@ -925,7 +950,7 @@ func (s *MsgServerTestSuite) TestContributeDKG_HappyPath_SingleValidator() {
 	roundID, addrs, _ := s.createPendingRoundWithValidators(1)
 	s.setBlockProposer(addrs[0])
 
-	_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+	_, err := s.contributeDKG(&types.MsgContributeDKG{
 		Creator:            addrs[0],
 		VoteRoundId:        roundID,
 		FeldmanCommitments: makeDKGCommitments(1),
@@ -947,6 +972,37 @@ func (s *MsgServerTestSuite) TestContributeDKG_HappyPath_SingleValidator() {
 	s.Require().Equal(types.DefaultDealTimeout, round.CeremonyPhaseTimeout)
 }
 
+func (s *MsgServerTestSuite) TestContributeDKG_RejectsMissingOrMismatchedConstantTermProof() {
+	s.SetupTest()
+	roundID, addrs, _ := s.createPendingRoundWithValidators(1)
+	s.setBlockProposer(addrs[0])
+	commitments := makeDKGCommitments(1)
+	msg := &types.MsgContributeDKG{
+		Creator:            addrs[0],
+		VoteRoundId:        roundID,
+		FeldmanCommitments: commitments,
+	}
+
+	_, err := s.msgServer.ContributeDKG(s.ctx, msg)
+	s.Require().ErrorContains(err, "constant-term proof")
+
+	proof, err := elgamal.GenerateConstantTermProof(
+		new(curvey.ScalarPallas).New(1), s.ctx.ChainID(),
+		roundID, addrs[0], commitments)
+	s.Require().NoError(err)
+	msg.ConstantTermProof = proof
+	msg.FeldmanCommitments = [][]byte{
+		elgamal.PallasGenerator().Mul(new(curvey.ScalarPallas).New(2)).ToAffineCompressed(),
+	}
+	_, err = s.msgServer.ContributeDKG(s.ctx, msg)
+	s.Require().ErrorContains(err, "constant-term proof")
+
+	kv := s.keeper.OpenKVStore(s.ctx)
+	round, err := s.keeper.GetVoteRound(kv, roundID)
+	s.Require().NoError(err)
+	s.Require().Empty(round.DkgContributions)
+}
+
 func (s *MsgServerTestSuite) TestContributeDKG_HappyPath_TwoValidators() {
 	s.SetupTest()
 
@@ -956,7 +1012,7 @@ func (s *MsgServerTestSuite) TestContributeDKG_HappyPath_TwoValidators() {
 	// must supply 2 Feldman commitments and 1 payload (n-1 = 1).
 	for _, addr := range addrs {
 		s.setBlockProposer(addr)
-		_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+		_, err := s.contributeDKG(&types.MsgContributeDKG{
 			Creator:            addr,
 			VoteRoundId:        roundID,
 			FeldmanCommitments: makeDKGCommitments(2),
@@ -982,7 +1038,7 @@ func (s *MsgServerTestSuite) TestContributeDKG_PartialAccumulation() {
 
 	// First contribution: stays REGISTERING.
 	s.setBlockProposer(addrs[0])
-	_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+	_, err := s.contributeDKG(&types.MsgContributeDKG{
 		Creator:            addrs[0],
 		VoteRoundId:        roundID,
 		FeldmanCommitments: makeDKGCommitments(2),
@@ -1000,7 +1056,7 @@ func (s *MsgServerTestSuite) TestContributeDKG_PartialAccumulation() {
 
 	// Second contribution: still REGISTERING (need 3).
 	s.setBlockProposer(addrs[1])
-	_, err = s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+	_, err = s.contributeDKG(&types.MsgContributeDKG{
 		Creator:            addrs[1],
 		VoteRoundId:        roundID,
 		FeldmanCommitments: makeDKGCommitments(2),
@@ -1015,7 +1071,7 @@ func (s *MsgServerTestSuite) TestContributeDKG_PartialAccumulation() {
 
 	// Third contribution: transitions to DEALT.
 	s.setBlockProposer(addrs[2])
-	_, err = s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+	_, err = s.contributeDKG(&types.MsgContributeDKG{
 		Creator:            addrs[2],
 		VoteRoundId:        roundID,
 		FeldmanCommitments: makeDKGCommitments(2),
@@ -1080,11 +1136,15 @@ func (s *MsgServerTestSuite) TestContributeDKG_FinalComputesCorrectCombinedCommi
 
 	for i, addr := range addrs {
 		s.setBlockProposer(addr)
-		_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+		proof, err := elgamal.GenerateConstantTermProof(secrets[i], s.ctx.ChainID(),
+			roundID, addr, allFeldmanBytes[i])
+		s.Require().NoError(err)
+		_, err = s.contributeDKG(&types.MsgContributeDKG{
 			Creator:            addr,
 			VoteRoundId:        roundID,
 			FeldmanCommitments: allFeldmanBytes[i],
 			Payloads:           makeDKGPayloads(addrs, addr),
+			ConstantTermProof:  proof,
 		})
 		s.Require().NoError(err)
 	}
@@ -1125,7 +1185,7 @@ func (s *MsgServerTestSuite) TestContributeDKG_RejectsIdentityCombinedEAPK() {
 	two := new(curvey.ScalarPallas).New(2)
 
 	s.setBlockProposer(addrs[0])
-	_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+	_, err := s.contributeDKG(&types.MsgContributeDKG{
 		Creator:            addrs[0],
 		VoteRoundId:        roundID,
 		FeldmanCommitments: marshalCommitments(G, G.Mul(two)),
@@ -1134,7 +1194,7 @@ func (s *MsgServerTestSuite) TestContributeDKG_RejectsIdentityCombinedEAPK() {
 	s.Require().NoError(err)
 
 	s.setBlockProposer(addrs[1])
-	_, err = s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+	_, err = s.contributeDKG(&types.MsgContributeDKG{
 		Creator:            addrs[1],
 		VoteRoundId:        roundID,
 		FeldmanCommitments: marshalCommitments(G.Neg(), G),
@@ -1158,7 +1218,7 @@ func (s *MsgServerTestSuite) TestContributeDKG_RejectsIdentityDerivedVK() {
 	three := new(curvey.ScalarPallas).New(3)
 
 	s.setBlockProposer(addrs[0])
-	_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+	_, err := s.contributeDKG(&types.MsgContributeDKG{
 		Creator:            addrs[0],
 		VoteRoundId:        roundID,
 		FeldmanCommitments: marshalCommitments(G, G),
@@ -1167,7 +1227,7 @@ func (s *MsgServerTestSuite) TestContributeDKG_RejectsIdentityDerivedVK() {
 	s.Require().NoError(err)
 
 	s.setBlockProposer(addrs[1])
-	_, err = s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+	_, err = s.contributeDKG(&types.MsgContributeDKG{
 		Creator:            addrs[1],
 		VoteRoundId:        roundID,
 		FeldmanCommitments: marshalCommitments(G, G.Mul(three).Neg()),
@@ -1189,7 +1249,7 @@ func (s *MsgServerTestSuite) TestContributeDKG_EmitsEvent() {
 	roundID, addrs, _ := s.createPendingRoundWithValidators(1)
 	s.setBlockProposer(addrs[0])
 
-	_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+	_, err := s.contributeDKG(&types.MsgContributeDKG{
 		Creator:            addrs[0],
 		VoteRoundId:        roundID,
 		FeldmanCommitments: makeDKGCommitments(1),
@@ -1217,7 +1277,7 @@ func (s *MsgServerTestSuite) TestContributeDKG_CeremonyLog() {
 	roundID, addrs, _ := s.createPendingRoundWithValidators(2)
 
 	s.setBlockProposer(addrs[0])
-	_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+	_, err := s.contributeDKG(&types.MsgContributeDKG{
 		Creator:            addrs[0],
 		VoteRoundId:        roundID,
 		FeldmanCommitments: makeDKGCommitments(2),
@@ -1233,7 +1293,7 @@ func (s *MsgServerTestSuite) TestContributeDKG_CeremonyLog() {
 	s.Require().Contains(round.CeremonyLog[0], "1/2")
 
 	s.setBlockProposer(addrs[1])
-	_, err = s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+	_, err = s.contributeDKG(&types.MsgContributeDKG{
 		Creator:            addrs[1],
 		VoteRoundId:        roundID,
 		FeldmanCommitments: makeDKGCommitments(2),
@@ -1337,7 +1397,7 @@ func (s *MsgServerTestSuite) TestContributeDKG_Rejects() {
 			setup: func() ([]byte, []string) {
 				roundID, addrs, _ := s.createPendingRoundWithValidators(3)
 				s.setBlockProposer(addrs[0])
-				_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+				_, err := s.contributeDKG(&types.MsgContributeDKG{
 					Creator:            addrs[0],
 					VoteRoundId:        roundID,
 					FeldmanCommitments: makeDKGCommitments(2),
@@ -1500,7 +1560,7 @@ func (s *MsgServerTestSuite) TestContributeDKG_Rejects() {
 				msg.Creator = addrs[0]
 			}
 			s.setBlockProposer(msg.Creator)
-			_, err := s.msgServer.ContributeDKG(s.ctx, msg)
+			_, err := s.contributeDKG(msg)
 			s.Require().Error(err)
 			s.Require().Contains(err.Error(), tc.errContains)
 		})
@@ -1512,7 +1572,7 @@ func (s *MsgServerTestSuite) TestContributeDKG_RejectsProposerMismatch() {
 
 	roundID, addrs, _ := s.createPendingRoundWithValidators(2)
 	s.setBlockProposer(addrs[1]) // proposer != creator
-	_, err := s.msgServer.ContributeDKG(s.ctx, &types.MsgContributeDKG{
+	_, err := s.contributeDKG(&types.MsgContributeDKG{
 		Creator:            addrs[0],
 		VoteRoundId:        roundID,
 		FeldmanCommitments: makeDKGCommitments(2),

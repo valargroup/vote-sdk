@@ -298,10 +298,17 @@ func TestProcessProposalAcceptsDKGContribution(t *testing.T) {
 
 	validators := []*types.ValidatorPallasKey{{ValidatorAddress: valAddr}}
 	roundID := ta.SeedRegisteringCeremony(validators)
+	secret := new(curvey.ScalarPallas).New(1)
+	commitments := [][]byte{elgamal.PallasGenerator().ToAffineCompressed()}
+	proof, err := elgamal.GenerateConstantTermProof(secret, "", roundID,
+		valAddr, commitments)
+	require.NoError(t, err)
 
 	msg := &types.MsgContributeDKG{
-		Creator:     valAddr,
-		VoteRoundId: roundID,
+		Creator:            valAddr,
+		VoteRoundId:        roundID,
+		FeldmanCommitments: commitments,
+		ConstantTermProof:  proof,
 	}
 	txBytes, err := voteapi.EncodeCeremonyTx(msg, voteapi.TagContributeDKG)
 	require.NoError(t, err)
@@ -397,6 +404,8 @@ func TestDKGContributionInjection(t *testing.T) {
 	for j, c := range contrib.FeldmanCommitments {
 		require.Len(t, c, 32, "FeldmanCommitment[%d] must be 32-byte compressed Pallas point", j)
 	}
+	require.Len(t, contrib.ConstantTermProof, 64,
+		"contribution must prove knowledge of its constant coefficient")
 
 	// n-1 = 2 payloads (excludes self).
 	require.Len(t, contrib.Payloads, 2, "expected n-1=2 payloads (excludes self)")
