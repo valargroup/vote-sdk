@@ -101,3 +101,13 @@ The owner moved the vetted list into the dynamic config that wallets already fet
 - **Free refresh.** The daily handle refresh reads each registration post through oEmbed. Paid calls are now only for registrations, about $0.015 each.
 - **Pictures.** Vetted delegates' pictures come from their public X profile pages, fetched once per round by Valar's own tool. The owner accepted this terms-of-service risk.
 - **Storage.** Profile content moves out of git to Valar's store, because X's 24-hour deletion rule cannot be met in git history. The per-round list pins only salted hashes.
+
+## Follow-up in rev 9 (owner decision)
+
+A new key from registering again counts only for rounds created at least 2 days after it.
+- **Before that,** the previous key keeps working, including in rounds already running. A hijack therefore never touches a running or imminent round.
+- **Replacing a key early.** A new key replaced before its 2 days are up never counts, so an owner who recovers the account within 2 days cancels a hijacker's key.
+- **Manual backstop.** For a hijack more than 2 days before a round, coordinators suspend the delegate until the owner registers again.
+- **Stolen keys.** A stolen key is revoked at once with "Retire" from the owner's own copy.
+- **Rate limit.** The 14-day cooldown is replaced by one paid check per account per day.
+- **Chain state.** Each entry keeps its last 4 keys with timestamps, and the ballot check uses the round's effective key.

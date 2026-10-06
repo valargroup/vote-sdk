@@ -1,6 +1,6 @@
 # Proxy delegation: final implementation plan
 
-Status: final plan for implementation, revision 8, 2026-10-06. It supersedes integrated-design-v1 and the six component specs wherever they disagree. It folds in seven adversarial review lenses (soundness, privacy, liveness, identity, chain ops, circuit feasibility, completeness) and their skeptic verdicts, the owner's revision-2 feedback and its two skeptic reviews, the owner's revision-3 decisions, an evaluation of label-free pool reveals, an external review of revision 3 with the owner's revision-4 decisions and an exact pool-solvability simulation, the owner's revision-5 decisions (complete delegate ballots, no delegator proofs) with an independent cross-check by a second model (Astra), a revision-6 simplification pass that the owner adopted in full (`archive/review/rev6-simplification.md`), the owner's revision-7 decision to pin the vetted list per round in the dynamic config, and the owner's revision-8 decisions on registration cost, re-registration and profile data.
+Status: final plan for implementation, revision 9, 2026-10-06. It supersedes integrated-design-v1 and the six component specs wherever they disagree. It folds in seven adversarial review lenses (soundness, privacy, liveness, identity, chain ops, circuit feasibility, completeness) and their skeptic verdicts, the owner's revision-2 feedback and its two skeptic reviews, the owner's revision-3 decisions, an evaluation of label-free pool reveals, an external review of revision 3 with the owner's revision-4 decisions and an exact pool-solvability simulation, the owner's revision-5 decisions (complete delegate ballots, no delegator proofs) with an independent cross-check by a second model (Astra), a revision-6 simplification pass that the owner adopted in full (`archive/review/rev6-simplification.md`), the owner's revision-7 decision to pin the vetted list per round in the dynamic config, the owner's revision-8 decisions on registration cost, re-registration and profile data, and the owner's revision-9 rule for when a new delegate key starts to count.
 
 Evidence labels: [code] read in a repo, [doc] from a spec or doc, [measured] from a prototype run, [inference] reasoned, [new] does not exist yet and is work in this plan (§4 Existing vs new). Repos: **vote-sdk** (chain, helper, FFI), **voting-circuits**, **zcash_voting** (client SDK), **Vizor**, **verifier service** (new repo), **token-holder-voting-config**, **vizor-deeplink-server**, **zips/book**.
 
@@ -68,7 +68,7 @@ Terms: *registration* is today's ZKP1 (notes to a VAN; Vizor shows it as "voting
   - Handle renames are handled between rounds (§4.6 Renames).
   - Removed: curator keys, the vetted section's own `seq`, the offline-key certificate and the new static pin.
   - Estimate: about 53-60 eng-weeks [inference].
-- **Rev 8 (this revision), owner decisions on registration and profile data** (decisions 10 and 46-48, Q23):
+- **Rev 8, owner decisions on registration and profile data** (decisions 10 and 46-48, Q23):
   - **Delegate phrases** are 12 words.
   - **Re-registration.** Registering again from the same X or GitHub account re-keys the delegate's existing entry: same number, new key. There is no support process.
     - The old key stops at once.
@@ -80,6 +80,13 @@ Terms: *registration* is today's ZKP1 (notes to a VAN; Vizor shows it as "voting
   - **Storage.** Profile content moves out of git to Valar's store, and the per-round list pins only salted hashes.
   - **Removed:** the successor authorization and the support override.
   - **Estimate:** about 54-61 eng-weeks [inference].
+- **Rev 9 (this revision), owner decision on key timing** (decision 10, §4.2 Key history, §4.6):
+  - **When a new key counts.** A key added by registering again counts only for rounds created at least 2 days after it. Until then, the previous key keeps working, including in rounds already running, so a hijack never touches a running or imminent round.
+  - **Replacing a key early.** A new key replaced before its 2 days are up never counts, so an owner who recovers the account within 2 days cancels a hijacker's key.
+  - **Manual backstop.** For a hijack more than 2 days before a round, coordinators suspend the delegate until the owner registers again.
+  - **Stolen keys.** A stolen key is revoked at once with "Retire" from the owner's own copy.
+  - **The 14-day cooldown goes.** One paid check per account per day replaces it.
+  - **Estimate:** about 55-62 eng-weeks [inference].
 
 ---
 
@@ -92,7 +99,7 @@ Terms: *registration* is today's ZKP1 (notes to a VAN; Vizor shows it as "voting
 3. **Circuits.** One new additive circuit, ZKP4, spends a full-authority VAN. It outputs a DC that commits to a hidden delegate index `d` and an amount `w`, plus a successor VAN holding `W − w`. ZKP1, ZKP2 and ZKP3 VKs stay byte-identical, so Zodl and old Vizor keep working unchanged.
 4. **Pools.** Each DC is split into 16 El Gamal shares or, when its batch is planned in the last-moment window, one share holding the whole amount, exactly as votes are. Existing helpers reveal them with the **unchanged ZKP3** as `(proposal 0, decision d)`, and the chain adds them into `Pool[d]`.
 5. **Tally.** At the ACTIVE→TALLYING EndBlock, the chain adds each pool, on every proposal, into the option its delegate's ballot chose, plus a deterministic `Enc(0; ρ)` re-randomizer. A delegate with no ballot contributes nothing anywhere: its pool is not counted this round. Threshold decryption of per-option results then proceeds exactly as today, once; there are no running totals and no re-tallies. Pools are never decrypted separately, so per-delegate totals are never published, although the published per-option totals can determine some of them (item 10).
-6. **Delegate identity.** A dedicated 12-word delegate key phrase derives one Ed25519 delegate key, which signs registration, revocation and the ballot. The delegate proves control of an X account (or a GitHub account) with a marker post. A Valar verifier issues an attestation. The chain registry stores the key, status and a salted commitment only. No X content goes on chain. Delegates can register at any time, including mid-round. The phrase is 12 words. A delegate who loses or leaks the key registers again from the same X or GitHub account, which re-keys their existing entry; the new key votes from the next round (§4.6 Re-registration and key loss).
+6. **Delegate identity.** A dedicated 12-word delegate key phrase derives one Ed25519 delegate key, which signs registration, revocation and the ballot. The delegate proves control of an X account (or a GitHub account) with a marker post. A Valar verifier issues an attestation. The chain registry stores the key, status and a salted commitment only. No X content goes on chain. Delegates can register at any time, including mid-round. The phrase is 12 words. A delegate who loses or leaks the key registers again from the same X or GitHub account, which adds a new key to their existing entry. The new key counts for rounds created at least 2 days later, and the previous key keeps working until then (§4.6 Re-registration and key loss).
 7. **Discovery.** The browse list shows only vetted delegates. Valar and Vizor approve each round's list in the config repo, and the round's signed entry in the dynamic config wallets already use pins it, so the list is fixed for the round. Before each round, the vetted delegates' pictures, names and handles are refreshed from X or GitHub. Wallets also download a live signed directory with every registered delegate's current handle. Any other registered delegate is reachable only by exact search on X handle, GitHub handle or key fingerprint, and appears with no profile picture or display text. Search runs locally on the device. Fingerprints and lookalike warnings appear on every delegate surface. There is no leaderboard.
 8. **Compatibility and control.** Gating is additive only: no `vote_protocol` or `auth_version` bump. The feature turns on through chain capabilities plus a VK fingerprint match, and a per-round proxy flag that coordinators set when they create the round. Mid-round, a coordinator pause (two approvals, D7) makes the chain reject new delegations. Vizor reads the same pause before every commit, so it stops offering delegation, without touching delegations already made (§8.3).
 9. **Delivery.** voting-circuits 0.13.0, vote-sdk v1.7.0 (dormant merges, one coordinated activation), zcash_voting, a new verifier service, and Vizor, with two audit tranches and stage rounds first. The critical path is about 17-18 weeks.
@@ -129,7 +136,7 @@ Terms: *registration* is today's ZKP1 (notes to a VAN; Vizor shows it as "voting
 | D3 (rev 3) | Open registry with proof; Valar verifier; chain registry; vetted-only browse list | X and GitHub providers; attestations counted against a k-of-n verifier set in params; registry 0x1A. The browse list shows only vetted delegates, approved by Valar and Vizor reviewers and pinned per round in the signed dynamic config (owner rev 7); every other registered delegate is reachable by exact search (§4.6 Curation) | Launch is 1-of-1 Valar, so the verifier is a trust and censorship point until a second verifier exists. Valar and Vizor decide who is browsable, and additions take effect from the next round, so an unvetted delegate relies on sharing their handle or fingerprint. Delegates with only a domain cannot register in v1 |
 | D4 (restored in rev 3) | Per-delegate totals hidden; pools never individually decrypted | At close each pool is added into the options its delegate's ballot chose, and only per-option totals are decrypted, once (§4.2 Routing, decision 37). No leaderboard and no ZEC totals on profiles or dashboards. Ballots are public, so a track record can be computed from them; Vizor shows one from v1.1 (decision 42). Approximate delegation counts are public on chain but shown only on the delegate's own dashboard, marked approximate, never as a sort key | Complete ballots (D2) put every counted pool in every proposal's total, so comparing per-proposal totals reveals nothing. But an option that no direct voter picked equals the sum of the pools whose delegates chose it, and several such options can combine to determine a pool even when it is not alone (§5 Pool solvability). A determined pool with one delegator exposes that delegator's amount: the same kind of exposure a lone direct voter has, somewhat more likely for delegators in small rounds. A coalition of at least t election-key holders can decrypt any pool (§5 Validator trust). Reveal counts are public live. Reveal timing links a late DC's tx to its delegate |
 | D5 (rev 2) | Last-moment delegation parity: delegate until voting closes, as for votes | Delegation stays open while `now < vote_end_time`; a batch planned in the last-moment window uses the single-share layout and immediate delivery; at close, pools are added to their delegates' ballots with every reveal that landed before `vote_end_time` (§4.4, O3) | As for a late vote, the reveal must land before close. One reveal carries a late DC's weight on every proposal. Reveal timing links a late DC's tx to `d`, as it links a late vote's tx to its option |
-| D6 (confirmed; one key in rev 6; 12 words in rev 8) | Delegate keys come from a separate delegate key phrase | A non-BIP-39 12-word phrase derives one delegate key; the 12 words are the export and import format (§4.6, O4, decision 10) | A lost or leaked phrase is replaced by registering again from the same X or GitHub account with a new phrase, which re-keys the entry (no support process). The new key votes from the next round, so if this happens before the delegate's ballot, that round's pool is not counted |
+| D6 (confirmed; one key in rev 6; 12 words in rev 8) | Delegate keys come from a separate delegate key phrase | A non-BIP-39 12-word phrase derives one delegate key; the 12 words are the export and import format (§4.6, O4, decision 10) | A lost or leaked phrase is replaced by registering again from the same X or GitHub account with a new phrase, which adds a new key to the entry (no support process). The new key counts from rounds created 2 days later, and a lost key cannot vote meanwhile, so if this happens before the delegate's ballot, that round's pool is not counted |
 | D7 (rev 2; rev 5) | Coordinator suspension with safeguards | `MsgSetDelegateSuspension` is immediate and freeze-only, with a public reason code; every proxy payload needs at least 2 coordinator approvals; 2-of-3 vote managers within the first two proxy rounds (§4.2, Q5). A suspension before the ballot means no ballot, so the pool counts nowhere; a ballot already accepted stands | Coordinators remain fully trusted (they can already push binaries via x/upgrade). A quorum can still stop a delegate's whole pool from counting by suspending it before its ballot lands. Incident levers need two coordinators on call |
 | D8 (rev 3) | At most 8 delegates per wallet and 8 DCs per registration per round | C14 range `[0,8)` with a 3-bit check; 0x09 carries at most 8 DCs; `proxy_delegation_version = 1` implies 8 slots; the planner and UI cap 8 delegates (decision 5) | Nothing lost: no bundle ever needs more than 8 DCs, because one DC per delegate per bundle suffices |
 | D9 (rev 3; one switch in rev 6) | Mid-round off switch, pause-only | One lever: `proxy_dc_paused`, set with `MsgSetProxyDelegationPause` (at least 2 approvals, D7). The chain then rejects every new DC at once, including batches already committed, without spending the VAN. Vizor reads the pause before preview and again immediately before every commit (§4.4 Gating), so it stops offering and committing new allocations, and shows "Paused" (decision 38). The round stays active; included DCs are still revealed and counted through their delegates' ballots; share delivery and status continue; lifting the pause resumes (§8.3) | It cannot undo existing delegations, which are final. No "discard delegated weight this round" lever in v1. Switching off needs two coordinator approvals, so two coordinators are on call for every proxy round. A lying RPC server can hide the pause from Vizor, but the chain still rejects the batch and the VAN stays unspent |
@@ -159,9 +166,9 @@ Terms: *registration* is today's ZKP1 (notes to a VAN; Vizor shows it as "voting
 | 7 | EndBlock routing with ρ re-randomization | Pools and ballots final; blocks identity-C1 round kill on the combined buckets; per-option results never need a pool decrypted | Lazy routing in three code paths |
 | 8 | Pool counts at `ShareCountKey(round,0,d)`; distinct event | Free genesis export; VoteSummary never sees p=0 | Separate key (OPS-2) |
 | 9 | Digests: BLAKE2b, ASCII domain, `lp8(chain_id)`, 32-byte fields | One convention; no cross-chain replay | `net` string, LE fields |
-| 10 (rev 6; re-key in owner rev 8) | One delegate key from a delegate phrase; registry ops are `register` and `revoke`, plus coordinator suspension; registering again from the same account re-keys the entry | A delegate signs once per round, so a hot/cold key split buys little, and both keys came from one phrase on one device anyway (IDN-7). With no pending changes, the proven stored entry is the effective entry. The account is the master identity, with no support process (owner rev 8): a re-key keeps the index, the old key stops at once, and the new key can ballot only in rounds created after the re-key, so formed pools cannot be captured (IDN-1); the verifier allows one registration per account per 14 days (§4.6); hardware users included | DIK and DRK with route-key rotation, identity change, verifier-attested recovery with a 7 d delay, cancel and self-freeze (rev 1-5); seed derivation |
+| 10 (rev 6; new keys in owner rev 8-9) | One delegate key from a delegate phrase; registry ops are `register` and `revoke`, plus coordinator suspension; registering again from the same account adds a new key to the entry | A delegate signs once per round, so a hot/cold key split buys little, and both keys came from one phrase on one device anyway (IDN-7). With no pending changes, the proven stored entry is the effective entry. The account is the master identity, with no support process (owner rev 8): a new key keeps the index and counts only for rounds created 2 days or more after it, while the previous key keeps working until then. So a hijack never touches a round created within 2 days and formed pools cannot be captured (IDN-1); a key replaced before it settles never counts (owner rev 9); the verifier allows one paid check per account per day (§4.6); hardware users included | DIK and DRK with route-key rotation, identity change, verifier-attested recovery with a 7 d delay, cancel and self-freeze (rev 1-5); seed derivation |
 | 11 | Superseded in rev 6 by decision 10 (rev 1-5: no unfreeze; DIK rotation exits FROZEN) | No freeze op exists | n/a |
-| 12 | Rev 1-5's rule that recovered keys cannot submit ballots in older rounds returns in rev 8 as the re-key rule of decision 10; the DIK-only cancel stays superseded | A re-key has no delay to cancel | n/a |
+| 12 | Rev 1-5's rule that recovered keys cannot submit ballots in older rounds returns in rev 8-9 as the key-timing rule of decision 10; the DIK-only cancel stays superseded | A key change needs no cancel: a newer key replaces it before it settles | n/a |
 | 13 | Superseded in rev 6 by decision 10 (rev 1-5: delay floors; verifier warm-up) | No delayed key change exists; every proxy payload still needs at least 2 approvals (D7) | n/a |
 | 14 (rev 6) | DC secrets from a per-round key derived from the hotkey, for every account; never from viewing keys | Same as vote secrets: Vizor's hotkey is random per account and round and app-owned, so UFVK holders cannot read delegations, and no seed material crosses the wallet boundary | OVK-keyed ARK; spending-key ARK for seed-restore recovery (rev 1-5) |
 | 15 | No designated immediate DC share | No public tx-to-delegate link for early DCs; inside the last-moment window every share, vote or DC, is immediate anyway | DC share 0 immediate in every window |
@@ -174,7 +181,7 @@ Terms: *registration* is today's ZKP1 (notes to a VAN; Vizor shows it as "voting
 | 22 | Proxy PRs `V:state/breaking`, v1.7.0 only | v1.7.0 is a halt between rounds and is never backported, so no two binaries run the same heights | Rolling dormant releases |
 | 23 (rev 6) | 0x09 carries an optional registration and 1 to 8 DCs, no casts | ZKP1 plus 8 DCs is about 100-150 KB, so no byte budget or packer is needed; the handler is a near copy of the 0x06/0x07 batch code. Keeping the registration in 0x09 keeps last-moment parity for first-time delegators. Kept weight is voted later with ordinary 0x06 casts | Mixed DC and cast batches with a 50-action cap and an advertised byte budget (rev 1-5); taking the registration out too (an extra block for first-time last-moment delegators) |
 | 24 | No per-block proof-verification cap in v1 | 0x06/0x07 already set this load class; a cap under 51 strands Zodl batches | A proof-action cap (OPS-10) |
-| 25 | Per-block dedupe: one ballot tx per (round, d) per block, in PrepareProposal | Stops duplicate-signature ballot floods. Registry ops need either a fresh attested key (`register`, at most once per account per 14 days) or the entry's own key (`revoke`), so they need no dedupe (rev 6, rev 8) | A global cap only (IDN-9); a registry-op dedupe and cap (rev 1-5) |
+| 25 | Per-block dedupe: one ballot tx per (round, d) per block, in PrepareProposal | Stops duplicate-signature ballot floods. Registry ops need either a fresh attested key (`register`, at most one paid check per account per day) or the entry's own key (`revoke`), so they need no dedupe (rev 6, rev 8) | A global cap only (IDN-9); a registry-op dedupe and cap (rev 1-5) |
 | 26 (rev 6) | Any second ballot for a `(round, d)` is rejected with `ErrDelegateBallotExists`; the client treats an identical stored ballot as success | Safe retries near the deadline without allowing amendment (D2), and no no-op success that anyone holding a copy of the signed ballot could keep landing | Identical resubmission as a no-op success (rev 1-5); amendable ballots (LIV-11) |
 | 27 | ZIP-215 Ed25519 everywhere; torsion-component keys rejected | Chain, verifiers and auditors agree | Mixed stdlib, dalek and CometBFT rules (IDN-15) |
 | 28 | Superseded in rev 6 by decision 41 (rev 1-5: deep-link payload only in the URL fragment, fingerprint mandatory) | No deep links in v1 | n/a |
@@ -195,7 +202,7 @@ Terms: *registration* is today's ZKP1 (notes to a VAN; Vizor shows it as "voting
 | 43 (rev 6) | X and GitHub proofs only; a simple ASCII lookalike check against vetted handles and a reserved list | Handles are ASCII, and unvetted delegates show no display name, so a fold-and-edit-distance check covers what matters. Organizations can register through a representative's X or GitHub account | DNS and `.well-known` proofs with eTLD+1 rules; UTS #39 skeletons with first-seen precedence and 12-month skeleton reservations for every handle, and perceptual hashing (rev 1-5) |
 | 44 (rev 6) | Allocation packing by sequential fill | Same bound `D ≤ #DC ≤ D + B − 1`; [measured] 2.845 DCs per delegator against 2.834 for the exact packer, worse in 1.2% of cases (`prototypes/client/compare_packers.out`) | Exact split-free search, best-fit decreasing and greedy splitting (rev 1-5); per-bundle Hamilton, which made 44% more DCs |
 | 45 (rev 6) | The round's proxy flag is set in `MsgCreateVotingSession` | Each round's enablement is explicit at creation, so no runbook rule about changing a params flag while a create-session action is pending. A create-session action that sets the flag needs at least 2 approvals (D7) | `enable_for_new_rounds` in params, snapshotted at round creation (rev 1-5) |
-| 46 (owner rev 8) | Registration pays for one call only | Junk attempts cost nothing, spend is capped, and an account cannot make us pay repeatedly. **Free check:** oEmbed, X's published embed endpoint, resolves posts by id, so it gives the post text, the current handle and display name, and a 404 for deleted posts. **Paid call:** one post lookup with its author (about $0.015), made by the signer under a daily spend cap; it gives the numeric id and the account's age, which oEmbed cannot. **Cooldown:** one registration per account per 14 days, checked before the paid call. **Refresh:** the daily refresh reads each registration post through oEmbed for free | Paid user lookups for the daily refresh (about $63 a month at 200 delegates, $3,050 at 10,000); a ZEC registration fee, which needs a payment-watching wallet, confirmation waits and ZEC for every delegate; scraping for registration |
+| 46 (owner rev 8) | Registration pays for one call only | Junk attempts cost nothing, spend is capped, and an account cannot make us pay repeatedly. **Free check:** oEmbed, X's published embed endpoint, resolves posts by id, so it gives the post text, the current handle and display name, and a 404 for deleted posts. **Paid call:** one post lookup with its author (about $0.015), made by the signer under a daily spend cap; it gives the numeric id and the account's age, which oEmbed cannot. **Limit:** one paid check per account per day, checked before the paid call. **Refresh:** the daily refresh reads each registration post through oEmbed for free | Paid user lookups for the daily refresh (about $63 a month at 200 delegates, $3,050 at 10,000); a ZEC registration fee, which needs a payment-watching wallet, confirmation waits and ZEC for every delegate; scraping for registration |
 | 47 (owner rev 8) | Vetted delegates' X pictures come from their public profile pages, fetched by Valar's own tool once per round; the official API is used only for registration | Pictures are needed once per round for a small vetted set. The owner accepts the terms-of-service risk (X's terms prohibit scraping without written consent; R8-2) with guardrails: vetted delegates only, once per round, a low rate, an identicon on failure and the paid user lookup as fallback. X's verified badge is not shown, because the blue check is a paid subscription | Paid user lookups for pictures (about $0.01 per vetted delegate per round); third-party scrapers such as unavatar.io; delegate-supplied pictures (rev 6) |
 | 48 (rev 8) | Profile content stays out of git: the per-round list pins salted hashes, and pictures, names, statements and handles live on Valar's store | X's developer terms require stored X content to be kept current and deleted within 24 h, which git history cannot do (identity research), and delegates can ask for removal. Salted hashes reveal nothing once the content and its salt are deleted, the same idea as the salted on-chain subject commitment | Pictures and names committed to the config repo (rev 7) |
 
@@ -386,18 +393,23 @@ BLAKE2b-256("SVOTE_PROXY_DELEGATION_BATCH_SIGHASH_V1" || lp8(chain_id) || write3
 
 D1 stops grafting and truncation of DCs between batches. The registration keeps its own self-contained signature, as in today's 0x07. A relayer can therefore lift it out and submit it alone; the batch then fails on spent gov nullifiers, and the client re-plans the same DCs against the real anchor (CF-5).
 
-**0x0B `MsgDelegateOp`** (one delegate key, rev 6; re-key by re-registration, rev 8; decision 10). One tag carries the three delegate-signed ops:
+**0x0B `MsgDelegateOp`** (one delegate key, rev 6; new keys by re-registration, rev 8; key timing, rev 9; decision 10). One tag carries the three delegate-signed ops:
 
 | Op | Signed by | Effect | Notes |
 |---|---|---|---|
-| `register {delegate_index, dk, provider, subject_commit, attestations[], dk_sig}` | The new DK over REGISTER (proof of possession); verifier threshold over ATTEST | `delegate_index = 0`: a new ACTIVE entry, index assigned at once. `delegate_index = d`: a re-key of entry `d`, which the verifier attests is the same account. The DK is replaced, the status becomes ACTIVE (a coordinator suspension stays), and `rekeyed_at_time` is set | Accepted at any time while the verifier set is non-empty, including mid-round (D10); `next_index ≤ min(max_delegates, 2^30)`; a re-key must carry the entry's own `subject_commit`; a key is never reused, so an attestation cannot be replayed |
-| `revoke {delegate_index, dk_sig}` | The entry's DK over REVOKE | ACTIVE→REVOKED. Registering again from the same account reactivates the entry by re-keying it | A ballot already accepted stands |
-| `ballot {vote_round_id, delegate_index, options[], dk_sig}` | The entry's DK over BALLOT | Stores the round's one ballot for `d` | Rules below |
+| `register {delegate_index, dk, provider, subject_commit, attestations[], dk_sig}` | The new DK over REGISTER (proof of possession); verifier threshold over ATTEST | `delegate_index = 0`: a new ACTIVE entry, index assigned at once. `delegate_index = d`: adds a new key to entry `d`, which the verifier attests is the same account. The key goes into the entry's key history with its time; it counts from rounds created at least 2 days later (Key history, below). A coordinator suspension stays | Accepted at any time while the verifier set is non-empty, including mid-round (D10); `next_index ≤ min(max_delegates, 2^30)`; an added key must carry the entry's own `subject_commit`; a key is never reused, so an attestation cannot be replayed |
+| `revoke {delegate_index, dk, dk_sig}` | The key being revoked, over REVOKE; any key in the entry's history | Marks that key revoked; a revoked key never counts again. Revoking the newest key retires the delegate until a new key settles | A ballot already accepted stands |
+| `ballot {vote_round_id, delegate_index, options[], dk_sig}` | The round's effective key (Key history, below) over BALLOT | Stores the round's one ballot for `d` | Rules below |
 
-There is no separate rotation, recovery, cancel or freeze op, and no pending state or delay. A verifier-attested re-registration from the same account is the only key change, and the stored entry is always the effective entry.
-- The old key stops at once.
-- The new key can submit ballots only in rounds created after `rekeyed_at_time` (Ballot op), so a re-key never captures pools formed before it (IDN-1).
-- The verifier, not the chain, enforces a 14-day cooldown between registrations of one account (§4.6 Verifier policy). A lost or leaked key is replaced this way (§4.6 Re-registration and key loss).
+There is no separate rotation, recovery, cancel or freeze op. A verifier-attested re-registration from the same account is the only way to add a key (§4.6 Re-registration and key loss). The verifier, not the chain, allows one paid check per account per day (§4.6 Verifier policy).
+
+**Key history** (owner rev 9). Each entry keeps its last 4 keys, each with the time it was added and whether it was revoked. The key that counts in a round, its *effective key*, is the newest key that had settled when the round was created:
+- A first registration's key settles at once (D10).
+- A key added by registering again settles 2 days after it was added (`KEY_SETTLE`), and only if no newer key replaced it before then. A key replaced before settling never counts.
+- A revoked key never counts again. If a round's effective key is revoked, the delegate cannot ballot in that round.
+- If the history no longer holds the key a running round needs, the delegate cannot ballot in that round, which is the safe default.
+
+So a key change never affects a round created less than 2 days after it, including rounds already running. A hijacker's key can count only for rounds created 2 days or more after its change, and only if the owner has not registered again first (IDN-1).
 
 **Attestations.** Each is `{verifier_id, not_before, expires_at, sig}` over ATTEST, which binds `chain_id`, `delegate_index` (0 for a new entry), the DK, the provider, `subject_commit`, `not_before` and `expires_at`. The validity window is at most 72 h (a constant). `register` needs at least `params.verifier_threshold` valid attestations from distinct verifiers in the current params verifier set (launch: 1-of-1). There is no single-use `attestation_id`, because the DK is never reused (rev 6).
 
@@ -407,7 +419,7 @@ There is no separate rotation, recovery, cancel or freeze op, and no pending sta
 BLAKE2b-256(domain || lp8(chain_id) || fields as write32 / writeU32As32 / writeU64As32)
 ```
 
-The domains are `SVOTE_PROXY_DELEGATE_{SUBJECT, REGISTER, ATTEST, REVOKE, BALLOT}_V1`. REGISTER and ATTEST bind `delegate_index`, so a new registration and a re-key cannot be confused. A unit test asserts that every `SVOTE_` domain, including `SVOTE_PROXY_DELEGATION_BATCH_SIGHASH_V1`, is prefix-free. [measured] The 24 domains checked in review were prefix-free; [inference] the rev 6 set is a subset plus the renamed D1 domain, and the test pins it.
+The domains are `SVOTE_PROXY_DELEGATE_{SUBJECT, REGISTER, ATTEST, REVOKE, BALLOT}_V1`. REGISTER and ATTEST bind `delegate_index`, so a new registration and an added key cannot be confused. REVOKE binds the key being revoked. A unit test asserts that every `SVOTE_` domain, including `SVOTE_PROXY_DELEGATION_BATCH_SIGHASH_V1`, is prefix-free. [measured] The 24 domains checked in review were prefix-free; [inference] the rev 6 set is a subset plus the renamed D1 domain, and the test pins it.
 
 **Ed25519 rule.** ZIP-215 verification everywhere: CometBFT `crypto/ed25519` in Go, and `ed25519-zebra` or `ed25519-consensus` in Rust. Keys must be canonical, not small-order, and free of torsion (`[ℓ]A = O`).
 
@@ -424,18 +436,18 @@ ValidateBasic checks `n ≥ 1` and a 64-byte `dk_sig`. The handler accepts the b
 - the round is ACTIVE and `round.proxy_delegation.enabled`, and `blockTime < vote_end_time`;
 - `n = len(round.Proposals)`, so the ballot covers **every** proposal of the round;
 - every `options[i] < num_options(i + 1)`. There is no uncounted abstain value, and any other value is rejected. A round may include a real "Abstain" option, which is an ordinary option (Q2);
-- the delegate is ACTIVE (not REVOKED) and not suspended;
-- if the entry was re-keyed, the round was created after `rekeyed_at_time`;
+- the delegate is not suspended;
+- `dk_sig` verifies under the round's effective key (Key history, above), and that key is not revoked;
 - no ballot is stored for `(round, d)`. The ballot is one-shot and cannot be amended: any second ballot, identical or not, is rejected with `ErrDelegateBallotExists` (decision 26). The client treats that error as success when the stored ballot equals its own, so retries near the deadline stay safe, and no copy of a signed ballot can keep landing as a no-op.
 
-A delegate registered after the round was created submits under the same rules. `proxy_dc_paused` does not affect ballots. A ballot already accepted stands through a later suspension, revocation or re-key; a delegate suspended or revoked before its ballot lands cannot submit one, so its pool counts nowhere this round (D7). Writing the `0x1B` key for `(round, d)` emits a `delegate_ballot{round, delegate_index, options}` event.
+A delegate registered after the round was created submits under the same rules. `proxy_dc_paused` does not affect ballots. A ballot already accepted stands through a later suspension, revocation or key change; a delegate that is suspended, or whose effective key for the round is revoked, before its ballot lands cannot submit one, so its pool counts nowhere this round (D7). Writing the `0x1B` key for `(round, d)` emits a `delegate_ballot{round, delegate_index, options}` event.
 
 **0x04 `MsgRevealShare` with `proposal_id = 0`.** Accepted if and only if `round.proxy_delegation.enabled` and `1 ≤ d < NextDelegateIndex` at reveal time; delegate status and `proxy_dc_paused` are ignored. Effects: `AddToTally(round, 0, d)`, `IncrementShareCount(round, 0, d)`, and a `reveal_pool_share{round, delegate_index, share_nf}` event (never `reveal_share`). With no in-circuit bound (O1), this check is what keeps pool shares on registered indices; a DC to an unregistered index is never revealed, which hurts only its sender. It counts toward the 256-per-block cap. Errors `ErrProxyDelegationDisabled` and `ErrDelegateNotFound` are permanent. A layout-1 (last-moment) DC contributes one reveal and a layout-0 DC sixteen; neither needs a chain change, and the chain cannot tell them apart (`MsgRevealShare` carries no share index, `proto/svote/v1/tx.proto:120-128` [code]).
 
 **Coordinator payloads.** Each is one more case in the closed payload switch (`msg_server_coordinator_actions.go:228-338` [code]).
 - `MsgSetProxyDelegationParams`: the verifier set (0 to 16 verifiers with unique ids and Ed25519 pubkeys), `verifier_threshold` (k-of-n counting is implemented from the start, so adding the planned second verifier, Q6, needs no upgrade) and `max_delegates` (≤2^30; launch 20,000). An empty verifier set turns registration off. There are no delay floors, key-change caps or verifier warm-up, because no delayed key change exists (rev 6). It never changes `proxy_dc_paused`.
 - `MsgSetProxyDelegationPause {paused}`: sets `proxy_dc_paused`, the one mid-round off switch (D9, §8.3). It is its own payload so that a pre-drafted pause and unpause pair can never roll back other params.
-- `MsgSetDelegateSuspension`: immediate, freeze-only, public reason code (1 impersonation, 2 key compromise, 3 legal, 4 verifier review, 99 other). It cannot create entries, change keys or void a ballot already accepted. A suspension before the ballot means no ballot, so the pool counts nowhere (D7). It is also how a stolen key is stopped when its owner cannot revoke (§4.6 Re-registration and key loss).
+- `MsgSetDelegateSuspension`: immediate, freeze-only, public reason code (1 impersonation, 2 key compromise, 3 legal, 4 verifier review, 99 other). It cannot create entries, change keys or void a ballot already accepted. A suspension before the ballot means no ballot, so the pool counts nowhere (D7). It is also the manual backstop for a hijacked account or a stolen key whose owner has no copy (§4.6 Re-registration and key loss). Coordinators lift it with the same payload once the owner has registered again.
 - **Proxy rounds** are flagged in `MsgCreateVotingSession`, which gains a `proxy_delegation` bool [new] (decision 45). The flag and `next_delegate_index_at_creation` are written to `VoteRound` field 31 at creation.
 - **Approval floor (D7, Q5 decided).** These three payload types, and a `MsgCreateVotingSession` that sets the proxy flag, execute only with at least `max(2, policy.threshold)` distinct vote-manager approvals, so they never execute inside the proposing tx (today a threshold-1 action does, `msg_server_coordinator_actions.go:34-36` [code], and the policy threshold defaults to 1, `docs/vote-coordinator-actions.md:19` [doc]); the floor goes at `msg_server_coordinator_actions.go:170-176` [code]. Activation therefore needs at least 2 vote managers in the coordinator policy before the first proxy payload (§8.3), and the policy reaches 2-of-3 within the first two proxy rounds. Production runs one vote manager today (`scripts/init.sh:27,74-75` [code], per IDN-3).
 
@@ -443,7 +455,7 @@ A delegate registered after the round was created submits under the same rules. 
 
 | Key | Value |
 |---|---|
-| `0x1A 01 u32be(d)` | `ProxyDelegateEntry` {index, dk, status ACTIVE/REVOKED, suspended + reason, provider, subject_commit, registered_height, revoked_height, rekeyed_at_time} |
+| `0x1A 01 u32be(d)` | `ProxyDelegateEntry` {index, keys (the last 4: dk, added_at_time, first_registration, revoked), suspended + reason, provider, subject_commit, registered_height}. The newest key is the one shown and fingerprinted; the delegate is retired while the newest key is revoked |
 | `0x1A 02 dk[32]` | `u32be(d)`: every delegate key ever registered, including revoked ones, so a key is never reused (forward plus reverse index, as in the Pallas-key registry, `keeper_pallas_registry.go:33-48, 102-117` [code]) |
 | `0x1A 04` | `next_index` (genesis 1; index 0 never assigned) |
 | `0x1A 06` | `ProxyDelegationParams` {verifiers, verifier_threshold, max_delegates, proxy_dc_paused} (the only params key) |
@@ -617,7 +629,7 @@ Effective VAN weight, `floor(total_note_value / 12,500,000) − Σ dispatched or
   - its `subject_commit` equals `H(provider, id, salt)` from the directory entry;
   - the entry is ACTIVE and not suspended.
 
-  An entry re-keyed after the round was created is also refused, because no key can ballot for it this round (§4.2 Ballot op). This is the one registry check, made once at confirm.
+  An entry whose effective key for the round is revoked is also refused, because nobody can ballot for it this round (§4.2 Key history). This is the one registry check, made once at confirm.
   - Bindings never change, because the stored entry is the effective entry. There is therefore no post-commit re-check and no `ProxyBlocked{DelegateChanged}` state.
   - A delegate revoked between confirm and inclusion only leaves that DC uncounted.
   - This proof request names the chosen delegates' registry keys, so the RPC server learns which delegates the wallet is about to use, as helpers learn each DC's delegate (§5); Tor hides the IP.
@@ -640,7 +652,7 @@ Vizor checks these before preview and again immediately before commit. Gates con
 
 **Delegate APIs.**
 - **Phrase and key.** Create and restore the 12-word phrase, and derive the delegate key, one key per phrase (§4.6).
-- **Registration.** The marker text, the resolve and attest client, and encoders for the five digests. Registering again from the same account uses the same flow and re-keys the entry.
+- **Registration.** The marker text, the resolve and attest client, and encoders for the five digests. Registering again from the same account uses the same flow and adds a new key to the entry.
 - **Ballot builder.** It requires one counted option for every proposal of the round and rejects an incomplete ballot before signing.
 - **Preflight.** It fetches the delegate's stored ballot from the whole-round list. If one exists, it reports it and never submits a different one.
 - **Submission.** It signs, submits once, and retries only the identical stored ballot. `ErrDelegateBallotExists` with an identical stored ballot counts as success.
@@ -725,9 +737,9 @@ Vizor checks these before preview and again immediately before commit. Gates con
 | Paused | "Delegating is paused for this round. Delegations already made aren't affected, and you can still vote." |
 | DG-1 additions | "Your public votes stay linked to your X or GitHub account permanently, even if you delete your post or account." / "An approximate count of delegations to you is public on the voting chain. Vizor shows it only on your dashboard." / "Your private votes are hidden from the public. Vote servers can link them to you unless Tor is on." |
 | Not browsable (DG-1 and dashboard, until vetted) | "You won't appear in the browse list unless curators review you. Share your handle or fingerprint so people can find you." |
-| Retire (DG-11) | "Retire as a delegate? If you haven't submitted this round's ballot, ZEC delegated to you this round won't be counted. To come back, register again from the same account." |
-| Key changed (profiles, search, status) | "Key changed on {date}. Compare the new fingerprint with their latest post." During the round of the change: "Changed keys. Can vote again next round." |
-| Register again (DG-2) | "Lost your phrase? Create a new one and post its marker from the same account. Your delegate number stays the same, and your new key can vote from the next round. You can do this once every 14 days." |
+| Retire (DG-11) | "Retire as a delegate? This stops your current key immediately. If you haven't submitted this round's ballot, ZEC delegated to you this round won't be counted. To come back, register again from the same account; your new key counts from rounds created 2 days later." |
+| Key changed (profiles, search, status) | "Key changed on {date}. Compare the new fingerprint with their latest post. Their previous key still votes in rounds created before {settle date}." |
+| Register again (DG-2) | "Lost your phrase? Create a new one and post its marker from the same account. Your delegate number stays the same, and your new key counts from rounds created 2 days later. If your old key was stolen, press Retire with it first." |
 | Kept ZEC | "Vote with the ZEC you kept from this device before voting ends." |
 
 Other copy fixes:
@@ -784,7 +796,7 @@ Other copy fixes:
 **Attestation.**
 - Each attestation carries `not_before` and `expires_at` (at most 72 h later), signed over ATTEST. ATTEST binds:
   - `chain_id`;
-  - `delegate_index` (0 for a new entry, or the entry being re-keyed);
+  - `delegate_index` (0 for a new entry, or the entry getting a new key);
   - the DK, the provider and `subject_commit`;
   - `not_before` and `expires_at` (§4.2).
 - The chain counts a threshold of distinct current verifiers from the params verifier set, deduplicated by `verifier_id` and pubkey. There is no admin bypass.
@@ -805,34 +817,28 @@ Other copy fixes:
 
 **Verifier policy.**
 - **One entry per account.** The subject is the numeric account id (X user id or GitHub `owner.id`).
-- **Registering.** A REGISTER from an account without an entry creates one. A REGISTER from an account that already has one re-keys it, whatever its status (owner rev 8): there is no support process and no old-key sign-off.
-- **Re-registration cooldown (owner rev 8), checked before any paid call.** The verifier tracks every entry's current handle (Retention and deletion, below), so it can apply limits right after the free oEmbed check, by the post author's handle:
-  - An account whose entry was registered or re-keyed in the last 14 days (`reregister_cooldown`) cannot register again until the 14 days pass.
-  - Each handle gets at most one failed paid check per day, so an honest mistake such as replying instead of posting retries the next day.
-  - A handle renamed since the last daily refresh is not recognized before the paid call. The paid lookup then matches the account id, and the cooldown still refuses it, so a rename can cost at most one paid call. The daily cap bounds the total.
+- **Registering.** A REGISTER from an account without an entry creates one. A REGISTER from an account that already has one adds a new key to that entry, whatever its status (owner rev 8): there is no support process and no old-key sign-off.
+- **One paid check per account per day (owner rev 8), checked before any paid call.**
+  - The verifier tracks every entry's current handle (Retention and deletion, below), so right after the free oEmbed check it refuses a post whose author handle already had a paid check that day, successful or not.
+  - An honest mistake, such as replying instead of posting, can be retried the next day.
+  - A handle renamed since the last daily refresh is not recognized before the paid call. The paid lookup then matches the account id and the limit still applies, so a rename can cost at most one paid call. The daily spend cap bounds the total.
 - Per-provider quotas, so GitHub cannot starve X.
-- An account-age gate, using `created_at` from the paid lookup, and per-account and per-IP rate caps.
+- An account-age gate, using `created_at` from the paid lookup, and per-IP rate caps.
 - Unused issuances count against the IP and its /24.
 
-**Re-registration and key loss** (decision 10, owner rev 8). The X or GitHub account is the delegate's master identity.
-- **How a key is replaced.** To replace a lost, leaked or old key, the delegate:
-  - creates a new 12-word phrase;
-  - posts a new marker post from the same account;
-  - registers again.
-
-  The verifier sees the same numeric account id and attests a re-key of the existing entry: same index, new key (§4.2 0x0B).
-- **Cooldown.** An account can register again only 14 days after its last registration or re-key (Verifier policy, above).
-  - Trade-off: a hijacker who re-keys first also locks the owner out for up to 14 days after they regain the account.
-  - In that window the hijacker's key can vote only in rounds created after its re-key, and Vizor shows "Key changed" with the date.
-  - Curators see the fingerprint change in the next list's PR and can leave that delegate out.
-- **Timing rule.**
-  - The old key stops working at once.
-  - The new key can submit ballots only in rounds created after the re-key. So a hijacker who takes over the account mid-round cannot cast the ballot for pools formed before; at most, that delegate has no ballot this round.
-  - An honest re-key loses nothing more, because a lost key could not vote anyway.
-- **In Vizor.** It shows "Key changed" with the new fingerprint. It does not offer a delegate whose key changed during the current round ("Changed keys. Can vote again next round.").
-- **Retire is reversible.** A REVOKED entry is reactivated the same way, by registering again.
-- **Suspension is separate.** A coordinator suspension survives a re-key.
-- **What this accepts.** Whoever controls the X or GitHub account controls the delegate, until the owner regains the account and registers again.
+**Re-registration and key loss** (decision 10; owner rev 8 and rev 9). The X or GitHub account is the delegate's master identity.
+- **Replacing a key.** To replace a lost, leaked or old key, the delegate creates a new 12-word phrase, posts a new marker post from the same account, and registers again. The verifier sees the same numeric account id and attests a new key for the existing entry: same index (§4.2 0x0B).
+- **Key timing (owner rev 9).**
+  - A first registration counts at once (D10).
+  - A key added by registering again counts only for rounds created at least 2 days after it was added. Until then, the previous key keeps working, including in any round already running. So a hijack 2 days or less before a round, or during one, does not touch that round: the owner still votes with their existing key.
+  - A new key replaced before its 2 days are up never counts. If the owner gets the account back and registers again within 2 days, the hijacker's key never counts, and the original key keeps working until the owner's new key settles.
+- **Hijack more than 2 days before a round.** If the owner cannot recover the account in time, coordinators suspend the delegate before the round starts (at least 2 approvals, D7) and lift the suspension once the owner has registered again. Coordinators never set keys.
+- **Stolen key** (the thief copied the key but does not control the account). A stolen key keeps working until a change settles, so the owner first presses "Retire" with their own copy, which revokes that key at once; a revoked key never counts again. Then they register again. If the owner has no copy left, coordinator suspension is the backstop.
+- **Lost key.** Registering again loses nothing more: the lost key could not vote anyway, and the new key counts from rounds created 2 days later.
+- **In Vizor.** It shows "Key changed" with the date and the new fingerprint, and notes that the previous key still votes in rounds created before the change settles. It does not offer a delegate whose key for the current round is revoked.
+- **Retire is reversible.** Registering again adds a new key, which counts 2 days later.
+- **Suspension is separate.** A coordinator suspension survives a key change.
+- **What this accepts.** Whoever controls the X or GitHub account controls the delegate from 2 days after their change, until the owner regains the account and registers again. A thief holding the only copy of a key can vote until a new key settles or coordinators suspend the delegate.
 
 **Vetted list, pinned per round** (decision 39; owner rev 7 and rev 8). The browse list for a round is one file, pinned by the round's signed config entry. It holds no profile content.
 - **Where it lives.**
@@ -866,7 +872,7 @@ Other copy fixes:
   - It is signed by an online key named in the current round's proxy entry, so rotating that key needs a re-signed round entry, not a wallet release; there is no offline key or certificate.
   - It carries `seq`, `issued_at`, `expires_at` (at most 24 h) and `chain_id`.
 - **Registry entries.**
-  - Every registered delegate appears as `{index, dk, status, rekeyed_at, provider, subject id, salt, current handle, flags}`, so exact search works.
+  - Every registered delegate appears as `{index, dk, status, key_added_at, provider, subject id, salt, current handle, flags}`, so exact search works.
   - `status` is a display hint; the proven check at confirm is authoritative.
   - Other wallets may consume these once counsel clears handle redistribution (Q10).
 - **Vetted content.**
@@ -942,7 +948,7 @@ Other copy fixes:
   - It is one wallet function in `zcash_vote_delegate`: lowercase, map `0→o`, `1` and `i→l`, `rn→m`, `vv→w`, `cl→d`, drop `_` and `-`, then allow Damerau distance 1.
   - It runs against vetted handles, the list's `reserved_names` and the live directory's reserved handles.
   - It warns on vetted-list entries and on search results.
-- **Re-keyed entries** keep their index, and the directory shows "key changed" with the date. There are no successor links.
+- **Entries with a new key** keep their index, and the directory shows "key changed" with the date. There are no successor links.
 - **Reports** go to a Valar web form or email inbox, with a 24 h target for impersonation.
 
 **Ops.**
@@ -1120,13 +1126,13 @@ The optional post-close reveal grace window (Q18) would remove the timing link i
 
 | Attack | Defense |
 |---|---|
-| X account takeover | The account is the master identity (owner rev 8), so a hijacker can re-key the entry. The new key can ballot only in rounds created after the re-key, so formed pools cannot be captured (IDN-1); Vizor shows "Key changed" with the date; curators see the fingerprint change in the next list's PR. The owner registers again after regaining the account, after the 14-day cooldown (§4.6) |
+| X account takeover | The account is the master identity (owner rev 8), so a hijacker can add a key. A key change never touches a round created within 2 days of it, so the owner keeps voting with their existing key. If the owner registers again within 2 days, the hijacker's key never counts. Otherwise coordinators suspend the delegate before the next round (IDN-1, §4.6). Vizor shows "Key changed" with the date, and curators see the fingerprint change in the next list's PR |
 | Verifier API compromise | The signer recomputes the digest, re-checks the post through oEmbed and makes the paid lookup with its own credentials, budget and log, so the API can delay or refuse registrations, or spend up to the daily cap, but cannot mint one; the refresher reads every registration post daily; signer-log reconciliation |
 | Signer host compromise | Can mint unvetted impostors only for subjects that never registered; the refresher's re-check and log reconciliation detect it within about a day; containment is removing the verifier key from params (2 approvals) and flagging registrations since the suspected time |
 | Directory key theft | The vetted list is pinned per round by the admin key, not the directory key; Vizor proves the chosen entries before proving, so a relabelled index, key or handle is caught; a vetted delegate's handle change is always shown as "renamed from"; wallets pin handles; `seq` and expiry; re-sign the round's proxy entry with a new key |
 | Admin key (`trusted_keys`) compromise | Could pin an impostor into a round's vetted list. The same key already authorizes every round's election key, so it is already the root of trust for vote privacy; the list also needs Valar and Vizor PR approval, and Vizor's pre-proving check still binds every delegation to the chain entry it names |
 | Impersonation by an unvetted lookalike | Not browsable; exact search only; no avatar or display text; "Not reviewed" label; lookalike check against vetted handles and reserved names; fingerprint on every surface |
-| Delegate key theft | Per-use presence. A thief can submit this round's ballot once if the delegate has not yet (accepted), but cannot replace a ballot already accepted, and can revoke the entry. The owner registers again from the same account, which stops the stolen key at once (§4.6 Re-registration and key loss) |
+| Delegate key theft | Per-use presence. A thief can submit this round's ballot once if the delegate has not yet (accepted), but cannot replace a ballot already accepted, and can revoke the entry. The owner presses Retire with their own copy, which revokes the stolen key at once, then registers again; with no copy left, coordinators suspend the delegate (§4.6 Re-registration and key loss) |
 | Coordinator key | Suspension is immediate, freeze-only and public with a reason code; every proxy payload needs at least 2 approvals, reaching 2-of-3 within the first two proxy rounds (D7). Coordinators remain fully trusted, as they already are via x/upgrade. |
 
 **Not provided:** receipt-freeness (a delegator can prove its DC opening; pools are vote-market aggregation points, cf. LobbyFi); per-delegate censorship resistance (reveals and ballots tagged `d` are attributable; helper redundancy and multiple vote servers mitigate); and proofs for delegators that a ballot or their own shares were recorded (D1).
@@ -1141,14 +1147,14 @@ Severity is after skeptic review. "Unverified" means not re-checked by a skeptic
 
 | ID(s) | Sev. | Issue | Resolution |
 |---|---|---|---|
-| IDN-1 | high | Takeover or rogue-verifier recovery captures pools mid-round; removing a verifier doesn't stop it | Rev 6 removed recovery. Rev 8 re-keys by re-registration, and the new key cannot ballot in rounds created before the re-key, so no formed pool can be captured; a removed verifier key stops new re-keys (decision 10) |
+| IDN-1 | high | Takeover or rogue-verifier recovery captures pools mid-round; removing a verifier doesn't stop it | Rev 6 removed recovery. Since rev 8-9, a new key from re-registration counts only for rounds created 2 days or more after it, so no running or imminent round is affected and no formed pool can be captured; the owner's own re-registration within 2 days cancels a hijacker's key; a removed verifier key stops new keys (decision 10) |
 | IDN-2 | high | Signer signs opaque digests; alarm reads API-written table | Signer recomputes, re-checks every post through oEmbed and makes the paid lookup with its own credentials; own budgets and daily spend cap; the refresher reads every registration post daily; signer-log reconciliation (rev 6: no separate re-verifier, decision 21) |
 | IDN-4 | high | One online directory key controls handle, avatar and curated status | Vetted list and profiles pinned per round by the admin key after Valar and Vizor PR review, never by the directory key (rev 7); the directory key can only hide; proven pre-proving check of the chosen entries; handle pinning |
 | CMP-1, OPS-1, IDN-6(b), LIV-10(b) | high | DRK unfreeze defeats freeze; freezes replayable | **Closed by removal (rev 6):** no freeze, unfreeze or pending change exists; only a verifier-attested re-registration from the same account undoes a `revoke` (decision 10, rev 8) |
 | IDN-3 | medium | One coordinator key can install verifiers and zero delays | Trust model stated; every proxy payload needs ≥2 approvals, 2-of-3 within two proxy rounds (Q5 decided, D7); no delays or warm-up exist to configure (rev 6) |
 | IDN-5 | medium | Any post or retweet with the marker binds an account | Original post, whole-template match |
 | IDN-6(a,c) | medium | DRK thief blocks recovery; cancels burn change cap | **Closed by removal (rev 6):** no recovery, cancel or change cap |
-| IDN-11 | medium | Lookalike precedence by registration order; empty curated list at launch; inherited successors | OOB fingerprint confirmation for every vetted entry; ASCII lookalike check against vetted handles and a reserved list; re-keyed entries keep their index and show "Key changed" (rev 8: no successor links; rev 6: no first-seen precedence or skeleton reservations, decision 43) |
+| IDN-11 | medium | Lookalike precedence by registration order; empty curated list at launch; inherited successors | OOB fingerprint confirmation for every vetted entry; ASCII lookalike check against vetted handles and a reserved list; entries with a new key keep their index and show "Key changed" (rev 8: no successor links; rev 6: no first-seen precedence or skeleton reservations, decision 43) |
 | IDN-13, CMP-22 | medium | Conflicting app-store UGC controls | UGC limited to the curated vetted list, with every change reviewed by Valar and Vizor in the list's PR; report link and local Hide; one text limit; terms |
 | PRV-1 | medium | OVK-keyed ARK exposes delegations to UFVK holders | DC secrets from the random per-round hotkey (rev 6, decision 14) |
 | PRV-2, CMP-17 | medium | Abstain option creates solvable buckets; claims overstated | No Abstain option by default (Q2, default no) and no uncounted abstain for delegates (O5); §5 claims restated: complete ballots close the cross-proposal channel, and zero-direct options leave delegators somewhat more exposed than direct voters in small rounds (§5 Pool solvability, XR-1); exposure stated in §5, the FAQ and copy C4 rather than warned in the app (D11) |
@@ -1177,10 +1183,10 @@ Severity is after skeptic review. "Unverified" means not re-checked by a skeptic
 | SND-1, CF-3 | low | Slot nf missing from chain and genesis paths; rand invariant | Slot nullifier wired through ValidateBasic, ante step 4, the handler and genesis (§4.2); invariant in ZIP-PD |
 | SND-6, CF-1 | low | Bound open; width and value rule | **Closed by removal (rev 6):** no `delegate_index_bound` (O1); the chain's reveal check `1 ≤ d < NextDelegateIndex` stays |
 | SND-7 (unv.) | low | Mixed anchor burns a registration | Registration ⇔ anchor 0 |
-| SND-4 (unv.) | low | Stolen key submits the delegate's vote irreversibly | Per-use key presence; a ballot is one-shot, so a thief cannot replace one already accepted; registering again from the same account stops the stolen key at once (§4.6 Re-registration and key loss) |
+| SND-4 (unv.) | low | Stolen key submits the delegate's vote irreversibly | Per-use key presence; a ballot is one-shot, so a thief cannot replace one already accepted; Retire with the owner's own copy revokes the stolen key at once; coordinator suspension if they have none (§4.6 Re-registration and key loss) |
 | SND-5 (unv.) | low | Suspension stops a pool from counting | Kept; owner decided (Q5, D7): immediate, freeze-only, public reason, ≥2 approvals; a suspension before the ballot leaves the pool uncounted, and a ballot already accepted stands |
 | IDN-7 | low | Hot key theft; misleading claim | Per-use presence; reworded |
-| IDN-9 | low | Floods via fresh signatures | One ballot tx per `(round, d)` per block in PrepareProposal; registry ops need a fresh attested key, with one registration per account per 14 days, or the entry's own key (rev 6, rev 8) |
+| IDN-9 | low | Floods via fresh signatures | One ballot tx per `(round, d)` per block in PrepareProposal; registry ops need a fresh attested key, with one paid check per account per day, or the key being revoked (rev 6, rev 8) |
 | IDN-10 | low | Subdomain sybils | **Closed by removal (rev 6):** no DNS provider (decision 43) |
 | IDN-12, PRV-8 | low | Crypto-shredding claim false; stale objects | Claim withdrawn; only the current directory and pack exist; ≤24 h expiry |
 | IDN-14 | low | Phrase looks like a wallet seed | Non-BIP-39 format |
@@ -1230,8 +1236,8 @@ Severity is after skeptic review. "Unverified" means not re-checked by a skeptic
 | R5-2 | low | Without a decoy set, the pre-proving registry proof request names the chosen delegates' keys to the RPC server | Accepted: helpers already learn each DC's delegate (§5); Tor hides the IP; ballot and directory reads stay whole-list (decision 18) |
 | R5-3 | low | Ballots and share status are shown without proofs, so a lying RPC server or helper can misreport them in the app | Accepted (D1, decision 35): the chain counts the real ballot, delegates can publish their choices elsewhere, and the pre-proving registry check stays proven, so a lying server still cannot redirect a delegation |
 | R5-4 | medium | A delegate who misses the ballot deadline, or is suspended before it, leaves its whole pool uncounted for the round | Accepted by the owner (D2, D7): copy "Counts only with a ballot" before commit and on PD-7; DG-8 reminder, final-5-minute warning and 60 s confirm; a ballot track record on profiles follows in v1.1 (decision 42) |
-| R6-1 | low | A delegate who loses or leaks the key loses that round's pool if this happens before the ballot | Accepted (decision 10). Since rev 8, registering again from the same account keeps the index, vetted status and history; the new key votes from the next round |
-| R6-2 | low | A key thief can revoke the entry | Accepted: the delegate registers again from the X or GitHub account the thief does not control, which reactivates the entry (rev 8) |
+| R6-1 | low | A delegate who loses or leaks the key loses that round's pool if this happens before the ballot | Accepted (decision 10). Since rev 8, registering again from the same account keeps the index, vetted status and history; the new key counts from rounds created 2 days later |
+| R6-2 | low | A key thief can revoke the entry | Accepted: the delegate registers again from the X or GitHub account the thief does not control, which adds a new key that counts 2 days later (rev 8-9) |
 | R6-3 | low | No recovery after a reinstall or seed restore: a delegation not yet handed off is lost, and the kept remainder cannot be voted from the new install | Accepted as parity with votes (decision 17); copy C8 |
 | R6-4 | low | A DC to an unregistered index is never revealed | Accepted: it only hurts its sender, and honest wallets prove the entry before proving (O1) |
 | R6-5 | low | Auditing routing needs archival state, with no audit query | Accepted (decision 40) |
@@ -1241,7 +1247,8 @@ Severity is after skeptic review. "Unverified" means not re-checked by a skeptic
 | R7-2 | low | Vetted-list additions wait for the next round | Accepted: mid-round registrants are still found by exact search (D10), and removals act at once through directory flags or suspension |
 | R7-3 | low | Vetted delegates' pictures and names are X content again | Refreshed every round; hidden within 24 h when an account is deleted, suspended or protected, and when the picture changes if counsel requires; counsel signs off (§4.6 Legal) |
 | R7-4 | low | Without a round's proxy entry, Vizor cannot verify the live directory or show the vetted list | The entry is published with the round; it is content, not an off switch (decision 38) |
-| R8-1 | medium | The X or GitHub account is the delegate's master identity: a hijacker can re-key the entry | Accepted (owner rev 8): no formed pool can be captured; "Key changed" is shown; the 14-day cooldown can delay the owner taking it back, and the hijacker's key can vote only in rounds created after its re-key |
+| R8-1 | medium | The X or GitHub account is the delegate's master identity: a hijacker can add a key | Accepted (owner rev 8-9): a key change never touches a round created within 2 days of it; the owner's own re-registration within 2 days cancels the hijacker's key; otherwise coordinators suspend before the next round; "Key changed" is shown |
+| R9-1 | low | A stolen delegate key keeps working until a new key settles | Accepted (owner rev 9): the owner revokes it at once with their own copy (Retire); with no copy, coordinators suspend; keys are behind per-use biometrics on the phone |
 | R8-2 | medium | Profile pictures come from fetching public X profile pages, which X's terms prohibit without written consent | Accepted by the owner (decision 47): once per round, vetted delegates only, identicon on failure, paid lookup as fallback; registration stays on the official API; counsel informed (§4.6 Legal) |
 | R8-3 | low | Deleting the registration post delists the delegate, because the free daily refresh reads it | Accepted: registering again restores the listing; the delegate guide says to keep the post up |
 | R8-4 | low | Under a sustained attack, new registrations pause for the rest of the UTC day once the spend cap is reached | Accepted: spend stays capped, and each paid call needs a real marker post from an account outside its cooldown |
@@ -1269,7 +1276,7 @@ Q16 and Q17 were withdrawn in rev 3 with the published totals. Q19 was decided i
 | Q4 | **Decided (rev 6): no delegator recovery after a reinstall, for any account,** as for votes. The earlier question, opt-in recovery keyed to the viewing key for hardware delegators, is moot. | Decision 17, §4.4 |
 | Q21 | **Decided (rev 6): adopt the simplification pass in full,** including the three owner calls: (A) no deep links in v1, (B) a lean status view, and (C) one off switch. | Revision history, decisions 10, 14, 17, 23, 26 and 38-45 |
 | Q22 | **Decided (rev 7): the vetted list lives in the dynamic config,** pinned per round by the existing admin key and approved by Valar and Vizor PR review instead of curator keys, with pictures, names and handles refreshed from X or GitHub before each round. | Decision 39, §4.6, §4.7 |
-| Q23 | **Decided (rev 8): registration cost and identity.** 12-word delegate phrases. Registering again from the same account re-keys the entry, with no support process and a 14-day cooldown checked before any paid call. Registration costs a free oEmbed check first, then one paid lookup by the signer under a daily spend cap. The daily refresh is free through oEmbed. Valar's own tool fetches pictures from public profile pages once per round. Profile content stays on Valar's servers, with only hashes in git. | Decisions 10, 46-48; §4.6 |
+| Q23 | **Decided (rev 8): registration cost and identity.** 12-word delegate phrases. Registering again from the same account adds a new key that counts from rounds created 2 days later (rev 9), with no support process and one paid check per account per day, checked before any paid call. Registration costs a free oEmbed check first, then one paid lookup by the signer under a daily spend cap. The daily refresh is free through oEmbed. Valar's own tool fetches pictures from public profile pages once per round. Profile content stays on Valar's servers, with only hashes in git. | Decisions 10, 46-48; §4.6 |
 
 ### 7.2 Open
 
@@ -1304,7 +1311,7 @@ Sizes: S is 1-3 days, M is 1-2 eng-weeks, L is 2-4 eng-weeks. Per-repo totals ar
     Rev 6 makes it smaller: two new tags, five delegate digests plus D1, and no pending-change state.
   - **SP2:**
     - ZIP-A errata limited to the hooks ZIP-PD cites (S).
-    - **One ZIP, ZIP-PD** (M). Rev 6 folds ZIP-DR into it as a registry section: register, revoke, suspension, attestation counting, the five digests, the re-key rule and the coordinator trust model with the D7 approval floor. ZIP-PD also carries:
+    - **One ZIP, ZIP-PD** (M). Rev 6 folds ZIP-DR into it as a registry section: register, revoke, suspension, attestation counting, the five digests, the key-timing rule and the coordinator trust model with the D7 approval floor. ZIP-PD also carries:
       - the ZKP4 statement, including the 3-bit slot check and no index bound, frozen by week 3;
       - the timing section (spec_rollout §1.4.11), rewritten for parity. Delete "SHOULD finish before vote_end − buffer" and "MUST NOT start after vote_end − 30 min". The wallet MUST use the vote path's last-moment predicate and `VoteEnded` check, MUST require authenticated round timing for new allocations, and MUST freeze the batch layout and `(d, w, slot, layout)` per `van_nf` before the first proof;
       - the complete-ballot and one-final-tally rules, the §5 normative wording, pool solvability and the validator trust assumption.
@@ -1325,7 +1332,7 @@ Sizes: S is 1-3 days, M is 1-2 eng-weeks, L is 2-4 eng-weeks. Per-repo totals ar
   - proto and dormant gating with one const (S);
   - types and digests (S-M);
   - capacity guard (S);
-  - registry: register (new or re-key, with the re-key ballot rule), revoke and suspension (M);
+  - registry: register (new or added key), the key history and its ballot rule, revoke and suspension (M);
   - ballots, with the completeness and one-shot rules (S-M);
   - ZKP4 FFI (M);
   - 0x09, cloned from the 0x06/0x07 batch code (M);
@@ -1363,7 +1370,7 @@ Sizes: S is 1-3 days, M is 1-2 eng-weeks, L is 2-4 eng-weeks. Per-repo totals ar
   - integration, vectors, mobile benchmarks (M);
   - layout choice, batch freeze and the explicit-layout share planner (S).
 - **Verifier service (about 5.75-7 eng-weeks):**
-  - API with the free oEmbed pre-check, the 14-day cooldown and rate limits, and the X and GitHub providers (M-L);
+  - API with the free oEmbed pre-check, the one-per-day limit and rate limits, and the X and GitHub providers (M-L);
   - hardened signer that re-checks every post and makes the one paid lookup under the daily spend cap, plus the key ceremony (M);
   - refresher (daily oEmbed reads of registration posts, delisting on 404 within 24 h) and chain indexer (S-M);
   - publisher of the one signed `directory.json`, on two mirrors (S-M);
@@ -1392,7 +1399,7 @@ Sizes: S is 1-3 days, M is 1-2 eng-weeks, L is 2-4 eng-weeks. Per-repo totals ar
 | M0 contracts-v1, ZKP4 statement, registry digests frozen | 0-3 | Critical. Every rev 6 change to wire formats lands here |
 | M1 voting-circuits 0.13.0-rc.1 | 2-8 | Critical; about a week earlier than rev 5, without the index bound |
 | M2a Audit tranche 1: ZKP4 (both layouts, 3-bit slot check), 0x09, p=0 reveal, ballot validation, routing and ρ, registry handlers | 8-12 | Critical; book auditors now |
-| M2b Audit tranche 2: client secrets (hotkey-derived `dc_seed`, layout 1), phrase format and key derivation, the five registry and ballot digests, the re-key rule and attestation counting, signer custody, the per-round proxy entry and its signing payload, directory signing, Rust image decode, Vizor's participation-reader extension (light-client and IAVL checks of the registry entries) | 11-14 | Launch gate; about a third smaller than rev 5. Merge it into M2a if the client crypto is ready by about week 10 |
+| M2b Audit tranche 2: client secrets (hotkey-derived `dc_seed`, layout 1), phrase format and key derivation, the five registry and ballot digests, the key-timing rule and attestation counting, signer custody, the per-round proxy entry and its signing payload, directory signing, Rust image decode, Vizor's participation-reader extension (light-client and IAVL checks of the registry entries) | 11-14 | Launch gate; about a third smaller than rev 5. Merge it into M2a if the client crypto is ready by about week 10 |
 | M3 vote-sdk dormant merges plus helper | 3-11 | Registry and ballots need no circuits |
 | M4 Verifier MVP (X, GitHub), with the hardened signer | 3-9 | One identity engineer can move to Vizor integration afterwards |
 | M5 zcash_voting | 4-12 | Needs M1 rc |
@@ -1404,10 +1411,11 @@ Sizes: S is 1-3 days, M is 1-2 eng-weeks, L is 2-4 eng-weeks. Per-repo totals ar
 
 - **Critical path:** M0 → M1 → M2a → release candidates (0.13.0, v1.7.0, zcash_voting, Vizor) → M8 → final tags → M9 → M10, about 17-18 weeks, set by the circuit, the audit and the stage rounds.
 - M2b and the legal sign-off run on parallel paths that must close before M8 ends.
-- **Total:** about 54-61 eng-weeks plus two audit tranches [inference], against rev 5's 79-84.
+- **Total:** about 55-62 eng-weeks plus two audit tranches [inference], against rev 5's 79-84.
   - Rev 6 saves in every package.
   - Rev 7 trims about 0.5 more net: no curator keys, offline certificate or new static pin, against the new per-round proxy entry and picture pull.
-  - Rev 8 adds back about 0.5-1, for the re-key op, the oEmbed pre-check and refresher, the cooldown and spend cap, and moving profile content out of git.
+  - Rev 8 adds back about 0.5-1, for the added-key op, the oEmbed pre-check and refresher, the spend cap, and moving profile content out of git.
+  - Rev 9 adds about 0.5 for the key history and its ballot rule.
 
   Package figures:
 
@@ -1459,7 +1467,7 @@ Sizes: S is 1-3 days, M is 1-2 eng-weeks, L is 2-4 eng-weeks. Per-repo totals ar
   - an in-window DC at about T−10 min alongside a pre-window DC;
   - a delegate registered mid-round who is found by exact search, receives a delegation and submits a ballot in the same round;
   - a delegate with delegations who submits no ballot (its pool is counted nowhere);
-  - a delegate who retires and registers again, and one who re-keys with a new 12-word phrase (the new key votes only in the next round);
+  - a delegate who retires and registers again, and one who adds a new key with a new 12-word phrase (the old key still votes in the running round; the new key counts from rounds created 2 days later);
   - a pause on/off drill.
 
   A scripted check confirms that per-option totals match the plaintext model.
@@ -1467,7 +1475,9 @@ Sizes: S is 1-3 days, M is 1-2 eng-weeks, L is 2-4 eng-weeks. Per-repo totals ar
   - a DC landing in the transition block is rejected with the VAN unspent;
   - a batch re-proved across the window boundary keeps one layout;
   - an incomplete ballot and any second ballot are rejected;
-  - a re-registration inside the 14-day cooldown is refused before any paid call, and one from a different account that took a renamed handle creates a new entry instead of re-keying.
+  - a second paid check for one account on the same day is refused before any paid call;
+  - a hijacker's new key that the owner replaces within 2 days never counts;
+  - a registration from a different account that took a renamed handle creates a new entry instead of adding a key.
 - **Real influencers** onboard on mainnet between M9 and M10, with registration on and no proxy round yet; this also seeds the launch vetted list.
 - **Then** one mainnet proxy round per Q7 and Q12.
 
@@ -1511,9 +1521,14 @@ Zodl maintainers then confirm on a current production build that `VoteRound` fie
     - `register` needs a threshold of distinct current verifiers and a never-seen key; a replayed attestation fails.
     - The registry is capped at `min(max_delegates, 2^30)`.
     - A mid-round `register` gets the next index at once and can submit a ballot in the running round.
-    - A `register` with `delegate_index = d` re-keys entry `d`: same index, new key, ACTIVE; a suspension stays; the old key is rejected at once; the new key's ballot is rejected in rounds created before the re-key and accepted in later ones; a re-key with a different `subject_commit` is rejected.
-    - A revoked entry is reactivated by a re-key.
-    - A revoked or suspended delegate cannot submit a ballot, and a ballot accepted before a later revocation, suspension or re-key still counts.
+    - A `register` with `delegate_index = d` adds a key to entry `d`; one with a different `subject_commit` is rejected; a suspension stays.
+    - Key history:
+      - a first registration's key counts at once;
+      - an added key counts only in rounds created at least 2 days after it, and the previous key keeps working until then, including in running rounds;
+      - a key replaced before it settles never counts;
+      - a revoked key never counts again, and any key in the history can be revoked with its own signature;
+      - a round whose key fell out of the 4-key history gets no ballot.
+    - A suspended delegate, or one whose effective key is revoked, cannot submit a ballot. A ballot accepted before a later revocation, suspension or key change still counts.
   - **Pool reveals.** p=0 reveals are accepted for suspended and revoked delegates and for an index registered after round creation, and rejected for `d = 0` and `d ≥ Next`.
   - **Proposal 0 stays out of results.**
     - Proposal 0 never appears in VoteSummary, TallyResults, 0x0D partials, completeness or `SubmitTally`.
@@ -1613,8 +1628,8 @@ Zodl maintainers then confirm on a current production build that `VoteRound` fie
   - **Delegate mode.**
     - DG-9 keeps Submit disabled until every question has an answer, and offers no per-question abstain.
     - DG-10 lists every choice and requires re-auth, and a submitted ballot is read-only.
-    - DG-11 Retire requires re-auth and a confirm, and DG-2 "Register again" re-keys the same entry.
-    - A delegate whose key changed during the current round is not offered for delegation, and shows "Changed keys. Can vote again next round."
+    - DG-11 Retire requires re-auth and a confirm, and DG-2 "Register again" adds a key to the same entry.
+    - A delegate whose effective key for the round is revoked is not offered for delegation, and one with a settling key shows "Key changed" with the settle date.
   - **Copy.** The §4.5 copy keys, including "Not browsable" and "Retire". No string claims that a delegator's amount privacy equals a direct voter's.
   - **Images and network roles.**
     - The `Image.network`/codec ban.
@@ -1626,8 +1641,8 @@ Zodl maintainers then confirm on a current production build that `VoteRound` fie
   - **Other.** Deletion cleanup and accessibility.
 - **Verifier:**
   - reply, quote, retweet and template-mismatch proofs are rejected;
-  - an attempt that fails the free oEmbed check, or an account inside its 14-day cooldown, causes no paid call;
-  - the signer refuses mismatched fields, re-checks the post and makes the one paid lookup itself, stops paid calls at the daily spend cap, and attests a re-key for an account that already has an entry;
+  - an attempt that fails the free oEmbed check, or an account that already had a paid check that day, causes no paid call;
+  - the signer refuses mismatched fields, re-checks the post and makes the one paid lookup itself, stops paid calls at the daily spend cap, and attests a new key for an account that already has an entry;
   - the refresher delists a registration whose post returns 404 within 24 h, and never delists on network errors or 5xx;
   - `directory.json` carries current handles for every registered delegate, and its flags can hide but never add a vetted entry;
   - a purge regenerates the document on both mirrors;
@@ -1711,7 +1726,7 @@ Pass criteria:
   - At least 2 vote managers in the coordinator policy; proxy payloads need 2 approvals.
   - Params set: verifier set at threshold 1, `max_delegates` 20,000.
 - [ ] **Verifier hardening live.**
-  - The free oEmbed pre-check and the 14-day cooldown run before any paid call.
+  - The free oEmbed pre-check and the one-per-day limit run before any paid call.
   - The signer makes the one paid lookup on its own host, under the daily spend cap (about $5 at launch).
   - The refresher reads every registration post daily through oEmbed and delists on 404 within 24 h.
   - The picture tool's guardrails are in place: vetted delegates only, once per round, identicon fallback.
