@@ -78,3 +78,13 @@ The rows overlap, so they add up to more than the total.
   | 10,000 | $3,050 (about $1,250 with weekly refresh of dormant delegates) |
 
   Rev 5 spent about the same, because hydration rode on the same user lookup. The savings are engineering, legal and ops.
+
+## Follow-up in rev 7 (owner decision)
+
+The owner moved the vetted list into the dynamic config that wallets already fetch.
+- **Signed proxy entry.** Each round gets a proxy entry beside its round entry, signed by the same admin key (`trusted_keys`). The entry pins the vetted list's hash and names the live directory's signing key.
+- **Approval.** A Valar reviewer and a Vizor reviewer approve each list in a config-repo PR. This replaces rev 6's 2-of-3 curator keys.
+- **Pre-round refresh.** Before each round, a curator tool refreshes the vetted delegates' pictures, names and handles from X or GitHub by account id.
+- **Fixed per round.** Additions wait for the next round. Removals still act at once through directory flags or suspension.
+- **What it removes:** the curator keys, the vetted section's own `seq`, the directory's offline-key certificate and the new static pin.
+- **Net effect:** about 0.5 eng-weeks saved after adding the per-round picture pull [inference]. Vetted pictures and names are X content again, and counsel signs off on that (PLAN.md §4.6 Legal).
