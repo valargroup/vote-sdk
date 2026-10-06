@@ -111,3 +111,30 @@ A new key from registering again counts only for rounds created at least 2 days 
 - **Stolen keys.** A stolen key is revoked at once with "Retire" from the owner's own copy.
 - **Rate limit.** The 14-day cooldown is replaced by one paid check per account per day.
 - **Chain state.** Each entry keeps its last 4 keys with timestamps, and the ballot check uses the round's effective key.
+
+## Follow-up in rev 11 (final review)
+
+Astra, at extra-high reasoning, and an independent reviewer both found holes in rev 9's key rule and a few rev 7-8 details. Their raw reports are not kept here; PLAN.md rev 11 records the outcome. The fixes, all owner-approved:
+- **Key history.** A first registration counts in every round. A pending key replaced before it settles is deleted, and settled keys are kept. The effective key is the newest with `settles_at ≤ round.created_at_time`.
+- **Saved attestations.** Attestations bind the entry's newest key.
+- **Key freeze.** Coordinators freeze one key instead of suspending the whole delegate.
+- **Several keys.** The apps handle more than one key per delegate.
+- **Spend cap.** Part of it is reserved for owners re-registering.
+- **Relisting.** Re-posting the marker relists a delegate without a key change.
+- **Pictures.** There is no picture pack in git.
+- **Freshness.** The directory's age is judged by its signed time.
+- **Proxy entries.** Each carries a version number.
+- **Approvals.** A required CI check enforces one Valar and one Vizor approval.
+
+Simplifications adopted:
+- One VAN-weight loader.
+- Proven entry bytes decoded in zcash_voting.
+- The proxy entry in its own PR.
+- Stage auto-merge.
+- No per-IP tracking.
+- No paid picture fallback.
+
+Not adopted:
+- A verifier-signed handle binding for unvetted delegates.
+- Salted picture hashes.
+- Rewording the "Counted" status.
