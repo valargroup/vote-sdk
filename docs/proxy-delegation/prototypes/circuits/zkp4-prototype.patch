@@ -1,0 +1,2284 @@
+diff -ruN -x target -x Cargo.lock -x .git pristine/voting-circuits/src/lib.rs rev3-circuit/voting-circuits/src/lib.rs
+--- pristine/voting-circuits/src/lib.rs	2026-10-05 22:44:03
++++ rev3-circuit/voting-circuits/src/lib.rs	2026-10-05 22:39:27
+@@ -28,3 +28,4 @@
+ pub mod delegation;
+ pub mod share_reveal;
+ pub mod vote_proof;
++pub mod proxy_delegation;
+diff -ruN -x target -x Cargo.lock -x .git pristine/voting-circuits/src/proxy_delegation/circuit/tests.rs rev3-circuit/voting-circuits/src/proxy_delegation/circuit/tests.rs
+--- pristine/voting-circuits/src/proxy_delegation/circuit/tests.rs	1969-12-31 17:00:00
++++ rev3-circuit/voting-circuits/src/proxy_delegation/circuit/tests.rs	2026-10-05 22:42:01
+@@ -0,0 +1,686 @@
++use super::*;
++use crate::ff::{Field, PrimeField, PrimeFieldBits};
++#[allow(unused_imports)]
++use crate::ff::PrimeField as _PF;
++use crate::gadgets::elgamal::{base_to_scalar, elgamal_encrypt, spend_auth_g_affine};
++use crate::gadgets::van_integrity::van_integrity_hash;
++use crate::group::{Curve, Group};
++use crate::protocol_hash::poseidon_hash_2;
++use crate::rand::rngs::OsRng;
++use crate::shares_hash::{share_commitment, shares_hash};
++use core::iter;
++use std::println;
++use voting_crypto_deps::halo2_gadgets::sinsemilla::primitives::CommitDomain;
++use voting_crypto_deps::halo2_proofs::dev::MockProver;
++use voting_crypto_deps::orchard::constants::{
++    fixed_bases::COMMIT_IVK_PERSONALIZATION, L_ORCHARD_BASE,
++};
++use voting_crypto_deps::pasta_curves::arithmetic::CurveAffine;
++
++fn empty_path() -> [pallas::Base; VOTE_COMM_TREE_DEPTH] {
++    let mut r = [pallas::Base::zero(); VOTE_COMM_TREE_DEPTH];
++    r[0] = poseidon_hash_2(pallas::Base::zero(), pallas::Base::zero());
++    for i in 1..VOTE_COMM_TREE_DEPTH {
++        r[i] = poseidon_hash_2(r[i - 1], r[i - 1]);
++    }
++    r
++}
++
++fn single_leaf_root(leaf: pallas::Base) -> pallas::Base {
++    let p = empty_path();
++    let mut c = leaf;
++    for s in p.iter() {
++        c = poseidon_hash_2(c, *s);
++    }
++    c
++}
++
++fn derive_voting_address(
++    vsk: pallas::Scalar,
++    nk: pallas::Base,
++    rivk_v: pallas::Scalar,
++) -> (pallas::Affine, pallas::Affine) {
++    let ak_x = *(spend_auth_g_affine() * vsk)
++        .to_affine()
++        .coordinates()
++        .unwrap()
++        .x();
++    let ivk_v = CommitDomain::new(COMMIT_IVK_PERSONALIZATION)
++        .short_commit(
++            iter::empty()
++                .chain(ak_x.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
++                .chain(nk.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE)),
++            &rivk_v,
++        )
++        .unwrap();
++    let g_d = pallas::Point::generator() * pallas::Scalar::from(12345u64);
++    let pk_d = g_d * base_to_scalar(ivk_v).unwrap();
++    (g_d.to_affine(), pk_d.to_affine())
++}
++
++/// Knobs for negative tests.
++#[derive(Clone)]
++pub(super) struct Fx {
++    pub total: u64,
++    pub shares: [u64; 16],
++    /// Override for W_new (field element); default W - sum(shares).
++    pub remaining_override: Option<pallas::Base>,
++    pub authority_old: u64,
++    pub delegate_index: u64,
++    pub instance_delegate_index: Option<u64>,
++    pub instance_dc_proposal: u64,
++    pub dc_slot: u64,
++    pub bound: u64,
++}
++
++impl Default for Fx {
++    fn default() -> Self {
++        let mut shares = [0u64; 16];
++        shares[0] = 1000;
++        shares[3] = 100;
++        shares[7] = 7;
++        Fx {
++            total: 10_000,
++            shares,
++            remaining_override: None,
++            authority_old: MAX_PROPOSAL_AUTHORITY,
++            delegate_index: 1234,
++            instance_delegate_index: None,
++            instance_dc_proposal: 0,
++            dc_slot: 3,
++            bound: 5000,
++        }
++    }
++}
++
++pub(super) struct Built {
++    pub circuit: Circuit,
++    pub instance: Instance,
++    pub share_comms: [pallas::Base; 16],
++    pub blinds: [pallas::Base; 16],
++    pub c1: [(pallas::Base, pallas::Base); 16],
++    pub c2: [(pallas::Base, pallas::Base); 16],
++    pub round: pallas::Base,
++    pub dc: pallas::Base,
++}
++
++pub(super) fn build(fx: &Fx) -> Built {
++    let mut rng = OsRng;
++    let vsk = pallas::Scalar::random(&mut rng);
++    let nk = pallas::Base::random(&mut rng);
++    let rivk = pallas::Scalar::random(&mut rng);
++    let alpha = pallas::Scalar::random(&mut rng);
++    let (g_d, pk_d) = derive_voting_address(vsk, nk, rivk);
++    let g_d_x = *g_d.coordinates().unwrap().x();
++    let pk_d_x = *pk_d.coordinates().unwrap().x();
++    let round = pallas::Base::random(&mut rng);
++    let rand = pallas::Base::random(&mut rng);
++    let w: u64 = fx.shares.iter().sum();
++    let total = pallas::Base::from(fx.total);
++    let remaining = fx
++        .remaining_override
++        .unwrap_or(pallas::Base::from(fx.total) - pallas::Base::from(w));
++
++    let van_old = van_integrity_hash(
++        g_d_x,
++        pk_d_x,
++        total,
++        round,
++        pallas::Base::from(fx.authority_old),
++        rand,
++    );
++    let van_new = van_integrity_hash(
++        g_d_x,
++        pk_d_x,
++        remaining,
++        round,
++        pallas::Base::from(MAX_PROPOSAL_AUTHORITY),
++        rand,
++    );
++    let root = single_leaf_root(van_old);
++    let nf = poseidon::Hash::<_, poseidon::P128Pow5T3, ConstantLength<4>, 3, 2>::init().hash([
++        nk,
++        domain_tags::vote_authority_spend(),
++        round,
++        van_old,
++    ]);
++    let r_vpk = (spend_auth_g_affine() * (vsk + alpha)).to_affine();
++    let ea_pk = (spend_auth_g_affine() * pallas::Scalar::from(42u64)).to_affine();
++
++    let mut c1x = [pallas::Base::zero(); 16];
++    let mut c1y = [pallas::Base::zero(); 16];
++    let mut c2x = [pallas::Base::zero(); 16];
++    let mut c2y = [pallas::Base::zero(); 16];
++    let randomness: [pallas::Base; 16] =
++        core::array::from_fn(|i| pallas::Base::from((i as u64 + 1) * 101));
++    let blinds: [pallas::Base; 16] = core::array::from_fn(|_| pallas::Base::random(&mut rng));
++    for i in 0..16 {
++        let (a, b, c, d) =
++            elgamal_encrypt(pallas::Base::from(fx.shares[i]), randomness[i], ea_pk).unwrap();
++        c1x[i] = a;
++        c2x[i] = b;
++        c1y[i] = c;
++        c2y[i] = d;
++    }
++    let sh = shares_hash(blinds, c1x, c2x, c1y, c2y);
++    let share_comms: [pallas::Base; 16] =
++        core::array::from_fn(|i| share_commitment(blinds[i], c1x[i], c2x[i], c1y[i], c2y[i]));
++    let dc_inst = vote_commitment::vote_commitment_hash(
++        round,
++        sh,
++        pallas::Base::from(fx.instance_dc_proposal),
++        pallas::Base::from(fx.instance_delegate_index.unwrap_or(fx.delegate_index)),
++    );
++    let dc_true = delegation_commitment_hash(round, sh, fx.delegate_index as u32);
++
++    let circuit = Circuit {
++        vote_comm_tree_path: Value::known(empty_path()),
++        vote_comm_tree_position: Value::known(0),
++        vpk_g_d: Value::known(g_d),
++        vpk_pk_d: Value::known(pk_d),
++        total_note_value: Value::known(total),
++        remaining_note_value: Value::known(remaining),
++        van_comm_rand: Value::known(rand),
++        vote_authority_note_old: Value::known(van_old),
++        vsk: Value::known(vsk),
++        rivk_v: Value::known(rivk),
++        alpha_v: Value::known(alpha),
++        vsk_nk: Value::known(nk),
++        shares: fx.shares.map(|s| Value::known(pallas::Base::from(s))),
++        enc_share_c1_x: c1x.map(Value::known),
++        enc_share_c2_x: c2x.map(Value::known),
++        enc_share_c1_y: c1y.map(Value::known),
++        enc_share_c2_y: c2y.map(Value::known),
++        share_blinds: blinds.map(Value::known),
++        share_randomness: randomness.map(Value::known),
++        ea_pk: Value::known(ea_pk),
++        delegate_index: Value::known(pallas::Base::from(fx.delegate_index)),
++        dc_slot: Value::known(pallas::Base::from(fx.dc_slot)),
++        delegate_index_bound: Value::known(pallas::Base::from(fx.bound)),
++    };
++    let instance = Instance {
++        van_nullifier: nf,
++        r_vpk_x: *r_vpk.coordinates().unwrap().x(),
++        r_vpk_y: *r_vpk.coordinates().unwrap().y(),
++        vote_authority_note_new: van_new,
++        delegation_commitment: dc_inst,
++        vote_comm_tree_root: root,
++        vote_comm_tree_anchor_height: pallas::Base::from(77u64),
++        voting_round_id: round,
++        ea_pk_x: *ea_pk.coordinates().unwrap().x(),
++        ea_pk_y: *ea_pk.coordinates().unwrap().y(),
++        dc_slot_nullifier: dc_slot_nullifier_hash(nk, round, rand, fx.dc_slot as u8),
++        delegate_index_bound: pallas::Base::from(fx.bound),
++    };
++    Built {
++        circuit,
++        instance,
++        share_comms,
++        blinds,
++        c1: core::array::from_fn(|i| (c1x[i], c1y[i])),
++        c2: core::array::from_fn(|i| (c2x[i], c2y[i])),
++        round,
++        dc: dc_true,
++    }
++}
++
++fn verify(fx: &Fx) -> bool {
++    let b = build(fx);
++    match MockProver::run(K, &b.circuit, vec![b.instance.to_halo2_instance()]) {
++        Ok(p) => p.verify().is_ok(),
++        Err(_) => false,
++    }
++}
++
++#[test]
++fn zkp4_valid_partial() {
++    assert!(verify(&Fx::default()));
++}
++
++#[test]
++fn zkp4_valid_full_delegation_successor_zero() {
++    let mut fx = Fx::default();
++    fx.total = 1107; // == sum(shares) -> W_new = 0
++    assert!(verify(&fx));
++}
++
++#[test]
++fn zkp4_valid_max_weight() {
++    let mut fx = Fx::default();
++    fx.total = 1 << 30; // ZKP1 upper bound
++    fx.shares = [(1 << 30) / 16; 16];
++    assert!(verify(&fx));
++}
++
++#[test]
++fn zkp4_rejects_overdelegation_w_gt_w() {
++    let mut fx = Fx::default();
++    fx.total = 1000; // w = 1107 > W
++    assert!(!verify(&fx));
++}
++
++#[test]
++fn zkp4_rejects_zero_weight() {
++    let mut fx = Fx::default();
++    fx.shares = [0; 16];
++    assert!(!verify(&fx));
++}
++
++#[test]
++fn zkp4_rejects_non_max_authority() {
++    let mut fx = Fx::default();
++    fx.authority_old = MAX_PROPOSAL_AUTHORITY - 2; // voted on proposal 1 already
++    assert!(!verify(&fx));
++}
++
++#[test]
++fn zkp4_rejects_nonzero_pool_proposal() {
++    let mut fx = Fx::default();
++    fx.instance_dc_proposal = 1;
++    assert!(!verify(&fx));
++}
++
++#[test]
++fn zkp4_rejects_wrong_delegate_in_dc() {
++    let mut fx = Fx::default();
++    fx.instance_delegate_index = Some(1235);
++    assert!(!verify(&fx));
++}
++
++#[test]
++fn zkp4_rejects_inflated_successor() {
++    let mut fx = Fx::default();
++    fx.remaining_override = Some(pallas::Base::from(10_000u64)); // W_new = W, w > 0
++    assert!(!verify(&fx));
++}
++
++#[test]
++fn zkp4_rejects_share_overflow() {
++    let mut fx = Fx::default();
++    fx.shares[0] = 1 << 30;
++    fx.total = (1 << 30) + 2000;
++    assert!(!verify(&fx));
++}
++
++/// ZKP3 (unchanged) reveals a DC share with proposal_id = 0 and decision = delegate_index.
++#[test]
++fn zkp3_reveals_dc_share_with_pool_proposal_and_large_index() {
++    let fx = Fx::default();
++    let b = build(&fx);
++    for idx in [0usize, 7] {
++        let rb = crate::share_reveal::build_share_reveal(
++            empty_path(),
++            0,
++            b.share_comms,
++            b.blinds[idx],
++            b.c1[idx].0,
++            b.c2[idx].0,
++            b.c1[idx].1,
++            b.c2[idx].1,
++            idx as u32,
++            pallas::Base::zero(),
++            pallas::Base::from(fx.delegate_index),
++            b.round,
++        );
++        assert_eq!(rb.instance.vote_comm_tree_root, single_leaf_root(b.dc));
++        let p = MockProver::run(
++            crate::share_reveal::K,
++            &rb.circuit,
++            vec![rb.instance.to_halo2_instance()],
++        )
++        .unwrap();
++        assert_eq!(p.verify(), Ok(()));
++
++        // Same reveal, but claiming a different delegate, must fail against the DC root.
++        let mut inst = rb.instance.clone();
++        inst.vote_decision = pallas::Base::from(fx.delegate_index + 1);
++        let p = MockProver::run(
++            crate::share_reveal::K,
++            &rb.circuit,
++            vec![inst.to_halo2_instance()],
++        )
++        .unwrap();
++        assert!(p.verify().is_err());
++        // ... or claiming proposal 1.
++        let mut inst = rb.instance.clone();
++        inst.proposal_id = pallas::Base::one();
++        let p = MockProver::run(
++            crate::share_reveal::K,
++            &rb.circuit,
++            vec![inst.to_halo2_instance()],
++        )
++        .unwrap();
++        assert!(p.verify().is_err());
++    }
++    // u32::MAX index is also accepted by ZKP3 (no range constraint on decision).
++    let mut fx2 = Fx::default();
++    fx2.delegate_index = u32::MAX as u64;
++    let b2 = build(&fx2);
++    let rb = crate::share_reveal::build_share_reveal(
++        empty_path(),
++        0,
++        b2.share_comms,
++        b2.blinds[0],
++        b2.c1[0].0,
++        b2.c2[0].0,
++        b2.c1[0].1,
++        b2.c2[0].1,
++        0,
++        pallas::Base::zero(),
++        pallas::Base::from(u32::MAX as u64),
++        b2.round,
++    );
++    let p = MockProver::run(
++        crate::share_reveal::K,
++        &rb.circuit,
++        vec![rb.instance.to_halo2_instance()],
++    )
++    .unwrap();
++    assert_eq!(p.verify(), Ok(()));
++}
++
++#[test]
++#[ignore]
++fn row_budget() {
++    use voting_crypto_deps::halo2_proofs::dev::CircuitCost;
++    let b = build(&Fx::default());
++    let cost = CircuitCost::<vesta::Point, _>::measure(K, &b.circuit);
++    println!("ZKP4 filled: {cost:?}");
++    let cost_d = CircuitCost::<vesta::Point, _>::measure(K, &Circuit::default());
++    println!("ZKP4 default: {cost_d:?}");
++}
++
++#[test]
++#[ignore]
++fn prove_verify_timing() {
++    use std::time::Instant;
++    use voting_crypto_deps::halo2_proofs::{
++        pasta::EqAffine,
++        plonk::{keygen_pk, keygen_vk},
++        poly::commitment::Params,
++    };
++    let t = Instant::now();
++    let params: Params<EqAffine> = Params::new(K);
++    let vk = keygen_vk(&params, &Circuit::default()).unwrap();
++    let pk = keygen_pk(&params, vk.clone(), &Circuit::default()).unwrap();
++    println!("ZKP4 keygen: {:?}", t.elapsed());
++    let pinned = format!("{:?}", vk.pinned());
++    let fp = blake2b_simd::Params::new().hash_length(32).hash(pinned.as_bytes());
++    println!("ZKP4 VK fingerprint (prototype): {:02x?}", fp.as_bytes());
++    let mut times = vec![];
++    for i in 0..8 {
++        let b = build(&Fx::default());
++        let pi = b.instance.to_halo2_instance();
++        let t = Instant::now();
++        let proof = crate::prove_error::create_proof_bytes(&params, &pk, b.circuit, &pi).unwrap();
++        let dt = t.elapsed();
++        times.push(dt);
++        let t = Instant::now();
++        crate::prove_error::verify_proof_bytes("zkp4", &params, &vk, &proof, &pi).unwrap();
++        println!(
++            "ZKP4 prove #{i}: {:?}  verify: {:?}  proof bytes: {}",
++            dt,
++            t.elapsed(),
++            proof.len()
++        );
++    }
++    times.sort();
++    println!("ZKP4 median prove: {:?}", times[times.len() / 2]);
++}
++
++#[test]
++#[ignore]
++fn explain_negative_failures() {
++    let mut cases: Vec<(&str, Fx)> = vec![];
++    let mut f = Fx::default(); f.total = 1000; cases.push(("w > W", f));
++    let mut f = Fx::default(); f.shares = [0; 16]; cases.push(("w = 0", f));
++    let mut f = Fx::default(); f.authority_old = MAX_PROPOSAL_AUTHORITY - 2; cases.push(("auth != MAX", f));
++    let mut f = Fx::default(); f.instance_dc_proposal = 1; cases.push(("DC proposal 1", f));
++    let mut f = Fx::default(); f.instance_delegate_index = Some(1235); cases.push(("wrong delegate", f));
++    let mut f = Fx::default(); f.remaining_override = Some(pallas::Base::from(10_000u64)); cases.push(("inflated successor", f));
++    let mut f = Fx::default(); f.dc_slot = 8; cases.push(("slot 8", f));
++    for (name, fx) in cases {
++        let b = build(&fx);
++        let p = MockProver::run(K, &b.circuit, vec![b.instance.to_halo2_instance()]).unwrap();
++        match p.verify() {
++            Ok(()) => println!("{name}: UNEXPECTED PASS"),
++            Err(errs) => {
++                let mut names: Vec<String> = errs.iter().map(|e| {
++                    let s = format!("{e}");
++                    s.lines().next().unwrap_or("").chars().take(140).collect()
++                }).collect();
++                names.sort(); names.dedup();
++                println!("{name}: {} failures; e.g. {:?}", errs.len(), &names[..names.len().min(3)]);
++            }
++        }
++    }
++}
++
++#[test]
++#[ignore]
++fn compare_zkp2_zkp4_timing() {
++    use std::time::Instant;
++    use voting_crypto_deps::halo2_proofs::{
++        pasta::EqAffine,
++        plonk::{keygen_pk, keygen_vk},
++        poly::commitment::Params,
++    };
++    use voting_crypto_deps::orchard::keys::SpendingKey;
++    let params: Params<EqAffine> = Params::new(K);
++    let vk = keygen_vk(&params, &Circuit::default()).unwrap();
++    let pk = keygen_pk(&params, vk.clone(), &Circuit::default()).unwrap();
++    crate::vote_proof::vote_proof_cached_keys().unwrap();
++    let sk = SpendingKey::from_bytes([7u8; 32]).unwrap();
++    let ea_pk = (spend_auth_g_affine() * pallas::Scalar::from(42u64)).to_affine();
++    let (mut t2, mut t4) = (vec![], vec![]);
++    for i in 0..10 {
++        let t = Instant::now();
++        let b2 = crate::vote_proof::build_vote_proof_from_delegation(
++            &sk, 1, 1_000 * 12_500_000, pallas::Base::from(5u64), pallas::Base::from(9u64),
++            empty_path(), 0, 1, 1 + (i % 50) as u64, 1, ea_pk,
++            pallas::Scalar::random(&mut OsRng), MAX_PROPOSAL_AUTHORITY, false,
++        ).unwrap();
++        t2.push(t.elapsed());
++        let _ = b2;
++        let b = build(&Fx::default());
++        let pi = b.instance.to_halo2_instance();
++        let t = Instant::now();
++        let _p = crate::prove_error::create_proof_bytes(&params, &pk, b.circuit, &pi).unwrap();
++        t4.push(t.elapsed());
++    }
++    t2.sort(); t4.sort();
++    println!("CMP ZKP2 build+prove median {:?} (min {:?}); ZKP4 prove median {:?} (min {:?})", t2[5], t2[0], t4[5], t4[0]);
++}
++
++#[test]
++#[ignore]
++fn keygen_only_zkp4() {
++    use voting_crypto_deps::halo2_proofs::{pasta::EqAffine, plonk::{keygen_pk, keygen_vk}, poly::commitment::Params};
++    let params: Params<EqAffine> = Params::new(K);
++    let vk = keygen_vk(&params, &Circuit::default()).unwrap();
++    let pk = keygen_pk(&params, vk, &Circuit::default()).unwrap();
++    std::hint::black_box(&pk);
++}
++
++#[test]
++#[ignore]
++fn keygen_only_zkp2() {
++    let k = crate::vote_proof::vote_proof_cached_keys().unwrap();
++    std::hint::black_box(k);
++}
++
++#[test]
++#[ignore]
++fn keygen_only_none() {}
++
++#[test]
++#[ignore]
++fn print_frozen_vectors() {
++    let dc = delegation_commitment_hash(pallas::Base::from(42u64), pallas::Base::from(100u64), 7);
++    println!("VEC dc(42,100,7) = {:?}", dc.to_repr());
++    let vc = vote_commitment::vote_commitment_hash(pallas::Base::from(42u64), pallas::Base::from(100u64), pallas::Base::from(0u64), pallas::Base::from(7u64));
++    assert_eq!(dc, vc);
++    let nf = crate::share_reveal::share_nullifier_hash(dc, pallas::Base::from(3u64), pallas::Base::from(1001u64));
++    println!("VEC share_nf(dc,3,1001) = {:?}", nf.to_repr());
++}
++
++/// Runs MockProver with `dc_slot = slot` and returns the rendered failures.
++fn slot_failures(slot: u64) -> Vec<String> {
++    let mut fx = Fx::default();
++    fx.dc_slot = slot;
++    let b = build(&fx);
++    let p = MockProver::run(K, &b.circuit, vec![b.instance.to_halo2_instance()]).unwrap();
++    match p.verify() {
++        Ok(()) => vec![],
++        Err(errs) => errs.iter().map(|e| format!("{e}")).collect(),
++    }
++}
++
++/// Asserts `slot` fails only at C14's 3-bit short range check.
++fn assert_rejected_by_slot_range_check(slot: u64) {
++    let fails = slot_failures(slot);
++    assert!(!fails.is_empty(), "slot {slot} must be rejected");
++    for f in &fails {
++        assert!(
++            f.starts_with("Lookup ") && f.contains("'Range check 3 bits'"),
++            "slot {slot}: unexpected failure outside the slot range check: {f}"
++        );
++    }
++}
++
++#[test]
++fn zkp4_valid_slot_7() {
++    for slot in [0, 7] {
++        assert!(slot_failures(slot).is_empty(), "slot {slot} must verify");
++    }
++}
++
++#[test]
++fn zkp4_rejects_slot_8_at_range_check() {
++    assert_rejected_by_slot_range_check(8);
++}
++
++#[test]
++fn zkp4_rejects_slot_15() {
++    assert_rejected_by_slot_range_check(15);
++    assert_rejected_by_slot_range_check(16);
++}
++
++/// `TAG + s` for every valid slot stays distinct from each other and from the
++/// crate's other domain tags, and only moves byte 0 (no carry for s < 8).
++#[test]
++fn slot_tags_are_distinct() {
++    let n = 1usize << DC_SLOT_BITS;
++    assert_eq!(n, 8);
++    let tag = proxy_delegation_slot_tag();
++    let slot_tags: Vec<pallas::Base> = (0..n as u64).map(|s| tag + pallas::Base::from(s)).collect();
++    for (s, t) in slot_tags.iter().enumerate() {
++        let r = t.to_repr();
++        assert_eq!(r[0], b'p' + s as u8);
++        assert_eq!(&r[1..21], &b"proxy delegation slot"[1..]);
++        assert!(r[21..].iter().all(|&x| x == 0));
++    }
++    let others = [
++        pallas::Base::from(domain_tags::DOMAIN_VAN),
++        pallas::Base::from(domain_tags::DOMAIN_VC),
++        domain_tags::vote_authority_spend(),
++        domain_tags::governance_authorization(),
++        domain_tags::share_spend(),
++    ];
++    for (i, a) in slot_tags.iter().enumerate() {
++        for b in &slot_tags[i + 1..] {
++            assert_ne!(a, b);
++        }
++        assert!(!others.contains(a), "slot tag {i} collides with a protocol tag");
++    }
++    let (nk, round, rand) = (pallas::Base::from(1u64), pallas::Base::from(42u64), pallas::Base::from(5u64));
++    let nfs: Vec<_> = (0..n as u8).map(|s| dc_slot_nullifier_hash(nk, round, rand, s)).collect();
++    for (i, a) in nfs.iter().enumerate() {
++        for b in &nfs[i + 1..] {
++            assert_ne!(a, b);
++        }
++    }
++}
++
++#[test]
++#[ignore]
++fn debug_valid() {
++    let b = build(&Fx::default());
++    match MockProver::run(K, &b.circuit, vec![b.instance.to_halo2_instance()]) {
++        Err(e) => println!("DBG run error: {e:?}"),
++        Ok(p) => match p.verify() { Ok(()) => println!("DBG ok"), Err(es) => for e in es.iter().take(4) { println!("DBG {e}"); } },
++    }
++}
++
++#[test]
++#[ignore]
++fn print_slot_vector() {
++    let nf = dc_slot_nullifier_hash(pallas::Base::from(1u64), pallas::Base::from(42u64), pallas::Base::from(5u64), 3);
++    println!("VEC slot_nf(nk=1,round=42,rand=5,slot=3) = {}", nf.to_repr().iter().map(|b| format!("{b:02x}")).collect::<String>());
++}
++
++#[test]
++fn review_bound_eq_ok() { let mut fx = Fx::default(); fx.bound = fx.delegate_index; assert!(verify(&fx)); }
++#[test]
++fn review_bound_lt_rejected() { let mut fx = Fx::default(); fx.bound = fx.delegate_index - 1; assert!(!verify(&fx)); }
++#[test]
++fn review_bound_d_zero_rejected() { let mut fx = Fx::default(); fx.delegate_index = 0; fx.bound = 10; assert!(!verify(&fx)); }
++#[test]
++fn review_bound_u32max_ok() { let mut fx = Fx::default(); fx.delegate_index = u32::MAX as u64; fx.bound = u32::MAX as u64; assert!(verify(&fx)); }
++#[test]
++#[ignore]
++fn review_row_budget() {
++    use voting_crypto_deps::halo2_proofs::dev::CircuitCost;
++    let b = build(&Fx::default());
++    let cost = CircuitCost::<vesta::Point, _>::measure(K, &b.circuit);
++    println!("REVIEW ZKP4+bound track={} filled: {cost:?}", super::BOUND_TRACK);
++}
++
++/// Last-moment single-share DC layout: all weight in share 0, shares 1..15 zero.
++#[test]
++fn zkp4_single_share_layout_accepts_and_reveals() {
++    // Typical partial delegation in single-share layout.
++    let mut fx = Fx::default();
++    fx.shares = [0u64; 16];
++    fx.shares[0] = 4_000;
++    assert!(verify(&fx), "single-share partial DC must verify");
++
++    // Delegate everything at the 2^30 - 1 weight ceiling: W_new = 0.
++    let mut fx = Fx::default();
++    fx.total = (1u64 << 30) - 1;
++    fx.shares = [0u64; 16];
++    fx.shares[0] = (1u64 << 30) - 1;
++    assert!(verify(&fx), "single-share full DC at max weight must verify");
++
++    // ZKP3 reveals share 0 as (proposal 0, decision d) against the DC leaf.
++    let b = build(&fx);
++    let rb = crate::share_reveal::build_share_reveal(
++        empty_path(),
++        0,
++        b.share_comms,
++        b.blinds[0],
++        b.c1[0].0,
++        b.c2[0].0,
++        b.c1[0].1,
++        b.c2[0].1,
++        0,
++        pallas::Base::zero(),
++        pallas::Base::from(fx.delegate_index),
++        b.round,
++    );
++    assert_eq!(rb.instance.vote_comm_tree_root, single_leaf_root(b.dc));
++    let p = MockProver::run(
++        crate::share_reveal::K,
++        &rb.circuit,
++        vec![rb.instance.to_halo2_instance()],
++    )
++    .unwrap();
++    assert_eq!(p.verify(), Ok(()));
++
++    // Share 0 alone above 2^30 is still rejected (C9).
++    let mut fx = Fx::default();
++    fx.total = 1u64 << 31;
++    fx.shares = [0u64; 16];
++    fx.shares[0] = 1u64 << 30;
++    assert!(!verify(&fx), "share 0 at 2^30 must fail the range check");
++}
+diff -ruN -x target -x Cargo.lock -x .git pristine/voting-circuits/src/proxy_delegation/circuit.rs rev3-circuit/voting-circuits/src/proxy_delegation/circuit.rs
+--- pristine/voting-circuits/src/proxy_delegation/circuit.rs	1969-12-31 17:00:00
++++ rev3-circuit/voting-circuits/src/proxy_delegation/circuit.rs	2026-10-05 22:43:30
+@@ -0,0 +1,827 @@
++//! PROTOTYPE ZKP #4 circuit. See `mod.rs`.
++//!
++//! Conditions (numbering mirrors ZKP #2 where shared):
++//! - C1  VAN membership (Poseidon Merkle path, root -> instance).
++//! - C2  Old VAN integrity with proposal_authority = MAX (constant).
++//! - C3  Diversified address integrity (CommitIvk chain).
++//! - C4  Spend authority r_vpk -> instance.
++//! - C5  VAN nullifier (identical to ZKP #2) -> instance.
++//! - C6  Successor VAN integrity: same address/round/rand, MAX, weight W_new -> instance.
++//! - C7  W_new in [0, 2^30) (strict 3-word lookup range check).
++//! - C8  sum(shares) + W_new == W.
++//! - C9  each share in [0, 2^30).
++//! - C10 shares_hash (blinded share commitments).
++//! - C11 El Gamal encryption integrity under ea_pk (instance).
++//! - C12 w = sum(shares) != 0.
++//! - C13 DC = Poseidon(DOMAIN_VC, round, shares_hash, 0, delegate_index) -> instance.
++//! - C14 dc_slot in [0, 8) (3-bit short lookup); slot nullifier -> instance.
++//! - C15 1 <= delegate_index <= bound (bound from instance).
++
++use std::vec::Vec;
++use crate::ff::Field as _ReviewField;
++
++use voting_crypto_deps::halo2_gadgets::{
++    ecc::{
++        chip::{EccChip, EccConfig},
++        CircuitVersion, NonIdentityPoint, ScalarFixed,
++    },
++    poseidon::{
++        primitives::{self as poseidon, ConstantLength},
++        Hash as PoseidonHash, Pow5Chip as PoseidonChip, Pow5Config as PoseidonConfig,
++    },
++    sinsemilla::chip::{SinsemillaChip, SinsemillaConfig},
++    utilities::lookup_range_check::{LookupRangeCheck, LookupRangeCheckConfig},
++};
++use voting_crypto_deps::halo2_proofs::{
++    circuit::{floor_planner, AssignedCell, Layouter, Value},
++    plonk::{self, Advice, Column, ConstraintSystem, Fixed, Instance as InstanceColumn},
++};
++use voting_crypto_deps::orchard::{
++    circuit::{
++        commit_ivk::{CommitIvkChip, CommitIvkConfig},
++        gadget::{
++            add_chip::{AddChip, AddConfig},
++            assign_free_advice, AddInstruction,
++        },
++    },
++    constants::{OrchardCommitDomains, OrchardFixedBases, OrchardHashDomains},
++};
++use voting_crypto_deps::pasta_curves::{pallas, vesta};
++
++use crate::{
++    domain_tags,
++    gadgets::{
++        address_ownership::{prove_address_ownership, spend_auth_g_mul},
++        elgamal::{prove_elgamal_encryptions, EaPkInstanceLoc, SpendAuthGFixedBase30Config},
++        nonzero::NonZeroConfig,
++        poseidon_merkle::{synthesize_poseidon_merkle_path, MerkleSwapGate},
++        van_integrity, vote_commitment,
++    },
++    params::{
++        MAX_PROPOSAL_AUTHORITY, RANGE_CHECK_WORD_BITS, SHARE_VALUE_RANGE_WORDS,
++        VOTE_COMM_TREE_DEPTH,
++    },
++    shares_hash::compute_shares_hash_in_circuit,
++};
++
++/// Circuit size.
++pub const K: u32 = 11;
++
++const ELGAMAL_TRACK_SPLIT: usize = 8;
++macro_rules! SLOT_COLS_IMPL { ($a:ident, $b:ident, $m:ident) => { { let _ = (&$m, &$a); [$b[1], $b[2], $b[3], $b[4]] } }; }
++macro_rules! SLOT_COLS { ($a:ident, $b:ident, $m:ident) => { SLOT_COLS_IMPL!($a, $b, $m) }; }
++const PRIMARY_SHARES_HASH_COUNT: usize = 2;
++
++/// Reserved proposal id for delegation commitments (baked as a constant).
++pub(crate) const POOL_PROPOSAL_ID: u64 = 0;
++
++const VAN_NULLIFIER_PUBLIC_OFFSET: usize = 0;
++const R_VPK_X_PUBLIC_OFFSET: usize = 1;
++const R_VPK_Y_PUBLIC_OFFSET: usize = 2;
++const VOTE_AUTHORITY_NOTE_NEW_PUBLIC_OFFSET: usize = 3;
++const DELEGATION_COMMITMENT_PUBLIC_OFFSET: usize = 4;
++const VOTE_COMM_TREE_ROOT_PUBLIC_OFFSET: usize = 5;
++#[allow(dead_code)]
++const VOTE_COMM_TREE_ANCHOR_HEIGHT_PUBLIC_OFFSET: usize = 6;
++const VOTING_ROUND_ID_PUBLIC_OFFSET: usize = 7;
++const EA_PK_X_PUBLIC_OFFSET: usize = 8;
++const EA_PK_Y_PUBLIC_OFFSET: usize = 9;
++const DC_SLOT_NULLIFIER_PUBLIC_OFFSET: usize = 10;
++/// REVIEW: public delegate_index_bound (1 <= d <= bound).
++const DELEGATE_INDEX_BOUND_PUBLIC_OFFSET: usize = 11;
++/// REVIEW: which track hosts the two bound range checks (0 = primary, 1 = track B).
++pub(crate) const BOUND_TRACK: u8 = 1;
++/// REVIEW: 10-bit words per bound range check (4 => 40 bits).
++const BOUND_WORDS: usize = 4;
++/// Bits of the per-VAN-chain DC slot index (cap = 2^DC_SLOT_BITS = 8 DCs per chain).
++pub(crate) const DC_SLOT_BITS: usize = 3;
++
++/// Domain tag for DC slot nullifiers.
++pub(crate) fn proxy_delegation_slot_tag() -> pallas::Base {
++    use crate::ff::PrimeField;
++    let mut b = [0u8; 32];
++    b[..21].copy_from_slice(b"proxy delegation slot");
++    pallas::Base::from_repr(b).unwrap()
++}
++
++/// Native DC slot nullifier.
++pub fn dc_slot_nullifier_hash(vsk_nk: pallas::Base, voting_round_id: pallas::Base, van_comm_rand: pallas::Base, slot: u8) -> pallas::Base {
++    poseidon::Hash::<_, poseidon::P128Pow5T3, ConstantLength<4>, 3, 2>::init().hash([vsk_nk, proxy_delegation_slot_tag() + pallas::Base::from(u64::from(slot)), voting_round_id, van_comm_rand])
++}
++
++/// Native DC hash: `Poseidon(DOMAIN_VC, round, shares_hash, 0, delegate_index)`.
++pub fn delegation_commitment_hash(
++    voting_round_id: pallas::Base,
++    shares_hash: pallas::Base,
++    delegate_index: u32,
++) -> pallas::Base {
++    vote_commitment::vote_commitment_hash(
++        voting_round_id,
++        shares_hash,
++        pallas::Base::from(POOL_PROPOSAL_ID),
++        pallas::Base::from(u64::from(delegate_index)),
++    )
++}
++
++/// Circuit configuration.
++#[derive(Clone, Debug)]
++pub struct Config {
++    primary: Column<InstanceColumn>,
++    advices: [Column<Advice>; 10],
++    elgamal_advices: [Column<Advice>; 10],
++    elgamal_advices_b: [Column<Advice>; 10],
++    poseidon_config: PoseidonConfig<pallas::Base, 3, 2>,
++    hash_poseidon_config: PoseidonConfig<pallas::Base, 3, 2>,
++    slot_poseidon_config: PoseidonConfig<pallas::Base, 3, 2>,
++    add_config: AddConfig,
++    ecc_config: EccConfig<OrchardFixedBases>,
++    elgamal_ecc_config: EccConfig<OrchardFixedBases>,
++    elgamal_ecc_config_b: EccConfig<OrchardFixedBases>,
++    sinsemilla_config:
++        SinsemillaConfig<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases>,
++    commit_ivk_config: CommitIvkConfig,
++    range_check: LookupRangeCheckConfig<pallas::Base, RANGE_CHECK_WORD_BITS>,
++    range_check_b: LookupRangeCheckConfig<pallas::Base, RANGE_CHECK_WORD_BITS>,
++    merkle_swap: MerkleSwapGate,
++    nonzero: NonZeroConfig,
++    nonzero_b: NonZeroConfig,
++    spend_auth_g_fixed_base_30: SpendAuthGFixedBase30Config,
++    spend_auth_g_fixed_base_30_b: SpendAuthGFixedBase30Config,
++}
++
++impl Config {
++    fn poseidon_chip(&self) -> PoseidonChip<pallas::Base, 3, 2> {
++        PoseidonChip::construct(self.poseidon_config.clone())
++    }
++    fn hash_poseidon_chip(&self) -> PoseidonChip<pallas::Base, 3, 2> {
++        PoseidonChip::construct(self.hash_poseidon_config.clone())
++    }
++    fn add_chip(&self) -> AddChip {
++        AddChip::construct(self.add_config.clone())
++    }
++    fn ecc_chip(&self) -> EccChip<OrchardFixedBases> {
++        EccChip::construct(self.ecc_config.clone(), CircuitVersion::AnchoredBase)
++    }
++    fn elgamal_ecc_chip(&self) -> EccChip<OrchardFixedBases> {
++        EccChip::construct(self.elgamal_ecc_config.clone(), CircuitVersion::AnchoredBase)
++    }
++    fn elgamal_ecc_chip_b(&self) -> EccChip<OrchardFixedBases> {
++        EccChip::construct(self.elgamal_ecc_config_b.clone(), CircuitVersion::AnchoredBase)
++    }
++    fn sinsemilla_chip(
++        &self,
++    ) -> SinsemillaChip<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases> {
++        SinsemillaChip::construct(self.sinsemilla_config.clone())
++    }
++    fn commit_ivk_chip(&self) -> CommitIvkChip {
++        CommitIvkChip::construct(self.commit_ivk_config.clone())
++    }
++    fn constant(
++        &self,
++        layouter: &mut impl Layouter<pallas::Base>,
++        label: &'static str,
++        value: pallas::Base,
++    ) -> Result<AssignedCell<pallas::Base, pallas::Base>, plonk::Error> {
++        layouter.assign_region(
++            || label,
++            |mut region| region.assign_advice_from_constant(|| label, self.advices[0], 0, value),
++        )
++    }
++}
++
++/// ZKP #4 witnesses.
++#[derive(Clone, Debug, Default)]
++pub struct Circuit {
++    pub(crate) vote_comm_tree_path: Value<[pallas::Base; VOTE_COMM_TREE_DEPTH]>,
++    pub(crate) vote_comm_tree_position: Value<u32>,
++    pub(crate) vpk_g_d: Value<pallas::Affine>,
++    pub(crate) vpk_pk_d: Value<pallas::Affine>,
++    /// Input VAN weight W (ballots).
++    pub(crate) total_note_value: Value<pallas::Base>,
++    /// Successor VAN weight W - w (ballots).
++    pub(crate) remaining_note_value: Value<pallas::Base>,
++    pub(crate) van_comm_rand: Value<pallas::Base>,
++    pub(crate) vote_authority_note_old: Value<pallas::Base>,
++    pub(crate) vsk: Value<pallas::Scalar>,
++    pub(crate) rivk_v: Value<pallas::Scalar>,
++    pub(crate) alpha_v: Value<pallas::Scalar>,
++    pub(crate) vsk_nk: Value<pallas::Base>,
++    pub(crate) shares: [Value<pallas::Base>; 16],
++    pub(crate) enc_share_c1_x: [Value<pallas::Base>; 16],
++    pub(crate) enc_share_c2_x: [Value<pallas::Base>; 16],
++    pub(crate) enc_share_c1_y: [Value<pallas::Base>; 16],
++    pub(crate) enc_share_c2_y: [Value<pallas::Base>; 16],
++    pub(crate) share_blinds: [Value<pallas::Base>; 16],
++    pub(crate) share_randomness: [Value<pallas::Base>; 16],
++    pub(crate) ea_pk: Value<pallas::Affine>,
++    /// Private delegate index (hidden inside DC).
++    pub(crate) delegate_index: Value<pallas::Base>,
++    /// Per-VAN-chain DC slot index in [0, 2^DC_SLOT_BITS).
++    pub(crate) dc_slot: Value<pallas::Base>,
++    /// REVIEW: d - 1 and bound - d witnesses come from these.
++    pub(crate) delegate_index_bound: Value<pallas::Base>,
++}
++
++impl plonk::Circuit<pallas::Base> for Circuit {
++    type Config = Config;
++    type FloorPlanner = floor_planner::V1;
++
++    fn without_witnesses(&self) -> Self {
++        Self::default()
++    }
++
++    fn configure(meta: &mut ConstraintSystem<pallas::Base>) -> Self::Config {
++        let advices: [Column<Advice>; 10] = core::array::from_fn(|_| meta.advice_column());
++        for col in &advices {
++            meta.enable_equality(*col);
++        }
++        let elgamal_advices: [Column<Advice>; 10] = core::array::from_fn(|_| meta.advice_column());
++        for col in &elgamal_advices {
++            meta.enable_equality(*col);
++        }
++        let elgamal_advices_b: [Column<Advice>; 10] =
++            core::array::from_fn(|_| meta.advice_column());
++        for col in &elgamal_advices_b {
++            meta.enable_equality(*col);
++        }
++        let hash_advices: [Column<Advice>; 4] = core::array::from_fn(|_| meta.advice_column());
++
++        let primary = meta.instance_column();
++        meta.enable_equality(primary);
++
++        let lagrange_coeffs: [Column<Fixed>; 8] = core::array::from_fn(|_| meta.fixed_column());
++        let rc_a = lagrange_coeffs[2..5].try_into().unwrap();
++        let rc_b = lagrange_coeffs[5..8].try_into().unwrap();
++        let constants = meta.fixed_column();
++        meta.enable_constant(constants);
++
++        let add_config = AddChip::configure(meta, advices[7], advices[8], advices[6]);
++
++        let table_idx = meta.lookup_table_column();
++        let lookup = (
++            table_idx,
++            meta.lookup_table_column(),
++            meta.lookup_table_column(),
++        );
++        let range_check = LookupRangeCheckConfig::configure(meta, advices[9], table_idx);
++        let elgamal_range_check =
++            LookupRangeCheckConfig::configure(meta, elgamal_advices[9], table_idx);
++        let elgamal_range_check_b =
++            LookupRangeCheckConfig::configure(meta, elgamal_advices_b[9], table_idx);
++
++        let ecc_config =
++            EccChip::<OrchardFixedBases>::configure(meta, advices, lagrange_coeffs, range_check);
++        let elgamal_lagrange_coeffs: [Column<Fixed>; 8] =
++            core::array::from_fn(|_| meta.fixed_column());
++        let elgamal_ecc_config = EccChip::<OrchardFixedBases>::configure(
++            meta,
++            elgamal_advices,
++            elgamal_lagrange_coeffs,
++            elgamal_range_check,
++        );
++        let spend_auth_g_fixed_base_30 =
++            SpendAuthGFixedBase30Config::configure(meta, elgamal_advices, elgamal_lagrange_coeffs);
++        let elgamal_lagrange_coeffs_b: [Column<Fixed>; 8] =
++            core::array::from_fn(|_| meta.fixed_column());
++        let elgamal_ecc_config_b = EccChip::<OrchardFixedBases>::configure(
++            meta,
++            elgamal_advices_b,
++            elgamal_lagrange_coeffs_b,
++            elgamal_range_check_b,
++        );
++        let spend_auth_g_fixed_base_30_b = SpendAuthGFixedBase30Config::configure(
++            meta,
++            elgamal_advices_b,
++            elgamal_lagrange_coeffs_b,
++        );
++
++        let sinsemilla_config = SinsemillaChip::configure(
++            meta,
++            advices[..5].try_into().unwrap(),
++            advices[6],
++            lagrange_coeffs[0],
++            lookup,
++            range_check,
++            false,
++        );
++        let commit_ivk_config = CommitIvkChip::configure(meta, advices);
++
++        let poseidon_config = PoseidonChip::configure::<poseidon::P128Pow5T3>(
++            meta,
++            advices[6..9].try_into().unwrap(),
++            advices[5],
++            rc_a,
++            rc_b,
++        );
++        let hash_round_constants: [Column<Fixed>; 6] =
++            core::array::from_fn(|_| meta.fixed_column());
++        let hash_poseidon_config = PoseidonChip::configure::<poseidon::P128Pow5T3>(
++            meta,
++            hash_advices[..3].try_into().unwrap(),
++            hash_advices[3],
++            hash_round_constants[..3].try_into().unwrap(),
++            hash_round_constants[3..].try_into().unwrap(),
++        );
++
++        let slot_rc: [Column<Fixed>; 6] = core::array::from_fn(|_| meta.fixed_column());
++        let slot_cols: [Column<Advice>; 4] = SLOT_COLS!(elgamal_advices, elgamal_advices_b, meta);
++        let slot_poseidon_config = PoseidonChip::configure::<poseidon::P128Pow5T3>(
++            meta,
++            slot_cols[..3].try_into().unwrap(),
++            slot_cols[3],
++            slot_rc[..3].try_into().unwrap(),
++            slot_rc[3..].try_into().unwrap(),
++        );
++        let merkle_swap = MerkleSwapGate::configure(
++            meta,
++            [advices[0], advices[1], advices[2], advices[3], advices[4]],
++        );
++        let nonzero = NonZeroConfig::configure(meta, [elgamal_advices[0], elgamal_advices[1]]);
++        let nonzero_b =
++            NonZeroConfig::configure(meta, [elgamal_advices_b[0], elgamal_advices_b[1]]);
++
++        Config {
++            primary,
++            advices,
++            elgamal_advices,
++            elgamal_advices_b,
++            poseidon_config,
++            hash_poseidon_config,
++            slot_poseidon_config,
++            add_config,
++            ecc_config,
++            elgamal_ecc_config,
++            elgamal_ecc_config_b,
++            sinsemilla_config,
++            commit_ivk_config,
++            range_check,
++            range_check_b: elgamal_range_check_b,
++            merkle_swap,
++            nonzero,
++            nonzero_b,
++            spend_auth_g_fixed_base_30,
++            spend_auth_g_fixed_base_30_b,
++        }
++    }
++
++    fn synthesize(
++        &self,
++        config: Self::Config,
++        mut layouter: impl Layouter<pallas::Base>,
++    ) -> Result<(), plonk::Error> {
++        SinsemillaChip::load(config.sinsemilla_config.clone(), &mut layouter)?;
++        let ecc_chip = config.ecc_chip();
++
++        let voting_round_id = layouter.assign_region(
++            || "copy voting_round_id",
++            |mut region| {
++                region.assign_advice_from_instance(
++                    || "voting_round_id",
++                    config.primary,
++                    VOTING_ROUND_ID_PUBLIC_OFFSET,
++                    config.advices[0],
++                    0,
++                )
++            },
++        )?;
++
++        let vpk_g_d_point = NonIdentityPoint::new(
++            ecc_chip.clone(),
++            layouter.namespace(|| "witness vpk_g_d"),
++            self.vpk_g_d,
++        )?;
++        let vpk_g_d = vpk_g_d_point.extract_p().inner().clone();
++        let vpk_pk_d_point = NonIdentityPoint::new(
++            ecc_chip.clone(),
++            layouter.namespace(|| "witness vpk_pk_d"),
++            self.vpk_pk_d,
++        )?;
++        let vpk_pk_d = vpk_pk_d_point.extract_p().inner().clone();
++
++        let total_note_value = assign_free_advice(
++            layouter.namespace(|| "witness W"),
++            config.advices[0],
++            self.total_note_value,
++        )?;
++        let remaining_note_value = assign_free_advice(
++            layouter.namespace(|| "witness W_new"),
++            config.advices[0],
++            self.remaining_note_value,
++        )?;
++        let van_comm_rand = assign_free_advice(
++            layouter.namespace(|| "witness van_comm_rand"),
++            config.advices[0],
++            self.van_comm_rand,
++        )?;
++        let vote_authority_note_old = assign_free_advice(
++            layouter.namespace(|| "witness van_old"),
++            config.advices[0],
++            self.vote_authority_note_old,
++        )?;
++        let domain_van = config.constant(
++            &mut layouter,
++            "DOMAIN_VAN",
++            pallas::Base::from(van_integrity::DOMAIN_VAN),
++        )?;
++        // C2/C6: authority is the MAX constant on both sides (baked into the VK).
++        let authority_max = config.constant(
++            &mut layouter,
++            "MAX_PROPOSAL_AUTHORITY",
++            pallas::Base::from(MAX_PROPOSAL_AUTHORITY),
++        )?;
++        let vsk_nk = assign_free_advice(
++            layouter.namespace(|| "witness vsk_nk"),
++            config.advices[0],
++            self.vsk_nk,
++        )?;
++
++        // ---- C2: old VAN integrity (authority == MAX) ----
++        let derived_van = van_integrity::van_integrity_poseidon(
++            &config.poseidon_config,
++            &mut layouter,
++            "Old VAN integrity",
++            domain_van.clone(),
++            vpk_g_d.clone(),
++            vpk_pk_d.clone(),
++            total_note_value.clone(),
++            voting_round_id.clone(),
++            authority_max.clone(),
++            van_comm_rand.clone(),
++        )?;
++        layouter.assign_region(
++            || "VAN integrity check",
++            |mut region| region.constrain_equal(derived_van.cell(), vote_authority_note_old.cell()),
++        )?;
++
++        // ---- C3: address ownership ----
++        let vsk_scalar = ScalarFixed::new(ecc_chip.clone(), layouter.namespace(|| "vsk"), self.vsk)?;
++        let vsk_ak_point = spend_auth_g_mul(
++            ecc_chip.clone(),
++            layouter.namespace(|| "[vsk]G"),
++            "c3: [vsk] SpendAuthG",
++            vsk_scalar,
++        )?;
++        let ak = vsk_ak_point.extract_p().inner().clone();
++        let rivk_v_scalar =
++            ScalarFixed::new(ecc_chip.clone(), layouter.namespace(|| "rivk_v"), self.rivk_v)?;
++        prove_address_ownership(
++            config.sinsemilla_chip(),
++            ecc_chip.clone(),
++            config.commit_ivk_chip(),
++            layouter.namespace(|| "c3 address"),
++            "c3",
++            ak,
++            vsk_nk.clone(),
++            rivk_v_scalar,
++            &vpk_g_d_point,
++            &vpk_pk_d_point,
++        )?;
++
++        // ---- C4: spend authority ----
++        crate::gadgets::spend_authority::prove_spend_authority(
++            ecc_chip.clone(),
++            layouter.namespace(|| "c4 spend authority"),
++            self.alpha_v,
++            &vsk_ak_point,
++            config.primary,
++            R_VPK_X_PUBLIC_OFFSET,
++            R_VPK_Y_PUBLIC_OFFSET,
++        )?;
++
++        // ---- C1: membership ----
++        {
++            let root = synthesize_poseidon_merkle_path::<VOTE_COMM_TREE_DEPTH>(
++                &config.merkle_swap,
++                &config.poseidon_config,
++                &mut layouter,
++                config.advices[0],
++                vote_authority_note_old.clone(),
++                self.vote_comm_tree_position,
++                self.vote_comm_tree_path,
++                "c1: merkle",
++            )?;
++            layouter.constrain_instance(
++                root.cell(),
++                config.primary,
++                VOTE_COMM_TREE_ROOT_PUBLIC_OFFSET,
++            )?;
++        }
++
++        // ---- C5: VAN nullifier (identical derivation to ZKP #2) ----
++        let domain_van_nf =
++            config.constant(&mut layouter, "vote authority spend", domain_tags::vote_authority_spend())?;
++        let van_nullifier = PoseidonHash::<
++            pallas::Base,
++            _,
++            poseidon::P128Pow5T3,
++            ConstantLength<4>,
++            3,
++            2,
++        >::init(config.poseidon_chip(), layouter.namespace(|| "nf init"))?
++        .hash(
++            layouter.namespace(|| "Poseidon(nk, tag, round, van)"),
++            [vsk_nk.clone(), domain_van_nf, voting_round_id.clone(), vote_authority_note_old],
++        )?;
++        layouter.constrain_instance(
++            van_nullifier.cell(),
++            config.primary,
++            VAN_NULLIFIER_PUBLIC_OFFSET,
++        )?;
++
++        // ---- C14: DC slot nullifier (caps DCs per VAN chain at 2^DC_SLOT_BITS) ----
++        {
++            let dc_slot = assign_free_advice(
++                layouter.namespace(|| "witness dc_slot"),
++                config.advices[0],
++                self.dc_slot,
++            )?;
++            config.range_check_b.copy_short_check(
++                layouter.namespace(|| "dc_slot < 2^3"),
++                dc_slot.clone(),
++                DC_SLOT_BITS,
++            )?;
++            let tag = config.constant(&mut layouter, "proxy delegation slot", proxy_delegation_slot_tag())?;
++            let tag_slot = config.add_chip().add(layouter.namespace(|| "tag + slot"), &tag, &dc_slot)?;
++            let slot_nf = PoseidonHash::<pallas::Base, _, poseidon::P128Pow5T3, ConstantLength<4>, 3, 2>::init(
++                PoseidonChip::construct(config.slot_poseidon_config.clone()),
++                layouter.namespace(|| "slot nf init"),
++            )?
++            .hash(
++                layouter.namespace(|| "Poseidon(nk, tag, round, rand, slot)"),
++                [vsk_nk, tag_slot, voting_round_id.clone(), van_comm_rand.clone()],
++            )?;
++            layouter.constrain_instance(slot_nf.cell(), config.primary, DC_SLOT_NULLIFIER_PUBLIC_OFFSET)?;
++        }
++
++        // ---- C6: successor VAN (same address/round/rand, MAX, weight W_new) ----
++        let derived_van_new = van_integrity::van_integrity_poseidon(
++            &config.poseidon_config,
++            &mut layouter,
++            "New VAN integrity",
++            domain_van,
++            vpk_g_d,
++            vpk_pk_d,
++            remaining_note_value.clone(),
++            voting_round_id.clone(),
++            authority_max,
++            van_comm_rand,
++        )?;
++        layouter.constrain_instance(
++            derived_van_new.cell(),
++            config.primary,
++            VOTE_AUTHORITY_NOTE_NEW_PUBLIC_OFFSET,
++        )?;
++
++        // ---- C7: W_new in [0, 2^30) — anti-inflation (w <= W) ----
++        config.range_check_b.copy_check(
++            layouter.namespace(|| "W_new < 2^30"),
++            remaining_note_value.clone(),
++            SHARE_VALUE_RANGE_WORDS,
++            true,
++        )?;
++
++        // ---- C8: shares sum + W_new == W ----
++        let share_cells: [_; 16] = (0..16usize)
++            .map(|i| {
++                assign_free_advice(
++                    layouter.namespace(|| format!("witness share_{i}")),
++                    config.advices[0],
++                    self.shares[i],
++                )
++            })
++            .collect::<Result<Vec<_>, _>>()?
++            .try_into()
++            .expect("16");
++        let shares_sum = share_cells[1..].iter().enumerate().try_fold(
++            share_cells[0].clone(),
++            |acc, (i, share)| {
++                config
++                    .add_chip()
++                    .add(layouter.namespace(|| format!("sum step {}", i + 1)), &acc, share)
++            },
++        )?;
++        let conserved = config.add_chip().add(
++            layouter.namespace(|| "w + W_new"),
++            &shares_sum,
++            &remaining_note_value,
++        )?;
++        layouter.assign_region(
++            || "w + W_new == W",
++            |mut region| region.constrain_equal(conserved.cell(), total_note_value.cell()),
++        )?;
++
++        // ---- C12: w != 0 ----
++        config
++            .nonzero_b
++            .constrain_nonzero(layouter.namespace(|| "w != 0"), "w != 0", &shares_sum)?;
++
++        // ---- C9: share range ----
++        for (i, cell) in share_cells.iter().enumerate() {
++            config.range_check.copy_check(
++                layouter.namespace(|| format!("share_{i} < 2^30")),
++                cell.clone(),
++                SHARE_VALUE_RANGE_WORDS,
++                true,
++            )?;
++        }
++
++        // ---- C10: shares hash ----
++        let wit16 = |layouter: &mut dyn FnMut(usize) -> Result<AssignedCell<pallas::Base, pallas::Base>, plonk::Error>| -> Result<[AssignedCell<pallas::Base, pallas::Base>; 16], plonk::Error> {
++            let v = (0..16).map(|i| layouter(i)).collect::<Result<Vec<_>, _>>()?;
++            Ok(v.try_into().expect("16"))
++        };
++        let blinds = wit16(&mut |i| {
++            assign_free_advice(layouter.namespace(|| format!("blind {i}")), config.advices[0], self.share_blinds[i])
++        })?;
++        let enc_c1 = wit16(&mut |i| {
++            assign_free_advice(layouter.namespace(|| format!("c1x {i}")), config.advices[0], self.enc_share_c1_x[i])
++        })?;
++        let enc_c2 = wit16(&mut |i| {
++            assign_free_advice(layouter.namespace(|| format!("c2x {i}")), config.advices[0], self.enc_share_c2_x[i])
++        })?;
++        let enc_c1_y = wit16(&mut |i| {
++            assign_free_advice(layouter.namespace(|| format!("c1y {i}")), config.advices[0], self.enc_share_c1_y[i])
++        })?;
++        let enc_c2_y = wit16(&mut |i| {
++            assign_free_advice(layouter.namespace(|| format!("c2y {i}")), config.advices[0], self.enc_share_c2_y[i])
++        })?;
++        let shares_hash = compute_shares_hash_in_circuit(
++            || config.poseidon_chip(),
++            || config.hash_poseidon_chip(),
++            PRIMARY_SHARES_HASH_COUNT,
++            layouter.namespace(|| "c10: shares hash"),
++            blinds,
++            enc_c1.clone(),
++            enc_c2.clone(),
++            enc_c1_y.clone(),
++            enc_c2_y.clone(),
++        )?;
++
++        // ---- C11: El Gamal ----
++        {
++            let r_cells: [_; 16] = (0..16usize)
++                .map(|i| {
++                    let column = if i < ELGAMAL_TRACK_SPLIT {
++                        config.elgamal_advices[0]
++                    } else {
++                        config.elgamal_advices_b[0]
++                    };
++                    assign_free_advice(
++                        layouter.namespace(|| format!("r[{i}]")),
++                        column,
++                        self.share_randomness[i],
++                    )
++                })
++                .collect::<Result<Vec<_>, _>>()?
++                .try_into()
++                .expect("16");
++            let loc = || EaPkInstanceLoc {
++                instance: config.primary,
++                x_row: EA_PK_X_PUBLIC_OFFSET,
++                y_row: EA_PK_Y_PUBLIC_OFFSET,
++            };
++            prove_elgamal_encryptions(
++                config.elgamal_ecc_chip(),
++                config.nonzero,
++                &config.spend_auth_g_fixed_base_30,
++                layouter.namespace(|| "c11a"),
++                "c11a",
++                0..ELGAMAL_TRACK_SPLIT,
++                self.ea_pk,
++                loc(),
++                share_cells.clone(),
++                r_cells.clone(),
++                enc_c1.clone(),
++                enc_c2.clone(),
++                enc_c1_y.clone(),
++                enc_c2_y.clone(),
++            )?;
++            prove_elgamal_encryptions(
++                config.elgamal_ecc_chip_b(),
++                config.nonzero_b,
++                &config.spend_auth_g_fixed_base_30_b,
++                layouter.namespace(|| "c11b"),
++                "c11b",
++                ELGAMAL_TRACK_SPLIT..16,
++                self.ea_pk,
++                loc(),
++                share_cells,
++                r_cells,
++                enc_c1,
++                enc_c2,
++                enc_c1_y,
++                enc_c2_y,
++            )?;
++        }
++
++        // ---- C13: DC = Poseidon(DOMAIN_VC, round, shares_hash, 0, delegate_index) ----
++        let domain_vc = config.constant(
++            &mut layouter,
++            "DOMAIN_VC",
++            pallas::Base::from(vote_commitment::DOMAIN_VC),
++        )?;
++        let pool_proposal = config.constant(
++            &mut layouter,
++            "POOL_PROPOSAL_ID = 0",
++            pallas::Base::from(POOL_PROPOSAL_ID),
++        )?;
++        let delegate_index = assign_free_advice(
++            layouter.namespace(|| "witness delegate_index"),
++            config.advices[0],
++            self.delegate_index,
++        )?;
++        // ---- REVIEW C15: 1 <= delegate_index <= bound (public) ----
++        {
++            let bound = layouter.assign_region(
++                || "copy bound",
++                |mut region| {
++                    region.assign_advice_from_instance(
++                        || "bound",
++                        config.primary,
++                        DELEGATE_INDEX_BOUND_PUBLIC_OFFSET,
++                        config.advices[0],
++                        0,
++                    )
++                },
++            )?;
++            let one = config.constant(&mut layouter, "one", pallas::Base::one())?;
++            let a = assign_free_advice(
++                layouter.namespace(|| "d - 1"),
++                config.advices[0],
++                self.delegate_index.map(|d| d - pallas::Base::one()),
++            )?;
++            let b = assign_free_advice(
++                layouter.namespace(|| "bound - d"),
++                config.advices[0],
++                self.delegate_index_bound.zip(self.delegate_index).map(|(m, d)| m - d),
++            )?;
++            let a1 = config.add_chip().add(layouter.namespace(|| "a + 1"), &a, &one)?;
++            layouter.assign_region(|| "a + 1 == d", |mut region| region.constrain_equal(a1.cell(), delegate_index.cell()))?;
++            let bd = config.add_chip().add(layouter.namespace(|| "b + d"), &b, &delegate_index)?;
++            layouter.assign_region(|| "b + d == bound", |mut region| region.constrain_equal(bd.cell(), bound.cell()))?;
++            if BOUND_TRACK == 0 {
++                config.range_check.copy_check(layouter.namespace(|| "d-1 range"), a, BOUND_WORDS, true)?;
++                config.range_check.copy_check(layouter.namespace(|| "bound-d range"), b, BOUND_WORDS, true)?;
++            } else {
++                config.range_check_b.copy_check(layouter.namespace(|| "d-1 range"), a, BOUND_WORDS, true)?;
++                config.range_check_b.copy_check(layouter.namespace(|| "bound-d range"), b, BOUND_WORDS, true)?;
++            }
++        }
++        let dc = vote_commitment::vote_commitment_poseidon(
++            &config.poseidon_config,
++            &mut layouter,
++            "c13",
++            domain_vc,
++            voting_round_id,
++            shares_hash,
++            pool_proposal,
++            delegate_index,
++        )?;
++        layouter.constrain_instance(
++            dc.cell(),
++            config.primary,
++            DELEGATION_COMMITMENT_PUBLIC_OFFSET,
++        )?;
++        Ok(())
++    }
++}
++
++/// Public inputs (10 field elements).
++#[derive(Clone, Debug)]
++pub struct Instance {
++    pub van_nullifier: pallas::Base,
++    pub r_vpk_x: pallas::Base,
++    pub r_vpk_y: pallas::Base,
++    pub vote_authority_note_new: pallas::Base,
++    pub delegation_commitment: pallas::Base,
++    pub vote_comm_tree_root: pallas::Base,
++    pub vote_comm_tree_anchor_height: pallas::Base,
++    pub voting_round_id: pallas::Base,
++    pub ea_pk_x: pallas::Base,
++    pub ea_pk_y: pallas::Base,
++    pub dc_slot_nullifier: pallas::Base,
++    pub delegate_index_bound: pallas::Base,
++}
++
++impl Instance {
++    /// Halo2 ordering.
++    pub fn to_halo2_instance(&self) -> Vec<vesta::Scalar> {
++        vec![
++            self.van_nullifier,
++            self.r_vpk_x,
++            self.r_vpk_y,
++            self.vote_authority_note_new,
++            self.delegation_commitment,
++            self.vote_comm_tree_root,
++            self.vote_comm_tree_anchor_height,
++            self.voting_round_id,
++            self.ea_pk_x,
++            self.ea_pk_y,
++            self.dc_slot_nullifier,
++            self.delegate_index_bound,
++        ]
++    }
++}
++
++#[cfg(test)]
++mod tests;
+diff -ruN -x target -x Cargo.lock -x .git pristine/voting-circuits/src/proxy_delegation/circuit_b1/tests_b1.rs rev3-circuit/voting-circuits/src/proxy_delegation/circuit_b1/tests_b1.rs
+--- pristine/voting-circuits/src/proxy_delegation/circuit_b1/tests_b1.rs	1969-12-31 17:00:00
++++ rev3-circuit/voting-circuits/src/proxy_delegation/circuit_b1/tests_b1.rs	2026-10-05 22:39:27
+@@ -0,0 +1,109 @@
++use super::*;
++use crate::ff::{Field, PrimeFieldBits};
++use crate::gadgets::elgamal::{base_to_scalar, elgamal_encrypt, spend_auth_g_affine};
++use crate::gadgets::van_integrity::van_integrity_hash;
++use crate::group::{Curve, Group};
++use crate::protocol_hash::poseidon_hash_2;
++use crate::rand::rngs::OsRng;
++use core::iter;
++use std::println;
++use voting_crypto_deps::halo2_gadgets::sinsemilla::primitives::CommitDomain;
++use voting_crypto_deps::halo2_proofs::dev::MockProver;
++use voting_crypto_deps::orchard::constants::{fixed_bases::COMMIT_IVK_PERSONALIZATION, L_ORCHARD_BASE};
++use voting_crypto_deps::pasta_curves::arithmetic::CurveAffine;
++
++fn empty_path() -> [pallas::Base; VOTE_COMM_TREE_DEPTH] {
++    let mut r = [pallas::Base::zero(); VOTE_COMM_TREE_DEPTH];
++    r[0] = poseidon_hash_2(pallas::Base::zero(), pallas::Base::zero());
++    for i in 1..VOTE_COMM_TREE_DEPTH { r[i] = poseidon_hash_2(r[i - 1], r[i - 1]); }
++    r
++}
++
++fn build() -> (Circuit, Vec<pallas::Base>) {
++    let mut rng = OsRng;
++    let vsk = pallas::Scalar::random(&mut rng);
++    let nk = pallas::Base::random(&mut rng);
++    let rivk = pallas::Scalar::random(&mut rng);
++    let alpha = pallas::Scalar::random(&mut rng);
++    let ak_x = *(spend_auth_g_affine() * vsk).to_affine().coordinates().unwrap().x();
++    let ivk = CommitDomain::new(COMMIT_IVK_PERSONALIZATION).short_commit(
++        iter::empty().chain(ak_x.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE))
++            .chain(nk.to_le_bits().iter().by_vals().take(L_ORCHARD_BASE)), &rivk).unwrap();
++    let g_d = (pallas::Point::generator() * pallas::Scalar::from(12345u64)).to_affine();
++    let pk_d = (g_d * base_to_scalar(ivk).unwrap()).to_affine();
++    let (gx, px) = (*g_d.coordinates().unwrap().x(), *pk_d.coordinates().unwrap().x());
++    let round = pallas::Base::random(&mut rng);
++    let rand = pallas::Base::random(&mut rng);
++    let mut w = [0u64; 16];
++    for j in 0..NSLOTS { w[j] = 100 + j as u64; }
++    let wsum: u64 = w.iter().sum();
++    let total = 10_000u64;
++    let rem = pallas::Base::from(total - wsum);
++    let max = pallas::Base::from(MAX_PROPOSAL_AUTHORITY);
++    let van_old = van_integrity_hash(gx, px, pallas::Base::from(total), round, max, rand);
++    let van_new = van_integrity_hash(gx, px, rem, round, max, rand);
++    let mut root = van_old;
++    for s in empty_path() { root = poseidon_hash_2(root, s); }
++    let nf = poseidon::Hash::<_, poseidon::P128Pow5T3, ConstantLength<4>, 3, 2>::init()
++        .hash([nk, domain_tags::vote_authority_spend(), round, van_old]);
++    let r_vpk = (spend_auth_g_affine() * (vsk + alpha)).to_affine();
++    let ea_pk = (spend_auth_g_affine() * pallas::Scalar::from(42u64)).to_affine();
++    let mut c = [[pallas::Base::zero(); 4]; 16];
++    let randomness: [pallas::Base; 16] = core::array::from_fn(|i| pallas::Base::from((i as u64 + 1) * 101));
++    for i in 0..16 {
++        let (a, b, cc, d) = elgamal_encrypt(pallas::Base::from(w[i]), randomness[i], ea_pk).unwrap();
++        c[i] = [a, b, cc, d];
++    }
++    let circuit = Circuit {
++        vote_comm_tree_path: Value::known(empty_path()),
++        vote_comm_tree_position: Value::known(0),
++        vpk_g_d: Value::known(g_d), vpk_pk_d: Value::known(pk_d),
++        total_note_value: Value::known(pallas::Base::from(total)),
++        remaining_note_value: Value::known(rem),
++        van_comm_rand: Value::known(rand),
++        vote_authority_note_old: Value::known(van_old),
++        vsk: Value::known(vsk), rivk_v: Value::known(rivk), alpha_v: Value::known(alpha), vsk_nk: Value::known(nk),
++        shares: w.map(|s| Value::known(pallas::Base::from(s))),
++        enc_share_c1_x: core::array::from_fn(|i| Value::known(c[i][0])),
++        enc_share_c2_x: core::array::from_fn(|i| Value::known(c[i][1])),
++        enc_share_c1_y: core::array::from_fn(|i| Value::known(c[i][2])),
++        enc_share_c2_y: core::array::from_fn(|i| Value::known(c[i][3])),
++        share_blinds: [Value::known(pallas::Base::zero()); 16],
++        share_randomness: randomness.map(Value::known),
++        ea_pk: Value::known(ea_pk),
++        delegate_index: Value::known(pallas::Base::zero()),
++    };
++    let mut pi = vec![nf, *r_vpk.coordinates().unwrap().x(), *r_vpk.coordinates().unwrap().y(), van_new,
++        pallas::Base::zero(), root, pallas::Base::from(5u64), round,
++        *ea_pk.coordinates().unwrap().x(), *ea_pk.coordinates().unwrap().y()];
++    for j in 0..NSLOTS {
++        pi.push(pallas::Base::from(1000 + j as u64));
++        pi.extend([c[j][0], c[j][2], c[j][1], c[j][3]]);
++    }
++    (circuit, pi)
++}
++
++#[test]
++#[ignore]
++fn b1_mock_rows_and_timing() {
++    use std::time::Instant;
++    use voting_crypto_deps::halo2_proofs::{dev::CircuitCost, pasta::EqAffine, plonk::{keygen_pk, keygen_vk}, poly::commitment::Params};
++    let (c, pi) = build();
++    let p = MockProver::run(K, &c, vec![pi.clone()]).unwrap();
++    assert_eq!(p.verify(), Ok(()));
++    println!("B1 cost: {:?}", CircuitCost::<vesta::Point, _>::measure(K, &c));
++    let params: Params<EqAffine> = Params::new(K);
++    let vk = keygen_vk(&params, &Circuit::default()).unwrap();
++    let pk = keygen_pk(&params, vk.clone(), &Circuit::default()).unwrap();
++    let mut ts = vec![];
++    for _ in 0..6 {
++        let (c, pi) = build();
++        let t = Instant::now();
++        let proof = crate::prove_error::create_proof_bytes(&params, &pk, c, &pi).unwrap();
++        ts.push(t.elapsed());
++        crate::prove_error::verify_proof_bytes("b1", &params, &vk, &proof, &pi).unwrap();
++        println!("B1 proof bytes {} public inputs {}", proof.len(), pi.len());
++    }
++    ts.sort();
++    println!("B1 median prove {:?}", ts[3]);
++}
+diff -ruN -x target -x Cargo.lock -x .git pristine/voting-circuits/src/proxy_delegation/circuit_b1.rs rev3-circuit/voting-circuits/src/proxy_delegation/circuit_b1.rs
+--- pristine/voting-circuits/src/proxy_delegation/circuit_b1.rs	1969-12-31 17:00:00
++++ rev3-circuit/voting-circuits/src/proxy_delegation/circuit_b1.rs	2026-10-05 22:39:27
+@@ -0,0 +1,623 @@
++//! PROTOTYPE B1 variant: NSLOTS public encrypted pool slots in one proof.
++//!
++//! Conditions (numbering mirrors ZKP #2 where shared):
++//! - C1  VAN membership (Poseidon Merkle path, root -> instance).
++//! - C2  Old VAN integrity with proposal_authority = MAX (constant).
++//! - C3  Diversified address integrity (CommitIvk chain).
++//! - C4  Spend authority r_vpk -> instance.
++//! - C5  VAN nullifier (identical to ZKP #2) -> instance.
++//! - C6  Successor VAN integrity: same address/round/rand, MAX, weight W_new -> instance.
++//! - C7  W_new in [0, 2^30) (strict 3-word lookup range check).
++//! - C8  sum(shares) + W_new == W.
++//! - C9  each share in [0, 2^30).
++//! - C10 shares_hash (blinded share commitments).
++//! - C11 El Gamal encryption integrity under ea_pk (instance).
++//! - C12 w = sum(shares) != 0.
++//! - C13 DC = Poseidon(DOMAIN_VC, round, shares_hash, 0, delegate_index) -> instance.
++
++use std::vec::Vec;
++
++use voting_crypto_deps::halo2_gadgets::{
++    ecc::{
++        chip::{EccChip, EccConfig},
++        CircuitVersion, NonIdentityPoint, ScalarFixed,
++    },
++    poseidon::{
++        primitives::{self as poseidon, ConstantLength},
++        Hash as PoseidonHash, Pow5Chip as PoseidonChip, Pow5Config as PoseidonConfig,
++    },
++    sinsemilla::chip::{SinsemillaChip, SinsemillaConfig},
++    utilities::lookup_range_check::{LookupRangeCheck, LookupRangeCheckConfig},
++};
++use voting_crypto_deps::halo2_proofs::{
++    circuit::{floor_planner, AssignedCell, Layouter, Value},
++    plonk::{self, Advice, Column, ConstraintSystem, Fixed, Instance as InstanceColumn},
++};
++use voting_crypto_deps::orchard::{
++    circuit::{
++        commit_ivk::{CommitIvkChip, CommitIvkConfig},
++        gadget::{
++            add_chip::{AddChip, AddConfig},
++            assign_free_advice, AddInstruction,
++        },
++    },
++    constants::{OrchardCommitDomains, OrchardFixedBases, OrchardHashDomains},
++};
++use voting_crypto_deps::pasta_curves::{pallas, vesta};
++
++#[allow(unused_imports)]
++use crate::{
++    domain_tags,
++    gadgets::{
++        address_ownership::{prove_address_ownership, spend_auth_g_mul},
++        elgamal::{prove_elgamal_encryptions, EaPkInstanceLoc, SpendAuthGFixedBase30Config},
++        nonzero::NonZeroConfig,
++        poseidon_merkle::{synthesize_poseidon_merkle_path, MerkleSwapGate},
++        van_integrity, vote_commitment,
++    },
++    params::{
++        MAX_PROPOSAL_AUTHORITY, RANGE_CHECK_WORD_BITS, SHARE_VALUE_RANGE_WORDS,
++        VOTE_COMM_TREE_DEPTH,
++    },
++    shares_hash::compute_shares_hash_in_circuit,
++};
++
++/// Circuit size.
++pub const K: u32 = 11;
++pub const NSLOTS: usize = 10;
++const SPLIT: usize = 5;
++const SLOT_BASE: usize = 10;
++
++const ELGAMAL_TRACK_SPLIT: usize = 8;
++const PRIMARY_SHARES_HASH_COUNT: usize = 2;
++
++/// Reserved proposal id for delegation commitments (baked as a constant).
++pub(crate) const POOL_PROPOSAL_ID: u64 = 0;
++
++const VAN_NULLIFIER_PUBLIC_OFFSET: usize = 0;
++const R_VPK_X_PUBLIC_OFFSET: usize = 1;
++const R_VPK_Y_PUBLIC_OFFSET: usize = 2;
++const VOTE_AUTHORITY_NOTE_NEW_PUBLIC_OFFSET: usize = 3;
++const DELEGATION_COMMITMENT_PUBLIC_OFFSET: usize = 4;
++const VOTE_COMM_TREE_ROOT_PUBLIC_OFFSET: usize = 5;
++#[allow(dead_code)]
++const VOTE_COMM_TREE_ANCHOR_HEIGHT_PUBLIC_OFFSET: usize = 6;
++const VOTING_ROUND_ID_PUBLIC_OFFSET: usize = 7;
++const EA_PK_X_PUBLIC_OFFSET: usize = 8;
++const EA_PK_Y_PUBLIC_OFFSET: usize = 9;
++
++/// Native DC hash: `Poseidon(DOMAIN_VC, round, shares_hash, 0, delegate_index)`.
++pub fn delegation_commitment_hash(
++    voting_round_id: pallas::Base,
++    shares_hash: pallas::Base,
++    delegate_index: u32,
++) -> pallas::Base {
++    vote_commitment::vote_commitment_hash(
++        voting_round_id,
++        shares_hash,
++        pallas::Base::from(POOL_PROPOSAL_ID),
++        pallas::Base::from(u64::from(delegate_index)),
++    )
++}
++
++/// Circuit configuration.
++#[derive(Clone, Debug)]
++pub struct Config {
++    primary: Column<InstanceColumn>,
++    advices: [Column<Advice>; 10],
++    elgamal_advices: [Column<Advice>; 10],
++    elgamal_advices_b: [Column<Advice>; 10],
++    poseidon_config: PoseidonConfig<pallas::Base, 3, 2>,
++    hash_poseidon_config: PoseidonConfig<pallas::Base, 3, 2>,
++    add_config: AddConfig,
++    ecc_config: EccConfig<OrchardFixedBases>,
++    elgamal_ecc_config: EccConfig<OrchardFixedBases>,
++    elgamal_ecc_config_b: EccConfig<OrchardFixedBases>,
++    sinsemilla_config:
++        SinsemillaConfig<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases>,
++    commit_ivk_config: CommitIvkConfig,
++    range_check: LookupRangeCheckConfig<pallas::Base, RANGE_CHECK_WORD_BITS>,
++    range_check_b: LookupRangeCheckConfig<pallas::Base, RANGE_CHECK_WORD_BITS>,
++    merkle_swap: MerkleSwapGate,
++    nonzero: NonZeroConfig,
++    nonzero_b: NonZeroConfig,
++    spend_auth_g_fixed_base_30: SpendAuthGFixedBase30Config,
++    spend_auth_g_fixed_base_30_b: SpendAuthGFixedBase30Config,
++}
++
++impl Config {
++    fn poseidon_chip(&self) -> PoseidonChip<pallas::Base, 3, 2> {
++        PoseidonChip::construct(self.poseidon_config.clone())
++    }
++    fn hash_poseidon_chip(&self) -> PoseidonChip<pallas::Base, 3, 2> {
++        PoseidonChip::construct(self.hash_poseidon_config.clone())
++    }
++    fn add_chip(&self) -> AddChip {
++        AddChip::construct(self.add_config.clone())
++    }
++    fn ecc_chip(&self) -> EccChip<OrchardFixedBases> {
++        EccChip::construct(self.ecc_config.clone(), CircuitVersion::AnchoredBase)
++    }
++    fn elgamal_ecc_chip(&self) -> EccChip<OrchardFixedBases> {
++        EccChip::construct(self.elgamal_ecc_config.clone(), CircuitVersion::AnchoredBase)
++    }
++    fn elgamal_ecc_chip_b(&self) -> EccChip<OrchardFixedBases> {
++        EccChip::construct(self.elgamal_ecc_config_b.clone(), CircuitVersion::AnchoredBase)
++    }
++    fn sinsemilla_chip(
++        &self,
++    ) -> SinsemillaChip<OrchardHashDomains, OrchardCommitDomains, OrchardFixedBases> {
++        SinsemillaChip::construct(self.sinsemilla_config.clone())
++    }
++    fn commit_ivk_chip(&self) -> CommitIvkChip {
++        CommitIvkChip::construct(self.commit_ivk_config.clone())
++    }
++    fn constant(
++        &self,
++        layouter: &mut impl Layouter<pallas::Base>,
++        label: &'static str,
++        value: pallas::Base,
++    ) -> Result<AssignedCell<pallas::Base, pallas::Base>, plonk::Error> {
++        layouter.assign_region(
++            || label,
++            |mut region| region.assign_advice_from_constant(|| label, self.advices[0], 0, value),
++        )
++    }
++}
++
++/// ZKP #4 witnesses.
++#[derive(Clone, Debug, Default)]
++pub struct Circuit {
++    pub(crate) vote_comm_tree_path: Value<[pallas::Base; VOTE_COMM_TREE_DEPTH]>,
++    pub(crate) vote_comm_tree_position: Value<u32>,
++    pub(crate) vpk_g_d: Value<pallas::Affine>,
++    pub(crate) vpk_pk_d: Value<pallas::Affine>,
++    /// Input VAN weight W (ballots).
++    pub(crate) total_note_value: Value<pallas::Base>,
++    /// Successor VAN weight W - w (ballots).
++    pub(crate) remaining_note_value: Value<pallas::Base>,
++    pub(crate) van_comm_rand: Value<pallas::Base>,
++    pub(crate) vote_authority_note_old: Value<pallas::Base>,
++    pub(crate) vsk: Value<pallas::Scalar>,
++    pub(crate) rivk_v: Value<pallas::Scalar>,
++    pub(crate) alpha_v: Value<pallas::Scalar>,
++    pub(crate) vsk_nk: Value<pallas::Base>,
++    pub(crate) shares: [Value<pallas::Base>; 16],
++    pub(crate) enc_share_c1_x: [Value<pallas::Base>; 16],
++    pub(crate) enc_share_c2_x: [Value<pallas::Base>; 16],
++    pub(crate) enc_share_c1_y: [Value<pallas::Base>; 16],
++    pub(crate) enc_share_c2_y: [Value<pallas::Base>; 16],
++    pub(crate) share_blinds: [Value<pallas::Base>; 16],
++    pub(crate) share_randomness: [Value<pallas::Base>; 16],
++    pub(crate) ea_pk: Value<pallas::Affine>,
++    /// Private delegate index (hidden inside DC).
++    pub(crate) delegate_index: Value<pallas::Base>,
++}
++
++impl plonk::Circuit<pallas::Base> for Circuit {
++    type Config = Config;
++    type FloorPlanner = floor_planner::V1;
++
++    fn without_witnesses(&self) -> Self {
++        Self::default()
++    }
++
++    fn configure(meta: &mut ConstraintSystem<pallas::Base>) -> Self::Config {
++        let advices: [Column<Advice>; 10] = core::array::from_fn(|_| meta.advice_column());
++        for col in &advices {
++            meta.enable_equality(*col);
++        }
++        let elgamal_advices: [Column<Advice>; 10] = core::array::from_fn(|_| meta.advice_column());
++        for col in &elgamal_advices {
++            meta.enable_equality(*col);
++        }
++        let elgamal_advices_b: [Column<Advice>; 10] =
++            core::array::from_fn(|_| meta.advice_column());
++        for col in &elgamal_advices_b {
++            meta.enable_equality(*col);
++        }
++        let hash_advices: [Column<Advice>; 4] = core::array::from_fn(|_| meta.advice_column());
++
++        let primary = meta.instance_column();
++        meta.enable_equality(primary);
++
++        let lagrange_coeffs: [Column<Fixed>; 8] = core::array::from_fn(|_| meta.fixed_column());
++        let rc_a = lagrange_coeffs[2..5].try_into().unwrap();
++        let rc_b = lagrange_coeffs[5..8].try_into().unwrap();
++        let constants = meta.fixed_column();
++        meta.enable_constant(constants);
++
++        let add_config = AddChip::configure(meta, advices[7], advices[8], advices[6]);
++
++        let table_idx = meta.lookup_table_column();
++        let lookup = (
++            table_idx,
++            meta.lookup_table_column(),
++            meta.lookup_table_column(),
++        );
++        let range_check = LookupRangeCheckConfig::configure(meta, advices[9], table_idx);
++        let elgamal_range_check =
++            LookupRangeCheckConfig::configure(meta, elgamal_advices[9], table_idx);
++        let elgamal_range_check_b =
++            LookupRangeCheckConfig::configure(meta, elgamal_advices_b[9], table_idx);
++
++        let ecc_config =
++            EccChip::<OrchardFixedBases>::configure(meta, advices, lagrange_coeffs, range_check);
++        let elgamal_lagrange_coeffs: [Column<Fixed>; 8] =
++            core::array::from_fn(|_| meta.fixed_column());
++        let elgamal_ecc_config = EccChip::<OrchardFixedBases>::configure(
++            meta,
++            elgamal_advices,
++            elgamal_lagrange_coeffs,
++            elgamal_range_check,
++        );
++        let spend_auth_g_fixed_base_30 =
++            SpendAuthGFixedBase30Config::configure(meta, elgamal_advices, elgamal_lagrange_coeffs);
++        let elgamal_lagrange_coeffs_b: [Column<Fixed>; 8] =
++            core::array::from_fn(|_| meta.fixed_column());
++        let elgamal_ecc_config_b = EccChip::<OrchardFixedBases>::configure(
++            meta,
++            elgamal_advices_b,
++            elgamal_lagrange_coeffs_b,
++            elgamal_range_check_b,
++        );
++        let spend_auth_g_fixed_base_30_b = SpendAuthGFixedBase30Config::configure(
++            meta,
++            elgamal_advices_b,
++            elgamal_lagrange_coeffs_b,
++        );
++
++        let sinsemilla_config = SinsemillaChip::configure(
++            meta,
++            advices[..5].try_into().unwrap(),
++            advices[6],
++            lagrange_coeffs[0],
++            lookup,
++            range_check,
++            false,
++        );
++        let commit_ivk_config = CommitIvkChip::configure(meta, advices);
++
++        let poseidon_config = PoseidonChip::configure::<poseidon::P128Pow5T3>(
++            meta,
++            advices[6..9].try_into().unwrap(),
++            advices[5],
++            rc_a,
++            rc_b,
++        );
++        let hash_round_constants: [Column<Fixed>; 6] =
++            core::array::from_fn(|_| meta.fixed_column());
++        let hash_poseidon_config = PoseidonChip::configure::<poseidon::P128Pow5T3>(
++            meta,
++            hash_advices[..3].try_into().unwrap(),
++            hash_advices[3],
++            hash_round_constants[..3].try_into().unwrap(),
++            hash_round_constants[3..].try_into().unwrap(),
++        );
++
++        let merkle_swap = MerkleSwapGate::configure(
++            meta,
++            [advices[0], advices[1], advices[2], advices[3], advices[4]],
++        );
++        let nonzero = NonZeroConfig::configure(meta, [elgamal_advices[0], elgamal_advices[1]]);
++        let nonzero_b =
++            NonZeroConfig::configure(meta, [elgamal_advices_b[0], elgamal_advices_b[1]]);
++
++        Config {
++            primary,
++            advices,
++            elgamal_advices,
++            elgamal_advices_b,
++            poseidon_config,
++            hash_poseidon_config,
++            add_config,
++            ecc_config,
++            elgamal_ecc_config,
++            elgamal_ecc_config_b,
++            sinsemilla_config,
++            commit_ivk_config,
++            range_check,
++            range_check_b: elgamal_range_check_b,
++            merkle_swap,
++            nonzero,
++            nonzero_b,
++            spend_auth_g_fixed_base_30,
++            spend_auth_g_fixed_base_30_b,
++        }
++    }
++
++    fn synthesize(
++        &self,
++        config: Self::Config,
++        mut layouter: impl Layouter<pallas::Base>,
++    ) -> Result<(), plonk::Error> {
++        SinsemillaChip::load(config.sinsemilla_config.clone(), &mut layouter)?;
++        let ecc_chip = config.ecc_chip();
++
++        let voting_round_id = layouter.assign_region(
++            || "copy voting_round_id",
++            |mut region| {
++                region.assign_advice_from_instance(
++                    || "voting_round_id",
++                    config.primary,
++                    VOTING_ROUND_ID_PUBLIC_OFFSET,
++                    config.advices[0],
++                    0,
++                )
++            },
++        )?;
++
++        let vpk_g_d_point = NonIdentityPoint::new(
++            ecc_chip.clone(),
++            layouter.namespace(|| "witness vpk_g_d"),
++            self.vpk_g_d,
++        )?;
++        let vpk_g_d = vpk_g_d_point.extract_p().inner().clone();
++        let vpk_pk_d_point = NonIdentityPoint::new(
++            ecc_chip.clone(),
++            layouter.namespace(|| "witness vpk_pk_d"),
++            self.vpk_pk_d,
++        )?;
++        let vpk_pk_d = vpk_pk_d_point.extract_p().inner().clone();
++
++        let total_note_value = assign_free_advice(
++            layouter.namespace(|| "witness W"),
++            config.advices[0],
++            self.total_note_value,
++        )?;
++        let remaining_note_value = assign_free_advice(
++            layouter.namespace(|| "witness W_new"),
++            config.advices[0],
++            self.remaining_note_value,
++        )?;
++        let van_comm_rand = assign_free_advice(
++            layouter.namespace(|| "witness van_comm_rand"),
++            config.advices[0],
++            self.van_comm_rand,
++        )?;
++        let vote_authority_note_old = assign_free_advice(
++            layouter.namespace(|| "witness van_old"),
++            config.advices[0],
++            self.vote_authority_note_old,
++        )?;
++        let domain_van = config.constant(
++            &mut layouter,
++            "DOMAIN_VAN",
++            pallas::Base::from(van_integrity::DOMAIN_VAN),
++        )?;
++        // C2/C6: authority is the MAX constant on both sides (baked into the VK).
++        let authority_max = config.constant(
++            &mut layouter,
++            "MAX_PROPOSAL_AUTHORITY",
++            pallas::Base::from(MAX_PROPOSAL_AUTHORITY),
++        )?;
++        let vsk_nk = assign_free_advice(
++            layouter.namespace(|| "witness vsk_nk"),
++            config.advices[0],
++            self.vsk_nk,
++        )?;
++
++        // ---- C2: old VAN integrity (authority == MAX) ----
++        let derived_van = van_integrity::van_integrity_poseidon(
++            &config.poseidon_config,
++            &mut layouter,
++            "Old VAN integrity",
++            domain_van.clone(),
++            vpk_g_d.clone(),
++            vpk_pk_d.clone(),
++            total_note_value.clone(),
++            voting_round_id.clone(),
++            authority_max.clone(),
++            van_comm_rand.clone(),
++        )?;
++        layouter.assign_region(
++            || "VAN integrity check",
++            |mut region| region.constrain_equal(derived_van.cell(), vote_authority_note_old.cell()),
++        )?;
++
++        // ---- C3: address ownership ----
++        let vsk_scalar = ScalarFixed::new(ecc_chip.clone(), layouter.namespace(|| "vsk"), self.vsk)?;
++        let vsk_ak_point = spend_auth_g_mul(
++            ecc_chip.clone(),
++            layouter.namespace(|| "[vsk]G"),
++            "c3: [vsk] SpendAuthG",
++            vsk_scalar,
++        )?;
++        let ak = vsk_ak_point.extract_p().inner().clone();
++        let rivk_v_scalar =
++            ScalarFixed::new(ecc_chip.clone(), layouter.namespace(|| "rivk_v"), self.rivk_v)?;
++        prove_address_ownership(
++            config.sinsemilla_chip(),
++            ecc_chip.clone(),
++            config.commit_ivk_chip(),
++            layouter.namespace(|| "c3 address"),
++            "c3",
++            ak,
++            vsk_nk.clone(),
++            rivk_v_scalar,
++            &vpk_g_d_point,
++            &vpk_pk_d_point,
++        )?;
++
++        // ---- C4: spend authority ----
++        crate::gadgets::spend_authority::prove_spend_authority(
++            ecc_chip.clone(),
++            layouter.namespace(|| "c4 spend authority"),
++            self.alpha_v,
++            &vsk_ak_point,
++            config.primary,
++            R_VPK_X_PUBLIC_OFFSET,
++            R_VPK_Y_PUBLIC_OFFSET,
++        )?;
++
++        // ---- C1: membership ----
++        {
++            let root = synthesize_poseidon_merkle_path::<VOTE_COMM_TREE_DEPTH>(
++                &config.merkle_swap,
++                &config.poseidon_config,
++                &mut layouter,
++                config.advices[0],
++                vote_authority_note_old.clone(),
++                self.vote_comm_tree_position,
++                self.vote_comm_tree_path,
++                "c1: merkle",
++            )?;
++            layouter.constrain_instance(
++                root.cell(),
++                config.primary,
++                VOTE_COMM_TREE_ROOT_PUBLIC_OFFSET,
++            )?;
++        }
++
++        // ---- C5: VAN nullifier (identical derivation to ZKP #2) ----
++        let domain_van_nf =
++            config.constant(&mut layouter, "vote authority spend", domain_tags::vote_authority_spend())?;
++        let van_nullifier = PoseidonHash::<
++            pallas::Base,
++            _,
++            poseidon::P128Pow5T3,
++            ConstantLength<4>,
++            3,
++            2,
++        >::init(config.poseidon_chip(), layouter.namespace(|| "nf init"))?
++        .hash(
++            layouter.namespace(|| "Poseidon(nk, tag, round, van)"),
++            [vsk_nk, domain_van_nf, voting_round_id.clone(), vote_authority_note_old],
++        )?;
++        layouter.constrain_instance(
++            van_nullifier.cell(),
++            config.primary,
++            VAN_NULLIFIER_PUBLIC_OFFSET,
++        )?;
++
++        // ---- C6: successor VAN (same address/round/rand, MAX, weight W_new) ----
++        let derived_van_new = van_integrity::van_integrity_poseidon(
++            &config.poseidon_config,
++            &mut layouter,
++            "New VAN integrity",
++            domain_van,
++            vpk_g_d,
++            vpk_pk_d,
++            remaining_note_value.clone(),
++            voting_round_id.clone(),
++            authority_max,
++            van_comm_rand,
++        )?;
++        layouter.constrain_instance(
++            derived_van_new.cell(),
++            config.primary,
++            VOTE_AUTHORITY_NOTE_NEW_PUBLIC_OFFSET,
++        )?;
++
++        // ---- C7: W_new in [0, 2^30) — anti-inflation (w <= W) ----
++        config.range_check_b.copy_check(
++            layouter.namespace(|| "W_new < 2^30"),
++            remaining_note_value.clone(),
++            SHARE_VALUE_RANGE_WORDS,
++            true,
++        )?;
++
++        // ---- B1: NSLOTS public (delegate_index_j, Enc(w_j)) slots ----
++        let share_cells: [_; 16] = (0..16usize)
++            .map(|i| {
++                assign_free_advice(
++                    layouter.namespace(|| format!("witness w_{i}")),
++                    config.advices[0],
++                    if i < NSLOTS { self.shares[i] } else { Value::known(pallas::Base::zero()) },
++                )
++            })
++            .collect::<Result<Vec<_>, _>>()?
++            .try_into()
++            .expect("16");
++        let shares_sum = share_cells[1..NSLOTS].iter().enumerate().try_fold(
++            share_cells[0].clone(),
++            |acc, (i, share)| {
++                config
++                    .add_chip()
++                    .add(layouter.namespace(|| format!("sum step {}", i + 1)), &acc, share)
++            },
++        )?;
++        let conserved = config.add_chip().add(
++            layouter.namespace(|| "w + W_new"),
++            &shares_sum,
++            &remaining_note_value,
++        )?;
++        layouter.assign_region(
++            || "w + W_new == W",
++            |mut region| region.constrain_equal(conserved.cell(), total_note_value.cell()),
++        )?;
++        config
++            .nonzero_b
++            .constrain_nonzero(layouter.namespace(|| "w != 0"), "w != 0", &shares_sum)?;
++        let wit16 = |f: &mut dyn FnMut(usize) -> Result<AssignedCell<pallas::Base, pallas::Base>, plonk::Error>| -> Result<[AssignedCell<pallas::Base, pallas::Base>; 16], plonk::Error> {
++            let v = (0..16).map(|i| f(i)).collect::<Result<Vec<_>, _>>()?;
++            Ok(v.try_into().expect("16"))
++        };
++        let enc_c1 = wit16(&mut |i| assign_free_advice(layouter.namespace(|| format!("c1x {i}")), config.advices[0], self.enc_share_c1_x[i]))?;
++        let enc_c2 = wit16(&mut |i| assign_free_advice(layouter.namespace(|| format!("c2x {i}")), config.advices[0], self.enc_share_c2_x[i]))?;
++        let enc_c1_y = wit16(&mut |i| assign_free_advice(layouter.namespace(|| format!("c1y {i}")), config.advices[0], self.enc_share_c1_y[i]))?;
++        let enc_c2_y = wit16(&mut |i| assign_free_advice(layouter.namespace(|| format!("c2y {i}")), config.advices[0], self.enc_share_c2_y[i]))?;
++        for j in 0..NSLOTS {
++            let base = SLOT_BASE + 5 * j;
++            // slot j: [delegate_index (transcript-bound), c1x, c1y, c2x, c2y]
++            layouter.constrain_instance(enc_c1[j].cell(), config.primary, base + 1)?;
++            layouter.constrain_instance(enc_c1_y[j].cell(), config.primary, base + 2)?;
++            layouter.constrain_instance(enc_c2[j].cell(), config.primary, base + 3)?;
++            layouter.constrain_instance(enc_c2_y[j].cell(), config.primary, base + 4)?;
++        }
++        {
++            let r_cells: [_; 16] = (0..16usize)
++                .map(|i| {
++                    let column = if i < SPLIT { config.elgamal_advices[0] } else { config.elgamal_advices_b[0] };
++                    assign_free_advice(layouter.namespace(|| format!("r[{i}]")), column, self.share_randomness[i])
++                })
++                .collect::<Result<Vec<_>, _>>()?
++                .try_into()
++                .expect("16");
++            let loc = || EaPkInstanceLoc { instance: config.primary, x_row: EA_PK_X_PUBLIC_OFFSET, y_row: EA_PK_Y_PUBLIC_OFFSET };
++            prove_elgamal_encryptions(config.elgamal_ecc_chip(), config.nonzero, &config.spend_auth_g_fixed_base_30,
++                layouter.namespace(|| "b1a"), "b1a", 0..SPLIT, self.ea_pk, loc(),
++                share_cells.clone(), r_cells.clone(), enc_c1.clone(), enc_c2.clone(), enc_c1_y.clone(), enc_c2_y.clone())?;
++            prove_elgamal_encryptions(config.elgamal_ecc_chip_b(), config.nonzero_b, &config.spend_auth_g_fixed_base_30_b,
++                layouter.namespace(|| "b1b"), "b1b", SPLIT..NSLOTS, self.ea_pk, loc(),
++                share_cells, r_cells, enc_c1, enc_c2, enc_c1_y, enc_c2_y)?;
++        }
++        Ok(())
++    }
++}
++
++/// Public inputs (10 field elements).
++#[derive(Clone, Debug)]
++pub struct Instance {
++    pub van_nullifier: pallas::Base,
++    pub r_vpk_x: pallas::Base,
++    pub r_vpk_y: pallas::Base,
++    pub vote_authority_note_new: pallas::Base,
++    pub delegation_commitment: pallas::Base,
++    pub vote_comm_tree_root: pallas::Base,
++    pub vote_comm_tree_anchor_height: pallas::Base,
++    pub voting_round_id: pallas::Base,
++    pub ea_pk_x: pallas::Base,
++    pub ea_pk_y: pallas::Base,
++}
++
++impl Instance {
++    /// Halo2 ordering.
++    pub fn to_halo2_instance(&self) -> Vec<vesta::Scalar> {
++        vec![
++            self.van_nullifier,
++            self.r_vpk_x,
++            self.r_vpk_y,
++            self.vote_authority_note_new,
++            self.delegation_commitment,
++            self.vote_comm_tree_root,
++            self.vote_comm_tree_anchor_height,
++            self.voting_round_id,
++            self.ea_pk_x,
++            self.ea_pk_y,
++        ]
++    }
++}
++
++#[cfg(test)]
++mod tests_b1;
+diff -ruN -x target -x Cargo.lock -x .git pristine/voting-circuits/src/proxy_delegation/mod.rs rev3-circuit/voting-circuits/src/proxy_delegation/mod.rs
+--- pristine/voting-circuits/src/proxy_delegation/mod.rs	1969-12-31 17:00:00
++++ rev3-circuit/voting-circuits/src/proxy_delegation/mod.rs	2026-10-05 22:39:27
+@@ -0,0 +1,11 @@
++//! PROTOTYPE: Delegation-commitment proof (ZKP #4) for proxy delegation.
++//!
++//! Throwaway prototype used to measure rows, proof size, and prove time.
++//! Spends a full-authority VAN exactly like ZKP #2 and emits a successor VAN
++//! with weight `W - w` plus a delegation commitment
++//! `DC = Poseidon(DOMAIN_VC, round, shares_hash, 0, delegate_index)`.
++
++mod circuit;
++
++pub use circuit::{delegation_commitment_hash, Circuit, Instance, K};
++mod circuit_b1;

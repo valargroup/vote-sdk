@@ -1,0 +1,12 @@
+threads=1 load=3.73 2.95 4.97
+ZKP4 prove #7: 517.235375ms  verify: 5.926ms  proof bytes: 11008
+ZKP4 median prove: 518.613417ms
+threads=2 load=3.67 2.95 4.96
+ZKP4 prove #7: 272.0195ms  verify: 3.447458ms  proof bytes: 11008
+ZKP4 median prove: 272.130917ms
+threads=4 load=3.54 2.93 4.94
+ZKP4 prove #7: 158.108417ms  verify: 2.25675ms  proof bytes: 11008
+ZKP4 median prove: 158.396541ms
+threads=8 load=3.54 2.93 4.94
+ZKP4 prove #7: 95.372292ms  verify: 1.841667ms  proof bytes: 11008
+ZKP4 median prove: 94.868041ms

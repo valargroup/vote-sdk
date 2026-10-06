@@ -1,0 +1,67 @@
+## key_facts
+- Our tally is per-(proposal, decision) encrypted accumulators. The decision becomes public per revealed share while the amount stays hidden, the reverse of Kite/Helios encrypted unit vectors. [CODE] x/vote/keeper/keeper_tally.go:33-60; [DOC] ZIP adam_voting-protocol-client-delay L965-970, L1140-1146
+- In ZKP2, proposal_id is public and vote_decision is private. The VAN nullifier uses the hotkey's vsk.nk, so nobody else (including a proxy delegator) can compute it. [DOC] ZIP L772-806, L330-333
+- The voter picks the ElGamal randomness for each share and the ciphertext goes on chain, so a voter can prove a share's plaintext. The system is not receipt-free, and receipt-freeness is not a stated requirement. [DOC] ZIP L377-395, L200-215
+- The custody handoff already delivers num_ballots and van_comm_rand for a VAN bound to another party's hotkey. That is a working full-weight transfer and a verifiable vote-sale primitive today. [CODE] zcash_voting/src/delegation_capability.rs:46-52, 338-363
+- A new VAN reuses gov_comm_rand and the address. Whoever constructed a VAN (the custody controller today, or a proxy delegator in any VAN-transfer design) can recompute successor VAN commitments and learn which proposals were voted. [DOC] ZIP L1470-1480; [INF]
+- Chain limits: MaxProposals=50, 16 shares/VC, MaxVoteOptions=8, TallyBSGSBound=2^28 ballots per bucket, and a tally timeout that finalizes with empty results. [CODE] x/vote/types/keys.go:31-63
+- A round has only vote_end_time (no delegation, delegate or override deadlines), and ea_pk is per round, so any encrypted pool must be per round. [CODE] proto/svote/v1/types.proto:41,46
+- Vote txs skip the Cosmos SDK Tx envelope and are authenticated only by RedPallas plus ZKP, with no fee-paying accounts. [CODE] x/vote/ante/validate.go:1-14
+- Kite keeps one homomorphic ElGamal accumulator per delegate. Delegators add an encrypted vector over an anonymity set (T=5/10/20), delegates do O(1) work, there is no override and no transitivity, the delegate learns nothing, and the tally shows percentages only. Delegation proving takes 7-167 s. Revealing the delegate's vote only to its delegators is listed as future work. [EXT] arxiv.org/abs/2501.05626v4 Sec. 3, 5, 6, 7, Remarks 3-7
+- Penumbra: validator votes are public defaults and delegator votes override them, in any order. DelegatorVote reveals amount, validator (via the delegation asset) and vote in plaintext, but not identity. [EXT] protocol.penumbra.zone/main/governance.html; .../action/delegator_vote.html
+- Namada: delegates may vote only during the first 2/3 of the voting period, delegators until the end, and a delegator's vote is subtracted from its delegate. This is the see-then-override schedule. [EXT] specs.namada.net/modules/governance/on-chain
+- Cosmos x/gov and Snapshot ERC-20-with-override both use order-independent delegator precedence over plaintext tallies. [EXT] docs.cosmos.network/sdk/latest/modules/gov/README.md; discuss.ens.domains/t/.../11385
+- Treasury system (NDSS 2019): the committee decrypts per-expert delegated totals, then scales each expert's encrypted vote. Expert votes stay private and per-delegate totals become public, the inverse of Kite's public mode. [EXT] ndss2019_02A-2_Zhang_paper.pdf Fig. 4, 5, 7
+- Nejadgholi-Yang-Clark (FC'21): cycle detection, incoming-weight visibility and delegate accountability each break coercion resistance, and all four properties cannot coexist. [EXT] pulpspy.com/papers/2021_voting.pdf Sec. 4-5
+- Kulyk et al.: delegators can cancel any time before tally, delegations can carry up to T priorities as backups, and the proxy cannot prove how many delegations it holds. The proxy does O(n) token work. [EXT] KIT publications 1000081973, 1000081964
+- Li and Pournaras (2026): ranked backup delegates plus a personal fallback ballot cut vote loss from delegate failure from 26% to about 3% in their experiments. [EXT] arxiv.org/abs/2607.01730
+- LobbyFi turned pooled delegated ARB into a per-proposal vote market (about 19.3M ARB of votes bought for 5 ETH). Verifiable delegate behavior plus pooling attracts markets. [EXT] forum.arbitrum.foundation/t/.../28934
+- Zcash NU7 poll (Aug-Sep 2026): about 2.4M of about 3.6M eligible ZEC voted, and exact per-option totals were published at 0.125 ZEC precision. [EXT] unchainedcrypto.com; cryptoslate.com
+
+## design_implications
+- The only proven way to let delegators verify their delegate is public, attributable delegate votes applied to an atomic pool. For influencer delegation, the public-delegate-pool architecture (B) fits best: one hotkey-signed proxy-delegation proof per delegator and one signed route message per delegate per proposal.
+- Because our system already allows receipts (B11) and verifiable VAN transfer (B12), public delegate routing does not weaken coercion resistance compared with today. Private delegate routing would remove delegator accountability without stopping bribery, since the delegate knows its own randomness, unless a new re-randomizing party is added.
+- Pools must be per round (ea_pk is per round) and per delegate. Tally math should be order-independent: agg[p][route(d,p)] += Pool[d] - Withdrawn[d][p]. Pools should not touch the per-bucket ShareCount, and identity results must be skipped in AddToTally.
+- Proxy delegation should require a VAN with a full proposal_authority bitmask. Otherwise weight already voted on some proposal would flow through the delegate's pool for that proposal too (double count).
+- Fixed-arity proof with k=10 slots. Each slot is (delegate_index, Enc(w_j)) with a range check, plus a change VAN carrying the remainder. Pad unused slots with Enc(0) to random registered delegates to blur per-delegate counts. The minimum split is 1 ballot = 0.125 ZEC per delegate.
+- A Namada-style schedule is needed for actionable verification. New round fields would be proxy-delegation close, a delegate route deadline T1, and an override window ending before vote_end_time minus the last-moment buffer. These must be bound into round params, and the submission-server timing rules must be re-derived.
+- Override, if desired, is a ZKP2 sibling that spends a contribution note (a new VCT domain tag) instead of a VAN. It uses a per-(contribution, proposal) nullifier, adds an equal-plaintext ciphertext to Withdrawn[d][p], and outputs a normal 16-share VC. Contribution secrets must be derivable from the hotkey seed.
+- No transitivity in v1. If ever added, routes are public, so cycle detection is trivial, but override and accounting complexity grows (cf. Optimism's Alligator bug).
+- Delegate registration needs an anti-spam gate (txs have no fees) and should be frozen per round before proxy delegation opens. The delegate route key controls a whole pool and needs rotation or recovery semantics. Tie it to the X-identity attestation.
+- VAN transfer (A) is the documented book design. It gives the best public privacy but no accountability, lets delegates selectively drop or resell VANs, needs O(n) delegate proofs or merges, and cannot support override. Keep it only if the product rejects public delegate votes.
+- Follow mode (D) can ship in Vizor with no protocol change as a v0 or fallback. It casts the user's own vote mirroring an influencer's signed guide, with perfect privacy, but needs the device online after the influencer decides.
+
+## risks_and_holes
+- Liveness: an unsound route, withdrawal or OR-proof can push an accumulator negative or above 2^28. BSGS decryption then fails and the round can time out with empty results (keys.go:31-35). Every new ciphertext-producing proof must enforce exact plaintext bounds or equality.
+- Double counting: proxy-delegating weight from a VAN that already voted on proposal p would route that weight through the delegate's pool for p again. Enforce a full bitmask, or carry the bitmask and keep per-proposal pools.
+- Amount privacy regression: unsplit per-contribution ciphertexts let a colluding validator threshold learn exact amounts and which delegate each anonymous VAN chose. This loses the 16-share protection described at ZIP L1394-1404. Permanent ciphertexts are also exposed to harvest-now-decrypt-later.
+- Pool size inference: exact per-option totals are published (e.g. 22,384.875 ZEC). A large delegate that is the only router to an option, or that votes on only some of up to 50 proposals, has its pool size bounded or estimable by differencing.
+- Count oracle: tagging contributions with a public delegate id gives a per-delegate delegation counter, which Clark et al. show enables coercion and vote-buying checks. Dummy slots or anonymity sets only blur it.
+- 'Visible only to my delegators' is illusory: anyone can delegate 1 ballot (0.125 ZEC) and become a delegator-observer.
+- Delegator tracking leak in VAN-transfer designs (and today in the custody handoff): whoever built the VAN knows gov_comm_rand and can recompute successor VANs, learning which proposals were voted. This is a participation receipt; to be confirmed by the circuits panel.
+- VAN transfer lets a delegate silently skip or resell individual delegators' VANs, and merge circuits need identical bitmasks, so the delegate must keep one merged VAN per bitmask class.
+- Delegate inactivity: if a delegate does not route on p, the pooled weight is lost unless there is an override window or a fallback rule (cf. Cardano drepActivity, Li-Pournaras fallback ballots).
+- Late-route problem: if the delegate can route up to vote_end_time, delegators can never react. A delegate deadline is needed, and the shorter override window shrinks the temporal mixing for override shares and makes them distinguishable by timing.
+- Delegate key compromise or impersonation: one RedPallas key routes a potentially huge pool. A wrong X-handle-to-key mapping in the identity layer sends delegations to an impostor.
+- Concentration and markets: pools are natural aggregation points for LobbyFi-style vote markets and over-delegation (Kite Remark 3, AtomOne's removal of inheritance). Caps are hard because totals are encrypted.
+- Spam: vote txs carry no fees (validate.go:1-14). Delegate registry entries, dummy slots and route messages need rate limiting or a proof-of-stake gate.
+- Spec drift: the ZIP drafts say proposal_id is in {1..15} while the chain allows 50, so any new circuit spec should take parameters from code, not the drafts.
+- Per-round VANs mean there is no standing delegation across rounds for hardware-wallet users: ZKP1 needs a fresh SpendAuthSig each round (ZIP L1311-1332), so delegators must open the wallet every round.
+- Split accounting is bug-prone even in plaintext (Optimism Alligator allowance bug). Keep v1 one-level, absolute integer ballots, at most 10 slots, with a single change VAN.
+- 'Up to 10 delegates' cannot be enforced across multiple anonymous proxy-delegation txs from the same holder unless the VAN carries a counter. Treat it as a UX limit, not a protocol invariant.
+
+## open_questions
+- Must delegates' per-proposal choices be public (Architecture B: full accountability), private with participation-only visibility (C), or private with public per-delegate totals (C', Treasury-style)?
+- Do we support delegator override after delegating? If so, is it per proposal with delegator precedence (Penumbra/Namada style, needs contribution notes, a withdrawal accumulator and an override window), or only whole revocation before a delegation close (Kite style)?
+- What round schedule do we want? Proxy-delegation close, delegate route deadline (e.g. 2/3 of the window, as Namada) and override window. Should delegations also be allowed after delegates route (informed delegation)?
+- What happens to pooled weight when a delegate does not vote on a proposal: lost, abstain, a ranked backup delegate, or returned to the delegator through the override window?
+- Should per-delegate delegation counts and/or totals be public (leaderboards, influencer UX) or hidden (dummy slots or anonymity sets, never decrypt pools)? Should the delegate itself learn its total, e.g. by dual-encrypting contributions to the delegate's key?
+- Should published tallies stay exact (as in the NU7 poll), or move to rounded or percentage outputs to limit pool-size inference?
+- Can a delegate change its route before the deadline (last write wins), and can delegates also vote their own VAN independently?
+- Must each contribution be split into several ciphertexts to keep the current limit on what a colluding validator threshold learns?
+- Is proxy delegation restricted to full-bitmask VANs, i.e. delegate before voting anything yourself, with per-proposal override for exceptions?
+- Is transitive re-delegation by delegates ever required? A no for v1 is recommended.
+- Who may register as a delegate, and what anti-spam or attestation gate applies, given there are no fee-paying accounts? How does that tie to the X-handle attestation designed by the identity panel?
+- Is the existing custody-handoff participation leak (the controller can track successor VANs via gov_comm_rand reuse) acceptable, and must a VAN-transfer design avoid it? Needs code verification.
+- Should Vizor ship follow mode (client-side mirror voting) first as a no-protocol v0 while B is specified?
+- Do we accept that pools create a vote-market aggregation point (LobbyFi-like services registering as delegates), or do we want caps or friction such as a maximum routed share per delegate?

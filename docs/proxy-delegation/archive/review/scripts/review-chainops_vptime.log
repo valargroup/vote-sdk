@@ -1,0 +1,18 @@
+vote_proof keygen: 99.724583ms
+share_reveal keygen: 27.659625ms
+vote_proof build+prove #0: 73.303375ms proof bytes=11008
+  verify: 1.8265ms
+vote_proof build+prove #1: 70.520583ms proof bytes=11008
+  verify: 2.025292ms
+vote_proof build+prove #2: 70.017792ms proof bytes=11008
+  verify: 1.900959ms
+vote_proof build+prove #3: 72.915666ms proof bytes=11008
+  verify: 1.807417ms
+vote_proof build+prove #4: 70.072625ms proof bytes=11008
+  verify: 1.908833ms
+vote_proof build+prove #5: 70.530042ms proof bytes=11008
+  verify: 1.843542ms
+share_reveal build+prove #0: 27.929834ms proof bytes=4992
+share_reveal build+prove #1: 26.550125ms proof bytes=4992
+share_reveal build+prove #2: 24.6345ms proof bytes=4992
+share_reveal build+prove #3: 27.158959ms proof bytes=4992

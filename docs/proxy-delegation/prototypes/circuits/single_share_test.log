@@ -1,0 +1,95 @@
+   Compiling voting-circuits v0.12.2 (/private/tmp/claude-501/-Users-czstudio-Documents-vote-sdk--claude-worktrees-vote-delegation-planning-29b451/0cff7cc1-5f3f-4de1-be83-322a1fdf7727/scratchpad/rev-lastmoment/proto/voting-circuits)
+warning: constant `ELGAMAL_TRACK_SPLIT` is never used
+  --> src/proxy_delegation/circuit_b1.rs:71:7
+   |
+71 | const ELGAMAL_TRACK_SPLIT: usize = 8;
+   |       ^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `PRIMARY_SHARES_HASH_COUNT` is never used
+  --> src/proxy_delegation/circuit_b1.rs:72:7
+   |
+72 | const PRIMARY_SHARES_HASH_COUNT: usize = 2;
+   |       ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `POOL_PROPOSAL_ID` is never used
+  --> src/proxy_delegation/circuit_b1.rs:75:18
+   |
+75 | pub(crate) const POOL_PROPOSAL_ID: u64 = 0;
+   |                  ^^^^^^^^^^^^^^^^
+
+warning: constant `DELEGATION_COMMITMENT_PUBLIC_OFFSET` is never used
+  --> src/proxy_delegation/circuit_b1.rs:81:7
+   |
+81 | const DELEGATION_COMMITMENT_PUBLIC_OFFSET: usize = 4;
+   |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `delegation_commitment_hash` is never used
+  --> src/proxy_delegation/circuit_b1.rs:90:8
+   |
+90 | pub fn delegation_commitment_hash(
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: fields `hash_poseidon_config` and `range_check` are never read
+   --> src/proxy_delegation/circuit_b1.rs:111:5
+    |
+105 | pub struct Config {
+    |            ------ fields in this struct
+...
+111 |     hash_poseidon_config: PoseidonConfig<pallas::Base, 3, 2>,
+    |     ^^^^^^^^^^^^^^^^^^^^
+...
+119 |     range_check: LookupRangeCheckConfig<pallas::Base, RANGE_CHECK_WORD_BITS>,
+    |     ^^^^^^^^^^^
+    |
+    = note: `Config` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: method `hash_poseidon_chip` is never used
+   --> src/proxy_delegation/circuit_b1.rs:132:8
+    |
+128 | impl Config {
+    | ----------- method in this implementation
+...
+132 |     fn hash_poseidon_chip(&self) -> PoseidonChip<pallas::Base, 3, 2> {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: fields `share_blinds` and `delegate_index` are never read
+   --> src/proxy_delegation/circuit_b1.rs:190:16
+    |
+170 | pub struct Circuit {
+    |            ------- fields in this struct
+...
+190 |     pub(crate) share_blinds: [Value<pallas::Base>; 16],
+    |                ^^^^^^^^^^^^
+...
+194 |     pub(crate) delegate_index: Value<pallas::Base>,
+    |                ^^^^^^^^^^^^^^
+    |
+    = note: `Circuit` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: struct `Instance` is never constructed
+   --> src/proxy_delegation/circuit_b1.rs:591:12
+    |
+591 | pub struct Instance {
+    |            ^^^^^^^^
+
+warning: method `to_halo2_instance` is never used
+   --> src/proxy_delegation/circuit_b1.rs:606:12
+    |
+604 | impl Instance {
+    | ------------- method in this implementation
+605 |     /// Halo2 ordering.
+606 |     pub fn to_halo2_instance(&self) -> Vec<vesta::Scalar> {
+    |            ^^^^^^^^^^^^^^^^^
+
+warning: `voting-circuits` (lib test) generated 10 warnings
+    Finished `release` profile [optimized] target(s) in 21.01s
+     Running unittests src/lib.rs (../target/release/deps/voting_circuits-3b0927c014f8aabc)
+
+running 1 test
+test proxy_delegation::circuit::tests::zkp4_single_share_layout_accepts_and_reveals ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 286 filtered out; finished in 0.74s
+
+CARGO_TARGET_DIR=$S/../target cargo test --release --lib  -- --nocapture  129.72s user 1.44s system 590% cpu 22.224 total

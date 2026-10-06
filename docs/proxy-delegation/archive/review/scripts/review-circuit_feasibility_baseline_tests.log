@@ -1,0 +1,42 @@
+warning: method `to_halo2_instance` is never used
+   --> src/proxy_delegation/circuit_b1.rs:606:12
+    |
+604 | impl Instance {
+    | ------------- method in this implementation
+605 |     /// Halo2 ordering.
+606 |     pub fn to_halo2_instance(&self) -> Vec<vesta::Scalar> {
+    |            ^^^^^^^^^^^^^^^^^
+
+warning: `voting-circuits` (lib test) generated 10 warnings
+    Finished `release` profile [optimized] target(s) in 39.15s
+     Running unittests src/lib.rs (/private/tmp/claude-501/-Users-czstudio-Documents-vote-sdk--claude-worktrees-vote-delegation-planning-29b451/0cff7cc1-5f3f-4de1-be83-322a1fdf7727/scratchpad/review-circuit_feasibility/target/release/deps/voting_circuits-3b0927c014f8aabc)
+
+running 23 tests
+test proxy_delegation::circuit::tests::compare_zkp2_zkp4_timing ... ignored
+test proxy_delegation::circuit::tests::debug_valid ... ignored
+test proxy_delegation::circuit::tests::explain_negative_failures ... ignored
+test proxy_delegation::circuit::tests::keygen_only_none ... ignored
+test proxy_delegation::circuit::tests::keygen_only_zkp2 ... ignored
+test proxy_delegation::circuit::tests::keygen_only_zkp4 ... ignored
+test proxy_delegation::circuit::tests::print_frozen_vectors ... ignored
+test proxy_delegation::circuit::tests::print_slot_vector ... ignored
+test proxy_delegation::circuit::tests::prove_verify_timing ... ignored
+test proxy_delegation::circuit::tests::row_budget ... ignored
+test proxy_delegation::circuit::tests::zkp3_reveals_dc_share_with_pool_proposal_and_large_index ... ok
+test proxy_delegation::circuit::tests::zkp4_valid_full_delegation_successor_zero ... ok
+test proxy_delegation::circuit::tests::zkp4_rejects_overdelegation_w_gt_w ... ok
+test proxy_delegation::circuit::tests::zkp4_valid_max_weight ... ok
+test proxy_delegation::circuit::tests::zkp4_rejects_inflated_successor ... ok
+test proxy_delegation::circuit::tests::zkp4_rejects_wrong_delegate_in_dc ... ok
+test proxy_delegation::circuit::tests::zkp4_rejects_slot_out_of_range ... ok
+test proxy_delegation::circuit::tests::zkp4_rejects_non_max_authority ... ok
+test proxy_delegation::circuit::tests::zkp4_rejects_zero_weight ... ok
+test proxy_delegation::circuit::tests::zkp4_rejects_nonzero_pool_proposal ... ok
+test proxy_delegation::circuit::tests::zkp4_valid_partial ... ok
+test proxy_delegation::circuit::tests::zkp4_rejects_share_overflow ... ok
+test proxy_delegation::circuit::tests::zkp4_valid_slot_15 ... ok
+
+test result: ok. 13 passed; 0 failed; 10 ignored; 0 measured; 263 filtered out; finished in 0.28s
+
+CARGO_TARGET_DIR=$R/target cargo test --release --lib  2>&1  246.79s user 7.37s system 637% cpu 39.864 total
+tail -40  0.00s user 0.00s system 0% cpu 39.863 total

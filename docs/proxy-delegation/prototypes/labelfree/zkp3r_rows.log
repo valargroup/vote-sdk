@@ -1,0 +1,27 @@
+test routed_share_reveal::tests::v2::zkp3r_v2_row_budget ... === ZKP3R-V2 (8 buckets, route depth 20) ===
+  max_rows 1867, max_advice_rows 1867, max_fixed_rows 1783; default 1867 (witness-independent)
+  debug: CircuitCost { k: 11, max_deg: 9, advice_columns: 27, instance_queries: 1, advice_queries: 82, fixed_queries: 40, lookups: 1, permutation_cols: 36, point_sets: 8, max_rows: 1867, max_advice_rows: 1867, max_fixed_rows: 1783, num_fixed_columns: 41, num_advice_columns: 27, num_instance_columns: 1, num_total_columns: 69, 
+  K=10: synthesis rejected (NotEnoughRowsAvailable { current_k: 10 })
+  K=11: PASS
+  K=12: PASS
+test routed_share_reveal::tests::zkp3r_row_budget ... === ZKP3R route depth 20 ===
+  max_rows 1024, max_advice_rows 1016, max_fixed_rows 1024, 2^K = 2048
+  witness independence: default max_rows 1024 (PASS)
+  debug: CircuitCost { k: 11, max_deg: 9, advice_columns: 27, instance_queries: 1, advice_queries: 82, fixed_queries: 40, lookups: 1, permutation_cols: 36, point_sets: 8, max_rows: 1024, max_advice_rows: 1016, max_fixed_rows: 1024, num_fixed_columns: 41, num_advice_columns: 27, num_instance_columns: 1, num_total_columns: 69, 
+  K=9: synthesis rejected (NotEnoughRowsAvailable { current_k: 9 })
+  K=10: synthesis rejected (NotEnoughRowsAvailable { current_k: 10 })
+  K=11: PASS
+=== ZKP3R route depth 24 ===
+  max_rows 1105, max_advice_rows 1105, max_fixed_rows 1031, 2^K = 2048
+  witness independence: default max_rows 1105 (PASS)
+  debug: CircuitCost { k: 11, max_deg: 9, advice_columns: 27, instance_queries: 1, advice_queries: 82, fixed_queries: 40, lookups: 1, permutation_cols: 36, point_sets: 8, max_rows: 1105, max_advice_rows: 1105, max_fixed_rows: 1031, num_fixed_columns: 41, num_advice_columns: 27, num_instance_columns: 1, num_total_columns: 69, 
+  K=9: synthesis rejected (NotEnoughRowsAvailable { current_k: 9 })
+  K=10: synthesis rejected (NotEnoughRowsAvailable { current_k: 10 })
+  K=11: PASS
+=== ZKP3R route depth 16 ===
+  max_rows 1024, max_advice_rows 1016, max_fixed_rows 1024, 2^K = 2048
+  witness independence: default max_rows 1024 (PASS)
+  debug: CircuitCost { k: 11, max_deg: 9, advice_columns: 27, instance_queries: 1, advice_queries: 82, fixed_queries: 40, lookups: 1, permutation_cols: 36, point_sets: 8, max_rows: 1024, max_advice_rows: 1016, max_fixed_rows: 1024, num_fixed_columns: 41, num_advice_columns: 27, num_instance_columns: 1, num_total_columns: 69, 
+  K=9: synthesis rejected (NotEnoughRowsAvailable { current_k: 9 })
+  K=10: synthesis rejected (NotEnoughRowsAvailable { current_k: 10 })
+  K=11: PASS

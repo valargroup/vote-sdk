@@ -1,0 +1,5 @@
+dc_tx_rate_per_hour,median_anonymity_set,p10,frac_unique
+0.1,4.0,1,0.17
+0.25,8.0,2,0.05
+1,29.0,5,0.01
+4,112.5,25,0.00

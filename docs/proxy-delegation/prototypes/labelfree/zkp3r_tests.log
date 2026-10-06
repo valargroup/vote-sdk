@@ -1,0 +1,66 @@
+test routed_share_reveal::tests::ecc_probe::ecc_probe_rows ... ignored, diagnostic
+test routed_share_reveal::tests::v2::zkp3r_v2_prove_verify_timing ... ignored, release timing
+test routed_share_reveal::tests::v2::zkp3r_v2_rejects_wrong_bucket_or_route ...     rejected: 2 failure(s): instance/outside row 38; permute state
+    rejected: 16 failure(s): instance/outside row 5; instance/outside row 6; instance/outside row 7; instance/outside row 8; instance/outside row 9; instance/outside row 10; instance/outside row 11; instance/outside row 12; bucket 2 select 1; bucket 2 select 0; bucket 1 select 1; bucket 1 select 0; bucket 2 selec
+    rejected: 2 failure(s): decision one-hot [gate decision one-hot]; decision one-hot [gate decision one-hot]
+    rejected: 2 failure(s): decision one-hot [gate decision one-hot]; decision one-hot [gate decision one-hot]
+    rejected: 2 failure(s): instance/outside row 38; permute state
+    rejected: 16 failure(s): instance/outside row 5; instance/outside row 6; instance/outside row 7; instance/outside row 8; instance/outside row 21; instance/outside row 22; instance/outside row 23; instance/outside row 24; bucket 5 select 1; bucket 5 select 0; bucket 1 select 1; bucket 1 select 0; bucket 5 sele
+    rejected: 4 failure(s): instance/outside row 6; instance/outside row 8; bucket 1 select 1; bucket 1 select 1
+test routed_share_reveal::tests::v2::zkp3r_v2_row_budget ... ignored, diagnostic
+test routed_share_reveal::tests::v2::zkp3r_v2_valid_and_decrypts_one_hot ... ok
+test routed_share_reveal::tests::zkp3_baseline_timing ... ignored, release timing
+test routed_share_reveal::tests::zkp3r_nullifier_distinct_across_proposals_same_within_proposal ... ok
+test routed_share_reveal::tests::zkp3r_prove_verify_timing ... ignored, release timing
+test routed_share_reveal::tests::zkp3r_rejects_delegate_not_in_route_tree ...     rejected: 2 failure(s): instance/outside row 11; permute state
+    rejected: 2 failure(s): instance/outside row 11; permute state
+    rejected: 2 failure(s): instance/outside row 11; permute state
+    rejected: 2 failure(s): instance/outside row 11; permute state
+    rejected: 2 failure(s): instance/outside row 11; permute state
+    rejected: 2 failure(s): instance/outside row 11; permute state
+test routed_share_reveal::tests::zkp3r_rejects_direct_vote_commitment ...     rejected: 4 failure(s): R1 merkle swap level 0; permute state; instance/outside row 11; permute state
+    rejected: 4 failure(s): R1 merkle swap level 0; permute state; instance/outside row 11; permute state
+    rejected: 2 failure(s): R1 merkle swap level 0; permute state
+test routed_share_reveal::tests::zkp3r_rejects_reused_or_foreign_nullifier ...     rejected: 2 failure(s): permute state; instance/outside row 0
+    rejected: 2 failure(s): permute state; instance/outside row 0
+test routed_share_reveal::tests::zkp3r_rejects_tampered_share_comms_and_index ...     rejected: 2 failure(s): R1 merkle swap level 0; permute state
+    rejected: 4 failure(s): R4 share commitment mux; permute state; permute state; instance/outside row 0
+    rejected: 6 failure(s): share commitment multiplexer [gate share commitment multiplexer]; share commitment multiplexer [gate share commitment multiplexer]; R4 share commitment mux; permute state; permute state; instance/outside row 0
+test routed_share_reveal::tests::zkp3r_rejects_wrong_ciphertext ...     rejected: 2 failure(s): R4 share commitment mux; permute state
+    rejected: 2 failure(s): R4 share commitment mux; permute state
+    rejected: 4 failure(s): instance/outside row 3; instance/outside row 4; complete point addition; complete point addition
+    rejected: 4 failure(s): instance/outside row 3; instance/outside row 4; complete point addition; complete point addition
+    rejected: 4 failure(s): instance/outside row 3; instance/outside row 4; complete point addition; complete point addition
+    rejected: 4 failure(s): instance/outside row 3; instance/outside row 4; complete point addition; complete point addition
+    rejected: 2 failure(s): instance/outside row 2; complete point addition
+    rejected: 1 failure(s): field element != 0 [gate field element != 0]
+    rejected: 4 failure(s): instance/outside row 9; instance/outside row 10; variable-base scalar mul; variable-base scalar mul
+test routed_share_reveal::tests::zkp3r_rejects_wrong_delegate ...     rejected: 2 failure(s): R1 merkle swap level 0; permute state
+    rejected: 2 failure(s): instance/outside row 11; permute state
+test routed_share_reveal::tests::zkp3r_rejects_wrong_option ...     rejected: 2 failure(s): instance/outside row 11; permute state
+    rejected: 2 failure(s): instance/outside row 11; permute state
+test routed_share_reveal::tests::zkp3r_rejects_wrong_public_context ...     rejected: 4 failure(s): R1 merkle swap level 0; permute state; instance/outside row 11; permute state
+    rejected: 4 failure(s): permute state; instance/outside row 0; instance/outside row 11; permute state
+    rejected: 2 failure(s): instance/outside row 7; permute state
+    rejected: 2 failure(s): instance/outside row 11; permute state
+    rejected: 2 failure(s): permute state; instance/outside row 0
+test routed_share_reveal::tests::zkp3r_rerandomized_ciphertext_decrypts_to_same_share ... ok
+test routed_share_reveal::tests::zkp3r_row_budget ... ignored, diagnostic
+test routed_share_reveal::tests::zkp3r_valid ... ok
+test routed_share_reveal::tests::zkp3r_valid_other_share_and_positions ... ok
+test result: ok. 14 passed; 0 failed; 6 ignored; 0 measured; 292 filtered out; finished in 3.93s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+zkp4 -> zkp3r ok for shares [1000, 0, 0, 100, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 0]
+zkp4 -> zkp3r ok for shares [4000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+test proxy_delegation::circuit::tests::zkp4_dc_revealed_by_zkp3r ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 311 filtered out; finished in 4.09s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+ECC probe N=1 buckets, T=1 tracks: min K 11; max_advice_rows 236; advice cols 10; fixed cols 19
+ECC probe N=2 buckets, T=1 tracks: min K 11; max_advice_rows 472; advice cols 10; fixed cols 19
+ECC probe N=4 buckets, T=1 tracks: min K 11; max_advice_rows 944; advice cols 10; fixed cols 19
+ECC probe N=8 buckets, T=1 tracks: min K 11; max_advice_rows 1888; advice cols 10; fixed cols 19
+ECC probe N=8 buckets, T=2 tracks: min K 11; max_advice_rows 944; advice cols 20; fixed cols 36
+ECC probe N=8 buckets, T=4 tracks: min K 11; max_advice_rows 472; advice cols 40; fixed cols 69
+test routed_share_reveal::tests::ecc_probe::ecc_probe_rows ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 311 filtered out; finished in 0.46s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
