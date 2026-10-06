@@ -1,0 +1,2 @@
+hand cases: OK
+cross-check: 504 systems agree (FLINT vs SymPy RREF vs SymPy nullspace); 374 had >=1 determined variable

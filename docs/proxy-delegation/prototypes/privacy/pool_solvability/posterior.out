@@ -1,0 +1,7 @@
+small                c=1: 81% of 48 | c=2: 51% of 71 | c=3: 42% of 72 | c=4: 22% of 51
+medium               c=1: 75% of 36 | c=2: 55% of 44 | c=3: 35% of 66 | c=4: 21% of 53
+large                c=1: 83% of 6 | c=2: 20% of 15 | c=3: 7% of 14 | c=4: 15% of 13
+many-proposals       c=1: 50% of 46 | c=2: 34% of 87 | c=3: 9% of 107 | c=4: 12% of 121
+binary-only          c=1: 75% of 8 | c=2: 48% of 21 | c=3: 18% of 22 | c=4: 0% of 18
+early-few-delegates  c=1: 59% of 37 | c=2: 36% of 39 | c=3: 36% of 45 | c=4: 16% of 44
+few-delegates-37     c=1: 62% of 45 | c=2: 28% of 76 | c=3: 18% of 90 | c=4: 6% of 85
