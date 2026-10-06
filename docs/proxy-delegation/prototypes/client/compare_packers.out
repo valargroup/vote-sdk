@@ -1,0 +1,14 @@
+cases=19961
+plan  mean DCs per delegator = 2.834  (mean D = 2.503); extra DCs over D per delegator = 0.330
+seq   mean DCs per delegator = 2.845  (mean D = 2.503); extra DCs over D per delegator = 0.342
+perb  mean DCs per delegator = 4.068  (mean D = 2.503); extra DCs over D per delegator = 1.565
+seq fill uses more DCs than the plan packer in 1.2% of cases
+plan extra-DC histogram: {0: 15254, 1: 3713, 2: 482, 3: 321, 5: 191}
+seq extra-DC histogram: {0: 15023, 1: 3937, 2: 489, 3: 321, 5: 191}
+perb extra-DC histogram: {-5: 1, -4: 1, -3: 3, -2: 16, -1: 16, 0: 10873, 1: 2519, 2: 2160, 3: 1622, 4: 801, 5: 495, 6: 522, 7: 137, 8: 200, 9: 127, 10: 129, 11: 18, 12: 63, 13: 14, 14: 30, 15: 84, 16: 12, 17: 9, 18: 14, 19: 10, 20: 20, 21: 7, 22: 6, 23: 5, 24: 8, 25: 11, 26: 1, 28: 3, 29: 4, 30: 6, 31: 1, 33: 1, 34: 2, 35: 1, 39: 2, 40: 7}
+by B: count, mean extra plan / seq / per-bundle, mean D
+  B=1: n=10909 plan=0.000 seq=0.000 perb=-0.006 D=2.47
+  B=2: n=7087 plan=0.511 seq=0.532 perb=2.436 D=2.54
+  B=3: n=953 plan=1.029 seq=1.069 perb=4.885 D=2.54
+  B=4: n=629 plan=1.579 seq=1.625 perb=7.312 D=2.52
+  B=6: n=383 plan=2.619 seq=2.666 perb=12.499 D=2.58
