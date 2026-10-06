@@ -88,3 +88,16 @@ The owner moved the vetted list into the dynamic config that wallets already fet
 - **Fixed per round.** Additions wait for the next round. Removals still act at once through directory flags or suspension.
 - **What it removes:** the curator keys, the vetted section's own `seq`, the directory's offline-key certificate and the new static pin.
 - **Net effect:** about 0.5 eng-weeks saved after adding the per-round picture pull [inference]. Vetted pictures and names are X content again, and counsel signs off on that (PLAN.md §4.6 Legal).
+
+## Follow-up in rev 8 (owner decisions)
+
+- **12-word phrases.** Delegate phrases are 12 words.
+- **Re-registration.** An account can register again to replace its key. The verifier attests that it is the same account, and the entry is re-keyed: same number, new key.
+  - The old key stops at once.
+  - The new key votes only in rounds created after the change.
+  - The verifier allows one registration per account per 14 days, checked before any paid call.
+  - This replaces the successor authorization and the support override.
+- **Registration cost.** A free check through X's oEmbed endpoint comes first: post text, current handle and display name. Then the signer makes one paid post lookup, for the numeric id and the account's age, under a daily spend cap.
+- **Free refresh.** The daily handle refresh reads each registration post through oEmbed. Paid calls are now only for registrations, about $0.015 each.
+- **Pictures.** Vetted delegates' pictures come from their public X profile pages, fetched once per round by Valar's own tool. The owner accepted this terms-of-service risk.
+- **Storage.** Profile content moves out of git to Valar's store, because X's 24-hour deletion rule cannot be met in git history. The per-round list pins only salted hashes.
