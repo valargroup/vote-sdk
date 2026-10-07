@@ -163,3 +163,12 @@ Smaller findings the owner chose not to apply in rev 12 (revisit while drafting 
 - Testing the oldest supported Zodl builds.
 - Tor wording in copy C7.
 - Stale-text cleanup.
+
+## Follow-up in rev 13 (blocker review)
+
+Astra, at extra-high reasoning, and two independent reviewers checked rev 12 for anything blocking implementation. PLAN.md rev 13 records the outcome (R13-1 to R13-14). The owner approved fourteen items:
+- **Blockers.** The release path is made safe (nullifiers checked before expiry and pause, release only on proof of absence, same-generation re-signing), and re-registration markers name the key they replace.
+- **Before contracts-v1 freezes.** Proof-host failover, the shared off-chain formats, a 0x0B ante with signature checks, a p=0 branch in reveal validation, a fixed availability order, a strict "pending" boundary and fixed meanings for unset values after the upgrade.
+- **Early execution.** The trust-anchor rule in validator counts for every supported release, scoped config CI, a proxy-entry signing flow with an owner, one proxy PR per round, and the cache checked before the daily limit.
+
+Left for later: the pre-proving check's brief refusal during the directory's 10-minute lag after a key change, the stale CODEOWNERS wording, and four wrong line citations.
