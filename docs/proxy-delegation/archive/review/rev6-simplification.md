@@ -138,3 +138,28 @@ Not adopted:
 - A verifier-signed handle binding for unvetted delegates.
 - Salted picture hashes.
 - Rewording the "Counted" status.
+
+## Follow-up in rev 12 (last hole hunt)
+
+Astra, at extra-high reasoning, and an independent reviewer looked for remaining holes before implementation. Their raw reports are not kept here; PLAN.md rev 12 records the outcome (R12-1 to R12-8). The owner approved eight must-fix items:
+- **Config tooling.** vote-sdk's config tooling keeps unknown fields, CI protects proxy entries, and the gateway, Pages and stage auto-merge handle `delegates/`.
+- **Trust anchor.** Vizor's bundled validator set is refreshed at launch and monitored, with a clear failure state.
+- **Batch expiry.** 0x09 carries an expiry height, so a released batch can never land later, and a released registration is reused without new device signatures.
+- **Paid checks.** One paid check per post, cached for any submitter, replaces rev 11's signature check before payment, which could not work. The owner asked why a signature was needed at all; the cache stops the attack without one.
+- **Relisting.** A new post is confirmed against the numeric account.
+- **Round time.** The signed proxy entry carries the round's creation time.
+- **Delegation window.** The proxy entry is prepared right after round creation, with clear states before it lands and after a first vote.
+- **Consensus.** No key pruning in v1, and genesis validates the registry.
+
+Smaller findings the owner chose not to apply in rev 12 (revisit while drafting contracts-v1 or later):
+- Randomizing delegate order before the sequential fill, so packing does not hint at allocation order.
+- Keeping an old phrase on the delegate's device until its successor key has settled.
+- Separating a delegate's "retired" display status from per-round eligibility, including a "Revoke old key" action.
+- Making the re-registration spend reserve best effort, including renamed accounts.
+- Richer status states and a lost-key flag.
+- Hijack runbooks and verifier compromise at scale.
+- Publisher failover and directory-key rotation details, such as an admin-signed expiry on the directory key.
+- Generation-specific inputs for the VAN-weight loader.
+- Testing the oldest supported Zodl builds.
+- Tor wording in copy C7.
+- Stale-text cleanup.
