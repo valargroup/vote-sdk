@@ -8,6 +8,8 @@ import (
 
 // x/vote module sentinel errors.
 var (
+	// Clients identify spent nullifiers by this ABCI code, so wrap it with
+	// errors.Wrapf; ABCIInfo reports fmt.Errorf("%w") wraps as code 1.
 	ErrDuplicateNullifier  = errors.Register(ModuleName, 2, "nullifier already spent")
 	ErrRoundNotFound       = errors.Register(ModuleName, 3, "vote round not found")
 	ErrRoundNotActive      = errors.Register(ModuleName, 4, "vote round is not active")

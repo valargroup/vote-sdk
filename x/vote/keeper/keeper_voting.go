@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"cosmossdk.io/core/store"
+	errorsmod "cosmossdk.io/errors"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/valargroup/vote-sdk/x/vote/types"
@@ -42,7 +43,7 @@ func (k *Keeper) CheckAndSetNullifier(kvStore store.KVStore, nfType types.Nullif
 		return err
 	}
 	if has {
-		return fmt.Errorf("%w: nullifier already exists", types.ErrDuplicateNullifier)
+		return errorsmod.Wrapf(types.ErrDuplicateNullifier, "%x", nullifier)
 	}
 	return k.SetNullifier(kvStore, nfType, roundID, nullifier)
 }
@@ -59,7 +60,7 @@ func (k *Keeper) CheckNullifiersUnique(ctx context.Context, nfType types.Nullifi
 			return err
 		}
 		if has {
-			return fmt.Errorf("%w: %x", types.ErrDuplicateNullifier, nf)
+			return errorsmod.Wrapf(types.ErrDuplicateNullifier, "%x", nf)
 		}
 	}
 	return nil

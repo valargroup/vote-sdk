@@ -191,6 +191,16 @@ func (s *ABCIIntegrationSuite) queryCtx() sdk.Context {
 	return s.app.NewUncachedContext(false, cmtproto.Header{Height: s.app.Height})
 }
 
+// requireDuplicateNullifierResult asserts the ABCI code and codespace that
+// clients use to recognize a spent nullifier. The DeliverTx code also feeds
+// LastResultsHash, so changing it requires a coordinated upgrade.
+func (s *ABCIIntegrationSuite) requireDuplicateNullifierResult(code uint32, codespace, log string) {
+	s.T().Helper()
+	s.Require().Equal(types.ErrDuplicateNullifier.ABCICode(), code, log)
+	s.Require().Equal(types.ModuleName, codespace, log)
+	s.Require().Contains(log, types.ErrDuplicateNullifier.Error())
+}
+
 func (s *ABCIIntegrationSuite) nextEmptyBlockAppHash() []byte {
 	s.T().Helper()
 
@@ -313,6 +323,10 @@ func (s *ABCIIntegrationSuite) TestFullVotingLifecycle() {
 	has, err = s.app.VoteKeeper().HasNullifier(kvStore, types.NullifierTypeShare, roundID, revealMsg.ShareNullifier)
 	s.Require().NoError(err)
 	s.Require().True(has, "share nullifier should be recorded")
+
+	// A second helper revealing the same share learns that it lost the race.
+	checkResp := s.app.CheckTxSync(revealTx)
+	s.requireDuplicateNullifierResult(checkResp.Code, checkResp.Codespace, checkResp.Log)
 }
 
 // TestDelegateAndCastVoteBatchFullPipeline covers the consensus path from raw
@@ -376,11 +390,13 @@ func (s *ABCIIntegrationSuite) TestNullifierDoubleSpend() {
 	result := s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(delegation1))
 	s.Require().Equal(uint32(0), result.Code, "first delegation should succeed")
 
-	// Second delegation with overlapping nullifier fails.
-	delegation2 := testutil.ValidDelegation(roundID, 0x10) // same seed = same nullifiers
-	result = s.app.DeliverVoteTx(testutil.MustEncodeVoteTx(delegation2))
-	s.Require().NotEqual(uint32(0), result.Code, "duplicate nullifier should be rejected")
-	s.Require().Contains(result.Log, "nullifier already spent")
+	// Second delegation with overlapping nullifier fails in CheckTx and in
+	// FinalizeBlock.
+	delegation2Tx := testutil.MustEncodeVoteTx(testutil.ValidDelegation(roundID, 0x10)) // same seed = same nullifiers
+	checkResp := s.app.CheckTxSync(delegation2Tx)
+	s.requireDuplicateNullifierResult(checkResp.Code, checkResp.Codespace, checkResp.Log)
+	result = s.app.DeliverVoteTx(delegation2Tx)
+	s.requireDuplicateNullifierResult(result.Code, result.Codespace, result.Log)
 }
 
 // ---------------------------------------------------------------------------
@@ -405,8 +421,7 @@ func (s *ABCIIntegrationSuite) TestCheckTxVsRecheckTx() {
 
 	// RecheckTx for the same delegation should now fail (nullifiers consumed).
 	recheckResp := s.app.RecheckTxSync(delegationTx)
-	s.Require().NotEqual(uint32(0), recheckResp.Code, "RecheckTx should fail for consumed nullifiers")
-	s.Require().Contains(recheckResp.Log, "nullifier already spent")
+	s.requireDuplicateNullifierResult(recheckResp.Code, recheckResp.Codespace, recheckResp.Log)
 }
 
 func (s *ABCIIntegrationSuite) TestCheckTxImmediatelyAfterRestart() {
@@ -581,7 +596,7 @@ func (s *ABCIIntegrationSuite) TestConcurrentSubmissionsInSameBlock() {
 
 	results2 := s.app.DeliverVoteTxs(txs2)
 	s.Require().Len(results2, 2)
-	s.Require().NotEqual(uint32(0), results2[0].Code, "duplicate nullifier should fail")
+	s.requireDuplicateNullifierResult(results2[0].Code, results2[0].Codespace, results2[0].Log)
 	s.Require().Equal(uint32(0), results2[1].Code, "fresh delegation should succeed, got: %s", results2[1].Log)
 }
 

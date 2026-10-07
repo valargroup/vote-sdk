@@ -8,6 +8,12 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Report spent-nullifier rejections as ABCI code 2 in the `vote` codespace
+  instead of the generic code 1 in `undefined`, matching the code helpers and
+  wallets use to recognize a spent nullifier. The log now reads
+  `<nullifier hex>: nullifier already spent`. Validators must upgrade together
+  because the FinalizeBlock result code feeds `LastResultsHash`.
+
 - Require a round- and dealer-bound Schnorr proof of knowledge for each DKG
   contribution's constant Feldman commitment. This prevents a last dealer
   from cancelling prior commitments to choose a known election secret.

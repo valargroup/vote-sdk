@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"time"
 
+	errorsmod "cosmossdk.io/errors"
 	"cosmossdk.io/log"
 
 	svtest "github.com/valargroup/vote-sdk/testutil"
@@ -562,11 +563,33 @@ func (s *KeeperTestSuite) TestCheckNullifiersUnique() {
 				if tc.errContains != "" {
 					s.Require().Contains(err.Error(), tc.errContains)
 				}
+				s.requireDuplicateNullifierABCI(err)
 			} else {
 				s.Require().NoError(err)
 			}
 		})
 	}
+}
+
+// TestCheckAndSetNullifier verifies that recording a nullifier twice fails with
+// ErrDuplicateNullifier's ABCI code.
+func (s *KeeperTestSuite) TestCheckAndSetNullifier() {
+	nf := bytes.Repeat([]byte{0x04}, 32)
+	kv := s.keeper.OpenKVStore(s.ctx)
+	s.Require().NoError(s.keeper.CheckAndSetNullifier(kv, types.NullifierTypeShare, testRoundID, nf))
+
+	err := s.keeper.CheckAndSetNullifier(kv, types.NullifierTypeShare, testRoundID, nf)
+	s.requireDuplicateNullifierABCI(err)
+}
+
+// requireDuplicateNullifierABCI asserts that err reaches ABCI with the code
+// and codespace clients use to recognize a spent nullifier.
+func (s *KeeperTestSuite) requireDuplicateNullifierABCI(err error) {
+	s.T().Helper()
+	s.Require().ErrorIs(err, types.ErrDuplicateNullifier)
+	codespace, code, _ := errorsmod.ABCIInfo(err, false)
+	s.Require().Equal(types.ModuleName, codespace)
+	s.Require().Equal(types.ErrDuplicateNullifier.ABCICode(), code)
 }
 
 // ---------------------------------------------------------------------------
