@@ -237,6 +237,11 @@ func TestV160UpgradeAppliesAcrossSupportedChains(t *testing.T) {
 	testNoopUpgradeAppliesAcrossSupportedChains(t, svoteapp.V160UpgradeName)
 }
 
+func TestV170UpgradeAppliesAcrossSupportedChains(t *testing.T) {
+	require.NotEqual(t, svoteapp.V160UpgradeName, svoteapp.V170UpgradeName)
+	testNoopUpgradeAppliesAcrossSupportedChains(t, svoteapp.V170UpgradeName)
+}
+
 func testNoopUpgradeAppliesAcrossSupportedChains(t *testing.T, upgradeName string) {
 	t.Helper()
 	testChains := []string{"svote-1", "zvote-1", "upgrade-test-1"}
