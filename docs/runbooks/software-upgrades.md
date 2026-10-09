@@ -49,6 +49,15 @@ After scheduling a checksum-pinned plan, rerun `verify-prestage` without
 `--allow-no-plan`. Confirm the applied height, resumed blocks, validator
 participation, and matching app hashes before considering the rehearsal complete.
 
+The `voting_flow_zcash_voting` E2E test exercises a fresh ceremony through final
+tallying. Set `SVOTE_CHAIN_ID`, `SVOTE_API_URL`, `HELPER_SERVER_URL`, `SVOTE_HOME`,
+and `SVOTE_NODE_URL` for the isolated network. For an existing remote keyring,
+set `SVOTE_SSH_HOST`, `SVOTE_REMOTE_SVOTED`, and
+`SVOTE_USE_EXISTING_VOTE_MANAGER=1` to sign with its `vote-manager-1` key without
+exporting or replacing it. Verify that address is a coordinator on the intended
+test chain before running the test. These settings do not authorize production
+test rounds.
+
 ## Preparing production v1.6.0 (historical)
 
 Production's v1.4.0 chain already has x/upgrade; the v1.6.0 cutover requires no
