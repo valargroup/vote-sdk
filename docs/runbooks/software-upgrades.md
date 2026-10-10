@@ -58,6 +58,16 @@ exporting or replacing it. Verify that address is a coordinator on the intended
 test chain before running the test. These settings do not authorize production
 test rounds.
 
+The test also reads the validator's 32-byte Pallas public key from a local file,
+even when that key is already registered on-chain. Copy `pallas.pk` from the
+selected remote validator's home and set `SVOTE_PALLAS_PK_PATH` on the workstation:
+
+```bash
+SVOTE_PALLAS_PK_PATH="$(mktemp)"
+export SVOTE_PALLAS_PK_PATH
+scp "${SVOTE_SSH_HOST}:${SVOTE_HOME}/pallas.pk" "$SVOTE_PALLAS_PK_PATH"
+```
+
 ## Preparing production v1.6.0 (historical)
 
 Production's v1.4.0 chain already has x/upgrade; the v1.6.0 cutover requires no
