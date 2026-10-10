@@ -8,6 +8,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+## v1.7.0-rc.1
+
 - Require a round- and dealer-bound Schnorr proof of knowledge for each DKG
   contribution's constant Feldman commitment. This prevents a last dealer
   from cancelling prior commitments to choose a known election secret.
