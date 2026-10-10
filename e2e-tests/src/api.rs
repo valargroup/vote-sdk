@@ -543,7 +543,7 @@ pub fn default_cosmos_tx_config() -> CosmosTxConfig {
     CosmosTxConfig {
         key_name: "validator".to_string(),
         home_dir,
-        chain_id: "svote-1".to_string(),
+        chain_id: std::env::var("SVOTE_CHAIN_ID").unwrap_or_else(|_| "svote-1".to_string()),
         node_url,
     }
 }
@@ -898,7 +898,13 @@ pub const FIRST_VOTE_MANAGER_KEY_NAME: &str = "vote-manager-1";
 /// Panics if VM_PRIVKEYS is unset, empty, or the keyring import fails to surface
 /// the imported address. Every e2e test that needs to sign as a vote manager
 /// uses this helper.
+/// Set SVOTE_USE_EXISTING_VOTE_MANAGER=1 for a rehearsal that signs with the
+/// existing vote-manager-1 key without exporting or replacing it.
 pub fn import_first_vote_manager_key(home_dir: &str) -> String {
+    if std::env::var("SVOTE_USE_EXISTING_VOTE_MANAGER").as_deref() == Ok("1") {
+        return key_account_address(FIRST_VOTE_MANAGER_KEY_NAME, home_dir)
+            .expect("vote-manager-1 must already exist in the selected keyring");
+    }
     // Mirror the bash helper in scripts/_vote_manager_keys_lib.sh: skip empty
     // entries (leading/trailing/double comma) so ",abc" or " , abc" takes
     // "abc" rather than silently passing "" to svoted keys import-hex.

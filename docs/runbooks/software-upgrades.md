@@ -12,7 +12,63 @@ enabled and checksums required. Pre-staging through `update_chain.sh` removes th
 network dependency at the halt, while the automatic path remains available for
 future checksum-pinned plans.
 
-## Preparing production v1.6.0
+## Preparing v1.7.0 candidates
+
+The `v1.7.0` plan activates the DKG constant-term proof requirement. Every
+validator must switch binaries together because the new binary rejects old
+contribution messages. This is not a rolling deployment and does not reset
+the chain or migrate stores. Existing rounds retain their election keys and
+ceremony records. The upgrade does not retroactively protect old ceremonies.
+
+Use release tags `v1.7.0-rc.N` for rehearsals and plan name `v1.7.0` on each
+network. Both staging (`svote-1`) and production (`zvote-1`) have already applied
+`v1.6.0`, so do not reuse that plan. Once a network applies `v1.7.0`, later
+state-compatible candidates can replace its binary without scheduling the same
+plan again. A further consensus change needs a new plan and handler.
+
+Publish candidates from the `v1.7.x` release branch. RC publication leaves
+GitHub Latest and shared download pointers unchanged. Stable publication and
+promotion are separate operator decisions.
+
+Before scheduling, verify that no round has a DKG ceremony in progress. Preserve
+active rounds whose ceremonies have completed and check their state after the
+switch. Rehearse the old-to-new binary transition on an isolated network, then
+on staging. Create a fresh rehearsal round after the switch and complete DKG,
+voting, and tallying. An existing round cannot validate the new proof rule.
+
+Pre-stage the exact candidate without stopping the running binary:
+
+```bash
+TAG=v1.7.0-rc.1
+PLAN_NAME=v1.7.0
+curl -fsSL "https://shielded-vote.nyc3.digitaloceanspaces.com/scripts/upgrade/${TAG}/update_chain.sh" | sudo bash -s -- \
+  --mode prepare --plan-name "${PLAN_NAME}" --tag "${TAG}" --allow-no-plan
+```
+
+After scheduling a checksum-pinned plan, rerun `verify-prestage` without
+`--allow-no-plan`. Confirm the applied height, resumed blocks, validator
+participation, and matching app hashes before considering the rehearsal complete.
+
+The `voting_flow_zcash_voting` E2E test exercises a fresh ceremony through final
+tallying. Set `SVOTE_CHAIN_ID`, `SVOTE_API_URL`, `HELPER_SERVER_URL`, `SVOTE_HOME`,
+and `SVOTE_NODE_URL` for the isolated network. For an existing remote keyring,
+set `SVOTE_SSH_HOST`, `SVOTE_REMOTE_SVOTED`, and
+`SVOTE_USE_EXISTING_VOTE_MANAGER=1` to sign with its `vote-manager-1` key without
+exporting or replacing it. Verify that address is a coordinator on the intended
+test chain before running the test. These settings do not authorize production
+test rounds.
+
+The test also reads the validator's 32-byte Pallas public key from a local file,
+even when that key is already registered on-chain. Copy `pallas.pk` from the
+selected remote validator's home and set `SVOTE_PALLAS_PK_PATH` on the workstation:
+
+```bash
+SVOTE_PALLAS_PK_PATH="$(mktemp)"
+export SVOTE_PALLAS_PK_PATH
+scp "${SVOTE_SSH_HOST}:${SVOTE_HOME}/pallas.pk" "$SVOTE_PALLAS_PK_PATH"
+```
+
+## Preparing production v1.6.0 (historical)
 
 Production's v1.4.0 chain already has x/upgrade; the v1.6.0 cutover requires no
 reset. Staging has already applied the `v1.6.0` plan and must not reuse it.
