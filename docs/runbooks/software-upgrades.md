@@ -12,7 +12,7 @@ enabled and checksums required. Pre-staging through `update_chain.sh` removes th
 network dependency at the halt, while the automatic path remains available for
 future checksum-pinned plans.
 
-## Preparing v1.7.0 candidates
+## Preparing v1.7.0
 
 The `v1.7.0` plan activates the DKG constant-term proof requirement. Every
 validator must switch binaries together because the new binary rejects old
@@ -26,9 +26,12 @@ network. Both staging (`svote-1`) and production (`zvote-1`) have already applie
 state-compatible candidates can replace its binary without scheduling the same
 plan again. A further consensus change needs a new plan and handler.
 
-Publish candidates from the `v1.7.x` release branch. RC publication leaves
-GitHub Latest and shared download pointers unchanged. Stable publication and
-promotion are separate operator decisions.
+Publish from the `v1.7.x` release branch. Use tag `v1.7.0` for the stable
+release and set `RELEASE_HOLD_TAG=v1.7.0` before pushing it. RC publication
+and held stable publication leave GitHub Latest and shared download pointers
+unchanged. Promote the stable release only after the coordinated upgrade.
+On staging, where this plan is already applied, the stable binary can replace
+`v1.7.0-rc.1` because their runtime behavior and dependencies are identical.
 
 Before scheduling, verify that no round has a DKG ceremony in progress. Preserve
 active rounds whose ceremonies have completed and check their state after the

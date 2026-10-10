@@ -8,6 +8,11 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+## v1.7.0
+
+- Publish the stable release for the coordinated `v1.7.0` upgrade. Runtime
+  behavior and dependencies are unchanged from `v1.7.0-rc.1`.
+
 ## v1.7.0-rc.1
 
 - Require a round- and dealer-bound Schnorr proof of knowledge for each DKG
