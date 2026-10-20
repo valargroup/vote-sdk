@@ -8,6 +8,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Correct the join runbook's production and staging admin URLs for validator funding requests.
+
 ## v1.7.0
 
 - Publish the stable release for the coordinated `v1.7.0` upgrade. Runtime
