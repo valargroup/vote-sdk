@@ -8,6 +8,7 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Group unbonding and unbonded validators in an expandable section on the validators page, with jailed validators sorted last in each group.
 - Correct the join runbook's production and staging admin URLs for validator funding requests.
 
 ## v1.7.0
