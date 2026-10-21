@@ -13,6 +13,7 @@ import { PirFleetStatus } from "./components/PirFleetStatus";
 import { RoundsList } from "./components/RoundsList";
 import { AttestRoundEntryPage } from "./components/AttestRoundEntryPage";
 import { EndorsersPage } from "./components/EndorsersPage";
+import { ValidatorList } from "./components/ValidatorList";
 import { UpgradesPage } from "./components/UpgradesPage";
 import { QueueMonitorPage } from "./components/QueueMonitorPage";
 import { VoteManagerKeysPage } from "./components/VoteManagerKeysPage";
@@ -2670,12 +2671,6 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
     ceremony?.ceremony?.validators?.map((v) => v.validator_address) ?? []
   );
 
-  const sorted = [...validators].sort((a, b) => {
-    const aName = (a.description?.moniker ?? "").toLowerCase();
-    const bName = (b.description?.moniker ?? "").toLowerCase();
-    return aName.localeCompare(bName);
-  });
-
   // Compute total bonded power for percentage display.
   const totalPower = validators
     .filter((v) => v.status === "BOND_STATUS_BONDED")
@@ -2743,7 +2738,7 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
               </div>
             </div>
             <p className="text-[10px] text-text-secondary mb-1">
-              All bonded validators on-chain. A validator can be bonded and producing blocks but not listed as an approved submission server if it has been taken out of client rotation by an admin.
+              Bonded validators are shown first, with jailed validators last. Expand the inactive section to see unbonding and unbonded validators. A validator can be bonded and producing blocks but not listed as an approved submission server if it has been taken out of client rotation by an admin.
               To become a recommended configuration for wallets, server owners should open a pull request in{" "}
               <a
                 href={dynamicConfigFileUrl}
@@ -2766,8 +2761,8 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
           </div>
         )}
 
-        <div className="space-y-2">
-          {sorted.map((val, i) => {
+        <ValidatorList validators={validators}>
+          {(val, i) => {
             const moniker = val.description?.moniker || "Unknown";
             const statusInfo = BOND_STATUS_LABELS[val.status ?? ""] ?? {
               label: val.status ?? "Unknown",
@@ -2936,8 +2931,8 @@ function ValidatorsView({ wallet }: { wallet: UseWallet }) {
                 })()}
               </div>
             );
-          })}
-        </div>
+          }}
+        </ValidatorList>
       </div>
     </div>
   );
