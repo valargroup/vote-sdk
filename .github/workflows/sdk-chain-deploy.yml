@@ -118,7 +118,7 @@ jobs:
       SVOTE_ZCASH_NETWORK: ${{ needs.resolve-environment.outputs.zcash_network }}
     steps:
       - name: Deploy to primary Droplet
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
         with:
           host: ${{ secrets.PRIMARY_HOST || vars.PRIMARY_HOST || format('{0}vote-chain-primary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -176,7 +176,7 @@ jobs:
           DOMAIN: ${{ secrets.DOMAIN }}
 
       - name: Verify primary health
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
         with:
           host: ${{ secrets.PRIMARY_HOST || vars.PRIMARY_HOST || format('{0}vote-chain-primary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -206,7 +206,7 @@ jobs:
       SVOTE_ZCASH_NETWORK: ${{ needs.resolve-environment.outputs.zcash_network }}
     steps:
       - name: Deploy to secondary Droplet
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
         with:
           host: ${{ secrets.SECONDARY_HOST || vars.SECONDARY_HOST || format('{0}vote-chain-secondary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -236,7 +236,7 @@ jobs:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
       - name: Verify secondary health
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
         with:
           host: ${{ secrets.SECONDARY_HOST || vars.SECONDARY_HOST || format('{0}vote-chain-secondary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -267,7 +267,7 @@ jobs:
       SVOTE_ZCASH_NETWORK: ${{ needs.resolve-environment.outputs.zcash_network }}
     steps:
       - name: Deploy to explorer Droplet
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
         with:
           host: ${{ secrets.EXPLORER_HOST || vars.EXPLORER_HOST || format('{0}explorer.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -334,7 +334,7 @@ jobs:
           DOMAIN: ${{ secrets.DOMAIN }}
 
       - name: Verify explorer frontend healthy
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
         with:
           host: ${{ secrets.EXPLORER_HOST || vars.EXPLORER_HOST || format('{0}explorer.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -366,7 +366,7 @@ jobs:
       SVOTE_ZCASH_NETWORK: ${{ needs.resolve-environment.outputs.zcash_network }}
     steps:
       - name: Deploy to snapshot Droplet
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
         with:
           host: ${{ secrets.SNAPSHOT_HOST || vars.SNAPSHOT_HOST || format('{0}snapshots.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -406,7 +406,7 @@ jobs:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
       - name: Verify snapshot frontend healthy
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
         with:
           host: ${{ secrets.SNAPSHOT_HOST || vars.SNAPSHOT_HOST || format('{0}snapshots.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -434,7 +434,7 @@ jobs:
     environment: ${{ inputs.target_environment }}
     steps:
       - name: Notify Slack on failure
-        uses: slackapi/slack-github-action@v2.1.0
+        uses: slackapi/slack-github-action@b0fa283ad8fea605de13dc3f449259339835fc52  # v2.1.0
         with:
           webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
           webhook-type: incoming-webhook

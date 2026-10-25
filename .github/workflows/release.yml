@@ -29,7 +29,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout release tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           fetch-depth: 0
       - name: Verify tag belongs to its maintenance branch
@@ -52,7 +52,7 @@ jobs:
       publish_mutable_pointers: ${{ steps.channel.outputs.publish_mutable_pointers }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
       - name: Classify release tag
         id: channel
         env:
@@ -103,18 +103,18 @@ jobs:
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           fetch-depth: 0
       - name: Configure private repo access
         run: git config --global url."https://x-access-token:${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/".insteadOf "ssh://git@github.com/"
       - name: Install mise
-        uses: jdx/mise-action@v2
+        uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac  # v2
       - name: Add Rust cross target
         if: matrix.cross
         run: rustup target add ${{ matrix.rust_target }}
       - name: Cache Rust build
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
         with:
           path: |
             circuits/target
@@ -152,7 +152,7 @@ jobs:
             mise run build:create-val-tx
           fi
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: sdk-binaries-${{ matrix.platform }}
           path: |
@@ -165,11 +165,11 @@ jobs:
     needs: release-metadata
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           fetch-depth: 0
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff  # v5
         with:
           go-version: "1.24.3"
           cache-dependency-path: go.sum
@@ -186,7 +186,7 @@ jobs:
           sha256sum voting-config-linux-amd64 > voting-config-linux-amd64.sha256
           sha256sum --check voting-config-linux-amd64.sha256
       - name: Upload voting-config artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: voting-config-linux-amd64
           path: |
@@ -199,18 +199,18 @@ jobs:
     needs: release-metadata
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           sparse-checkout: deploy/explorer
           sparse-checkout-cone-mode: false
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
           node-version: '20'
       - name: Enable corepack (yarn 1.x)
         run: corepack enable
       - name: Cache yarn packages
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
         with:
           path: ~/.cache/yarn
           key: yarn-pingpub-ee1ca5ee54d7bd2dc4c5b4df8f3b93595440e9c8
@@ -245,7 +245,7 @@ jobs:
           yarn build
           tar czf "$GITHUB_WORKSPACE/explorer-dist.tar.gz" -C dist .
       - name: Upload explorer artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: explorer-dist
           path: explorer-dist.tar.gz
@@ -279,9 +279,9 @@ jobs:
     needs: create-release
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
       - name: Download voting-config artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           name: voting-config-linux-amd64
       - name: Verify and attach to GitHub Release
@@ -316,9 +316,9 @@ jobs:
             os_family: darwin
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
           node-version: 20
           cache: npm
@@ -327,12 +327,12 @@ jobs:
         working-directory: ui
         run: npm ci && npm run build
       - name: Download SDK binaries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           name: sdk-binaries-${{ matrix.platform }}
           path: sdk-binaries
       - name: Download explorer dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           name: explorer-dist
           path: explorer-artifact
@@ -382,7 +382,7 @@ jobs:
             echo "COSMOVISOR_TARBALL=${COSMOVISOR_TARBALL}" >> "$GITHUB_ENV"
           fi
       - name: Upload tarball artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: release-tarball-${{ matrix.platform }}
           path: |
@@ -390,7 +390,7 @@ jobs:
             ${{ env.TARBALL }}.sha256
       - name: Upload Cosmovisor tarball artifact
         if: matrix.os_family == 'linux'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: cosmovisor-tarball-${{ matrix.platform }}
           path: |
@@ -413,21 +413,21 @@ jobs:
     needs: [release, release-metadata]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
       - name: Download linux-amd64 release tarball
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           name: release-tarball-linux-amd64
       - name: Download linux-arm64 release tarball
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           name: release-tarball-linux-arm64
       - name: Download darwin-amd64 release tarball
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           name: release-tarball-darwin-amd64
       - name: Download darwin-arm64 release tarball
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           name: release-tarball-darwin-arm64
       - name: Set version
@@ -549,7 +549,7 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
 
       - name: Validate stable channel update
         run: |
