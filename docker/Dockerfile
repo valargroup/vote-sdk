@@ -4,7 +4,7 @@ FROM rust:1.88-bookworm AS rust-builder
 WORKDIR /src
 COPY circuits/ circuits/
 
-RUN cargo build --release --manifest-path circuits/Cargo.toml --no-default-features --features zakura
+RUN cargo build --release --locked --manifest-path circuits/Cargo.toml --no-default-features --features zakura
 
 # Stage 2: Build Go binaries with FFI tags
 FROM golang:1.24-bookworm AS go-builder

@@ -150,7 +150,7 @@ fixtures-ts: fixtures
 
 ## circuits: Build the Rust static library (requires cargo)
 circuits:
-	cargo build --release --manifest-path circuits/Cargo.toml $(CIRCUITS_CARGO_FLAGS)
+	cargo build --release --locked --manifest-path circuits/Cargo.toml $(CIRCUITS_CARGO_FLAGS)
 
 ## circuits-test: Run Rust circuit unit tests
 circuits-test:
@@ -221,7 +221,7 @@ docker-testnet-down:
 
 ## ui-build: Build the admin UI (requires Node.js + npm)
 ui-build:
-	cd ui && npm install --silent && npm run build
+	cd ui && npm ci --silent && npm run build
 
 ## start-admin: Start svoted with admin UI static files (/api/* needs [admin] disable = false in app.toml; e.g. SVOTE_ADMIN_DISABLE=false bash scripts/init.sh, or init-multi for val1)
 start-admin: ui-build
