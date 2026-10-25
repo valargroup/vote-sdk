@@ -3,7 +3,7 @@
 # Uses sslip.io for DNS so a bare IP gets a valid Let's Encrypt certificate.
 # Replace the hostname if you have a real domain.
 #
-# Install:  apt install caddy
+# Install Caddy >= 2.11.7 from its official stable repository (see docs/runbooks/join-chain.md).
 # Deploy:   sudo cp deploy/Caddyfile /etc/caddy/Caddyfile && sudo systemctl restart caddy
 #   — or —  make caddy   (from the sdk directory)
 
