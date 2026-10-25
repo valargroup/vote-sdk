@@ -35,6 +35,26 @@ set -euo pipefail
 
 SVOTE_UPGRADE_SCRIPT_VERSION="${SVOTE_UPGRADE_SCRIPT_VERSION:-}"
 
+CADDY_MIN_VERSION="2.11.7"
+
+# Accept stable releases at or above the security floor, including build metadata.
+caddy_version_supported() {
+  printf '%s\n' "$1" | awk -v minimum="$CADDY_MIN_VERSION" '
+    NR == 1 {
+      version = $1
+      if (version !~ /^v[0-9]+\.[0-9]+\.[0-9]+(\+[0-9A-Za-z.-]+)?$/) exit 1
+      sub(/^v/, "", version)
+      sub(/\+.*/, "", version)
+      split(version, actual, ".")
+      split(minimum, required, ".")
+      for (i = 1; i <= 3; i++) {
+        if (actual[i] + 0 > required[i] + 0) exit 0
+        if (actual[i] + 0 < required[i] + 0) exit 1
+      }
+      exit 0
+    }'
+}
+
 main() {
 if [ -z "${HOME:-}" ]; then
   if command -v getent > /dev/null 2>&1; then
@@ -1458,6 +1478,10 @@ if [ -n "$VALIDATOR_URL" ] && command -v caddy > /dev/null 2>&1; then
   if ! CADDY_VERSION_OUT=$(caddy version 2>&1); then
     printf '%s\n' "${CADDY_VERSION_OUT}" | sed 's/^/  /'
     handle_public_url_failure "Caddy on PATH ($(command -v caddy)) failed to run."
+  elif ! caddy_version_supported "$CADDY_VERSION_OUT"; then
+    echo "Caddy ${CADDY_MIN_VERSION} or newer (stable) is required; found: ${CADDY_VERSION_OUT}"
+    echo "  Upgrade guide: https://github.com/valargroup/vote-sdk/blob/main/docs/runbooks/update-caddy.md"
+    handle_public_url_failure "Caddy is below the supported version or its version could not be verified."
   else
     echo "Caddy ready: ${CADDY_VERSION_OUT}"
   fi

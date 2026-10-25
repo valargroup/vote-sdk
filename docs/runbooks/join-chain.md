@@ -214,6 +214,15 @@ val.example.org {
 
 On Linux, Caddy is installed from the Cloudsmith apt repo and managed by `systemctl`; its config lives at `/etc/caddy/Caddyfile`. On macOS, Caddy is installed via Homebrew and runs as a per-user launchd agent with config at `~/.config/caddy/Caddyfile`.
 
+Caddy **2.11.7 or newer (stable)** is required. The installer checks both new and
+existing binaries before configuring the proxy. It does not upgrade an existing
+installation automatically. For a manual installation, use [Caddy's official
+stable repository](https://caddyserver.com/docs/install#debian-ubuntu-raspbian)
+and check `caddy version`; the distribution's default package may be older.
+
+Existing operators should follow [Update Caddy](update-caddy.md). **Do not rerun
+`join.sh` to upgrade Caddy**; it resets validator state.
+
 For TLS-setup failure modes, see [Troubleshooting > Hostname and TLS](#hostname-and-tls).
 
 ## Backup and disaster recovery
