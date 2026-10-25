@@ -25,7 +25,7 @@ jobs:
       PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
     steps:
       - name: Checkout trusted base validator
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           ref: ${{ github.event.pull_request.base.sha }}
       - name: Validate state and backport labels

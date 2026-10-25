@@ -174,7 +174,7 @@ jobs:
     environment: ${{ inputs.target_environment }}
     steps:
       - name: Stop snapshot timer before chain reset
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
         timeout-minutes: 5
         with:
           host: ${{ secrets.SNAPSHOT_HOST || vars.SNAPSHOT_HOST || format('{0}snapshots.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
@@ -199,7 +199,7 @@ jobs:
     environment: ${{ inputs.target_environment }}
     steps:
       - name: Stop archive snapshot timer before chain reset
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
         timeout-minutes: 5
         with:
           host: ${{ secrets.EXPLORER_HOST || vars.EXPLORER_HOST || format('{0}explorer.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
@@ -235,7 +235,7 @@ jobs:
       MONIKER: ${{ inputs.target_environment == 'production' && 'valargroup' || 'valarg-genesis' }}
     steps:
       - name: Install tag and reset primary
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
         timeout-minutes: 15
         with:
           host: ${{ secrets.PRIMARY_HOST || vars.PRIMARY_HOST || format('{0}vote-chain-primary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
@@ -334,7 +334,7 @@ jobs:
       SNAPSHOTS_PREFIX: ${{ needs.resolve-environment.outputs.snapshots_prefix }}
     steps:
       - name: Fetch genesis and upload to DO Spaces
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
         timeout-minutes: 5
         with:
           host: ${{ secrets.PRIMARY_HOST || vars.PRIMARY_HOST || format('{0}vote-chain-primary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
@@ -381,7 +381,7 @@ jobs:
       CHAIN_ID: ${{ needs.resolve-environment.outputs.chain_id }}
     steps:
       - name: Send tokens from vote-manager to secondary address
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
         timeout-minutes: 5
         with:
           host: ${{ secrets.PRIMARY_HOST || vars.PRIMARY_HOST || format('{0}vote-chain-primary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
@@ -438,7 +438,7 @@ jobs:
       SVOTE_ZCASH_NETWORK: ${{ needs.resolve-environment.outputs.zcash_network }}
     steps:
       - name: Install tag and join as snapshot node
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
         timeout-minutes: 30
         with:
           host: ${{ secrets.SNAPSHOT_HOST || vars.SNAPSHOT_HOST || format('{0}snapshots.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
@@ -477,7 +477,7 @@ jobs:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
       - name: Publish initial pruned snapshot
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
         timeout-minutes: 30
         with:
           host: ${{ secrets.SNAPSHOT_HOST || vars.SNAPSHOT_HOST || format('{0}snapshots.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
@@ -526,7 +526,7 @@ jobs:
             fi
 
       - name: Verify snapshot services
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
         with:
           host: ${{ secrets.SNAPSHOT_HOST || vars.SNAPSHOT_HOST || format('{0}snapshots.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -562,7 +562,7 @@ jobs:
       SVOTE_ZCASH_NETWORK: ${{ needs.resolve-environment.outputs.zcash_network }}
     steps:
       - name: Install tag and join
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
         timeout-minutes: 30
         with:
           host: ${{ secrets.SECONDARY_HOST || vars.SECONDARY_HOST || format('{0}vote-chain-secondary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
@@ -600,7 +600,7 @@ jobs:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
       - name: Verify secondary health
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
         with:
           host: ${{ secrets.SECONDARY_HOST || vars.SECONDARY_HOST || format('{0}vote-chain-secondary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -638,7 +638,7 @@ jobs:
       SVOTE_ZCASH_NETWORK: ${{ needs.resolve-environment.outputs.zcash_network }}
     steps:
       - name: Install tag and join as archive
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
         timeout-minutes: 30
         with:
           host: ${{ secrets.EXPLORER_HOST || vars.EXPLORER_HOST || format('{0}explorer.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
@@ -701,7 +701,7 @@ jobs:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
       - name: Verify archive health
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
         with:
           host: ${{ secrets.EXPLORER_HOST || vars.EXPLORER_HOST || format('{0}explorer.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -719,7 +719,7 @@ jobs:
             exit 1
 
       - name: Publish initial archive snapshot
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
         timeout-minutes: 60
         with:
           host: ${{ secrets.EXPLORER_HOST || vars.EXPLORER_HOST || format('{0}explorer.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
@@ -843,7 +843,7 @@ jobs:
     environment: ${{ inputs.target_environment }}
     steps:
       - name: Notify Slack on failure
-        uses: slackapi/slack-github-action@v2.1.0
+        uses: slackapi/slack-github-action@b0fa283ad8fea605de13dc3f449259339835fc52  # v2.1.0
         with:
           webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
           webhook-type: incoming-webhook

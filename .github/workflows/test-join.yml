@@ -89,7 +89,7 @@ jobs:
           # script logic is identical across Darwin architectures.
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
 
       - name: Check reset-validator-snapshot syntax
         run: bash -n scripts/reset-validator-snapshot.sh scripts/test_reset_validator_snapshot.sh scripts/disable-cosmovisor-backups.sh scripts/render-disable-cosmovisor-backups.sh scripts/test_disable_cosmovisor_backups.sh

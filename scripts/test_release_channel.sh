@@ -88,7 +88,9 @@ latest_line="$(grep -n -- '- name: Mark GitHub release latest' "$RELEASE_WORKFLO
 [ "$pointer_line" -lt "$latest_line" ] || fail "GitHub Latest advances before mutable pointers"
 [ "$pointer_line" -lt "$verify_line" ] && [ "$verify_line" -lt "$latest_line" ] \
   || fail "stable pointers are not verified before GitHub Latest advances"
-[ "$(grep -Fc 'uses: actions/checkout@v4' "$PROMOTION_WORKFLOW")" -eq 1 ] \
+# The promotion job must use the shared actions/checkout step, exactly once.
+# The ref may still be the mutable tag or the commit SHA a pinning pass wrote.
+[ "$(grep -Ec 'uses: actions/checkout@(v4|[0-9a-f]{40})' "$PROMOTION_WORKFLOW")" -eq 1 ] \
   || fail "promotion switches away from the trusted checkout"
 
 grep -Fq 'missing_scripts=()' "$UPGRADE_SCRIPT_WORKFLOW" \
