@@ -4,8 +4,8 @@
 go = "1.24.3"
 rust = "stable"
 node = "22"
-buf = "latest"
-jq = "latest"
+buf = "1.75.0"
+jq = "1.8.2"
 
 [env]
 GOBIN = "{{env.HOME}}/go/bin"

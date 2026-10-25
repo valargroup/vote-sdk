@@ -150,7 +150,7 @@ fixtures-ts: fixtures
 
 ## circuits: Build the Rust static library (requires cargo)
 circuits:
-	cargo build --release --manifest-path circuits/Cargo.toml $(CIRCUITS_CARGO_FLAGS)
+	cargo build --release --locked --manifest-path circuits/Cargo.toml $(CIRCUITS_CARGO_FLAGS)
 
 ## circuits-test: Run Rust circuit unit tests
 circuits-test:
