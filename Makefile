@@ -186,6 +186,9 @@ test-all-ffi: circuits
 
 ## caddy: Install Caddyfile and restart Caddy (HTTPS reverse proxy for the chain API)
 caddy:
+	@got="$$(caddy version 2>/dev/null | awk '{print $$1}' | sed 's/^v//')"; \
+	  low="$$(printf '%s\n%s\n' 2.11.7 "$$got" | sort -V | head -n1)"; \
+	  [ "$$low" = "2.11.7" ] || { echo "Caddy $${got:-unknown} is older than the required 2.11.7 (Caddy 2026 advisories are fixed in 2.11.4; join.sh requires 2.11.7)" >&2; exit 1; }
 	sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
 	sudo systemctl restart caddy
 	@echo "Caddy restarted — HTTPS at https://46-101-255-48.sslip.io"
