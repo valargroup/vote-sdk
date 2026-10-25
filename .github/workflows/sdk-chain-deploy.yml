@@ -117,8 +117,13 @@ jobs:
       SVOTE_LWD_URLS: ${{ needs.resolve-environment.outputs.lwd_urls }}
       SVOTE_ZCASH_NETWORK: ${{ needs.resolve-environment.outputs.zcash_network }}
     steps:
+      - name: Check out deployment actions
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions
       - name: Deploy to primary Droplet
-        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
+        uses: ./.github/actions/pinned-ssh
         with:
           host: ${{ secrets.PRIMARY_HOST || vars.PRIMARY_HOST || format('{0}vote-chain-primary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -185,7 +190,7 @@ jobs:
           DOMAIN: ${{ secrets.DOMAIN }}
 
       - name: Verify primary health
-        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
+        uses: ./.github/actions/pinned-ssh
         with:
           host: ${{ secrets.PRIMARY_HOST || vars.PRIMARY_HOST || format('{0}vote-chain-primary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -214,8 +219,13 @@ jobs:
       SVOTE_LWD_URLS: ${{ needs.resolve-environment.outputs.lwd_urls }}
       SVOTE_ZCASH_NETWORK: ${{ needs.resolve-environment.outputs.zcash_network }}
     steps:
+      - name: Check out deployment actions
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions
       - name: Deploy to secondary Droplet
-        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
+        uses: ./.github/actions/pinned-ssh
         with:
           host: ${{ secrets.SECONDARY_HOST || vars.SECONDARY_HOST || format('{0}vote-chain-secondary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -245,7 +255,7 @@ jobs:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
       - name: Verify secondary health
-        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
+        uses: ./.github/actions/pinned-ssh
         with:
           host: ${{ secrets.SECONDARY_HOST || vars.SECONDARY_HOST || format('{0}vote-chain-secondary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -275,8 +285,13 @@ jobs:
       SVOTE_LWD_URLS: ${{ needs.resolve-environment.outputs.lwd_urls }}
       SVOTE_ZCASH_NETWORK: ${{ needs.resolve-environment.outputs.zcash_network }}
     steps:
+      - name: Check out deployment actions
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions
       - name: Deploy to explorer Droplet
-        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
+        uses: ./.github/actions/pinned-ssh
         with:
           host: ${{ secrets.EXPLORER_HOST || vars.EXPLORER_HOST || format('{0}explorer.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -352,7 +367,7 @@ jobs:
           DOMAIN: ${{ secrets.DOMAIN }}
 
       - name: Verify explorer frontend healthy
-        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
+        uses: ./.github/actions/pinned-ssh
         with:
           host: ${{ secrets.EXPLORER_HOST || vars.EXPLORER_HOST || format('{0}explorer.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -383,8 +398,13 @@ jobs:
       SVOTE_LWD_URLS: ${{ needs.resolve-environment.outputs.lwd_urls }}
       SVOTE_ZCASH_NETWORK: ${{ needs.resolve-environment.outputs.zcash_network }}
     steps:
+      - name: Check out deployment actions
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions
       - name: Deploy to snapshot Droplet
-        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
+        uses: ./.github/actions/pinned-ssh
         with:
           host: ${{ secrets.SNAPSHOT_HOST || vars.SNAPSHOT_HOST || format('{0}snapshots.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -424,7 +444,7 @@ jobs:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
       - name: Verify snapshot frontend healthy
-        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
+        uses: ./.github/actions/pinned-ssh
         with:
           host: ${{ secrets.SNAPSHOT_HOST || vars.SNAPSHOT_HOST || format('{0}snapshots.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}

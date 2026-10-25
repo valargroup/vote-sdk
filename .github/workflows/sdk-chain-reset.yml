@@ -173,8 +173,13 @@ jobs:
     needs: [resolve-environment, validate-tag]
     environment: ${{ inputs.target_environment }}
     steps:
+      - name: Check out deployment actions
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions
       - name: Stop snapshot timer before chain reset
-        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
+        uses: ./.github/actions/pinned-ssh
         timeout-minutes: 5
         with:
           host: ${{ secrets.SNAPSHOT_HOST || vars.SNAPSHOT_HOST || format('{0}snapshots.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
@@ -198,8 +203,13 @@ jobs:
     needs: [resolve-environment, validate-tag]
     environment: ${{ inputs.target_environment }}
     steps:
+      - name: Check out deployment actions
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions
       - name: Stop archive snapshot timer before chain reset
-        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
+        uses: ./.github/actions/pinned-ssh
         timeout-minutes: 5
         with:
           host: ${{ secrets.EXPLORER_HOST || vars.EXPLORER_HOST || format('{0}explorer.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
@@ -234,8 +244,13 @@ jobs:
       # Staging: valarg-genesis / valarg-secondary split; production: single valargroup moniker.
       MONIKER: ${{ inputs.target_environment == 'production' && 'valargroup' || 'valarg-genesis' }}
     steps:
+      - name: Check out deployment actions
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions
       - name: Install tag and reset primary
-        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
+        uses: ./.github/actions/pinned-ssh
         timeout-minutes: 15
         with:
           host: ${{ secrets.PRIMARY_HOST || vars.PRIMARY_HOST || format('{0}vote-chain-primary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
@@ -342,8 +357,13 @@ jobs:
       GENESIS_KEY: ${{ needs.resolve-environment.outputs.genesis_key }}
       SNAPSHOTS_PREFIX: ${{ needs.resolve-environment.outputs.snapshots_prefix }}
     steps:
+      - name: Check out deployment actions
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions
       - name: Fetch genesis and upload to DO Spaces
-        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
+        uses: ./.github/actions/pinned-ssh
         timeout-minutes: 5
         with:
           host: ${{ secrets.PRIMARY_HOST || vars.PRIMARY_HOST || format('{0}vote-chain-primary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
@@ -389,8 +409,13 @@ jobs:
     env:
       CHAIN_ID: ${{ needs.resolve-environment.outputs.chain_id }}
     steps:
+      - name: Check out deployment actions
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions
       - name: Send tokens from vote-manager to secondary address
-        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
+        uses: ./.github/actions/pinned-ssh
         timeout-minutes: 5
         with:
           host: ${{ secrets.PRIMARY_HOST || vars.PRIMARY_HOST || format('{0}vote-chain-primary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
@@ -446,8 +471,13 @@ jobs:
       SVOTE_LWD_URLS: ${{ needs.resolve-environment.outputs.lwd_urls }}
       SVOTE_ZCASH_NETWORK: ${{ needs.resolve-environment.outputs.zcash_network }}
     steps:
+      - name: Check out deployment actions
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions
       - name: Install tag and join as snapshot node
-        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
+        uses: ./.github/actions/pinned-ssh
         timeout-minutes: 30
         with:
           host: ${{ secrets.SNAPSHOT_HOST || vars.SNAPSHOT_HOST || format('{0}snapshots.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
@@ -486,7 +516,7 @@ jobs:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
       - name: Publish initial pruned snapshot
-        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
+        uses: ./.github/actions/pinned-ssh
         timeout-minutes: 30
         with:
           host: ${{ secrets.SNAPSHOT_HOST || vars.SNAPSHOT_HOST || format('{0}snapshots.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
@@ -535,7 +565,7 @@ jobs:
             fi
 
       - name: Verify snapshot services
-        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
+        uses: ./.github/actions/pinned-ssh
         with:
           host: ${{ secrets.SNAPSHOT_HOST || vars.SNAPSHOT_HOST || format('{0}snapshots.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -570,8 +600,13 @@ jobs:
       SVOTE_LWD_URLS: ${{ needs.resolve-environment.outputs.lwd_urls }}
       SVOTE_ZCASH_NETWORK: ${{ needs.resolve-environment.outputs.zcash_network }}
     steps:
+      - name: Check out deployment actions
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions
       - name: Install tag and join
-        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
+        uses: ./.github/actions/pinned-ssh
         timeout-minutes: 30
         with:
           host: ${{ secrets.SECONDARY_HOST || vars.SECONDARY_HOST || format('{0}vote-chain-secondary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
@@ -609,7 +644,7 @@ jobs:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
       - name: Verify secondary health
-        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
+        uses: ./.github/actions/pinned-ssh
         with:
           host: ${{ secrets.SECONDARY_HOST || vars.SECONDARY_HOST || format('{0}vote-chain-secondary.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -646,8 +681,13 @@ jobs:
       SVOTE_LWD_URLS: ${{ needs.resolve-environment.outputs.lwd_urls }}
       SVOTE_ZCASH_NETWORK: ${{ needs.resolve-environment.outputs.zcash_network }}
     steps:
+      - name: Check out deployment actions
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions
       - name: Install tag and join as archive
-        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
+        uses: ./.github/actions/pinned-ssh
         timeout-minutes: 30
         with:
           host: ${{ secrets.EXPLORER_HOST || vars.EXPLORER_HOST || format('{0}explorer.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
@@ -719,7 +759,7 @@ jobs:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
       - name: Verify archive health
-        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
+        uses: ./.github/actions/pinned-ssh
         with:
           host: ${{ secrets.EXPLORER_HOST || vars.EXPLORER_HOST || format('{0}explorer.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -737,7 +777,7 @@ jobs:
             exit 1
 
       - name: Publish initial archive snapshot
-        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262  # v1.0.3
+        uses: ./.github/actions/pinned-ssh
         timeout-minutes: 60
         with:
           host: ${{ secrets.EXPLORER_HOST || vars.EXPLORER_HOST || format('{0}explorer.{1}', needs.resolve-environment.outputs.dns_prefix, secrets.DOMAIN) }}

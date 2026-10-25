@@ -1,0 +1,28 @@
+name: Deployment actions
+
+on:
+  pull_request:
+    paths:
+      - .github/actions/**
+      - .github/workflows/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  images:
+    name: Deployment action (${{ matrix.action }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      matrix:
+        action: [ssh]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Build pinned action image
+        run: docker build --tag deployment-action:ci .github/actions/pinned-${{ matrix.action }}
+      - name: Check the entrypoint starts without credentials
+        run: docker run --rm --env INPUT_STRIP_COMPONENTS=0 deployment-action:ci --help
