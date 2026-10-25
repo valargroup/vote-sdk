@@ -286,6 +286,15 @@ jobs:
             SVOTE_HOSTS="${DNS_PREFIX}svote.${DOMAIN}"
             EOF
             fi
+            # Caddy's 2026 advisory cluster (CVE-2026-77281, CVE-2026-92284,
+            # CVE-2026-92700, CVE-2026-52845) is fixed only in 2.11.4, and
+            # join.sh requires 2.11.7 for validator setup. The host's package is
+            # never pinned, so assert the floor before reloading the front door.
+            caddy_version="$(caddy version 2>/dev/null | awk '{print $1}' | sed 's/^v//')"
+            if [ "$(printf '%s\n%s\n' 2.11.7 "$caddy_version" | sort -V | head -n1)" != "2.11.7" ]; then
+              echo "Caddy ${caddy_version:-unknown} is older than the required 2.11.7; not reloading" >&2
+              exit 1
+            fi
             systemctl restart caddy
 
             # Run init.sh with deterministic validator key and vote-manager set.
@@ -677,6 +686,15 @@ jobs:
             EXPLORER_API_HOSTS="${DNS_PREFIX}explorer-api.${DOMAIN}"
             EXPLORER_RPC_HOSTS="${DNS_PREFIX}explorer-rpc.${DOMAIN}"
             EOF
+            fi
+            # Caddy's 2026 advisory cluster (CVE-2026-77281, CVE-2026-92284,
+            # CVE-2026-92700, CVE-2026-52845) is fixed only in 2.11.4, and
+            # join.sh requires 2.11.7 for validator setup. The host's package is
+            # never pinned, so assert the floor before reloading the front door.
+            caddy_version="$(caddy version 2>/dev/null | awk '{print $1}' | sed 's/^v//')"
+            if [ "$(printf '%s\n%s\n' 2.11.7 "$caddy_version" | sort -V | head -n1)" != "2.11.7" ]; then
+              echo "Caddy ${caddy_version:-unknown} is older than the required 2.11.7; not reloading" >&2
+              exit 1
             fi
             systemctl restart caddy
 
