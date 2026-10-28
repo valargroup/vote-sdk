@@ -4,7 +4,7 @@
 
 Shielded-Vote is a Cosmos SDK application chain for private on-chain voting. The chain launches with a single genesis validator. Everyone else joins post-genesis via a custom validator-creating message, which atomically creates the validator and registers its Pallas key for the EA-key ceremony. The full rules live in the [protocol README](../../README.md#protocol-documentation).
 
-This runbook covers the operator side of joining `svote-1`: standing up a host, restoring the latest vote chain snapshot, catching up with the chain, reaching bonded status, and exposing the REST API over TLS for iOS clients and peers.
+This runbook covers the operator side of joining production (`zvote-1`) or staging (`svote-1`): standing up a host, restoring the latest vote chain snapshot, catching up with the chain, reaching bonded status, and exposing the REST API over TLS for iOS clients and peers.
 
 A validator is one service plus an optional Caddy reverse proxy on the same host.
 
@@ -109,7 +109,7 @@ After install:
 ```bash
 # Chain is synced.
 svoted status --home ~/.svoted | jq '{network: .node_info.network, height: .sync_info.latest_block_height, catching_up: .sync_info.catching_up}'
-# expect: network: "svote-1", catching_up: false
+# expect: network: "zvote-1" (production) or "svote-1" (staging), catching_up: false
 
 # REST + gRPC-gateway are live locally.
 curl -fsS http://127.0.0.1:1317/cosmos/base/tendermint/v1beta1/node_info | jq '.default_node_info.network'
@@ -364,7 +364,7 @@ The bucket also holds a few one-liner helpers:
 - `scripts/_chain_upgrade_common.sh`: shared upgrade helper library.
 - `reset-validator-snapshot.sh`: safe chain-data reset for existing validators.
 - `svoted-wrapper.sh`: the latest service wrapper, copied onto the host so the service unit can point at it.
-- `genesis.json`: canonical genesis, uploaded by `sdk-chain-reset.yml` after every chain reset.
+- `genesis/<chain-id>/genesis.json`: canonical genesis, uploaded by `sdk-chain-reset.yml` after every chain reset. Production uses `genesis/zvote-1/genesis.json`; staging uses `genesis/svote-1/genesis.json`.
 
 The GitHub Release for each tag also mirrors the tarballs, so operators pinning a specific version can substitute the GitHub URL in the manual install steps below.
 
@@ -411,6 +411,7 @@ sudo apt-get update && sudo apt-get install -y curl jq lz4 ca-certificates
    SEED_URL=$(echo "$VOTING_CONFIG" | jq -r '.vote_servers[0].url')
 
    NODE_INFO=$(curl -fsSL "$SEED_URL/cosmos/base/tendermint/v1beta1/node_info")
+   CHAIN_ID=$(echo "$NODE_INFO" | jq -er '.default_node_info.network')
    NODE_ID=$(echo "$NODE_INFO" | jq -r '.default_node_info.default_node_id')
    LISTEN_ADDR=$(echo "$NODE_INFO" | jq -r '.default_node_info.listen_addr')
    SEED_HOST=$(echo "$SEED_URL" | sed -E 's|^https?://||; s|:[0-9]+$||; s|/.*||')
@@ -418,14 +419,15 @@ sudo apt-get update && sudo apt-get install -y curl jq lz4 ca-certificates
    PERSISTENT_PEERS="${NODE_ID}@${SEED_HOST}:${P2P_PORT:-26656}"
    ```
 
-3. Initialize the node and pull genesis.
+3. Initialize the node and pull genesis for the discovered chain. The production URL is [genesis/zvote-1/genesis.json](https://shielded-vote.nyc3.digitaloceanspaces.com/genesis/zvote-1/genesis.json). The explorer RPC `/genesis` response is wrapped JSON, so do not save that response directly as the genesis file.
 
    ```bash
    MONIKER="my-validator"
    HOME_DIR="$HOME/.svoted"
    rm -rf "$HOME_DIR"
-   svoted init "$MONIKER" --chain-id svote-1 --home "$HOME_DIR"
-   curl -fsSL -o "$HOME_DIR/config/genesis.json" "${DO_BASE}/genesis.json"
+   svoted init "$MONIKER" --chain-id "$CHAIN_ID" --home "$HOME_DIR"
+   curl -fsSL -o "$HOME_DIR/config/genesis.json" "${DO_BASE}/genesis/${CHAIN_ID}/genesis.json"
+   test "$(jq -r '.chain_id' "$HOME_DIR/config/genesis.json")" = "$CHAIN_ID"
    svoted genesis validate-genesis --home "$HOME_DIR"
    ```
 
@@ -436,7 +438,7 @@ sudo apt-get update && sudo apt-get install -y curl jq lz4 ca-certificates
    SNAPSHOT_ARCHIVE=$(mktemp)
    VALIDATOR_STATE=$(mktemp)
    curl -fsSL -o "$SNAPSHOT_META" https://snapshots.valargroup.org/latest.json
-   test "$(jq -r '.chain_id' "$SNAPSHOT_META")" = "svote-1"
+   test "$(jq -r '.chain_id' "$SNAPSHOT_META")" = "$CHAIN_ID"
    SNAPSHOT_URL=$(jq -r '.url' "$SNAPSHOT_META")
    SNAPSHOT_SUM=$(jq -r '.checksum' "$SNAPSHOT_META")
    curl -fL -o "$SNAPSHOT_ARCHIVE" "$SNAPSHOT_URL"
@@ -498,7 +500,7 @@ Interactive runs without an explicit TLS mode prompt until the operator chooses 
 | `--tls-mode <skip\|custom\|auto>` or `SVOTE_TLS_MODE` | unset | Explicit TLS mode for unattended installs. `skip` leaves `VALIDATOR_URL` empty, `custom` requires `--domain` / `SVOTE_DOMAIN`, and `auto` uses an auto-detected `<ip>.sslip.io` hostname. Numeric aliases `1`, `2`, and `3` are accepted for compatibility with the prompt. |
 | `--domain <host>` or `SVOTE_DOMAIN` | unset | Public hostname for Caddy + `VALIDATOR_URL`. When set, the installer skips the TLS menu and treats Caddy setup for this static hostname as required. |
 | `SVOTE_MONIKER` | interactive prompt | Validator moniker; required for unattended installs. |
-| `SVOTE_DO_SPACES_BASE` | `https://shielded-vote.nyc3.digitaloceanspaces.com` | Artifact base for `version.txt`, release tarballs, `genesis.json`, and the `svoted-wrapper.sh` fallback. Set this when joining from a custom bucket. |
+| `SVOTE_DO_SPACES_BASE` | `https://shielded-vote.nyc3.digitaloceanspaces.com` | Artifact base for `version.txt`, release tarballs, `genesis/<chain-id>/genesis.json`, and the `svoted-wrapper.sh` fallback. Set this when joining from a custom bucket. |
 | `SVOTE_DO_SPACES_BUCKET` | unset | Bucket-name shortcut for `SVOTE_DO_SPACES_BASE`, using `SVOTE_DO_SPACES_REGION` or `nyc3`. |
 | `SVOTE_DO_SPACES_REGION` | `nyc3` | Region used only when `SVOTE_DO_SPACES_BUCKET` is set without `SVOTE_DO_SPACES_BASE`. |
 | `SVOTE_INSTALL_DIR` | `$HOME/.local/bin` | Where `svoted`, `create-val-tx`, and `svoted-wrapper.sh` are installed. For downloaded release binaries, `join.sh` adds this directory to the user's future shell `PATH` if it was missing. |
@@ -561,7 +563,7 @@ The three TLS modes and the Caddy layout are described in [TLS / reverse proxy](
 
 | Direction | Destination | Purpose |
 |-----------|-------------|---------|
-| Outbound 443 | `shielded-vote.nyc3.digitaloceanspaces.com` or the configured `SVOTE_DO_SPACES_BASE` host | `version.txt`, `svoted` + `create-val-tx` tarballs (`binaries/vote-sdk/…`), `genesis.json`, `svoted-wrapper.sh` fallback |
+| Outbound 443 | `shielded-vote.nyc3.digitaloceanspaces.com` or the configured `SVOTE_DO_SPACES_BASE` host | `version.txt`, `svoted` + `create-val-tx` tarballs (`binaries/vote-sdk/…`), `genesis/<chain-id>/genesis.json`, `svoted-wrapper.sh` fallback |
 | Outbound 443 | `snapshots.valargroup.org` | Latest Zvote snapshot metadata and archive URL used to bootstrap chain data before peer catch-up |
 | Outbound 443 | `voting.valargroup.dev` | [`dynamic-voting-config.json`](https://voting.valargroup.dev/prod/dynamic-voting-config.json) — canonical seed-peer discovery. Defaults to production when no environment path is provided. Override via `VOTING_CONFIG_URL` for staging mirrors. |
 | Outbound 443 | `prod.svote.valargroup.org` (production), `stage.svote.valargroup.org` (staging) | `POST /api/register-validator` (join queue). Override via `SVOTE_ADMIN_URL`. |
@@ -580,7 +582,7 @@ If the validator will answer PIR queries itself, also open inbound 443 for the `
 | Symptom | Likely cause | Action |
 |---------|--------------|--------|
 | `catching_up` stays `true` for >10 min, log shows "Dialing" / no peers connecting | Inbound 26656 blocked, or seed peer is unreachable | Verify firewall lets in 26656 (`ss -ltn | grep 26656`, then test from off-host); check `persistent_peers` in `~/.svoted/config/config.toml`; confirm the seed listed under `vote_servers[0].url` in [the dynamic voting-config](https://voting.valargroup.dev/prod/dynamic-voting-config.json) is up by hitting its `/cosmos/base/tendermint/v1beta1/node_info`. |
-| `svoted` exits with "error initializing application: genesis doc mismatch" | Local `genesis.json` doesn't match the live chain | Re-run `join.sh` and confirm the existing-install reset prompt if this is a disposable joining validator. It stops the service, deletes `~/.svoted`, and pulls canonical genesis fresh. For non-interactive reset runs, set `SVOTE_FORCE_RESET=1`. To repair only genesis manually: `DO_BASE="${SVOTE_DO_SPACES_BASE:-https://shielded-vote.nyc3.digitaloceanspaces.com}"; curl -fsSL -o ~/.svoted/config/genesis.json "${DO_BASE%/}/genesis.json" && svoted genesis validate-genesis --home ~/.svoted`. |
+| `svoted` exits with "error initializing application: genesis doc mismatch" | Local `genesis.json` doesn't match the live chain | Re-run `join.sh` and confirm the existing-install reset prompt if this is a disposable joining validator. It stops the service, deletes `~/.svoted`, and pulls canonical genesis fresh. For non-interactive reset runs, set `SVOTE_FORCE_RESET=1`. To repair only production genesis manually (use `svote-1` for staging): `CHAIN_ID=zvote-1; DO_BASE="${SVOTE_DO_SPACES_BASE:-https://shielded-vote.nyc3.digitaloceanspaces.com}"; curl -fsSL -o ~/.svoted/config/genesis.json "${DO_BASE%/}/genesis/${CHAIN_ID}/genesis.json" && svoted genesis validate-genesis --home ~/.svoted`. |
 | Service logs repeatedly show `waiting for validator funding` | Not yet funded | Wait. The vote-manager funds from the admin UI join queue. Ping the operator running the primary and confirm your address is listed. |
 | Service logs show an old moniker or keep polling `balance=0` after a re-run | A stale wrapper process survived a previous install and is using the old service environment | Current `join.sh` restarts the rewritten service. On an affected host, run `systemctl show svoted -p Environment --no-pager`, compare `MONIKER`/`VALIDATOR_ADDR` with `journalctl -u svoted -o cat`, then `sudo systemctl restart svoted`. |
 | `create-val-tx` fails with `key not found: validator` | Keyring backend mismatch (os vs test) | The wrapper expects the `validator` key in the test keyring. Confirm `svoted keys show validator -a --keyring-backend test --home ~/.svoted` returns the expected address. If you re-keyed manually, re-run `svoted init-validator-keys`. |
