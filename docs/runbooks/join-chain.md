@@ -419,7 +419,7 @@ sudo apt-get update && sudo apt-get install -y curl jq lz4 ca-certificates
    PERSISTENT_PEERS="${NODE_ID}@${SEED_HOST}:${P2P_PORT:-26656}"
    ```
 
-3. Initialize the node and pull genesis for the discovered chain. The production URL is [genesis/zvote-1/genesis.json](https://shielded-vote.nyc3.digitaloceanspaces.com/genesis/zvote-1/genesis.json). The legacy bucket-root `genesis.json` URL returns 403. The explorer RPC `/genesis` response is wrapped JSON, so do not save that response directly as the genesis file.
+3. Initialize the node and pull genesis for the discovered chain. The production URL is [genesis/zvote-1/genesis.json](https://shielded-vote.nyc3.digitaloceanspaces.com/genesis/zvote-1/genesis.json). The explorer RPC `/genesis` response is wrapped JSON, so do not save that response directly as the genesis file.
 
    ```bash
    MONIKER="my-validator"
