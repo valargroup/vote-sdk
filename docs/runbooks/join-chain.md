@@ -223,6 +223,10 @@ and check `caddy version`; the distribution's default package may be older.
 Existing operators should follow [Update Caddy](update-caddy.md). **Do not rerun
 `join.sh` to upgrade Caddy**; it resets validator state.
 
+Linux operators should also apply the [MPTCP mitigation](disable-mptcp.md)
+for CVE-2026-98432 until running a fixed kernel. This covers both the validator
+and its HTTPS proxy; updating Caddy alone does not fix the kernel vulnerability.
+
 For TLS-setup failure modes, see [Troubleshooting > Hostname and TLS](#hostname-and-tls).
 
 ## Backup and disaster recovery

@@ -8,6 +8,9 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Document the Linux MPTCP mitigation for CVE-2026-98432, including validator
+  and proxy restarts, socket verification, and the required kernel update.
+
 - Require Caddy 2.11.7 or newer for validator HTTPS setup and document how to
   update existing proxies without resetting validator state.
 - Group unbonding and unbonded validators in an expandable section on the validators page, with jailed validators sorted last in each group.
