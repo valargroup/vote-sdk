@@ -22,10 +22,6 @@ Production uses dedicated DigitalOcean Droplets in the same region + VPC, runnin
 
 All chain-facing nodes run the same `svoted` binary. Caddy on each public host terminates TLS via Let's Encrypt.
 
-On Linux, follow the [MPTCP mitigation runbook](runbooks/disable-mptcp.md) for
-CVE-2026-98432. Existing hosts need
-service restarts and socket verification even if MPTCP is already disabled.
-
 ## Fee and Reward Distribution
 
 `vote-sdk` is operated as a no-fee chain: minimum gas prices default to `0usvote`,
