@@ -23,6 +23,7 @@ zakura = [
 ]
 
 [dependencies]
+blake2b_simd = "1"
 voting-crypto-deps = { version = "=0.2.3", default-features = false }
 vote-commitment-tree = { version = "=0.6.1", default-features = false }
 voting-circuits = { version = "=0.12.0", default-features = false }
@@ -33,7 +34,6 @@ zcash_protocol = "0.10"
 hex = "0.4"
 
 [dev-dependencies]
-blake2b_simd = "1"
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

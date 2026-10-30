@@ -8,6 +8,11 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Accept version-2 delegation authorizations signed with V6/NU7 while retaining
+  the existing V6/NU6.3 version-1 profile. Register the coordinated `v1.8.0`
+  upgrade; validators must switch together because the accepted inputs expand.
+  No stores, proof circuits, or verifying keys change.
+
 - Disable MPTCP persistently during Linux validator setup before package
   installation or service startup, and stop if the setting cannot be applied.
   Document the Linux MPTCP mitigation for CVE-2026-98432, including validator

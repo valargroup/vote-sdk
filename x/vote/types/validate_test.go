@@ -562,7 +562,7 @@ func (s *ValidateBasicTestSuite) TestDelegateVote_ValidateBasic() {
 		{
 			name: "invalid: unsupported tx1 effects version",
 			modify: func(m *types.MsgDelegateVote) {
-				m.Tx1Effects[0]++
+				m.Tx1Effects[0] = 0xff
 			},
 			expectErr:   true,
 			errContains: "unsupported tx1 effects version",

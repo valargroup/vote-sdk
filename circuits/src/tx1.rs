@@ -3,7 +3,10 @@
 //! The chain receives only versioned transaction effecting data. It does not
 //! receive or reconstruct a PCZT. Version 1 fixes the rest of the transaction
 //! profile to V6/NU6.3 with no transparent, Sapling, or Orchard bundles and one
-//! single-action Ironwood bundle.
+//! single-action Ironwood bundle. Version 2 preserves that layout and uses the
+//! NU7 branch ID instead. The version is part of the signed profile.
+
+mod nu7;
 
 use std::{fmt, io::Cursor};
 
@@ -23,8 +26,10 @@ use zcash_protocol::{
     value::ZatBalance,
 };
 
-/// Version byte for the current delegation TX1 effects encoding.
+/// Version byte for the original V6/NU6.3 delegation signing profile.
 pub const EFFECTS_VERSION: u8 = 1;
+/// Version byte for the V6/NU7 delegation signing profile.
+pub const NU7_EFFECTS_VERSION: u8 = 2;
 /// Number of Ironwood actions in the fixed delegation transaction.
 pub const ACTION_COUNT: usize = 1;
 /// Length of one Ironwood action's effecting data.
@@ -52,7 +57,7 @@ impl fmt::Display for Error {
             }
             Error::UnsupportedVersion { actual } => write!(
                 f,
-                "unsupported tx1 effects version: expected {EFFECTS_VERSION}, got {actual}"
+                "unsupported tx1 effects version: expected {EFFECTS_VERSION} or {NU7_EFFECTS_VERSION}, got {actual}"
             ),
             Error::InvalidAction { index, message } => {
                 write!(f, "invalid Ironwood action {index}: {message}")
@@ -75,7 +80,7 @@ pub fn sighash(effects: &[u8]) -> Result<[u8; 32], Error> {
             actual: effects.len(),
         });
     }
-    if effects[0] != EFFECTS_VERSION {
+    if !matches!(effects[0], EFFECTS_VERSION | NU7_EFFECTS_VERSION) {
         return Err(Error::UnsupportedVersion { actual: effects[0] });
     }
 
@@ -108,6 +113,15 @@ pub fn sighash(effects: &[u8]) -> Result<[u8; 32], Error> {
     )
     .map_err(|err| Error::InvalidBundle(err.to_string()))?;
 
+    let ironwood_digest = effects_bundle
+        .commitment(OrchardTxVersion::V6)
+        .map_err(|err| Error::InvalidBundle(err.to_string()))?
+        .0;
+
+    if effects[0] == NU7_EFFECTS_VERSION {
+        return Ok(nu7::sighash(&ironwood_digest));
+    }
+
     let digester = TxIdDigester;
     let header_digest = <TxIdDigester as TransactionDigest<transaction::Authorized>>::digest_header(
         &digester,
@@ -116,10 +130,6 @@ pub fn sighash(effects: &[u8]) -> Result<[u8; 32], Error> {
         0,
         BlockHeight::from_u32(0),
     );
-    let ironwood_digest = effects_bundle
-        .commitment(OrchardTxVersion::V6)
-        .map_err(|err| Error::InvalidBundle(err.to_string()))?
-        .0;
     let digests = TxDigests {
         header_digest,
         transparent_digests: None,
@@ -193,7 +203,7 @@ mod tests {
         ));
 
         let mut unsupported = effects.clone();
-        unsupported[0] = EFFECTS_VERSION + 1;
+        unsupported[0] = NU7_EFFECTS_VERSION + 1;
         assert!(matches!(
             sighash(&unsupported),
             Err(Error::UnsupportedVersion { .. })

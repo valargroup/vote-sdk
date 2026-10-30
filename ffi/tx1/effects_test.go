@@ -51,6 +51,8 @@ func TestValidateEffectsFraming(t *testing.T) {
 	require.NoError(t, ValidateEffectsFraming(effects))
 	require.ErrorContains(t, ValidateEffectsFraming(effects[:len(effects)-1]), "must be 821 bytes")
 
-	effects[0]++
+	effects[0] = NU7EffectsVersion
+	require.NoError(t, ValidateEffectsFraming(effects))
+	effects[0] = NU7EffectsVersion + 1
 	require.ErrorContains(t, ValidateEffectsFraming(effects), "unsupported tx1 effects version")
 }

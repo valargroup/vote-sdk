@@ -23,6 +23,7 @@ func (app *SvoteApp) RegisterUpgradeHandlers() {
 	app.registerV150Upgrade()
 	app.registerV160Upgrade()
 	app.registerV170Upgrade()
+	app.registerV180Upgrade()
 	app.registerStageVoteFundingMigrationUpgrade()
 	app.registerIsolatedRehearsalUpgrade()
 }

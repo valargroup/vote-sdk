@@ -10,6 +10,8 @@ import (
 const (
 	// EffectsVersion identifies the fixed V6/NU6.3 delegation transaction profile.
 	EffectsVersion byte = 1
+	// NU7EffectsVersion identifies the fixed V6/NU7 delegation transaction profile.
+	NU7EffectsVersion byte = 2
 	// ActionCount is the number of Ironwood actions in the delegation transaction.
 	ActionCount = 1
 	// ActionEffectsLen is the serialized length of one Ironwood action's effecting data.
@@ -29,8 +31,8 @@ func ValidateEffectsFraming(effects []byte) error {
 	if len(effects) != EffectsLen {
 		return fmt.Errorf("tx1 effects must be %d bytes, got %d", EffectsLen, len(effects))
 	}
-	if effects[0] != EffectsVersion {
-		return fmt.Errorf("unsupported tx1 effects version: expected %d, got %d", EffectsVersion, effects[0])
+	if effects[0] != EffectsVersion && effects[0] != NU7EffectsVersion {
+		return fmt.Errorf("unsupported tx1 effects version: expected %d or %d, got %d", EffectsVersion, NU7EffectsVersion, effects[0])
 	}
 	return nil
 }

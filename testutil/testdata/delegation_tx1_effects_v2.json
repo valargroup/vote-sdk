@@ -1,0 +1,18 @@
+{
+  "action_count": 1,
+  "action_index": 0,
+  "bundle_flags": 7,
+  "bundle_version": 3,
+  "cmx_new": "TBFEVqDzyj93fQUqY1RHvD3msORbaDhuQn5OzllECiY=",
+  "consensus_branch_id": "77190ad9",
+  "expiry_height": 0,
+  "format": "ironwood_tx1_effects_v2",
+  "lock_time": 0,
+  "rk": "9Pc8AIUP2VT5yc08pFlk22oynPWqZsQNuMMqE8UaBI4=",
+  "sighash": "QSnTcCAzF9e6zUNxwi/b2ZHmLz0KJw8cImQyVyNGD1Q=",
+  "signed_note_nullifier": "erDi9Qm9bQ+uVn1vDeamxJrDXF+wdUYbSbZ3kaTZZBM=",
+  "spend_auth_sig": "JOKrkdqdhHONxJf2yZzekZnQq+gbl+luZIBXgYUOJqx9A7H9Su3PZDiG2D2Z1znmxGG9x5jYd8f5FONJzBr3BA==",
+  "transaction_version": 6,
+  "tx1_effects": "Ar2YLNnPxMG1JOYZeq1vNlad/CFcN4/4ElvDiaaLRWoverDi9Qm9bQ+uVn1vDeamxJrDXF+wdUYbSbZ3kaTZZBP09zwAhQ/ZVPnJzTykWWTbajKc9apmxA24wyoTxRoEjkwRRFag88o/d30FKmNUR7w95rDkW2g4bkJ+Ts5ZRAomeoK//EOALSclHP2RS4j9j9l8gVgI4/uue+L/f4Qukh9yWDkBpwpJGsbFmyarPTRkAzMIfXlqGlvfrIIpbOGCY5SXbqUAtQkK7nWabkdNvYBnIysTzOpCsPy49fKRY9m+6ElwOjFOkJKWXEiOI27PuSeSJSO4rQXxKRFGofPo2eydT+URpTjqjzVhTjYE3KiAWYSzRTlIFXtivpIIFY0ElYOq7dnRM5KMkj8q+z4OpjT9lKAtEaN8GexF90b8SBmP9kSbkaf/4c1wZnKdp8nXUfVs68rOQwIudkdxLeP3+wyoV6tJL255AS534mf2B4ZcMsTo27+OZHiQZ4dSS7pbVIFomZ/XjPN6uV5MnNYDkG+YyHkYa5EZFsaklAnTN4lwD9ebspcoK+kM/zsGjznXrtjGJgcVZ9pbem7pL4/NhoSmVICDSzGMz6L188SMBf1i4bWYrvMM5V6TUopN9UoW5ZxYG5sw4nTnn5UCa3XqbiwXYV0wieLU0yhil6+RnWq0J/+WZEu6CEEvAKx2q6jj8LXrAv/g3cDdaZ5XKMJSzRiHDGb2UT6VzrjvzZjASbnNaVtS9mYWHHuPWdIo92X4hHJuRp5RuBVLnSasu5BvHATG1A9xUvA8VtAu77F7W0luH5YIy30wgKS/hN/uR9Aaah9tGud/XVEYKkhSxHqDNUJwIKYeROwHaOmmvjitvUd2xfOUCdPnDrFkJ1p4qXyKZt0tuJrumOq3+4db9/OfNdK5jnqlSWsGHEDGz7HGN5L2tC6ZJU+Ujjj5/46MBKZV0wxYiS7/pnvf6JCCG9Tq0YxMvCart7q1zFJXwXWSxtH4YmjJXqeR1ATr9bgy3I3nxnMDgdQSZSExQM5XAeu/2kdYXuU7vuRZpoLu5Eq3RXMrPsYA27dWzDa9hK4rw5ryLQ546zI=",
+  "value_balance_zat": 1
+}

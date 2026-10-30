@@ -12,6 +12,30 @@ enabled and checksums required. Pre-staging through `update_chain.sh` removes th
 network dependency at the halt, while the automatic path remains available for
 future checksum-pinned plans.
 
+## Preparing v1.8.0
+
+The `v1.8.0` plan expands delegation signature verification to accept the
+version-2 V6/NU7 authorization profile. All validators must switch together:
+an old validator rejects version 2 while the new binary accepts it. Registering
+the handler does not schedule a plan or deploy the binary. No store migration
+is needed, and existing rounds, proofs, verifying keys, and version-1
+V6/NU6.3 authorizations remain valid.
+
+Wallets may send version 2 only after the target vote chain has upgraded.
+They must construct a V6 transaction with branch ID `0x77190ad9` and set the
+first byte of the 821-byte effects payload to `2`. The remainder of the
+profile is unchanged: zero lock time and expiry, no transparent, Sapling, or
+Orchard bundles, and one Ironwood V3 action with flags `0x07` and a positive
+1-zatoshi value balance. The synthetic transaction is never broadcast to Zcash.
+Changing only the version byte on an existing signed payload invalidates its
+signature. Version 1 continues to require branch ID `0x37a5165b`.
+
+Before promotion, rehearse the binary cutover on an isolated network and then
+staging. Submit authorizations under both profiles and confirm that changing a
+profile byte or action field without resigning is rejected. Confirm existing
+rounds remain usable. Schedule a production height only after that evidence is
+accepted; this change does not choose a height or publish a release.
+
 ## Preparing v1.7.0
 
 The `v1.7.0` plan activates the DKG constant-term proof requirement. Every

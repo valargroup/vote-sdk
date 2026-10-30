@@ -14,9 +14,18 @@ import (
 )
 
 func TestComputeDelegationSighashMatchesWalletFixture(t *testing.T) {
+	for _, filename := range []string{"delegation_tx1_effects_v1.json", "delegation_tx1_effects_v2.json"} {
+		t.Run(filename, func(t *testing.T) {
+			testComputeDelegationSighashFixture(t, filename)
+		})
+	}
+}
+
+func testComputeDelegationSighashFixture(t *testing.T, filename string) {
+	t.Helper()
 	_, thisFile, _, ok := runtime.Caller(0)
 	require.True(t, ok)
-	path := filepath.Join(filepath.Dir(thisFile), "..", "..", "testutil", "testdata", "delegation_tx1_effects_v1.json")
+	path := filepath.Join(filepath.Dir(thisFile), "..", "..", "testutil", "testdata", filename)
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 
