@@ -49,11 +49,11 @@ func rpMustReadFixture(t *testing.T, name string) []byte {
 }
 
 type delegationTX1Fixture struct {
-	RK                   string `json:"rk"`
-	SpendAuthSig         string `json:"spend_auth_sig"`
-	SignedNoteNullifier  string `json:"signed_note_nullifier"`
-	CmxNew               string `json:"cmx_new"`
-	TransactionEffectsV1 string `json:"tx1_effects"`
+	RK                  string `json:"rk"`
+	SpendAuthSig        string `json:"spend_auth_sig"`
+	SignedNoteNullifier string `json:"signed_note_nullifier"`
+	CmxNew              string `json:"cmx_new"`
+	TransactionEffects  string `json:"tx1_effects"`
 }
 
 func rpDecodeBase64(t *testing.T, value string) []byte {
@@ -64,7 +64,7 @@ func rpDecodeBase64(t *testing.T, value string) []byte {
 }
 
 func rpDelegationTX1Message(t *testing.T) *types.MsgDelegateVote {
-	return rpDelegationTX1MessageFromFixture(t, "delegation_tx1_effects_v1.json")
+	return rpDelegationTX1MessageFromFixture(t, "delegation_tx1_effects_v2.json")
 }
 
 func rpDelegationTX1MessageFromFixture(t *testing.T, filename string) *types.MsgDelegateVote {
@@ -84,7 +84,7 @@ func rpDelegationTX1MessageFromFixture(t *testing.T, filename string) *types.Msg
 		GovNullifiers:       [][]byte{make([]byte, 32)},
 		Proof:               make([]byte, 192),
 		VoteRoundId:         testRoundID,
-		Tx1Effects:          rpDecodeBase64(t, fixture.TransactionEffectsV1),
+		Tx1Effects:          rpDecodeBase64(t, fixture.TransactionEffects),
 	}
 }
 
@@ -116,7 +116,7 @@ func TestRedPallasDelegationNU7Profile(t *testing.T) {
 	for _, relabel := range []bool{false, true} {
 		name := "valid NU7 signature"
 		if relabel {
-			name = "NU7 signature cannot authorize NU6.3 profile"
+			name = "legacy profile byte is rejected"
 		}
 		t.Run(name, func(t *testing.T) {
 			msg := rpDelegationTX1MessageFromFixture(t, "delegation_tx1_effects_v2.json")
@@ -133,7 +133,7 @@ func TestRedPallasDelegationNU7Profile(t *testing.T) {
 			}
 			err := ante.ValidateVoteTx(s.ctx, msg, s.keeper, opts)
 			if relabel {
-				require.ErrorIs(t, err, types.ErrInvalidSignature)
+				require.ErrorContains(t, err, "unsupported tx1 effects version")
 			} else {
 				require.NoError(t, err)
 			}

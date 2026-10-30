@@ -28,7 +28,7 @@ const TestAuthority = "sv1authority"
 // non-identity to pass UnmarshalPublicKey validation in the ante handler.
 var DummyPallasPoint = elgamal.PallasGenerator().ToAffineCompressed()
 
-//go:embed testdata/delegation_tx1_effects_v1.json
+//go:embed testdata/delegation_tx1_effects_v2.json
 var delegationTX1FixtureJSON []byte
 
 var delegationTX1EffectsTemplate = func() []byte {

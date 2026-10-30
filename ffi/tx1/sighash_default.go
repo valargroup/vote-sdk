@@ -4,7 +4,7 @@ package tx1
 
 import "crypto/sha256"
 
-const testDigestDomain = "SVOTE_TX1_EFFECTS_TEST_V1"
+const testDigestDomain = "SVOTE_TX1_EFFECTS_TEST_V2"
 
 // ComputeDelegationSighash returns a deterministic stand-in digest for Go-only
 // tests. Production binaries require the redpallas build tag and use the Rust

@@ -1,7 +1,8 @@
 # Delegation signing vectors
 
 `delegation_tx1_effects_v1.json` is the existing wallet-generated V6/NU6.3
-authorization vector. Keep it unchanged when adding signing profiles.
+authorization vector. It is retained only to test rejection of the retired
+profile and to prove that changing its version byte cannot reuse its signature.
 
 `delegation_tx1_effects_v2.json` uses the same action layout with profile byte
 `2` and a disposable fixture verification key. Its expected digest was generated
@@ -27,8 +28,9 @@ and must never hold funds. Only the resulting verification key, digest, and
 signature are serialized. Generating a fresh signature changes its bytes but
 does not change the expected digest.
 
-The transaction module uses the published library transaction digester for
-both profiles; it only selects the consensus branch from the payload version.
+The transaction module accepts version 2 only and uses the published library
+transaction digester with the fixed NU7 consensus branch.
 The dependency graphs are aligned with voting-crypto-deps 0.4.0, which uses
 Common 4 in the default backend and the matching upstream libraries in the
-other backend. Both backend families must match these frozen vectors.
+other backend. Both backend families must match the NU7 vector and reject the
+legacy vector.
