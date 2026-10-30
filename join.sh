@@ -55,6 +55,35 @@ caddy_version_supported() {
     }'
 }
 
+# Disable new MPTCP sockets before packages or services can open listeners.
+# Existing listeners still need their owning services restarted.
+disable_mptcp() {
+  [ "$(uname -s)" = Linux ] || return 0
+  if [ ! -d /proc/sys/net/ipv4 ]; then
+    echo "ERROR: Cannot inspect Linux network settings under /proc/sys/net." >&2
+    return 1
+  fi
+  if [ ! -e /proc/sys/net/mptcp/enabled ]; then
+    echo "MPTCP is unavailable in this kernel; skipping."
+    return 0
+  fi
+  local privilege=()
+  if [ "$(id -u)" != 0 ]; then privilege=(sudo); fi
+  echo "Disabling MPTCP for this host..."
+  if ! "${privilege[@]}" install -d -m 0755 /etc/sysctl.d ||
+     ! printf '%s\n' 'net.mptcp.enabled = 0' | "${privilege[@]}" tee /etc/sysctl.d/90-vote-disable-mptcp.conf > /dev/null; then
+    echo "ERROR: Could not persist the MPTCP setting." >&2
+    return 1
+  fi
+  if ! { [ "$(cat /proc/sys/net/mptcp/enabled)" = 0 ] ||
+         printf '0\n' | "${privilege[@]}" tee /proc/sys/net/mptcp/enabled > /dev/null; } ||
+     [ "$(cat /proc/sys/net/mptcp/enabled)" != 0 ]; then
+    echo "ERROR: Could not disable MPTCP; stopping installation." >&2
+    return 1
+  fi
+  echo "MPTCP disabled. Existing listeners still require service restarts."
+}
+
 main() {
 if [ -z "${HOME:-}" ]; then
   if command -v getent > /dev/null 2>&1; then
@@ -395,6 +424,7 @@ install_missing_tools() {
   fi
 }
 
+disable_mptcp
 install_missing_tools
 
 for REQUIRED_TOOL in jq lz4; do
