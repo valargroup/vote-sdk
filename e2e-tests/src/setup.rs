@@ -40,7 +40,7 @@ fn delegation_tx1_effects(
     cmx_new: &[u8; 32],
 ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
     let fixture: DelegationTX1Fixture = serde_json::from_str(include_str!(
-        "../../testutil/testdata/delegation_tx1_effects_v2.json"
+        "../../testutil/testdata/delegation_tx1_effects_v1.json"
     ))?;
     let mut effects = BASE64_STANDARD.decode(fixture.tx1_effects)?;
     if effects.len() != shielded_vote_circuits::tx1::EFFECTS_LEN

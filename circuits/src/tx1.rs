@@ -1,9 +1,10 @@
 //! Canonical signature digest for the synthetic Ironwood delegation transaction.
 //!
-//! The chain receives only version-2 transaction effecting data. It does not
-//! receive or reconstruct a PCZT. The fixed profile is V6/NU7 with no
-//! transparent, Sapling, or Orchard bundles and one single-action Ironwood
-//! bundle. Legacy version-1 NU6.3 authorizations are rejected.
+//! The chain receives only versioned transaction effecting data. It does not
+//! receive or reconstruct a PCZT. Version 1 fixes the rest of the transaction
+//! profile to V6/NU6.3 with no transparent, Sapling, or Orchard bundles and one
+//! single-action Ironwood bundle. Version 2 preserves that layout and uses the
+//! NU7 branch ID instead. The version is part of the signed profile.
 
 #[cfg(feature = "upstream")]
 use lrz_zcash_protocol as protocol;
@@ -29,8 +30,10 @@ use protocol::{
     value::ZatBalance,
 };
 
-/// Version byte for the required V6/NU7 delegation signing profile.
-pub const EFFECTS_VERSION: u8 = 2;
+/// Version byte for the original V6/NU6.3 delegation signing profile.
+pub const EFFECTS_VERSION: u8 = 1;
+/// Version byte for the V6/NU7 delegation signing profile.
+pub const NU7_EFFECTS_VERSION: u8 = 2;
 /// Number of Ironwood actions in the fixed delegation transaction.
 pub const ACTION_COUNT: usize = 1;
 /// Length of one Ironwood action's effecting data.
@@ -58,7 +61,7 @@ impl fmt::Display for Error {
             }
             Error::UnsupportedVersion { actual } => write!(
                 f,
-                "unsupported tx1 effects version: expected {EFFECTS_VERSION}, got {actual}"
+                "unsupported tx1 effects version: expected {EFFECTS_VERSION} or {NU7_EFFECTS_VERSION}, got {actual}"
             ),
             Error::InvalidAction { index, message } => {
                 write!(f, "invalid Ironwood action {index}: {message}")
@@ -81,10 +84,11 @@ pub fn sighash(effects: &[u8]) -> Result<[u8; 32], Error> {
             actual: effects.len(),
         });
     }
-    if effects[0] != EFFECTS_VERSION {
-        return Err(Error::UnsupportedVersion { actual: effects[0] });
-    }
-    let branch_id = BranchId::Nu7;
+    let branch_id = match effects[0] {
+        EFFECTS_VERSION => BranchId::Nu6_3,
+        NU7_EFFECTS_VERSION => BranchId::Nu7,
+        actual => return Err(Error::UnsupportedVersion { actual }),
+    };
 
     let actions = (0..ACTION_COUNT)
         .map(|index| {
@@ -162,7 +166,7 @@ mod tests {
 
     fn fixture() -> Fixture {
         serde_json::from_str(include_str!(
-            "../../testutil/testdata/delegation_tx1_effects_v2.json"
+            "../../testutil/testdata/delegation_tx1_effects_v1.json"
         ))
         .expect("fixture is valid JSON")
     }
@@ -176,7 +180,7 @@ mod tests {
     fn matches_the_wallet_fixture() {
         let fixture = fixture();
         assert_eq!(fixture.transaction_version, 6);
-        assert_eq!(fixture.consensus_branch_id, "77190ad9");
+        assert_eq!(fixture.consensus_branch_id, "37a5165b");
         assert_eq!(fixture.lock_time, 0);
         assert_eq!(fixture.expiry_height, 0);
         assert_eq!(fixture.bundle_version, 3);
@@ -206,7 +210,7 @@ mod tests {
         ));
 
         let mut unsupported = effects.clone();
-        unsupported[0] = EFFECTS_VERSION + 1;
+        unsupported[0] = NU7_EFFECTS_VERSION + 1;
         assert!(matches!(
             sighash(&unsupported),
             Err(Error::UnsupportedVersion { .. })

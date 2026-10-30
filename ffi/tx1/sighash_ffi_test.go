@@ -14,7 +14,11 @@ import (
 )
 
 func TestComputeDelegationSighashMatchesWalletFixture(t *testing.T) {
-	testComputeDelegationSighashFixture(t, "delegation_tx1_effects_v2.json")
+	for _, filename := range []string{"delegation_tx1_effects_v1.json", "delegation_tx1_effects_v2.json"} {
+		t.Run(filename, func(t *testing.T) {
+			testComputeDelegationSighashFixture(t, filename)
+		})
+	}
 }
 
 func testComputeDelegationSighashFixture(t *testing.T, filename string) {

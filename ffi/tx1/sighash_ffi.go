@@ -16,7 +16,7 @@ import (
 )
 
 // ComputeDelegationSighash computes the canonical V6 shielded signature digest
-// for the required NU7 (version 2) delegation transaction profile.
+// for the NU6.3 (version 1) or NU7 (version 2) delegation transaction profile.
 func ComputeDelegationSighash(effects []byte) ([]byte, error) {
 	if err := ValidateEffectsFraming(effects); err != nil {
 		return nil, err

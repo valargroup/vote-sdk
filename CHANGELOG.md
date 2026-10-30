@@ -8,11 +8,10 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
-- Require version-2 delegation authorizations signed with V6/NU7 and reject
-  the retired V6/NU6.3 version-1 profile. Register the coordinated `v1.8.0`
-  upgrade; validators and wallets must switch together, and pending version-1
-  authorizations must be rebuilt and signed again.
-  Use the published Common 4 transaction digester, with
+- Accept version-2 delegation authorizations signed with V6/NU7 while retaining
+  the existing V6/NU6.3 version-1 profile. Register the coordinated `v1.8.0`
+  upgrade; validators must switch together because the accepted inputs expand.
+  Use the published Common 4 transaction digester for both profiles, with
   voting-circuits 0.14 and matching tree and test-client dependencies. No
   store migration is needed.
 

@@ -14,16 +14,13 @@ future checksum-pinned plans.
 
 ## Preparing v1.8.0
 
-The `v1.8.0` plan switches delegation signature verification to the
-version-2 V6/NU7 authorization profile only. All validators must switch together:
-old validators accept version 1 and reject version 2; new validators reject
-version 1 and accept version 2. Registering
+The `v1.8.0` plan expands delegation signature verification to accept the
+version-2 V6/NU7 authorization profile. All validators must switch together:
+an old validator rejects version 2 while the new binary accepts it. Registering
 the handler does not schedule a plan or deploy the binary. No store migration
-is needed. Delegations already accepted on-chain remain recorded, but wallets
-must rebuild and sign any pending version-1 authorizations again. Wallets that
-only emit version 1 cannot submit new delegations after the cutover. The release also
+is needed, and version-1 V6/NU6.3 authorizations remain valid. The release also
 aligns the proof and test-client dependency graphs with Common 4 and
-voting-circuits 0.14 so the signing profile uses the library transaction
+voting-circuits 0.14 so both signing profiles use the library transaction
 digester. Validate existing proof fixtures and complete the round lifecycle
 in rehearsal before scheduling the upgrade.
 
@@ -34,13 +31,11 @@ profile is unchanged: zero lock time and expiry, no transparent, Sapling, or
 Orchard bundles, and one Ironwood V3 action with flags `0x07` and a positive
 1-zatoshi value balance. The synthetic transaction is never broadcast to Zcash.
 Changing only the version byte on an existing signed payload invalidates its
-signature. Version 1 is rejected even with an otherwise valid NU6.3 signature.
+signature. Version 1 continues to require branch ID `0x37a5165b`.
 
 Before promotion, rehearse the binary cutover on an isolated network and then
-staging. Confirm that NU7 authorizations are accepted, version-1 authorizations
-are rejected, and relabeling an old authorization as version 2 does not make its
-signature valid. Confirm that changing action fields without signing again is
-rejected, and confirm existing
+staging. Submit authorizations under both profiles and confirm that changing a
+profile byte or action field without resigning is rejected. Confirm existing
 rounds remain usable. Schedule a production height only after that evidence is
 accepted; this change does not choose a height or publish a release.
 

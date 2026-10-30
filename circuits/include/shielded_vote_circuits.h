@@ -108,7 +108,7 @@ int32_t sv_verify_redpallas_sig(
 
 /*
  * Compute the canonical V6 shielded signature digest from the fixed,
- * versioned delegation TX1 effects payload (required v2: NU7; v1 is rejected).
+ * versioned delegation TX1 effects payload (v1: NU6.3, v2: NU7).
  *
  * Parameters:
  *   effects_ptr - Pointer to the 821-byte TX1 effects payload.
