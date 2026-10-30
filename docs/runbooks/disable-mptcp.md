@@ -1,9 +1,7 @@
 # Disable MPTCP on a Linux validator
 
 Temporary mitigation for CVE-2026-98432 on Ubuntu/Debian hosts running native
-`svoted` and Caddy services. No binary update is needed. **Do not rerun `join.sh`.**
-Restart one validator at a time, outside ceremonies and tally windows, with
-enough voting power remaining online.
+`svoted` and Caddy services. No binary update is needed.
 
 ## Apply
 
