@@ -49,13 +49,19 @@ for PLATFORM in "${PLATFORMS[@]}"; do
 
   echo ""
   echo "--- Running join.sh (SVOTE_SKIP_SERVICE=1) ---"
-  if docker run --rm --platform "${PLATFORM}" "${TAG}"; then
+  # Docker exposes /proc/sys read-only; configure its private namespace first.
+  docker_args=(--rm --platform "${PLATFORM}")
+  if docker run "${docker_args[@]}" "${TAG}" test -e /proc/sys/net/mptcp/enabled; then
+    docker_args+=(--sysctl net.mptcp.enabled=0)
+  fi
+  if docker run "${docker_args[@]}" "${TAG}"; then
     echo ""
     echo "PASS: ${PLATFORM}"
     PASS+=("${PLATFORM}")
   else
+    status=$?
     echo ""
-    echo "FAIL: ${PLATFORM} (exit $?)"
+    echo "FAIL: ${PLATFORM} (exit ${status})"
     FAIL+=("${PLATFORM} (run)")
   fi
 

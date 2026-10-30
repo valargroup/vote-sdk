@@ -8,6 +8,12 @@ A Cosmos SDK application chain for **private on-chain voting** using Zcash-deriv
 
 ## Quick Start
 
+Linux validator setup with `join.sh` persistently disables MPTCP before installing
+packages or starting services. It skips kernels without MPTCP support and stops
+if the setting cannot be applied. macOS setup is unchanged. Existing hosts still
+need service restarts and listener verification; rerunning setup is not a
+substitute for that check.
+
 ### Prerequisites
 
 - [mise](https://mise.jdx.dev/) — task runner + toolchain installer (recommended)

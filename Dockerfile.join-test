@@ -18,7 +18,8 @@
 #   docker run --rm join-test:amd64
 #   docker run --rm join-test:arm64
 #
-# Or via the helper script (also runs verification):
+# On kernels with MPTCP, docker run also needs --sysctl net.mptcp.enabled=0.
+# The helper script selects that setting automatically:
 #   ./scripts/test-join-docker.sh
 
 FROM ubuntu:24.04
