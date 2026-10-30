@@ -2,17 +2,20 @@
 name = "e2e-tests"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.97"
 description = "Rust E2E API tests for Shielded-Vote voting flow (replaces TypeScript suite)"
 
 [dependencies]
 # Keep the independent E2E graph on the upstream backend.
 shielded-vote-circuits = { path = "../circuits", default-features = false, features = ["upstream"] }
 
-orchard = { version = "0.15", features = ["unstable-voting-circuits"] }
-voting-circuits = { version = "=0.12.0", default-features = false, features = ["lrz"] }
-vote-commitment-tree = { version = "=0.6.1", default-features = false, features = ["lrz"] }
-vote-commitment-tree-client = { version = "=0.8.1", default-features = false, features = ["http", "lrz"] }
-zcash_voting = { version = "=4.0.0-rc.1", default-features = false, features = ["lrz"] }
+orchard = { version = "0.16", features = ["unstable-voting-circuits"] }
+voting-circuits = { version = "=0.14.0", default-features = false, features = ["lrz"] }
+vote-commitment-tree = { version = "=0.8.0", default-features = false, features = ["lrz"] }
+vote-commitment-tree-client = { version = "=0.10.0", default-features = false, features = ["http", "lrz"] }
+zcash_voting = { version = "=5.2.0-rc.2", default-features = false, features = ["lrz"] }
+
+voting-crypto-deps = { version = "=0.4.0", default-features = false, features = ["lrz"] }
 
 # HTTP and JSON
 reqwest = { version = "0.12", features = ["blocking", "json"] }
@@ -24,32 +27,33 @@ base64 = "0.22"
 hex = "0.4"
 
 # Round ID derivation (Poseidon hash)
-halo2_gadgets = "=0.5.0"
+halo2_gadgets = "=0.6.0"
 
 # Blake2b (used by the voter throughput fixture)
 blake2b_simd = "1"
 
 # ElGamal on Pallas
-pasta_curves = "0.5"
-ff = "0.13"
-group = "0.13"
+pasta_curves = "0.6"
+ff = "0.14"
+group = "0.14"
 
 # ECIES encryption (matching Go's sdk/crypto/ecies)
 sha2 = "0.10"
 chacha20poly1305 = "0.10"
 
 # RNG
-rand = "0.8"
-rand_core = "0.6"
+rand = "0.10"
+rand_core = "0.10"
 
 # Delegation setup (Merkle tree)
-incrementalmerkletree = "0.8"
+incrementalmerkletree = "0.9"
+vote-tree-incrementalmerkletree = { package = "incrementalmerkletree", version = "0.8" }
 
 [dev-dependencies]
-rand = "0.8"
-rand_chacha = "0.3"
-reddsa = "0.5"
-zcash_keys = { version = "0.16.1", features = ["orchard"] }
-zip32 = "0.2.1"
+rand = "0.10"
+rand_chacha = "0.10"
+reddsa = "0.6"
+zcash_keys = { version = "0.17.0-pre.0", features = ["orchard"] }
+zip32 = "0.3"
 
 [workspace]

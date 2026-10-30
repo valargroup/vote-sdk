@@ -17,12 +17,12 @@ use orchard::{
 };
 use pasta_curves::arithmetic::CurveAffine;
 use pasta_curves::pallas;
-use rand::rngs::OsRng;
 use serde::Deserialize;
 use voting_circuits::delegation::{
     build_delegation_bundle, create_delegation_proof, verify_delegation_proof, ImtProofData,
     ImtProvider, RealNoteInput, SpacedLeafImtProvider,
 };
+use voting_crypto_deps::rand::rngs::OsRng;
 use zcash_voting::VotingHotkey;
 
 /// Far-future vote_end_time (Jan 1 2100 UTC) for long-running E2E tests.

@@ -64,8 +64,12 @@ func rpDecodeBase64(t *testing.T, value string) []byte {
 }
 
 func rpDelegationTX1Message(t *testing.T) *types.MsgDelegateVote {
+	return rpDelegationTX1MessageFromFixture(t, "delegation_tx1_effects_v1.json")
+}
+
+func rpDelegationTX1MessageFromFixture(t *testing.T, filename string) *types.MsgDelegateVote {
 	t.Helper()
-	path := filepath.Join(rpRepoRoot(t), "testutil", "testdata", "delegation_tx1_effects_v1.json")
+	path := filepath.Join(rpRepoRoot(t), "testutil", "testdata", filename)
 	data, err := os.ReadFile(path)
 	require.NoError(t, err, "failed to read fixture %s", path)
 
@@ -106,6 +110,35 @@ func TestRedPallasDelegationValidSig(t *testing.T) {
 
 	err := ante.ValidateVoteTx(s.ctx, msg, s.keeper, opts)
 	require.NoError(t, err, "valid RedPallas signature should pass the ante handler")
+}
+
+func TestRedPallasDelegationNU7Profile(t *testing.T) {
+	for _, relabel := range []bool{false, true} {
+		name := "valid NU7 signature"
+		if relabel {
+			name = "NU7 signature cannot authorize NU6.3 profile"
+		}
+		t.Run(name, func(t *testing.T) {
+			msg := rpDelegationTX1MessageFromFixture(t, "delegation_tx1_effects_v2.json")
+			if relabel {
+				msg.Tx1Effects[0] = 1
+			}
+			s := new(ValidateTestSuite)
+			s.SetT(t)
+			s.SetupTest()
+			s.setupActiveRound()
+			opts := ante.ValidateOpts{
+				SigVerifier: redpallas.NewVerifier(),
+				ZKPVerifier: zkp.NewMockVerifier(),
+			}
+			err := ante.ValidateVoteTx(s.ctx, msg, s.keeper, opts)
+			if relabel {
+				require.ErrorIs(t, err, types.ErrInvalidSignature)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }
 
 // TestRedPallasDelegationWrongSig verifies that a real RedPallas signature

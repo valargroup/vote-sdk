@@ -40,7 +40,7 @@ pub struct Envelope {
 pub fn encrypt(
     recipient_pk: &pallas::Point,
     plaintext: &[u8],
-    rng: &mut impl rand_core::RngCore,
+    rng: &mut impl rand_core::Rng,
 ) -> Envelope {
     // Generate ephemeral scalar
     let e = pallas::Scalar::random(rng);
@@ -84,7 +84,7 @@ pub fn encrypt(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::rngs::OsRng;
+    use voting_crypto_deps::rand::rngs::OsRng;
 
     #[test]
     fn encrypt_produces_valid_envelope() {

@@ -295,13 +295,13 @@ fn voting_flow_zcash_voting_path() {
             .expect("store_delegation_data");
         }
 
-        // VAN position is global tree index captured before delegation.
-        db.store_van_position(
-            &round_id_hex,
-            0, // bundle_index
-            u32::try_from(van_position).expect("van_position fits in u32"),
-        )
-        .expect("store_van_position");
+        // Seed the confirmed position in this isolated in-memory fixture. Real
+        // clients persist it through the SDK chain-submission lifecycle.
+        let rows = db.conn().execute(
+            "UPDATE bundles SET van_leaf_position = ?1 WHERE round_id = ?2 AND wallet_id = ?3 AND bundle_index = 0",
+            (i64::try_from(van_position).expect("position fits SQLite"), &round_id_hex, "test"),
+        ).expect("seed confirmed delegation position");
+        assert_eq!(rows, 1);
         db
     };
 
@@ -416,8 +416,14 @@ fn voting_flow_zcash_voting_path() {
         16,
         "should have 16 encrypted shares"
     );
-    assert_eq!(bundle.share_payloads.len(), 16);
-    assert_eq!(bundle.share_payloads[0].shares_hash.len(), 32);
+    let payloads = zcash_voting::share::recover_payloads(
+        &zcash_voting::vote::recovery_bundle(&db, &round_id_hex, 0, draft.proposal_id)
+            .expect("load vote recovery")
+            .expect("vote was persisted"),
+    )
+    .expect("recover public share payloads");
+    assert_eq!(payloads.len(), 16);
+    assert_eq!(payloads[0].shares_hash.len(), 32);
 
     // ---- Step 7b: Local proof verification (same binary = same VK) ----
     {
@@ -551,7 +557,6 @@ fn voting_flow_zcash_voting_path() {
     );
 
     // ---- Step 9: Validate share payloads built by the public API ----
-    let payloads = bundle.share_payloads.clone();
     assert_eq!(payloads.len(), 16, "should have 16 share payloads");
     let shares_hash = payloads[0].shares_hash.clone();
     for (i, p) in payloads.iter().enumerate() {
@@ -601,7 +606,18 @@ fn voting_flow_zcash_voting_path() {
         16,
         "circuit always produces 16 encrypted shares"
     );
-    assert_eq!(single_bundle.share_payloads[0].shares_hash.len(), 32);
+    let single_payloads = zcash_voting::share::recover_payloads(
+        &zcash_voting::vote::recovery_bundle(
+            &single_share_db,
+            &round_id_hex,
+            0,
+            single_draft.proposal_id,
+        )
+        .expect("load single-share recovery")
+        .expect("vote was persisted"),
+    )
+    .expect("recover single-share payloads");
+    assert_eq!(single_payloads[0].shares_hash.len(), 32);
 
     // Verify the proof locally — the circuit must accept [num_ballots, 0, ..., 0] shares
     {
@@ -655,7 +671,6 @@ fn voting_flow_zcash_voting_path() {
         log_step("Step 9b", "single-share local verification PASSED");
     }
 
-    let single_payloads = &single_bundle.share_payloads;
     assert_eq!(
         single_payloads.len(),
         1,
