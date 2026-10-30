@@ -44,9 +44,3 @@ that could re-enable MPTCP after reboot.
 
 For failures, inspect `sudo journalctl -u svoted -u caddy -n 100 --no-pager`.
 Container deployments need separate network-namespace handling.
-
-## Kernel fix
-
-**TBD.** Package and reboot instructions will be added when the Ubuntu fix is
-available. Disabling MPTCP is an interim mitigation, not the kernel fix.
-See the [Ubuntu advisory](https://ubuntu.com/security/CVE-2026-98432).
