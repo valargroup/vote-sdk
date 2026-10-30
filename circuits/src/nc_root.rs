@@ -10,7 +10,7 @@
 //!   - u8 parent_count
 //!   - parent_count × Optional<H>: same encoding
 
-use incrementalmerkletree::{Hashable, Level};
+use voting_crypto_deps::incrementalmerkletree::{Hashable, Level};
 use voting_crypto_deps::orchard::tree::MerkleHashOrchard;
 
 /// Ironwood note commitment tree depth.

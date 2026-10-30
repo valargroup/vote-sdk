@@ -18,8 +18,11 @@ The `v1.8.0` plan expands delegation signature verification to accept the
 version-2 V6/NU7 authorization profile. All validators must switch together:
 an old validator rejects version 2 while the new binary accepts it. Registering
 the handler does not schedule a plan or deploy the binary. No store migration
-is needed, and existing rounds, proofs, verifying keys, and version-1
-V6/NU6.3 authorizations remain valid.
+is needed, and version-1 V6/NU6.3 authorizations remain valid. The release also
+aligns the proof and test-client dependency graphs with Common 4 and
+voting-circuits 0.14 so both signing profiles use the library transaction
+digester. Validate existing proof fixtures and complete the round lifecycle
+in rehearsal before scheduling the upgrade.
 
 Wallets may send version 2 only after the target vote chain has upgraded.
 They must construct a V6 transaction with branch ID `0x77190ad9` and set the

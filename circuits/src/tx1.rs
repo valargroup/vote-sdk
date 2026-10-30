@@ -6,22 +6,26 @@
 //! single-action Ironwood bundle. Version 2 preserves that layout and uses the
 //! NU7 branch ID instead. The version is part of the signed profile.
 
-mod nu7;
+#[cfg(feature = "upstream")]
+use lrz_zcash_protocol as protocol;
+use voting_crypto_deps::{orchard, zcash_primitives as primitives};
+#[cfg(feature = "zakura")]
+use zcash_protocol as protocol;
 
 use std::{fmt, io::Cursor};
 
 use nonempty::NonEmpty;
-use voting_crypto_deps::orchard::{
+use orchard::{
     bundle::{Bundle, BundleVersion, EffectsOnly, Flags, TxVersion as OrchardTxVersion},
     Anchor,
 };
-use voting_crypto_deps::zcash_primitives::transaction::{
+use primitives::transaction::{
     self,
     components::orchard::read_action_without_auth,
     txid::{to_txid, TxIdDigester},
     TransactionDigest, TxDigests, TxVersion,
 };
-use zcash_protocol::{
+use protocol::{
     consensus::{BlockHeight, BranchId},
     value::ZatBalance,
 };
@@ -80,9 +84,11 @@ pub fn sighash(effects: &[u8]) -> Result<[u8; 32], Error> {
             actual: effects.len(),
         });
     }
-    if !matches!(effects[0], EFFECTS_VERSION | NU7_EFFECTS_VERSION) {
-        return Err(Error::UnsupportedVersion { actual: effects[0] });
-    }
+    let branch_id = match effects[0] {
+        EFFECTS_VERSION => BranchId::Nu6_3,
+        NU7_EFFECTS_VERSION => BranchId::Nu7,
+        actual => return Err(Error::UnsupportedVersion { actual }),
+    };
 
     let actions = (0..ACTION_COUNT)
         .map(|index| {
@@ -118,15 +124,11 @@ pub fn sighash(effects: &[u8]) -> Result<[u8; 32], Error> {
         .map_err(|err| Error::InvalidBundle(err.to_string()))?
         .0;
 
-    if effects[0] == NU7_EFFECTS_VERSION {
-        return Ok(nu7::sighash(&ironwood_digest));
-    }
-
     let digester = TxIdDigester;
     let header_digest = <TxIdDigester as TransactionDigest<transaction::Authorized>>::digest_header(
         &digester,
         TxVersion::V6,
-        BranchId::Nu6_3,
+        branch_id,
         0,
         BlockHeight::from_u32(0),
     );
@@ -138,7 +140,7 @@ pub fn sighash(effects: &[u8]) -> Result<[u8; 32], Error> {
         ironwood_digest: Some(ironwood_digest),
     };
 
-    Ok(to_txid(TxVersion::V6, BranchId::Nu6_3, &digests).into())
+    Ok(to_txid(TxVersion::V6, branch_id, &digests).into())
 }
 
 #[cfg(test)]
@@ -167,6 +169,11 @@ mod tests {
             "../../testutil/testdata/delegation_tx1_effects_v1.json"
         ))
         .expect("fixture is valid JSON")
+    }
+
+    #[test]
+    fn protocol_dependency_uses_the_assigned_nu7_branch_id() {
+        assert_eq!(u32::from(BranchId::Nu7), 0x7719_0ad9);
     }
 
     #[test]

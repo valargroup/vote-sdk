@@ -8,7 +8,7 @@
 use group::ff::Field;
 use group::{Group, GroupEncoding};
 use pasta_curves::pallas;
-use rand_core::RngCore;
+use rand_core::Rng;
 
 /// Size of a compressed Pallas point (32 bytes).
 pub const COMPRESSED_POINT_SIZE: usize = 32;
@@ -31,7 +31,7 @@ pub struct Ciphertext {
 }
 
 /// Generate a keypair: sk random, pk = sk * G.
-pub fn keygen(rng: &mut impl RngCore) -> (SecretKey, PublicKey) {
+pub fn keygen(rng: &mut impl Rng) -> (SecretKey, PublicKey) {
     let sk = pallas::Scalar::random(rng);
     let pk = pallas::Point::generator() * sk;
     (SecretKey(sk), PublicKey(pk))
@@ -47,7 +47,7 @@ fn encrypt_core(pk: &PublicKey, v: u64, r: pallas::Scalar) -> Ciphertext {
 }
 
 /// Encrypt value v under pk with fresh randomness from rng.
-pub fn encrypt(pk: &PublicKey, v: u64, rng: &mut impl RngCore) -> Ciphertext {
+pub fn encrypt(pk: &PublicKey, v: u64, rng: &mut impl Rng) -> Ciphertext {
     let r = pallas::Scalar::random(rng);
     encrypt_core(pk, v, r)
 }

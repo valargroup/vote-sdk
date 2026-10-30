@@ -27,7 +27,8 @@ and must never hold funds. Only the resulting verification key, digest, and
 signature are serialized. Generating a fresh signature changes its bytes but
 does not change the expected digest.
 
-The NU7 composition in the chain exists because its pinned protocol dependency
-still assigns the proposed `0xffffffff` ID to `BranchId::Nu7`. It uses the
-assigned ID without updating the proof circuits or their verifying keys.
-The frozen Common 4 vector tests agreement across that dependency boundary.
+The transaction module uses the published library transaction digester for
+both profiles; it only selects the consensus branch from the payload version.
+The dependency graphs are aligned with voting-crypto-deps 0.4.0, which uses
+Common 4 in the default backend and the matching upstream libraries in the
+other backend. Both backend families must match these frozen vectors.
