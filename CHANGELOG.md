@@ -8,6 +8,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Update the Docker Rust builder to 1.97 so it supports the locked cryptography dependencies.
+
 - Disable MPTCP persistently during Linux validator setup before package
   installation or service startup, and stop if the setting cannot be applied.
   Document the Linux MPTCP mitigation for CVE-2026-98432, including validator
