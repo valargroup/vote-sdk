@@ -2789,6 +2789,7 @@ dependencies = [
 [[package]]
 name = "shielded-vote-circuits"
 version = "0.1.0"
+source = "git+https://github.com/valargroup/vote-sdk?rev=22a59d4cab72d0cb7bf77da1bdb874ca72ffe51d#22a59d4cab72d0cb7bf77da1bdb874ca72ffe51d"
 dependencies = [
  "hex",
  "imt-tree 0.5.3",

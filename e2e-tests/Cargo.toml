@@ -6,7 +6,8 @@ description = "Rust E2E API tests for Shielded-Vote voting flow (replaces TypeSc
 
 [dependencies]
 # Keep the independent E2E graph on the upstream backend.
-shielded-vote-circuits = { path = "../circuits", default-features = false, features = ["upstream"] }
+# Freeze the independent upstream reference; the Go node is built from this checkout.
+shielded-vote-circuits = { git = "https://github.com/valargroup/vote-sdk", rev = "22a59d4cab72d0cb7bf77da1bdb874ca72ffe51d", default-features = false, features = ["upstream"] }
 
 orchard = { version = "0.15", features = ["unstable-voting-circuits"] }
 voting-circuits = { version = "=0.12.0", default-features = false, features = ["lrz"] }

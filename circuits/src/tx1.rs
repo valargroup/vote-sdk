@@ -7,6 +7,8 @@
 
 use std::{fmt, io::Cursor};
 
+#[cfg(feature = "upstream")]
+use lrz_zcash_protocol as zcash_protocol;
 use nonempty::NonEmpty;
 use voting_crypto_deps::orchard::{
     bundle::{Bundle, BundleVersion, EffectsOnly, Flags, TxVersion as OrchardTxVersion},
