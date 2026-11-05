@@ -99,6 +99,9 @@ APP_TOML="${HOME_DIR}/config/app.toml"
 sed -i '/\[api\]/,/\[.*\]/ s/enable = false/enable = true/' "$APP_TOML"
 sed -i 's|address = "tcp://localhost:1317"|address = "tcp://0.0.0.0:1317"|' "$APP_TOML"
 sed -i '/\[api\]/,/\[.*\]/ s/enabled-unsafe-cors = false/enabled-unsafe-cors = true/' "$APP_TOML"
+# Stop writing a REST response after 30s so a slow public query can't pin
+# the node indefinitely (the default 0 means no timeout).
+sed -i 's|^rpc-write-timeout = .*|rpc-write-timeout = 30|' "$APP_TOML"
 
 # Archive pruning — keep every block forever.
 sed -i 's|^pruning = ".*"|pruning = "nothing"|' "$APP_TOML"
@@ -108,6 +111,8 @@ sed -i 's|^min-retain-blocks = .*|min-retain-blocks = 0|' "$APP_TOML"
 
 echo "Starting svoted..."
 systemctl daemon-reload
+# Enable so the archive comes back after a droplet reboot or resize.
+systemctl enable svoted
 systemctl start svoted
 
 # ─── Wait for sync ───────────────────────────────────────────────────────────
