@@ -1,11 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ed25519 } from "@noble/curves/ed25519.js";
 import { generateKeypair } from "../api/votingKey";
 import * as chainApi from "../api/chain";
 import {
   buildSignedRoundEntry,
+  base64ToBytes,
+  bytesToBase64,
   normalizeRoundId,
+  sha256Hex,
   validateEaPK,
 } from "./attestEntry";
+import { canonicalPayloadV2 } from "./roundAuth";
 
 vi.mock("../api/chain", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/chain")>();
@@ -54,6 +59,34 @@ describe("buildSignedRoundEntry", () => {
       auth_version: 2,
       ea_pk: EA_PK,
       signatures: [{ key_id: "test-signer", alg: "ed25519" }],
+    });
+    const signature = base64ToBytes(signed.entry.signatures[0].sig);
+    const publicKey = base64ToBytes(key.publicKeyB64);
+    expect(ed25519.verify(signature, canonicalPayloadV2(ROUND_ID, EA_PK, {
+      pir_depth: 20, tier0_layers: 12, tier1_layers: 8, poly_len: 4096,
+    }), publicKey)).toBe(true);
+    expect(ed25519.verify(signature, canonicalPayloadV2(ROUND_ID, EA_PK, {
+      pir_depth: 19, tier0_layers: 12, tier1_layers: 7, poly_len: 4096,
+    }), publicKey)).toBe(false);
+  });
+
+  it("discards a server response that still authorizes the old layout", async () => {
+    const oldPayload = canonicalPayloadV2(ROUND_ID, EA_PK, {
+      pir_depth: 19, tier0_layers: 12, tier1_layers: 7, poly_len: 4096,
+    });
+    vi.mocked(chainApi.attestRoundEntry).mockResolvedValue({
+      canonical_payload_b64: bytesToBase64(oldPayload),
+      signed_payload_hash: await sha256Hex(oldPayload),
+      auth_version: 2,
+    });
+    const signed = await buildSignedRoundEntry(ROUND_ID, EA_PK, generateKeypair("test-signer"));
+    expect(signed.usedLocalFallback).toBe(true);
+    expect(signed.signedPayloadHash).not.toBe(await sha256Hex(oldPayload));
+    expect(chainApi.attestRoundEntry).toHaveBeenCalledWith({
+      round_id: ROUND_ID,
+      ea_pk: EA_PK,
+      auth_version: 2,
+      pir_layout: { pir_depth: 20, tier0_layers: 12, tier1_layers: 8, poly_len: 4096 },
     });
   });
 
