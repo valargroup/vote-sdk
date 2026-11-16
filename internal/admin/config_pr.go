@@ -661,12 +661,11 @@ func mergeConfigPREntry(dynamicContent, staticContent []byte, roundID string, en
 	mergedExisting := len(existingEntries) > 0
 	cfg.Rounds[roundID] = entry
 
-	// Mixed v1/v2 files remain valid during migration: VerifyEntrySignatures
-	// dispatches on each entry's auth_version.
-	for roundID, entry := range cfg.Rounds {
-		if !votingconfig.VerifyEntrySignatures(roundID, entry, staticCfg.TrustedKeys, cfg.PIRLayout) {
-			return nil, false, nil, fmt.Errorf("round %s: no valid signature", roundID)
-		}
+	// Authenticate the entry being changed. Unchanged historical rounds may
+	// still bind an older PIR layout; preserve them for wallets to authenticate
+	// individually rather than blocking a newly signed round's PR.
+	if !votingconfig.VerifyEntrySignatures(roundID, entry, staticCfg.TrustedKeys, cfg.PIRLayout) {
+		return nil, false, nil, fmt.Errorf("round %s: no valid signature", roundID)
 	}
 
 	data, err := json.MarshalIndent(&cfg, "", "  ")
