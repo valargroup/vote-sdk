@@ -48,6 +48,7 @@ function PublishedSnapshotCard() {
   const {
     precomputedBaseURL,
     zcashNetwork,
+    publishedConfigLoaded,
   } = useUIConfig();
   const [servedHeight, setServedHeight] = useState<number | null>(null);
   const [activeRoundHeights, setActiveRoundHeights] = useState<number[]>([]);
@@ -123,9 +124,11 @@ function PublishedSnapshotCard() {
     }
   }, [precomputedBase, zcashNetwork, parsedHeight, validateManifest]);
 
+  // The PIR URL comes from voting-config, so read the served height only after it loads.
   useEffect(() => {
+    if (!publishedConfigLoaded) return;
     refreshSnapshotHeight();
-  }, [refreshSnapshotHeight]);
+  }, [publishedConfigLoaded, refreshSnapshotHeight]);
 
   const manifest = validation?.manifest ?? null;
   const totalBytes = manifest
@@ -385,6 +388,7 @@ function PublishedSnapshotCard() {
 // controls inside it are gated on uiMode === 'dev' so a misconfigured prod
 // cannot trigger an in-process rebuild.
 function PIRStatusCard({ devControls }: { devControls: boolean }) {
+  const { publishedConfigLoaded } = useUIConfig();
   const [status, setStatus] = useState<SnapshotStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [targetHeight, setTargetHeight] = useState("");
@@ -416,13 +420,15 @@ function PIRStatusCard({ devControls }: { devControls: boolean }) {
     }
   }, []);
 
+  // Before voting-config loads, the prod PIR URL is unknown and the fetch fails.
   useEffect(() => {
+    if (!publishedConfigLoaded) return;
     const init = async () => {
       await fetchStatus();
       await fetchActiveRound();
     };
     init();
-  }, [fetchStatus, fetchActiveRound]);
+  }, [publishedConfigLoaded, fetchStatus, fetchActiveRound]);
 
   useEffect(() => {
     if (status?.phase === "rebuilding") {
