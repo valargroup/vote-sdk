@@ -9,9 +9,9 @@ import {
 // network fetch that could fail or change what the operator is authorizing.
 // Update this constant together with the published config when it changes.
 export const AUTHORIZATION_PIR_LAYOUT: chainApi.PirLayout = {
-  pir_depth: 19,
+  pir_depth: 20,
   tier0_layers: 12,
-  tier1_layers: 7,
+  tier1_layers: 8,
   poly_len: 4096,
 };
 
