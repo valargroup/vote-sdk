@@ -30,6 +30,10 @@ import (
 
 // ValidateOpts configures the validation pipeline.
 type ValidateOpts struct {
+	// DelegationFailure observes rejected proofs after signature verification.
+	// It must never block, panic, or affect the validation result.
+	DelegationFailure func(context.Context, []byte, zkp.DelegationInputs, error)
+
 	// IsRecheck is true when running RecheckTx (mempool re-validation after
 	// a new block commit). When true, expensive signature and ZKP checks are
 	// skipped. Round, proposal, and nullifier checks still run.
@@ -299,18 +303,22 @@ func verifyDelegation(ctx context.Context, msg *types.MsgDelegateVote, k *keeper
 		types.SessionKeyNcRoot, hex.EncodeToString(round.NcRoot),
 		types.SessionKeyNullifierImtRoot, hex.EncodeToString(round.NullifierImtRoot),
 	)
+	inputs := zkp.DelegationInputs{
+		Rk:                  msg.Rk,
+		SignedNoteNullifier: msg.SignedNoteNullifier,
+		CmxNew:              msg.CmxNew,
+		VanCmx:              msg.VanCmx,
+		GovNullifiers:       msg.GovNullifiers,
+		VoteRoundId:         msg.VoteRoundId,
+		NcRoot:              round.NcRoot,
+		NullifierImtRoot:    round.NullifierImtRoot,
+	}
 	if err := observation.observe("delegation_proof", func() error {
-		return opts.ZKPVerifier.VerifyDelegation(msg.Proof, zkp.DelegationInputs{
-			Rk:                  msg.Rk,
-			SignedNoteNullifier: msg.SignedNoteNullifier,
-			CmxNew:              msg.CmxNew,
-			VanCmx:              msg.VanCmx,
-			GovNullifiers:       msg.GovNullifiers,
-			VoteRoundId:         msg.VoteRoundId,
-			NcRoot:              round.NcRoot,
-			NullifierImtRoot:    round.NullifierImtRoot,
-		})
+		return opts.ZKPVerifier.VerifyDelegation(msg.Proof, inputs)
 	}); err != nil {
+		if opts.DelegationFailure != nil {
+			opts.DelegationFailure(ctx, msg.Proof, inputs, err)
+		}
 		return fmt.Errorf("%w: delegation: %v", types.ErrInvalidProof, err)
 	}
 

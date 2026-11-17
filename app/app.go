@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/valargroup/vote-sdk/internal/delegationreplay"
+
 	dbm "github.com/cosmos/cosmos-db"
 
 	clienthelpers "cosmossdk.io/client/v2/helpers"
@@ -86,6 +88,9 @@ type SvoteApp struct {
 
 	// Helper server (set externally by PostSetup, may be nil).
 	helperRef atomic.Pointer[helper.Helper]
+
+	// Diagnostic capture is installed during server startup, outside chain state.
+	delegationCapture atomic.Pointer[delegationreplay.Recorder]
 
 	// checkTxBlockTimeReady is published by Commit after BaseApp rebuilds its
 	// CheckTx state with the latest consensus header.
@@ -261,6 +266,7 @@ func (app *SvoteApp) setAnteHandler(txConfig client.TxConfig) {
 		SigVerifier:          cryptoOpts.SigVerifier,
 		ZKPVerifier:          cryptoOpts.ZKPVerifier,
 		LocalCommittedHeight: app.LastBlockHeight,
+		DelegationFailure:    app.captureDelegationFailure,
 	})
 	if err != nil {
 		panic(err)

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -38,6 +39,9 @@ type DualAnteHandlerOptions struct {
 	// ZKP verifier. Use ProductionOpts().ZKPVerifier in production,
 	// zkp.NewMockVerifier() in tests.
 	ZKPVerifier zkp.Verifier
+
+	// DelegationFailure is a nonblocking diagnostic observer, outside chain state.
+	DelegationFailure func(context.Context, []byte, zkp.DelegationInputs, error)
 
 	// LocalCommittedHeight returns the latest locally committed block height. When
 	// set, it lets CheckTx distinguish a future commitment tree anchor from a
@@ -81,7 +85,7 @@ func NewDualAnteHandler(opts DualAnteHandlerOptions) (sdk.AnteHandler, error) {
 	return func(ctx sdk.Context, tx sdk.Tx, simulate bool) (sdk.Context, error) {
 		// Custom tx path (vote or ceremony).
 		if vtx, ok := tx.(*voteapi.VoteTxWrapper); ok {
-			return handleVoteAnte(ctx, vtx, voteKeeper, sigVerifier, zkpVerifier, committedHeight)
+			return handleVoteAnte(ctx, vtx, voteKeeper, sigVerifier, zkpVerifier, committedHeight, opts.DelegationFailure)
 		}
 
 		msgs := tx.GetMsgs()
@@ -124,6 +128,7 @@ func handleVoteAnte(
 	sigVerifier redpallas.Verifier,
 	zkpVerifier zkp.Verifier,
 	committedHeight func() int64,
+	delegationFailure func(context.Context, []byte, zkp.DelegationInputs, error),
 ) (sdk.Context, error) {
 	// All custom txs (vote + ceremony) are free — infinite gas meter.
 	ctx = ctx.WithGasMeter(storetypes.NewInfiniteGasMeter())
@@ -155,9 +160,10 @@ func handleVoteAnte(
 	}
 
 	opts := voteante.ValidateOpts{
-		IsRecheck:   ctx.IsReCheckTx(),
-		SigVerifier: sigVerifier,
-		ZKPVerifier: zkpVerifier,
+		DelegationFailure: delegationFailure,
+		IsRecheck:         ctx.IsReCheckTx(),
+		SigVerifier:       sigVerifier,
+		ZKPVerifier:       zkpVerifier,
 	}
 
 	start := time.Now()

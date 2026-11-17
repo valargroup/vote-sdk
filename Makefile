@@ -104,7 +104,7 @@ lint:
 
 ## test-unit: ElGamal, keeper, validation, codec, module unit tests (fast, parallel)
 test-unit:
-	go test -count=1 -race -parallel=4 ./crypto/elgamal/... ./x/vote/... ./api/...
+	go test -count=1 -race -parallel=4 ./crypto/elgamal/... ./x/vote/... ./api/... ./internal/delegationreplay/...
 
 ## test-integration: Full ABCI pipeline integration tests (in-process chain)
 test-integration:
@@ -162,7 +162,7 @@ fixtures: circuits
 
 ## test-halo2: Run Go tests that use real Halo2 verification via CGo (requires circuits)
 test-halo2: circuits
-	go test -tags halo2 -count=1 -v ./ffi/zkp/halo2/... ./x/vote/ante/...
+	go test -tags halo2 -count=1 -v ./ffi/zkp/halo2/... ./x/vote/ante/... ./internal/delegationreplay/...
 
 ## test-halo2-ante: Run ante handler tests with real Halo2 verification
 test-halo2-ante: circuits

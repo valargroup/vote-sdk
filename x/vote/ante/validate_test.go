@@ -1483,3 +1483,57 @@ func (s *ValidateTestSuite) TestVerifyDelegation_SessionDerivedInputs() {
 	s.Require().Equal(bytes.Repeat([]byte{0x03}, 32), spy.capturedDelegationInputs.NullifierImtRoot,
 		"NullifierImtRoot should match stored round value")
 }
+
+// Capture observes the exact server inputs only after a signature-valid proof
+// rejection, for both standalone and combined delegation submissions.
+func (s *ValidateTestSuite) TestDelegationFailureCaptureBoundary() {
+	for _, combined := range []bool{false, true} {
+		for _, outcome := range []string{"valid", "signature failure", "proof failure", "recheck"} {
+			s.Run(fmt.Sprintf("combined=%t/%s", combined, outcome), func() {
+				s.SetupTest()
+				s.setupActiveRound()
+				var msg types.VoteMessage = newValidMsgDelegateVote()
+				delegation := msg.(*types.MsgDelegateVote)
+				if combined {
+					composite := newValidMsgDelegateAndCastVoteBatch()
+					msg = composite
+					delegation = composite.Delegation
+				}
+				opts := mockOpts()
+				switch outcome {
+				case "signature failure":
+					opts = failSigOpts()
+				case "proof failure":
+					opts = failZKPOpts()
+				case "recheck":
+					opts = recheckOpts()
+				}
+				calls := 0
+				opts.DelegationFailure = func(ctx context.Context, proof []byte, inputs zkp.DelegationInputs, failure error) {
+					calls++
+					s.Require().Equal(s.ctx, ctx)
+					s.Require().Equal(delegation.Proof, proof)
+					s.Require().Equal(delegation.Rk, inputs.Rk)
+					s.Require().Equal(delegation.GovNullifiers, inputs.GovNullifiers)
+					round, err := s.keeper.GetVoteRound(s.keeper.OpenKVStore(s.ctx), delegation.VoteRoundId)
+					s.Require().NoError(err)
+					s.Require().Equal(round.NcRoot, inputs.NcRoot)
+					s.Require().Equal(round.NullifierImtRoot, inputs.NullifierImtRoot)
+					s.Require().Error(failure)
+				}
+				err := ante.ValidateVoteTx(s.ctx, msg, s.keeper, opts)
+				if outcome == "proof failure" {
+					s.Require().ErrorIs(err, types.ErrInvalidProof)
+					s.Require().Equal(1, calls)
+				} else {
+					s.Require().Zero(calls)
+					if outcome == "signature failure" {
+						s.Require().ErrorIs(err, types.ErrInvalidSignature)
+					} else {
+						s.Require().NoError(err)
+					}
+				}
+			})
+		}
+	}
+}

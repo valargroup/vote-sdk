@@ -19,7 +19,6 @@ import (
 	"github.com/valargroup/vote-sdk/app"
 
 	"github.com/cosmos/cosmos-sdk/client"
-	"github.com/cosmos/cosmos-sdk/client/debug"
 	"github.com/cosmos/cosmos-sdk/client/keys"
 	"github.com/cosmos/cosmos-sdk/client/pruning"
 	"github.com/cosmos/cosmos-sdk/client/rpc"
@@ -168,7 +167,7 @@ func initRootCmd(
 
 	rootCmd.AddCommand(
 		initCommand(basicManager),
-		debug.Cmd(),
+		delegationDebugCmd(),
 		pruning.Cmd(newApp, app.DefaultNodeHome),
 		snapshot.Cmd(newApp),
 		version.NewVersionCommand(),
@@ -187,6 +186,13 @@ func initRootCmd(
 			if svoteAppRef == nil {
 				return errors.New("crypto warm-up: app not initialized")
 			}
+			runCapture, err := svoteAppRef.ConfigureDelegationCapture(svrCtx.Viper.GetString("delegation-replay-dir"))
+			if err != nil {
+				return fmt.Errorf("delegation replay capture: %w", err)
+			}
+			if runCapture != nil {
+				g.Go(func() error { return runCapture(ctx) })
+			}
 			g.Go(func() error {
 				return svoteAppRef.StartCryptoWarmup(ctx, svrCtx.Logger)
 			})
@@ -196,6 +202,7 @@ func initRootCmd(
 			return adminSetup(svrCtx, clientCtx, ctx, g)
 		},
 		AddFlags: func(cmd *cobra.Command) {
+			cmd.Flags().String("delegation-replay-dir", "", "Dedicated absolute directory for bounded rejected-delegation captures (disabled when empty)")
 			addHelperFlags(cmd)
 			addAdminFlags(cmd)
 		},
