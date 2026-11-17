@@ -69,6 +69,16 @@ func (app *SvoteApp) StartCryptoWarmup(ctx context.Context, logger log.Logger) e
 	return nil
 }
 
+// delegationKeyFingerprint gives the vote API the fingerprint of the delegation
+// circuit key this binary verifies with, so it can tell a client built against
+// a different key that it is outdated. available is false in a build without
+// the "halo2" tag, which has a mock verifier and no key; the API then skips the
+// comparison.
+func delegationKeyFingerprint() (fingerprint [voteapi.DelegationKeyFingerprintLen]byte, available bool) {
+	fingerprint, err := halo2.DelegationKeyFingerprint()
+	return fingerprint, err == nil
+}
+
 // CryptoWarmupStatus returns the current crypto readiness snapshot for HTTP
 // handlers and operator status endpoints.
 func (app *SvoteApp) CryptoWarmupStatus() voteapi.CryptoReadinessStatus {

@@ -8,6 +8,16 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Tell outdated apps apart from invalid delegation proofs. Clients may send the
+  fingerprint of their delegation circuit key in an optional
+  `X-Vote-Delegation-Key-V1` header on the two delegation routes; when it
+  differs from the node's key, the vote API answers HTTP 422 with code 50 and
+  an "update the app" message before broadcasting. Clients that omit the header
+  are unaffected. Rejected delegations are logged and reported to Sentry with a
+  `client_delegation_key` label. The check is API-only and does not change
+  which transactions validators accept. See
+  [docs/delegation-key-fingerprint.md](docs/delegation-key-fingerprint.md).
+
 - Update the Docker Rust builder to 1.97 so it supports the locked cryptography dependencies.
 
 - Disable MPTCP persistently during Linux validator setup before package

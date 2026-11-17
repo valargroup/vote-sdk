@@ -76,6 +76,12 @@ type HandlerConfig struct {
 	// CryptoReadiness returns the process-local Halo2 verifier warm-up status.
 	// If nil, transaction submission is treated as ready for compatibility.
 	CryptoReadiness func() CryptoReadinessStatus
+
+	// DelegationKeyFingerprint returns the fingerprint of the delegation
+	// circuit key this node verifies with. It is called only after
+	// CryptoReadiness reports ready, so the key is already generated. If nil,
+	// a client's reported fingerprint is validated for format but not compared.
+	DelegationKeyFingerprint DelegationKeyFingerprintProvider
 }
 
 // Handler provides JSON REST endpoints for vote transaction submission
@@ -85,6 +91,8 @@ type Handler struct {
 	client          *http.Client
 	snapshot        SnapshotConfig
 	cryptoReadiness func() CryptoReadinessStatus
+
+	delegationKeyFingerprint DelegationKeyFingerprintProvider
 }
 
 // NewHandler creates a new REST API handler.
@@ -106,6 +114,8 @@ func NewHandler(cfg HandlerConfig) *Handler {
 		client:          client,
 		snapshot:        cfg.Snapshot,
 		cryptoReadiness: cfg.CryptoReadiness,
+
+		delegationKeyFingerprint: cfg.DelegationKeyFingerprint,
 	}
 }
 
@@ -178,7 +188,11 @@ func (h *Handler) handleDelegateVote(w http.ResponseWriter, r *http.Request) {
 	if !h.decodeAndValidate(w, r, msg) {
 		return
 	}
-	h.broadcastVoteTx(r.Context(), w, msg)
+	clientKey, proceed := h.checkClientDelegationKey(w, r, msg)
+	if !proceed {
+		return
+	}
+	h.broadcastVoteTx(r.Context(), w, msg, clientKey)
 }
 
 func (h *Handler) handleCastVote(w http.ResponseWriter, r *http.Request) {
@@ -189,7 +203,7 @@ func (h *Handler) handleCastVote(w http.ResponseWriter, r *http.Request) {
 	if !h.decodeAndValidate(w, r, msg) {
 		return
 	}
-	h.broadcastVoteTx(r.Context(), w, msg)
+	h.broadcastVoteTx(r.Context(), w, msg, clientDelegationKeyNotApplicable)
 }
 
 func (h *Handler) handleCastVoteBatch(w http.ResponseWriter, r *http.Request) {
@@ -200,7 +214,7 @@ func (h *Handler) handleCastVoteBatch(w http.ResponseWriter, r *http.Request) {
 	if !h.decodeAndValidateCanonicalJSON(w, r, msg) {
 		return
 	}
-	h.broadcastVoteTx(r.Context(), w, msg)
+	h.broadcastVoteTx(r.Context(), w, msg, clientDelegationKeyNotApplicable)
 }
 
 func (h *Handler) handleDelegateAndCastVoteBatch(w http.ResponseWriter, r *http.Request) {
@@ -211,7 +225,11 @@ func (h *Handler) handleDelegateAndCastVoteBatch(w http.ResponseWriter, r *http.
 	if !h.decodeAndValidateCanonicalJSON(w, r, msg) {
 		return
 	}
-	h.broadcastVoteTx(r.Context(), w, msg)
+	clientKey, proceed := h.checkClientDelegationKey(w, r, msg)
+	if !proceed {
+		return
+	}
+	h.broadcastVoteTx(r.Context(), w, msg, clientKey)
 }
 
 func (h *Handler) handleRevealShare(w http.ResponseWriter, r *http.Request) {
@@ -222,7 +240,7 @@ func (h *Handler) handleRevealShare(w http.ResponseWriter, r *http.Request) {
 	if !h.decodeAndValidate(w, r, msg) {
 		return
 	}
-	h.broadcastVoteTx(r.Context(), w, msg)
+	h.broadcastVoteTx(r.Context(), w, msg, clientDelegationKeyNotApplicable)
 }
 
 // handleReadiness exposes the process-local crypto warm-up state for operators
@@ -301,8 +319,10 @@ func (h *Handler) handleSnapshotData(w http.ResponseWriter, r *http.Request) {
 type txStatusResult struct {
 	Height string
 	Code   uint32
-	Log    string
-	Events []abciEvent
+	// Codespace names the module that owns Code; empty for success.
+	Codespace string
+	Log       string
+	Events    []abciEvent
 }
 
 type abciEvent struct {
@@ -366,9 +386,10 @@ func (h *Handler) queryTxByHash(ctx context.Context, txHash string) (*txStatusRe
 		Result *struct {
 			Height   string `json:"height"`
 			TxResult struct {
-				Code   uint32      `json:"code"`
-				Log    string      `json:"log"`
-				Events []abciEvent `json:"events"`
+				Code      uint32      `json:"code"`
+				Codespace string      `json:"codespace"`
+				Log       string      `json:"log"`
+				Events    []abciEvent `json:"events"`
 			} `json:"tx_result"`
 		} `json:"result"`
 		Error *struct {
@@ -394,10 +415,11 @@ func (h *Handler) queryTxByHash(ctx context.Context, txHash string) (*txStatusRe
 	// strings. Preserve them exactly; content-based Base64 detection corrupts
 	// valid values that happen to resemble encoded data.
 	return &txStatusResult{
-		Height: rpcResp.Result.Height,
-		Code:   rpcResp.Result.TxResult.Code,
-		Log:    rpcResp.Result.TxResult.Log,
-		Events: rpcResp.Result.TxResult.Events,
+		Height:    rpcResp.Result.Height,
+		Code:      rpcResp.Result.TxResult.Code,
+		Codespace: rpcResp.Result.TxResult.Codespace,
+		Log:       rpcResp.Result.TxResult.Log,
+		Events:    rpcResp.Result.TxResult.Events,
 	}, nil
 }
 
@@ -446,13 +468,24 @@ type BroadcastResult struct {
 	Code        uint32 `json:"code"`
 	Log         string `json:"log,omitempty"`
 	BatchDigest string `json:"batch_digest,omitempty"`
+
+	// codespace names the module that owns Code. It is kept for the server's
+	// own failure classification and is deliberately not part of the JSON:
+	// clients reject unknown fields in this response.
+	codespace string
 }
 
 // broadcastVoteTx encodes a vote message, broadcasts it to the local CometBFT
 // node, and translates the result into the REST response contract. Ambiguous
 // transport failures are reconciled by cometBroadcastTxSyncWithRetry before an
 // HTTP 502 is returned to the client.
-func (h *Handler) broadcastVoteTx(ctx context.Context, w http.ResponseWriter, msg types.VoteMessage) {
+//
+// clientKey labels the delegation circuit key the client reported on a
+// delegation route (clientDelegationKeyNotApplicable elsewhere). When such a
+// request is rejected for an invalid zero-knowledge proof, the rejection is
+// logged and reported to Sentry with that label, so an outdated client can be
+// told apart from a genuinely bad proof.
+func (h *Handler) broadcastVoteTx(ctx context.Context, w http.ResponseWriter, msg types.VoteMessage, clientKey clientDelegationKey) {
 	raw, err := EncodeVoteTx(msg)
 	if err != nil {
 		sentry.CaptureErr(err, map[string]string{
@@ -480,15 +513,20 @@ func (h *Handler) broadcastVoteTx(ctx context.Context, w http.ResponseWriter, ms
 		writeError(w, http.StatusBadGateway, fmt.Sprintf("broadcast failed: %v", err))
 		return
 	}
-	if batch, ok := msg.(*types.MsgCastVoteBatch); ok {
-		result.BatchDigest = hex.EncodeToString(types.ComputeCastVoteBatchSighash(batch))
-	}
-	if composite, ok := msg.(*types.MsgDelegateAndCastVoteBatch); ok {
-		result.BatchDigest = hex.EncodeToString(types.ComputeDelegateAndCastVoteBatchSighash(composite))
-	}
+	result.BatchDigest = batchDigestHex(msg)
 
 	if result.Code != 0 {
 		log.Printf("[shielded-vote-api] CheckTx rejected (code %d): %s", result.Code, result.Log)
+		if clientKey != clientDelegationKeyNotApplicable && isInvalidProofRejection(result) {
+			reportDelegationFailure(delegationFailure{
+				handler:   "broadcastVoteTx",
+				stage:     "invalid_proof",
+				msgType:   fmt.Sprintf("%T", msg),
+				txHash:    result.TxHash,
+				clientKey: clientKey,
+				cause:     types.ErrInvalidProof.Wrap("delegation rejected by the chain"),
+			})
+		}
 		writeJSON(w, http.StatusUnprocessableEntity, result)
 		return
 	}
@@ -581,9 +619,10 @@ func (h *Handler) cometBroadcastTxSync(ctx context.Context, txBytes []byte, txHa
 
 	var rpcResp struct {
 		Result struct {
-			Code uint32 `json:"code"`
-			Hash string `json:"hash"`
-			Log  string `json:"log"`
+			Code      uint32 `json:"code"`
+			Codespace string `json:"codespace"`
+			Hash      string `json:"hash"`
+			Log       string `json:"log"`
 		} `json:"result"`
 		Error *struct {
 			Code    int    `json:"code"`
@@ -634,9 +673,10 @@ func (h *Handler) cometBroadcastTxSync(ctx context.Context, txBytes []byte, txHa
 	}
 
 	return &BroadcastResult{
-		TxHash: rpcResp.Result.Hash,
-		Code:   rpcResp.Result.Code,
-		Log:    rpcResp.Result.Log,
+		TxHash:    rpcResp.Result.Hash,
+		Code:      rpcResp.Result.Code,
+		Log:       rpcResp.Result.Log,
+		codespace: rpcResp.Result.Codespace,
 	}, nil
 }
 
@@ -744,9 +784,10 @@ func txHashHex(txBytes []byte) string {
 
 func broadcastResultFromTxStatus(txHash string, status *txStatusResult) *BroadcastResult {
 	return &BroadcastResult{
-		TxHash: txHash,
-		Code:   status.Code,
-		Log:    status.Log,
+		TxHash:    txHash,
+		Code:      status.Code,
+		Log:       status.Log,
+		codespace: status.Codespace,
 	}
 }
 

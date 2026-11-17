@@ -63,6 +63,16 @@ var (
 	ErrCoordinatorAlreadyApproved   = errors.Register(ModuleName, 47, "coordinator action already approved")
 	ErrUnsupportedCoordinatorAction = errors.Register(ModuleName, 48, "unsupported coordinator action")
 	ErrInvalidCoordinatorAction     = errors.Register(ModuleName, 49, "invalid coordinator action")
+
+	// ErrClientCircuitKeyMismatch reports that a client built its delegation
+	// proof with a different delegation circuit key than this node verifies
+	// with, so the proof cannot verify and the client must be updated.
+	//
+	// It is returned only by the HTTP API, which compares the key fingerprint a
+	// client sends with the node's own before broadcasting. Consensus never
+	// returns it: CheckTx, proposal validation, and block execution do not see
+	// the client's fingerprint and are unaffected by it.
+	ErrClientCircuitKeyMismatch = errors.Register(ModuleName, 50, "client delegation circuit key does not match this chain")
 )
 
 // CommitmentRootUnavailableError identifies a reveal-share anchor whose

@@ -22,3 +22,10 @@ func NewVerifier() zkp.Verifier {
 func WarmVerifierCaches() error {
 	return nil
 }
+
+// DelegationKeyFingerprint always returns ErrDelegationKeyFingerprintUnavailable
+// when built without the "halo2" tag: the mock verifier has no delegation
+// circuit key. Callers skip the client key comparison in that case.
+func DelegationKeyFingerprint() ([DelegationKeyFingerprintLen]byte, error) {
+	return [DelegationKeyFingerprintLen]byte{}, ErrDelegationKeyFingerprintUnavailable
+}
