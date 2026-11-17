@@ -4,6 +4,29 @@ This document covers error tracking and diagnostic tooling for `svoted`,
 including the ABCI consensus handlers, the public vote API, and the
 Helper server.
 
+## Delegation proof failures
+
+When a delegation reaches proof verification and is rejected, the vote module
+emits `delegation proof verification failed` at error level. The structured
+record separates the exact verification inputs by their source:
+
+- `user_provided_fields`: `rk`, `signed_note_nullifier`, `cmx_new`, `van_cmx`,
+  `gov_nullifiers`, and `vote_round_id`, all supplied by the submitting client.
+- `server_provided_fields`: `nc_root` and `nullifier_imt_root`, read from the
+  selected round's state.
+
+Byte values use hexadecimal encoding; governance nullifiers are an array of
+hexadecimal strings. The record includes the verifier error. It applies to both
+standalone delegations and the delegation in a combined delegation/cast request.
+Successful verification, earlier validation or signature failures, and mempool
+rechecks do not emit this input record.
+
+Proof bytes, signatures, and private circuit inputs are not included. These
+verifier-visible commitments and nullifiers can still link voting activity;
+handle the node logs accordingly. This log helps compare submitted inputs with
+server roots, but cannot identify a private circuit condition or replay the
+rejected proof without obtaining its bytes separately.
+
 ## Prometheus metrics
 
 `svoted` exposes Prometheus text on the REST API listener at:

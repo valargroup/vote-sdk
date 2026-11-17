@@ -267,6 +267,10 @@ func TestValidateTestSuite(t *testing.T) {
 // SetupTest creates a fresh in-memory KV store, vote keeper, and SDK context
 // with a deterministic block time before each test case.
 func (s *ValidateTestSuite) SetupTest() {
+	s.setupWithLogger(log.NewNopLogger())
+}
+
+func (s *ValidateTestSuite) setupWithLogger(logger log.Logger) {
 	// Configure bech32 prefixes for validator address parsing.
 	cfg := sdk.GetConfig()
 	cfg.SetBech32PrefixForValidator("svvaloper", "svvaloperpub")
@@ -281,7 +285,7 @@ func (s *ValidateTestSuite) SetupTest() {
 		ProposerAddress: testProposerConsAddr,
 	})
 	storeService := runtime.NewKVStoreService(key)
-	s.keeper = keeper.NewKeeper(storeService, svtest.TestAuthority, log.NewNopLogger(), mockStakingKeeper{}, nil)
+	s.keeper = keeper.NewKeeper(storeService, svtest.TestAuthority, logger, mockStakingKeeper{}, nil)
 }
 
 // ---------------------------------------------------------------------------

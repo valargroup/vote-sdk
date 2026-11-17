@@ -285,32 +285,38 @@ func verifyDelegation(ctx context.Context, msg *types.MsgDelegateVote, k *keeper
 	}
 
 	// ZKP #1: delegation proof.
-	govNullifiersHex := make([]string, len(msg.GovNullifiers))
-	for i, n := range msg.GovNullifiers {
-		govNullifiersHex[i] = hex.EncodeToString(n)
+	inputs := zkp.DelegationInputs{
+		Rk:                  msg.Rk,
+		SignedNoteNullifier: msg.SignedNoteNullifier,
+		CmxNew:              msg.CmxNew,
+		VanCmx:              msg.VanCmx,
+		GovNullifiers:       msg.GovNullifiers,
+		VoteRoundId:         msg.VoteRoundId,
+		NcRoot:              round.NcRoot,
+		NullifierImtRoot:    round.NullifierImtRoot,
 	}
-	k.Logger().Info("VerifyDelegation inputs",
-		"rk", hex.EncodeToString(msg.Rk),
-		"signed_note_nullifier", hex.EncodeToString(msg.SignedNoteNullifier),
-		"cmx_new", hex.EncodeToString(msg.CmxNew),
-		"van_cmx", hex.EncodeToString(msg.VanCmx),
-		"gov_nullifiers", govNullifiersHex,
-		"vote_round_id", hex.EncodeToString(msg.VoteRoundId),
-		types.SessionKeyNcRoot, hex.EncodeToString(round.NcRoot),
-		types.SessionKeyNullifierImtRoot, hex.EncodeToString(round.NullifierImtRoot),
-	)
 	if err := observation.observe("delegation_proof", func() error {
-		return opts.ZKPVerifier.VerifyDelegation(msg.Proof, zkp.DelegationInputs{
-			Rk:                  msg.Rk,
-			SignedNoteNullifier: msg.SignedNoteNullifier,
-			CmxNew:              msg.CmxNew,
-			VanCmx:              msg.VanCmx,
-			GovNullifiers:       msg.GovNullifiers,
-			VoteRoundId:         msg.VoteRoundId,
-			NcRoot:              round.NcRoot,
-			NullifierImtRoot:    round.NullifierImtRoot,
-		})
+		return opts.ZKPVerifier.VerifyDelegation(msg.Proof, inputs)
 	}); err != nil {
+		govNullifiersHex := make([]string, len(inputs.GovNullifiers))
+		for i, n := range inputs.GovNullifiers {
+			govNullifiersHex[i] = hex.EncodeToString(n)
+		}
+		k.Logger().Error("delegation proof verification failed",
+			"user_provided_fields", map[string]interface{}{
+				"rk":                    hex.EncodeToString(inputs.Rk),
+				"signed_note_nullifier": hex.EncodeToString(inputs.SignedNoteNullifier),
+				"cmx_new":               hex.EncodeToString(inputs.CmxNew),
+				"van_cmx":               hex.EncodeToString(inputs.VanCmx),
+				"gov_nullifiers":        govNullifiersHex,
+				"vote_round_id":         hex.EncodeToString(inputs.VoteRoundId),
+			},
+			"server_provided_fields", map[string]string{
+				types.SessionKeyNcRoot:           hex.EncodeToString(inputs.NcRoot),
+				types.SessionKeyNullifierImtRoot: hex.EncodeToString(inputs.NullifierImtRoot),
+			},
+			"error", err.Error(),
+		)
 		return fmt.Errorf("%w: delegation: %v", types.ErrInvalidProof, err)
 	}
 
