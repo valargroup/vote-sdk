@@ -1,11 +1,34 @@
 package cmd
 
 import (
+	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
 	"github.com/valargroup/vote-sdk/ffi/zkp/halo2"
 )
+
+func TestDelegationReplayConfigControlsNodeHomeCapture(t *testing.T) {
+	nodeHome := filepath.Join(t.TempDir(), "custom-node-home")
+	for _, tc := range []struct {
+		name   string
+		config string
+		want   string
+	}{
+		{"existing config without setting", "[vote]\n", ""},
+		{"explicitly disabled", "[vote]\ndelegation_replay_capture = false\n", ""},
+		{"enabled", "[vote]\ndelegation_replay_capture = true\n", filepath.Join(nodeHome, "debug")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			config := viper.New()
+			config.SetConfigType("toml")
+			require.NoError(t, config.ReadConfig(strings.NewReader(tc.config)))
+			require.Equal(t, tc.want, delegationReplayDirectory(config, nodeHome))
+		})
+	}
+}
 
 func TestReplayDelegationRequiresRealVerifier(t *testing.T) {
 	if !halo2.IsMock {

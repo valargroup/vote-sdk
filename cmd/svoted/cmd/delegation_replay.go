@@ -3,12 +3,23 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 
 	"github.com/cosmos/cosmos-sdk/client/debug"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"github.com/valargroup/vote-sdk/ffi/zkp/halo2"
 	"github.com/valargroup/vote-sdk/internal/delegationreplay"
 )
+
+// An omitted setting in an existing app.toml also leaves capture disabled.
+// Use the server's resolved node home so --home is honored consistently.
+func delegationReplayDirectory(config *viper.Viper, nodeHome string) string {
+	if !config.GetBool("vote.delegation_replay_capture") {
+		return ""
+	}
+	return filepath.Join(nodeHome, "debug")
+}
 
 func delegationDebugCmd() *cobra.Command {
 	cmd := debug.Cmd()

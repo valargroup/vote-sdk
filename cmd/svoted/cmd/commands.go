@@ -54,9 +54,10 @@ func initCometBFTConfig() *cmtcfg.Config {
 
 // VoteConfig holds the [vote] section of app.toml.
 type VoteConfig struct {
-	EASkPath     string `mapstructure:"ea_sk_path"`
-	PallasSkPath string `mapstructure:"pallas_sk_path"`
-	CometRPC     string `mapstructure:"comet_rpc"`
+	EASkPath                string `mapstructure:"ea_sk_path"`
+	PallasSkPath            string `mapstructure:"pallas_sk_path"`
+	CometRPC                string `mapstructure:"comet_rpc"`
+	DelegationReplayCapture bool   `mapstructure:"delegation_replay_capture"`
 }
 
 // CustomAppConfig embeds the standard server config and adds [vote].
@@ -80,6 +81,10 @@ pallas_sk_path = "{{ .Vote.PallasSkPath }}"
 
 # CometBFT RPC endpoint. Adjust to the node's RPC port.
 comet_rpc = "{{ .Vote.CometRPC }}"
+
+# Retain bounded rejected delegation proofs under the node home directory's debug/.
+# Disabled by default; bundles contain verifier-visible voting data.
+delegation_replay_capture = {{ .Vote.DelegationReplayCapture }}
 `
 
 const adminConfigTemplate = `
@@ -186,7 +191,7 @@ func initRootCmd(
 			if svoteAppRef == nil {
 				return errors.New("crypto warm-up: app not initialized")
 			}
-			runCapture, err := svoteAppRef.ConfigureDelegationCapture(svrCtx.Viper.GetString("delegation-replay-dir"))
+			runCapture, err := svoteAppRef.ConfigureDelegationCapture(delegationReplayDirectory(svrCtx.Viper, svrCtx.Config.RootDir))
 			if err != nil {
 				return fmt.Errorf("delegation replay capture: %w", err)
 			}
@@ -202,7 +207,6 @@ func initRootCmd(
 			return adminSetup(svrCtx, clientCtx, ctx, g)
 		},
 		AddFlags: func(cmd *cobra.Command) {
-			cmd.Flags().String("delegation-replay-dir", "", "Dedicated absolute directory for bounded rejected-delegation captures (disabled when empty)")
 			addHelperFlags(cmd)
 			addAdminFlags(cmd)
 		},

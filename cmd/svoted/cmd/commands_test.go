@@ -60,6 +60,8 @@ func TestInitCommandSetsBlockLimitAtConfiguredGenesisPath(t *testing.T) {
 	appConfig, err := os.ReadFile(filepath.Join(home, "config", "app.toml"))
 	require.NoError(t, err)
 	require.Contains(t, string(appConfig), "rpc-read-timeout = 15")
+	require.Contains(t, string(appConfig), "delegation_replay_capture = false")
+	require.NoDirExists(t, filepath.Join(home, "debug"))
 
 	updated, err := genutiltypes.AppGenesisFromFile(config.GenesisFile())
 	require.NoError(t, err)

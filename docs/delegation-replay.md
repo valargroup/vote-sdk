@@ -7,18 +7,25 @@ operator reproduce a rejection without contacting a node or recovering a wallet.
 
 ## Enable capture
 
-Use a real Halo2 build. Capture is disabled by default. On the selected node,
-pass an absolute, dedicated directory whose parent already exists:
+Use a real Halo2 build. Capture is disabled by default, including for existing
+configuration files that omit the setting. To enable it on the selected node,
+set this in the existing `[vote]` section of `<node-home>/config/app.toml`:
 
-```sh
-svoted start --delegation-replay-dir /var/lib/svoted/delegation-replay
+```toml
+[vote]
+delegation_replay_capture = true
 ```
+
+On the next start, capture writes under `<node-home>/debug/`. The node home is
+the directory selected by `--home` (normally `~/.svoted`), so the default location
+is `~/.svoted/debug/`. There is no separate capture-directory flag.
 
 The directory is created with mode `0700`; an existing directory must already
 have that mode. Bundles have mode `0600`. A process lock prevents two writers.
 Do not share the directory with other data or add files to it. An unknown file,
 symlink, or non-private file causes capture storage to refuse writes. Disabling
-capture requires removing the flag; no deployment is enabled by this change.
+capture requires setting `delegation_replay_capture = false` and restarting the
+node. No deployment is enabled by this change.
 
 Only delegation proof failures reached after signature validation are eligible,
 including the delegation inside a combined delegation/cast transaction. Successful
