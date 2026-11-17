@@ -2790,6 +2790,7 @@ dependencies = [
 name = "shielded-vote-circuits"
 version = "0.1.0"
 dependencies = [
+ "blake2b_simd",
  "hex",
  "imt-tree 0.5.3",
  "incrementalmerkletree",
