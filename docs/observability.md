@@ -243,9 +243,27 @@ captured — they represent expected invalid client input.
 |--------|----------------|
 | `broadcastVoteTx` — encode | 500: tx encoding failure (internal bug) |
 | `broadcastVoteTx` — broadcast | 502: CometBFT broadcast RPC error (node unreachable or failing) |
+| `broadcastVoteTx` — invalid_proof | 422 on a delegation route: the chain rejected the delegation with the vote module's invalid-proof error |
+| `checkClientDelegationKey` — delegation_key_mismatch | 422 on a delegation route: the client reported a delegation circuit key that differs from this node's, so nothing was broadcast |
 
-422 CheckTx rejections are **not** captured — they represent expected
+Other 422 CheckTx rejections are **not** captured — they represent expected
 invalid votes.
+
+Both delegation rows also write one log line:
+
+```text
+[shielded-vote-api] delegation rejected stage=<stage> msg_type=<Go type> tx_hash=<hash or empty> client_delegation_key=<label>: <error>
+```
+
+The label says which delegation circuit key the client reported in the
+`X-Vote-Delegation-Key-V1` header: `absent`, `match`, `mismatch`, or
+`unchecked`. `absent` means no key was reported; `match` means the reported key
+matches the node's. These are diagnostic hints, not authenticated proof of the
+client's key or age. The combined route may fail on a vote proof after its
+delegation proof passed. Wrapped verifier errors arrive as `undefined`/1 and
+are identified by their complete invalid-proof message; unrelated code 1
+errors are not labelled. See
+[delegation-key-fingerprint.md](delegation-key-fingerprint.md).
 
 #### Helper server
 
@@ -357,10 +375,15 @@ helpers, stale summaries, the current time, and the final-minute window.
 
 Every captured error includes contextual tags where available:
 
-- `handler` -- which handler produced the error (`PrepareProposal`, `ProcessProposal`, `ante`, `broadcastVoteTx`)
+- `handler` -- which handler produced the error (`PrepareProposal`, `ProcessProposal`, `ante`, `broadcastVoteTx`, `checkClientDelegationKey`)
 - `stage` -- processing stage within the handler (e.g. `threshold_tally_decryption`, `ack_dkg_round`, `encode_pd_tx`)
 - `tag` -- injected tx type for ProcessProposal rejections (`dkg_contribution`, `ack`, `partial_decrypt`, `tally`)
 - `msg_type` -- Go type of the vote message (ante and API errors)
+- `tx_hash` -- hash of the broadcast transaction (API errors, when one was broadcast)
+- `client_delegation_key` -- how the delegation circuit key a client reported
+  relates to this node's: `absent`, `match`, `mismatch`, or `unchecked`
+  (rejected delegations on the public vote API only). Request headers are
+  scrubbed from events, so this tag is the only place the answer appears.
 - `round_id` -- the voting round identifier (hex)
 - `share_index` -- the share index within the round (helper only)
 - `alert` -- `helper_share_failure` for a failed processing attempt or

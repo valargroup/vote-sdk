@@ -27,6 +27,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"sync"
 	"unsafe"
 
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
@@ -52,6 +53,34 @@ func WarmVerifierCaches() error {
 		return nil
 	}
 	return fmt.Errorf("halo2: warm verifier caches failed with code %d: %s", rc, rustLastError())
+}
+
+// delegationKeyFingerprint caches the fingerprint for the life of the process:
+// the delegation verifying key is deterministic and never changes while the
+// binary runs.
+var delegationKeyFingerprint struct {
+	once        sync.Once
+	fingerprint [DelegationKeyFingerprintLen]byte
+	err         error
+}
+
+// DelegationKeyFingerprint returns the fingerprint of the delegation circuit
+// verifying key that VerifyDelegationProof verifies against: BLAKE2b-256 over
+// the Rust debug rendering of the pinned key, the same value a client built
+// against the same circuit computes for its own key.
+//
+// The result, including a failure, is computed once and cached. The first call
+// generates the delegation key if WarmVerifierCaches has not run yet. The
+// fingerprint identifies a public key and is not secret.
+func DelegationKeyFingerprint() ([DelegationKeyFingerprintLen]byte, error) {
+	cached := &delegationKeyFingerprint
+	cached.once.Do(func() {
+		rc := C.sv_delegation_key_fingerprint((*C.uint8_t)(unsafe.Pointer(&cached.fingerprint[0])))
+		if rc != 0 {
+			cached.err = fmt.Errorf("halo2: delegation key fingerprint failed with code %d: %s", rc, rustLastError())
+		}
+	})
+	return cached.fingerprint, cached.err
 }
 
 // pallasFpModulus is the Pallas base field modulus in big-endian byte order:

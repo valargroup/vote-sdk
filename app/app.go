@@ -381,7 +381,8 @@ func (app *SvoteApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIC
 			LightwalletdURLs:      voteapi.ParseLightwalletdURLs(os.Getenv("SVOTE_LWD_URLS")),
 			ZcashNetwork:          os.Getenv("SVOTE_ZCASH_NETWORK"),
 		},
-		CryptoReadiness: app.CryptoWarmupStatus,
+		CryptoReadiness:          app.CryptoWarmupStatus,
+		DelegationKeyFingerprint: delegationKeyFingerprint,
 	})
 	voteHandler.RegisterTxRoutes(apiSvr.Router)
 	voteHandler.RegisterQueryRoutes(apiSvr.Router, apiSvr.ClientCtx)

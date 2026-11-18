@@ -346,6 +346,29 @@ int32_t sv_verify_delegation_proof(
 );
 
 /* -----------------------------------------------------------------------
+ * Delegation circuit key fingerprint
+ * ----------------------------------------------------------------------- */
+
+/*
+ * Write the fingerprint of the delegation circuit verifying key that
+ * sv_verify_delegation_proof verifies against.
+ *
+ * The fingerprint is BLAKE2b-256 (32-byte output, no key, no personalisation)
+ * over the UTF-8 bytes of Rust's format!("{:?}", vk.pinned()) for that key.
+ * A client built against the same delegation circuit computes the same value.
+ * The first call generates the key if the verifier caches are not warm yet.
+ *
+ * Parameters:
+ *   fingerprint_out - Pointer to 32-byte output buffer.
+ *
+ * Returns:
+ *    0  on success (fingerprint written to fingerprint_out).
+ *   -1  if fingerprint_out is null.
+ *   -6  if delegation key generation fails or panics.
+ */
+int32_t sv_delegation_key_fingerprint(uint8_t* fingerprint_out);
+
+/* -----------------------------------------------------------------------
  * Vote proof circuit (ZKP #2) — real Halo2 proof verification
  * ----------------------------------------------------------------------- */
 

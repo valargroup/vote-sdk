@@ -625,6 +625,94 @@ pub unsafe extern "C" fn sv_verify_delegation_proof(
 }
 
 // ---------------------------------------------------------------------------
+// Delegation circuit key fingerprint
+// ---------------------------------------------------------------------------
+
+/// Length in bytes of a delegation circuit key fingerprint.
+pub const DELEGATION_KEY_FINGERPRINT_LEN: usize = 32;
+
+/// Fingerprint of the delegation circuit verifying key this library verifies
+/// proofs against.
+///
+/// The fingerprint is BLAKE2b-256 (32-byte output, no key, no personalisation)
+/// over the UTF-8 bytes of `format!("{:?}", vk.pinned())`. It is the same
+/// definition the `voting-circuits` crate pins in its `vk_fingerprint_unchanged`
+/// test, so a client built against the same circuit computes the same value and
+/// a client built against a different circuit computes a different one.
+///
+/// The verifying key comes from the process-lifetime cache that
+/// `sv_verify_delegation_proof` uses, so the first call generates the key if
+/// nothing has warmed the cache yet. The fingerprint identifies a public key
+/// and is not secret.
+///
+/// # Errors
+/// Returns the key-generation failure message when the cached keys cannot be
+/// built.
+pub fn delegation_key_fingerprint() -> Result<[u8; DELEGATION_KEY_FINGERPRINT_LEN], String> {
+    let (_params, _pk, vk) =
+        delegation::delegation_cached_keys().map_err(|e| format!("{:?}", e))?;
+    let pinned_key = format!("{:?}", vk.pinned());
+    let digest = blake2b_simd::Params::new()
+        .hash_length(DELEGATION_KEY_FINGERPRINT_LEN)
+        .hash(pinned_key.as_bytes());
+    let mut fingerprint = [0u8; DELEGATION_KEY_FINGERPRINT_LEN];
+    fingerprint.copy_from_slice(digest.as_bytes());
+    Ok(fingerprint)
+}
+
+/// Write the fingerprint of the delegation circuit verifying key to
+/// `fingerprint_out`.
+///
+/// See [`delegation_key_fingerprint`] for the definition. The Go API layer
+/// compares this value with the fingerprint a client reports for the key that
+/// made its delegation proof.
+///
+/// # Arguments
+/// * `fingerprint_out` - 32-byte output buffer for the fingerprint.
+///
+/// # Returns
+/// * `0`  on success (fingerprint written to fingerprint_out).
+/// * `-1` if fingerprint_out is null.
+/// * `-6` if delegation key generation fails or panics.
+///
+/// # Safety
+/// `fingerprint_out` must be valid for writes of at least 32 bytes.
+#[no_mangle]
+pub unsafe extern "C" fn sv_delegation_key_fingerprint(fingerprint_out: *mut u8) -> i32 {
+    if fingerprint_out.is_null() {
+        set_ffi_error("delegation_key_fingerprint: null pointer argument");
+        return -1;
+    }
+
+    let result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+            || match delegation_key_fingerprint() {
+                Ok(fingerprint) => {
+                    std::ptr::copy_nonoverlapping(
+                        fingerprint.as_ptr(),
+                        fingerprint_out,
+                        DELEGATION_KEY_FINGERPRINT_LEN,
+                    );
+                    0
+                }
+                Err(msg) => {
+                    set_ffi_error(format!(
+                        "delegation_key_fingerprint: key generation failed: {msg}"
+                    ));
+                    -6
+                }
+            },
+        ));
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_ffi_error("sv_delegation_key_fingerprint: internal panic");
+            -6
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Vote proof circuit (ZKP #2) — real Halo2 proof verification
 // ---------------------------------------------------------------------------
 
@@ -2216,6 +2304,28 @@ mod tests {
         )
         .to_repr();
         assert_eq!(out, expected);
+    }
+
+    /// The exported fingerprint is the one `voting-circuits` pins for the
+    /// delegation verifying key. Clients send this value, so a change here
+    /// means every deployed client is reported as outdated. The pinned value
+    /// is for the default `zakura` backend, which is what the chain ships.
+    #[test]
+    #[cfg(feature = "zakura")]
+    fn test_delegation_key_fingerprint_matches_pinned_value() {
+        let mut fingerprint = [0u8; DELEGATION_KEY_FINGERPRINT_LEN];
+        let rc = unsafe { sv_delegation_key_fingerprint(fingerprint.as_mut_ptr()) };
+        assert_eq!(rc, 0);
+        assert_eq!(
+            hex::encode(fingerprint),
+            "e1773ecd2eb8531cc54c1df5b935a978788ef4eea4949cb45a00edf550ecee81"
+        );
+    }
+
+    #[test]
+    fn test_delegation_key_fingerprint_rejects_null_output() {
+        let rc = unsafe { sv_delegation_key_fingerprint(std::ptr::null_mut()) };
+        assert_eq!(rc, -1);
     }
 
     /// Full round-trip test: generate a share reveal proof and verify it via FFI.
