@@ -120,8 +120,12 @@ delegation route is rejected:
 
 - because of a key mismatch (stage `delegation_key_mismatch`, nothing
   broadcast); or
-- by the chain with the vote module's invalid-proof error, codespace `vote`
-  code 5 (stage `invalid_proof`).
+- by the chain with the vote module's invalid-proof error (stage
+  `invalid_proof`). Registered errors carry codespace `vote`, code 5. The
+  chain's Go-wrapped verifier failures are encoded as `undefined`, code 1;
+  these are identified by the complete `invalid zero-knowledge proof` message
+  in the colon-separated error chain. Unrelated code 1 failures are not labelled.
+  This classification changes no transaction response code or consensus rule.
 
 ```text
 [shielded-vote-api] delegation rejected stage=<stage> msg_type=<Go type> tx_hash=<hash or empty> client_delegation_key=<label>: <error>
@@ -136,7 +140,9 @@ is why the label is an explicit tag. No proof, signature, or other request
 content is logged or tagged.
 
 Rejections on other routes, other vote-module codes, and code 5 from another
-module are not labelled.
+module are not labelled. On the combined route an invalid-proof rejection may
+come from the delegation proof or a vote proof. The key label records what the
+client reported; it does not authenticate which key made the submitted proof.
 
 ## Tests that pin each rule
 

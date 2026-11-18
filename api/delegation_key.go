@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
+
+	errorsmod "cosmossdk.io/errors"
 
 	"github.com/valargroup/vote-sdk/sentry"
 	"github.com/valargroup/vote-sdk/x/vote/types"
@@ -131,11 +134,26 @@ func isDelegationKeyFingerprintHex(value string) bool {
 }
 
 // isInvalidProofRejection reports whether a broadcast outcome is the vote
-// module's invalid zero-knowledge proof rejection. The codespace is compared
-// as well as the code, because other modules have their own code 5.
+// module's invalid zero-knowledge proof rejection. Registered errors keep
+// vote/5, but the chain's fmt.Errorf wrappers expose Unwrap(), not Cause(),
+// so the current Cosmos encoder returns undefined/1 for verifier failures.
+// In that case require the complete registered error message in the chain's
+// colon-separated error chain; unrelated unclassified errors are not proofs.
+// This classifies an existing response without changing consensus error codes.
 func isInvalidProofRejection(result *BroadcastResult) bool {
-	return result.Code == types.ErrInvalidProof.ABCICode() &&
-		result.codespace == types.ErrInvalidProof.Codespace()
+	if result.Code == types.ErrInvalidProof.ABCICode() &&
+		result.codespace == types.ErrInvalidProof.Codespace() {
+		return true
+	}
+	if result.Code != 1 || result.codespace != errorsmod.UndefinedCodespace {
+		return false
+	}
+	for _, message := range strings.Split(result.Log, ": ") {
+		if message == types.ErrInvalidProof.Error() {
+			return true
+		}
+	}
+	return false
 }
 
 // delegationFailure describes one rejected delegation request for operators.

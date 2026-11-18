@@ -257,9 +257,13 @@ Both delegation rows also write one log line:
 
 The label says which delegation circuit key the client reported in the
 `X-Vote-Delegation-Key-V1` header: `absent`, `match`, `mismatch`, or
-`unchecked`. A burst of `invalid_proof` rejections labelled `absent` points at
-clients too old to report their key; `match` points at a genuinely invalid
-proof. See [delegation-key-fingerprint.md](delegation-key-fingerprint.md).
+`unchecked`. `absent` means no key was reported; `match` means the reported key
+matches the node's. These are diagnostic hints, not authenticated proof of the
+client's key or age. The combined route may fail on a vote proof after its
+delegation proof passed. Wrapped verifier errors arrive as `undefined`/1 and
+are identified by their complete invalid-proof message; unrelated code 1
+errors are not labelled. See
+[delegation-key-fingerprint.md](delegation-key-fingerprint.md).
 
 #### Helper server
 

@@ -17,6 +17,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
   `client_delegation_key` label. The check is API-only and does not change
   which transactions validators accept. See
   [docs/delegation-key-fingerprint.md](docs/delegation-key-fingerprint.md).
+  Failure reporting also recognizes the chain's wrapped verifier errors without
+  changing their existing transaction response codes.
 
 - Update the Docker Rust builder to 1.97 so it supports the locked cryptography dependencies.
 

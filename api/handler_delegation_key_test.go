@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/require"
 
@@ -264,7 +266,19 @@ func captureAPILog(t *testing.T) *bytes.Buffer {
 }
 
 func TestDelegationInvalidProofRejectionIsLabelledWithClientKey(t *testing.T) {
-	const invalidProof = `{"code":5,"codespace":"vote","hash":"ABC123","log":"invalid zero-knowledge proof"}`
+	// Use the same encoder as CheckTx, including its handling of Go's %w
+	// wrappers. A hand-written vote/5 reply misses the undefined/1 result
+	// produced by the chain's wrapped verifier failures.
+	delegationError := fmt.Errorf("%w: delegation: bad proof", types.ErrInvalidProof)
+	rejections := []struct {
+		name string
+		err  error
+	}{
+		{"registered_error", types.ErrInvalidProof},
+		{"delegation_verifier", delegationError},
+		{"combined_delegation_verifier", fmt.Errorf("delegation: %w", delegationError)},
+		{"combined_vote_verifier", fmt.Errorf("batch votes[0]: %w", fmt.Errorf("%w: vote commitment: bad proof", types.ErrInvalidProof))},
+	}
 	cases := []struct {
 		name  string
 		keys  []string
@@ -275,26 +289,43 @@ func TestDelegationInvalidProofRejectionIsLabelledWithClientKey(t *testing.T) {
 	}
 	for _, tc := range delegationRoutes() {
 		for _, key := range cases {
-			t.Run(tc.name+"/"+key.name, func(t *testing.T) {
-				apiLog := captureAPILog(t)
-				node := newDelegationKeyNode(t, true, invalidProof)
-				rec := node.post(t, tc.route, tc.msg, key.keys...)
+			for _, rejection := range rejections {
+				t.Run(tc.name+"/"+key.name+"/"+rejection.name, func(t *testing.T) {
+					apiLog := captureAPILog(t)
+					encoded := sdkerrors.ResponseCheckTxWithEvents(rejection.err, 0, 0, nil, false)
+					node := newDelegationKeyNode(t, true, cometRejection(t, rejection.err))
+					rec := node.post(t, tc.route, tc.msg, key.keys...)
 
-				require.Equal(t, http.StatusUnprocessableEntity, rec.Code, rec.Body.String())
-				require.Contains(t, apiLog.String(), "[shielded-vote-api] delegation rejected stage=invalid_proof")
-				require.Contains(t, apiLog.String(), "tx_hash=ABC123")
-				require.Contains(t, apiLog.String(), key.label)
+					require.Equal(t, http.StatusUnprocessableEntity, rec.Code, rec.Body.String())
+					require.Contains(t, apiLog.String(), "[shielded-vote-api] delegation rejected stage=invalid_proof")
+					require.Contains(t, apiLog.String(), "tx_hash=ABC123")
+					require.Contains(t, apiLog.String(), key.label)
 
-				// The client still receives the chain's own rejection, with
-				// no field added for the codespace.
-				var fields map[string]any
-				require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &fields))
-				require.EqualValues(t, 5, fields["code"])
-				require.Equal(t, "ABC123", fields["tx_hash"])
-				require.NotContains(t, fields, "codespace")
-			})
+					// The client still receives the chain's own rejection, with
+					// no field added for the codespace.
+					var fields map[string]any
+					require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &fields))
+					require.EqualValues(t, encoded.Code, fields["code"])
+					require.Equal(t, encoded.Log, fields["log"])
+					require.Equal(t, "ABC123", fields["tx_hash"])
+					require.NotContains(t, fields, "codespace")
+				})
+			}
 		}
 	}
+}
+
+// cometRejection returns the RPC result fields from the same error encoder
+// CheckTx uses, rather than assuming a wrapped error keeps its module code.
+func cometRejection(t *testing.T, err error) string {
+	t.Helper()
+	result := sdkerrors.ResponseCheckTxWithEvents(err, 0, 0, nil, false)
+	encoded, encodeErr := json.Marshal(map[string]any{
+		"code": result.Code, "codespace": result.Codespace,
+		"hash": "ABC123", "log": result.Log,
+	})
+	require.NoError(t, encodeErr)
+	return string(encoded)
 }
 
 func TestDelegationKeyMismatchIsLabelled(t *testing.T) {
@@ -320,6 +351,11 @@ func TestOtherRejectionsAreNotLabelledWithClientKey(t *testing.T) {
 		{"other_codespace", delegateVoteRoute, validDelegation(), `{"code":5,"codespace":"sdk","hash":"ABC123","log":"insufficient funds"}`},
 		{"other_vote_code", delegateVoteRoute, validDelegation(), `{"code":2,"codespace":"vote","hash":"ABC123","log":"nullifier already spent"}`},
 		{"cast_vote_route", "/shielded-vote/v1/cast-vote", svtest.ValidCastVoteN(roundID, 7, 1, 90)[0], `{"code":5,"codespace":"vote","hash":"ABC123","log":"invalid zero-knowledge proof"}`},
+		{"wrapped_signature_error", delegateVoteRoute, validDelegation(), cometRejection(t, fmt.Errorf("%w: bad signature", types.ErrInvalidSignature))},
+		{"unclassified_error", delegateVoteRoute, validDelegation(), cometRejection(t, fmt.Errorf("unrelated validation failure"))},
+		{"similar_error_text", delegateVoteRoute, validDelegation(), cometRejection(t, fmt.Errorf("unsupported invalid zero-knowledge proof format"))},
+		{"other_module_same_message", delegateVoteRoute, validDelegation(), cometRejection(t, sdkerrors.ErrInsufficientFunds.Wrap(types.ErrInvalidProof.Error()))},
+		{"unclassified_on_cast_route", "/shielded-vote/v1/cast-vote", svtest.ValidCastVoteN(roundID, 7, 1, 90)[0], cometRejection(t, fmt.Errorf("%w: vote commitment: bad proof", types.ErrInvalidProof))},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
