@@ -335,7 +335,7 @@ payload material. The helper chooses the bucket size from the vote duration:
 | Vote duration | Bucket size |
 |---------------|-------------|
 | 21 days or more | 6 hours |
-| 7 days or more | 3 hours |
+| 7 days or more | 4 hours |
 | 1 day or more | 1 hour |
 | 1 hour or more | 15 minutes |
 | Less than 1 hour | 1 minute |

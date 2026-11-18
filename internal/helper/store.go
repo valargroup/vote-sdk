@@ -1591,7 +1591,7 @@ func queueSummaryPolicyBucketSeconds(durationSeconds uint64) uint64 {
 	case durationSeconds >= 21*queueSummaryDay:
 		return 6 * queueSummaryHour
 	case durationSeconds >= 7*queueSummaryDay:
-		return 3 * queueSummaryHour
+		return 4 * queueSummaryHour
 	case durationSeconds >= queueSummaryDay:
 		return queueSummaryHour
 	case durationSeconds >= queueSummaryHour:

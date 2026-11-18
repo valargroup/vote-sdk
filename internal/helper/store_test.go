@@ -1288,7 +1288,7 @@ func TestStatus(t *testing.T) {
 
 func TestQueueSummaryBucketPolicy(t *testing.T) {
 	assert.Equal(t, uint64(6*3600), queueSummaryPolicyBucketSeconds(28*24*3600))
-	assert.Equal(t, uint64(3*3600), queueSummaryPolicyBucketSeconds(14*24*3600))
+	assert.Equal(t, uint64(4*3600), queueSummaryPolicyBucketSeconds(14*24*3600))
 	assert.Equal(t, uint64(3600), queueSummaryPolicyBucketSeconds(2*24*3600))
 	assert.Equal(t, uint64(15*60), queueSummaryPolicyBucketSeconds(2*3600))
 	assert.Equal(t, uint64(60), queueSummaryPolicyBucketSeconds(10*60))
