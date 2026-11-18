@@ -8,6 +8,10 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Use 4 hour buckets instead of 3 hour buckets in public helper queue
+  summaries for rounds of 7 to 21 days. Other round lengths keep their bucket
+  sizes.
+
 - Tell outdated apps apart from invalid delegation proofs. Clients may send the
   fingerprint of their delegation circuit key in an optional
   `X-Vote-Delegation-Key-V1` header on the two delegation routes; when it
