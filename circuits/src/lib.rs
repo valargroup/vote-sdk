@@ -9,6 +9,11 @@
 //! Includes the toy circuit for pipeline validation, and the real
 //! delegation circuit (ZKP #1) for production proof verification.
 
+// `upstream` selects crates.io `zcash_protocol` under a renamed dependency key;
+// alias it back so the crate keeps `use zcash_protocol::...`.
+#[cfg(feature = "upstream")]
+extern crate lrz_zcash_protocol as zcash_protocol;
+
 pub mod ffi;
 pub mod nc_root;
 mod proof;
