@@ -19,7 +19,6 @@ import (
 	"time"
 
 	sentrysdk "github.com/getsentry/sentry-go"
-	sentryhttp "github.com/getsentry/sentry-go/http"
 	"github.com/gorilla/mux"
 	protov2 "google.golang.org/protobuf/proto"
 
@@ -165,7 +164,7 @@ func (s CryptoReadinessStatus) ready() bool {
 // MsgAckExecutiveAuthorityKey and MsgSubmitPartialDecryption have no REST
 // endpoints — they are injected in-protocol via PrepareProposal.
 func (h *Handler) RegisterTxRoutes(router *mux.Router) {
-	trace := sentryhttp.New(sentryhttp.Options{Repanic: true}).Handle
+	trace := sentry.RouteTracing(true)
 	router.Handle("/shielded-vote/v1/delegate-vote", trace(http.HandlerFunc(h.handleDelegateVote))).Methods("POST")
 	router.Handle("/shielded-vote/v1/cast-vote", trace(http.HandlerFunc(h.handleCastVote))).Methods("POST")
 	router.Handle("/shielded-vote/v1/cast-vote-batch", trace(http.HandlerFunc(h.handleCastVoteBatch))).Methods("POST")

@@ -8,6 +8,16 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Send less to Sentry. Helper and chain REST events are named by their route
+  template, such as `/shielded-vote/v1/share-status/{roundId}/{nullifier}`,
+  never the raw path, and every event drops request bodies, query strings and
+  cookies. Tags, extras, spans and breadcrumbs lose the keys that could link a
+  share's reveal to its leaf (`proposal_id`, `tree_position`, `submit_at`,
+  `vote_decision`, `delegate_index`, `d`), and the numbers after those names
+  are redacted in error text. Each traced helper share now gets its own Sentry
+  hub, so a failure event carries its own share's trace. See
+  [docs/observability.md](docs/observability.md).
+
 - Build the validator circuits on the voting-circuits 0.15 line (Zakura
   Common 5.4, `voting-crypto-deps` 0.5.0), pinned by git rev until the
   voting-circuits release with ZKP4 is out. The ZKP1 to ZKP3 verifying keys
