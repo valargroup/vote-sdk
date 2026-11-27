@@ -90,6 +90,10 @@ type StaticConfig struct {
 	StaticConfigVersion int          `json:"static_config_version"`
 	DynamicConfigURL    string       `json:"dynamic_config_url"`
 	TrustedKeys         []TrustedKey `json:"trusted_keys"`
+	// RequireBallotAttestation makes a ballot_attestation mandatory for every
+	// round. It lives in the hash-pinned static config so the dynamic-config
+	// host cannot strip attestations unnoticed; see RequireBallotAttestation.
+	RequireBallotAttestation bool `json:"require_ballot_attestation,omitempty"`
 }
 
 type AuthStatus string

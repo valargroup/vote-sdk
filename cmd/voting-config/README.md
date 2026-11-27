@@ -79,6 +79,8 @@ The signature covers `"zcash-shielded-vote:round-auth:v3" || round_id || ea_pk |
 
 The field is additive. Wallets that predate it ignore it, and merges keep it: re-signing the v2 entry without `--round-file` leaves the existing attestation in place, and merging an attestation over a different digest is refused. `verify` fails on any attestation that does not verify, because wallets skip such rounds.
 
+The dynamic-config host can strip an attestation without breaking the v2 signatures. To make attestations mandatory, set `"require_ballot_attestation": true` in the hash-pinned static config. Wallets then skip any round without a valid attestation, and `verify` and the admin config-PR merge reject an entry that lacks one. The admin UI signs only the v2 payload, so with the flag set, attest rounds with `--round-file`.
+
 ## Verify a config
 
 ```bash

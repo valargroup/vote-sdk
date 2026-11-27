@@ -424,3 +424,35 @@ func TestParseServedRoundReadsTheVoteServersResponseType(t *testing.T) {
 		t.Fatalf("parsed identity = %s / %x", served.RoundID, served.EaPK)
 	}
 }
+
+func TestVerifyEnforcesAStaticRequirementForBallotAttestation(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	var eaPK [32]byte
+	roundID := strings.Repeat("01", 32)
+	dir := t.TempDir()
+	configPath, staticConfigPath := writeTestConfigs(t, dir, pub)
+	static := votingconfig.StaticConfig{}
+	raw, err := os.ReadFile(staticConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &static); err != nil {
+		t.Fatal(err)
+	}
+	static.RequireBallotAttestation = true
+	writeJSON(t, staticConfigPath, static)
+
+	t.Setenv("VOTING_CONFIG_PRIVKEY", base64.StdEncoding.EncodeToString(priv.Seed()))
+	signCmd := newRootCmd()
+	signCmd.SetErr(&bytes.Buffer{})
+	signCmd.SetArgs(signArgs(roundID, eaPK, "--merge", configPath))
+	if err := signCmd.Execute(); err != nil {
+		t.Fatalf("sign failed: %v", err)
+	}
+	verifyCmd := newRootCmd()
+	verifyCmd.SetArgs([]string{"verify", "--config", configPath, "--static-config", staticConfigPath})
+	err = verifyCmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "requires a ballot_attestation") {
+		t.Fatalf("expected missing-attestation error, got %v", err)
+	}
+}

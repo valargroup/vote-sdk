@@ -679,6 +679,9 @@ func mergeConfigPREntry(dynamicContent, staticContent []byte, roundID string, en
 	if err := votingconfig.ValidateBallotAttestation(roundID, entry, staticCfg.TrustedKeys, cfg.PIRLayout); err != nil {
 		return nil, false, nil, err
 	}
+	if err := votingconfig.RequireBallotAttestation(roundID, entry, &staticCfg); err != nil {
+		return nil, false, nil, err
+	}
 
 	data, err := json.MarshalIndent(&cfg, "", "  ")
 	if err != nil {

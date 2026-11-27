@@ -942,3 +942,35 @@ func signedTestBallotAttestation(t *testing.T, roundID, eaPKB64 string) *votingc
 		}},
 	}
 }
+
+func TestMergeConfigPREntryEnforcesAStaticRequirementForBallotAttestation(t *testing.T) {
+	t.Parallel()
+
+	body := validCreateConfigPRRequest(t)
+	dynamicConfig, staticConfig := configDocuments(t, nil)
+	staticConfig = withRequiredBallotAttestation(t, staticConfig)
+
+	_, _, _, err := mergeConfigPREntry(dynamicConfig, staticConfig, body.RoundID, body.Entry, body.PIRLayout)
+	if err == nil || !strings.Contains(err.Error(), "requires a ballot_attestation") {
+		t.Fatalf("want missing-attestation error, got %v", err)
+	}
+
+	body.Entry.BallotAttestation = signedTestBallotAttestation(t, body.RoundID, body.Entry.EaPK)
+	if _, _, _, err := mergeConfigPREntry(dynamicConfig, staticConfig, body.RoundID, body.Entry, body.PIRLayout); err != nil {
+		t.Fatalf("attested entry rejected: %v", err)
+	}
+}
+
+func withRequiredBallotAttestation(t *testing.T, static []byte) []byte {
+	t.Helper()
+	var cfg votingconfig.StaticConfig
+	if err := json.Unmarshal(static, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	cfg.RequireBallotAttestation = true
+	out, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}

@@ -155,6 +155,17 @@ func ValidateBallotAttestation(roundID string, entry RoundEntry, trusted []Trust
 	return nil
 }
 
+// RequireBallotAttestation enforces the static config's
+// require_ballot_attestation: when it is set, an entry without an attestation
+// is an error, because wallets skip such rounds. Call ValidateBallotAttestation
+// as well to check a present attestation.
+func RequireBallotAttestation(roundID string, entry RoundEntry, static *StaticConfig) error {
+	if static != nil && static.RequireBallotAttestation && entry.BallotAttestation == nil {
+		return fmt.Errorf("round %s: static config requires a ballot_attestation; sign with --round-file", roundID)
+	}
+	return nil
+}
+
 // MergeBallotAttestations combines the attestation already in a config with
 // one being merged in. An entry merged without an attestation keeps the
 // existing one, so re-signing a round's v2 entry never drops its ballot

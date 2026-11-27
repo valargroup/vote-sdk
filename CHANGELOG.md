@@ -18,7 +18,8 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
   in `internal/votingconfig/testdata`. `verify` and the admin config-PR merge
   now reject an attestation that does not verify, and every merge keeps an
   existing attestation instead of dropping it. Wallets that predate the field
-  ignore it.
+  ignore it. A static config may set `require_ballot_attestation: true`; `verify`
+  and the admin merge then reject entries without an attestation.
 
 - Use 4 hour buckets instead of 3 hour buckets in public helper queue
   summaries for rounds of 7 to 21 days. Other round lengths keep their bucket

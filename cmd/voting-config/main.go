@@ -331,6 +331,9 @@ func newVerifyCmd() *cobra.Command {
 				if err := votingconfig.ValidateBallotAttestation(roundID, entry, staticConfig.TrustedKeys, cfg.PIRLayout); err != nil {
 					return err
 				}
+				if err := votingconfig.RequireBallotAttestation(roundID, entry, staticConfig); err != nil {
+					return err
+				}
 				if entry.BallotAttestation != nil {
 					attested++
 				}
