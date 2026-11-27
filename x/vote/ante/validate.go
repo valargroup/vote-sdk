@@ -12,12 +12,18 @@
 //  4. Nullifier uniqueness check (stateful, KV read) — runs even on RecheckTx
 //  5. RedPallas signature verification — skipped on RecheckTx
 //  6. ZKP verification — skipped on RecheckTx
+//
+// A 0x0B delegate op replaces steps 2-6 with its own checks; see
+// keeper.ValidateDelegateOp. A 0x09 batch is not accepted yet
+// (docs/proxy-delegation/contracts-v1.md §5.1).
 package ante
 
 import (
 	"context"
 	"encoding/hex"
 	"fmt"
+
+	errorsmod "cosmossdk.io/errors"
 
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/ffi/redpallas"
@@ -52,6 +58,10 @@ type ValidateOpts struct {
 //   - CheckTx: full validation (basic + round + proposals + nullifiers + sig + ZKP)
 //   - RecheckTx: lightweight re-validation (basic + round + proposals + nullifiers)
 //   - FinalizeBlock: full validation before keeper execution
+//
+// With the gate open, every failure reports its registered code
+// (types.SurfaceRegisteredCode); while it is closed, every tag keeps the
+// codes it returns today.
 func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper, opts ValidateOpts) (retErr error) {
 	observation := defaultVerificationMetrics.begin(ctx, msg, opts.IsRecheck)
 	defer func() {
@@ -61,10 +71,39 @@ func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper
 		}
 		observation.finish(retErr)
 	}()
+	if types.ProxyDelegationEnabled {
+		// The shared helpers wrap their registered errors with fmt, which
+		// hides the code; this surfaces it from activation on (contracts-v1
+		// §0), so failed 0x02-0x07 transactions report it too.
+		defer func() { retErr = types.SurfaceRegisteredCode(retErr) }()
+	}
+
+	// Proxy delegation is dormant (docs/proxy-delegation/contracts-v1.md
+	// §5.1 step 1, §9), so its gate precedes every other check.
+	switch msg.(type) {
+	case *types.MsgProxyDelegationBatch, *types.MsgDelegateOp:
+		if !types.ProxyDelegationEnabled {
+			return types.ErrProxyDelegationDisabled
+		}
+	}
 
 	// 1. Basic field validation (stateless).
-	if err := observation.observe("basic_validation", msg.ValidateBasic); err != nil {
+	if err := observation.observe("basic_validation", func() error {
+		return msg.ValidateBasic()
+	}); err != nil {
 		return fmt.Errorf("basic validation failed: %w", err)
+	}
+
+	// A 0x0B op has no top-level round. It runs its own checks in §5.3
+	// order, and its Ed25519 signatures everywhere but RecheckTx.
+	if op, ok := msg.(*types.MsgDelegateOp); ok {
+		return observation.observe("delegate_op_validation", func() error {
+			return k.ValidateDelegateOp(ctx, op, !opts.IsRecheck)
+		})
+	}
+	// A 0x09 batch is not accepted yet.
+	if _, ok := msg.(*types.MsgProxyDelegationBatch); ok {
+		return errorsmod.Wrap(types.ErrProxyDelegationDisabled, "0x09 batches are not accepted yet")
 	}
 
 	// 2. Vote round existence and status check (message-type-aware).

@@ -185,6 +185,32 @@ func TestDelegationKeyMismatchIsRejectedWithoutBroadcast(t *testing.T) {
 	}
 }
 
+// TestDelegationKeyMismatchCarriesCodespaceWhenAskedFor checks that a client
+// that opts into codespace gets it on the mismatch answer too, in codespace
+// vote, as on every other answer from these routes.
+func TestDelegationKeyMismatchCarriesCodespaceWhenAskedFor(t *testing.T) {
+	for _, tc := range delegationRoutes() {
+		t.Run(tc.name, func(t *testing.T) {
+			node := newDelegationKeyNode(t, true, acceptedByComet)
+			body, err := json.Marshal(tc.msg)
+			require.NoError(t, err)
+			req := httptest.NewRequest(http.MethodPost, tc.route, bytes.NewReader(body))
+			req.Header.Set(api.DelegationKeyHeader, outdatedDelegationKey)
+			req.Header.Set("X-Svote-Codespace", "1")
+			rec := httptest.NewRecorder()
+			node.router.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusUnprocessableEntity, rec.Code, rec.Body.String())
+			require.Zero(t, node.broadcasts.Load())
+			var response api.BroadcastResult
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+			require.Equal(t, types.ErrClientCircuitKeyMismatch.ABCICode(), response.Code)
+			require.Equal(t, types.ModuleName, response.Codespace)
+			require.Equal(t, tc.batchDigest, response.BatchDigest)
+		})
+	}
+}
+
 func TestDelegationKeyMalformedHeaderIsRejectedWithoutBroadcast(t *testing.T) {
 	malformed := []struct {
 		name string

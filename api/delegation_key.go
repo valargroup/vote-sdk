@@ -107,14 +107,16 @@ func (h *Handler) checkClientDelegationKey(w http.ResponseWriter, r *http.Reques
 		clientKey: clientDelegationKeyMismatch,
 		cause:     mismatch,
 	})
-	writeJSON(w, http.StatusUnprocessableEntity, &BroadcastResult{
-		Code: types.ErrClientCircuitKeyMismatch.ABCICode(),
+	result := &BroadcastResult{
+		Code:      types.ErrClientCircuitKeyMismatch.ABCICode(),
+		Codespace: types.ErrClientCircuitKeyMismatch.Codespace(),
 		Log: fmt.Sprintf(
 			"this app's delegation circuit key does not match this chain, so its delegation proof cannot be verified; update the app to the latest version and try again (app key %s, chain key %s)",
 			clientFingerprint, nodeFingerprint,
 		),
 		BatchDigest: batchDigestHex(msg),
-	})
+	}
+	writeJSON(w, http.StatusUnprocessableEntity, result.body(wantsCodespace(r)))
 	return clientDelegationKeyMismatch, false
 }
 
@@ -142,10 +144,10 @@ func isDelegationKeyFingerprintHex(value string) bool {
 // This classifies an existing response without changing consensus error codes.
 func isInvalidProofRejection(result *BroadcastResult) bool {
 	if result.Code == types.ErrInvalidProof.ABCICode() &&
-		result.codespace == types.ErrInvalidProof.Codespace() {
+		result.Codespace == types.ErrInvalidProof.Codespace() {
 		return true
 	}
-	if result.Code != 1 || result.codespace != errorsmod.UndefinedCodespace {
+	if result.Code != 1 || result.Codespace != errorsmod.UndefinedCodespace {
 		return false
 	}
 	for _, message := range strings.Split(result.Log, ": ") {
