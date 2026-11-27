@@ -39,6 +39,12 @@ func (ms msgServer) executeCreateVotingSession(goCtx context.Context, msg *types
 
 	createdAtHeight := uint64(ctx.BlockHeight())
 
+	// Re-checked at execution, not only in ValidateBasic: a coordinator action
+	// proposed before this rule activated executes later, and must meet it too.
+	if err := types.ValidateProposalsHash(msg); err != nil {
+		return nil, err
+	}
+
 	// Derive vote_round_id deterministically from the creation height and setup
 	// fields. Using the creation height allows the same vote metadata to be
 	// retried after a failed ceremony without colliding with the expired round.

@@ -59,6 +59,21 @@ func (msg *MsgCreateVotingSession) ValidateBasic() error {
 			return err
 		}
 	}
+	return ValidateProposalsHash(msg)
+}
+
+// ValidateProposalsHash requires proposals_hash to be the ballot digest of the
+// message's title, description, discussion_url, and proposals. The round id
+// commits to proposals_hash, so this makes the round id commit to the ballot
+// wallets display.
+func ValidateProposalsHash(msg *MsgCreateVotingSession) error {
+	digest := msg.BallotDigest()
+	if !bytes.Equal(msg.ProposalsHash, digest[:]) {
+		return fmt.Errorf(
+			"%w: proposals_hash must be the ballot digest of the round's title, description, discussion_url, and proposals: expected %x, got %x",
+			ErrInvalidField, digest, msg.ProposalsHash,
+		)
+	}
 	return nil
 }
 

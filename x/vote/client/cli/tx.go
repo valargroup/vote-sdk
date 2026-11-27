@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -527,7 +528,6 @@ All byte fields are hex-encoded in the JSON.  Required fields:
 
   snapshot_height     (uint64) — Block height of the ZSA/nullifier snapshot
   snapshot_blockhash  (hex)    — 32-byte block hash at snapshot_height
-  proposals_hash      (hex)    — SHA-256 of the canonical proposals list
   vote_end_time       (int64)  — Unix timestamp after which voting closes
   nullifier_imt_root  (hex)    — Root of the incremental Merkle tree of nullifiers
   nc_root             (hex)    — Note commitment tree root at snapshot_height
@@ -538,11 +538,15 @@ All byte fields are hex-encoded in the JSON.  Required fields:
                                  (0-based uint32), label (ASCII string), and
                                  optional description (string))
 
+Optional fields: title, description, and discussion_url (strings), and
+proposals_hash (hex). proposals_hash must be the ballot digest of the title,
+description, discussion_url, and proposals, and is computed when omitted; a
+supplied value that differs is rejected.
+
 Example:
   {
     "snapshot_height": 1000,
     "snapshot_blockhash": "aabb...",
-    "proposals_hash": "ccdd...",
     "vote_end_time": 1893456000,
     "nullifier_imt_root": "eeff...",
     "nc_root": "0011...",
@@ -582,6 +586,7 @@ Example:
 				NcRoot            string `json:"nc_root"`
 				Description       string `json:"description"`
 				Title             string `json:"title"`
+				DiscussionUrl     string `json:"discussion_url"`
 				Proposals         []struct {
 					Id          uint32 `json:"id"`
 					Title       string `json:"title"`
@@ -608,10 +613,6 @@ Example:
 			}
 
 			snapshotBlockhash, err := decodeHex(types.SessionKeyBlockhash, input.SnapshotBlockhash)
-			if err != nil {
-				return err
-			}
-			proposalsHash, err := decodeHex(types.SessionKeyProposalsHash, input.ProposalsHash)
 			if err != nil {
 				return err
 			}
@@ -648,14 +649,28 @@ Example:
 				Creator:           clientCtx.GetFromAddress().String(),
 				SnapshotHeight:    input.SnapshotHeight,
 				SnapshotBlockhash: snapshotBlockhash,
-				ProposalsHash:     proposalsHash,
 				VoteEndTime:       input.VoteEndTime,
 				NullifierImtRoot:  nullifierImtRoot,
 				NcRoot:            ncRoot,
 				Proposals:         proposals,
 				Description:       input.Description,
 				Title:             input.Title,
+				DiscussionUrl:     input.DiscussionUrl,
 			}
+			// proposals_hash is the ballot digest of the fields above. It may be
+			// omitted; when supplied it must match, so a stale value fails here
+			// rather than on chain.
+			digest := msg.BallotDigest()
+			if input.ProposalsHash != "" {
+				supplied, err := decodeHex(types.SessionKeyProposalsHash, input.ProposalsHash)
+				if err != nil {
+					return err
+				}
+				if !bytes.Equal(supplied, digest[:]) {
+					return fmt.Errorf("field %q: %s is not the ballot digest %x; omit it to have it computed", types.SessionKeyProposalsHash, input.ProposalsHash, digest)
+				}
+			}
+			msg.ProposalsHash = digest[:]
 
 			return broadcastCoordinatorProposal(clientCtx, cmd.Flags(), msg)
 		},

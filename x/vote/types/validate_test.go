@@ -27,7 +27,7 @@ func TestValidateBasicTestSuite(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func validCreateSession() *types.MsgCreateVotingSession {
-	return &types.MsgCreateVotingSession{
+	return svtest.WithBallotDigest(&types.MsgCreateVotingSession{
 		Creator:           "sv1admin",
 		SnapshotHeight:    100,
 		SnapshotBlockhash: bytes.Repeat([]byte{0x01}, 32),
@@ -39,7 +39,7 @@ func validCreateSession() *types.MsgCreateVotingSession {
 			{Id: 1, Title: "Proposal A", Description: "First", Options: svtest.DefaultOptions()},
 			{Id: 2, Title: "Proposal B", Description: "Second", Options: svtest.DefaultOptions()},
 		},
-	}
+	})
 }
 
 func voteOptions(n int) []*types.VoteOption {
@@ -225,7 +225,13 @@ func (s *ValidateBasicTestSuite) TestCreateVotingSession_NewFieldsValidation() {
 	for _, tc := range tests {
 		s.Run(tc.name, func() {
 			msg := validCreateSession()
+			hash := msg.ProposalsHash
 			tc.modify(msg)
+			// Cases about other fields keep the hash consistent with the
+			// ballot they edited; cases about proposals_hash set their own.
+			if bytes.Equal(msg.ProposalsHash, hash) {
+				svtest.WithBallotDigest(msg)
+			}
 			err := msg.ValidateBasic()
 			if tc.expectErr {
 				s.Require().Error(err)
