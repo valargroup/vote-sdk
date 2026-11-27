@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -874,4 +875,102 @@ func TestBatchBranchNameDeterministic(t *testing.T) {
 	if got == other {
 		t.Fatalf("different round sets produced the same branch name: %q", got)
 	}
+}
+
+func TestMergeConfigPREntryPreservesBallotAttestation(t *testing.T) {
+	t.Parallel()
+
+	body := validCreateConfigPRRequest(t)
+	existing := body.Entry
+	existing.BallotAttestation = signedTestBallotAttestation(t, body.RoundID, body.Entry.EaPK)
+	dynamicConfig, staticConfig := configDocuments(t, map[string]votingconfig.RoundEntry{
+		body.RoundID: existing,
+	})
+
+	merged, _, _, err := mergeConfigPREntry(dynamicConfig, staticConfig, body.RoundID, body.Entry, body.PIRLayout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg votingconfig.SignedConfig
+	if err := json.Unmarshal(merged, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.Rounds[body.RoundID].BallotAttestation
+	if got == nil || got.BallotDigest != existing.BallotAttestation.BallotDigest {
+		t.Fatalf("merging a v2 signature dropped the ballot attestation: %+v", got)
+	}
+}
+
+func TestMergeConfigPREntryRejectsUnverifiableBallotAttestation(t *testing.T) {
+	t.Parallel()
+
+	body := validCreateConfigPRRequest(t)
+	body.Entry.BallotAttestation = signedTestBallotAttestation(t, body.RoundID, body.Entry.EaPK)
+	body.Entry.BallotAttestation.BallotDigest = strings.Repeat("0", 64)
+	dynamicConfig, staticConfig := configDocuments(t, nil)
+
+	_, _, _, err := mergeConfigPREntry(dynamicConfig, staticConfig, body.RoundID, body.Entry, body.PIRLayout)
+	if err == nil || !strings.Contains(err.Error(), "ballot_attestation") {
+		t.Fatalf("want ballot_attestation error, got %v", err)
+	}
+}
+
+func signedTestBallotAttestation(t *testing.T, roundID, eaPKB64 string) *votingconfig.BallotAttestation {
+	t.Helper()
+	eaPKBytes, err := votingconfig.DecodeBase64Fixed(eaPKB64, 32, "ea_pk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var eaPK [32]byte
+	copy(eaPK[:], eaPKBytes)
+	ballot := votingconfig.Ballot{
+		Title: "Round",
+		Proposals: []votingconfig.BallotProposal{{
+			ID: 1, Title: "Question",
+			Options: []votingconfig.BallotOption{{Index: 0, Label: "A"}, {Index: 1, Label: "B"}},
+		}},
+	}
+	digest := ballot.Digest()
+	sig, err := votingconfig.SignBallotAttestation(testEd25519PrivateKey(), roundID, eaPK, testConfigPIRLayout(), digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &votingconfig.BallotAttestation{
+		BallotDigest: hex.EncodeToString(digest[:]),
+		Signatures: []votingconfig.Signature{{
+			KeyID: "valar-test", Alg: votingconfig.AlgEd25519, Sig: base64.StdEncoding.EncodeToString(sig),
+		}},
+	}
+}
+
+func TestMergeConfigPREntryEnforcesAStaticRequirementForBallotAttestation(t *testing.T) {
+	t.Parallel()
+
+	body := validCreateConfigPRRequest(t)
+	dynamicConfig, staticConfig := configDocuments(t, nil)
+	staticConfig = withRequiredBallotAttestation(t, staticConfig)
+
+	_, _, _, err := mergeConfigPREntry(dynamicConfig, staticConfig, body.RoundID, body.Entry, body.PIRLayout)
+	if err == nil || !strings.Contains(err.Error(), "requires a ballot_attestation") {
+		t.Fatalf("want missing-attestation error, got %v", err)
+	}
+
+	body.Entry.BallotAttestation = signedTestBallotAttestation(t, body.RoundID, body.Entry.EaPK)
+	if _, _, _, err := mergeConfigPREntry(dynamicConfig, staticConfig, body.RoundID, body.Entry, body.PIRLayout); err != nil {
+		t.Fatalf("attested entry rejected: %v", err)
+	}
+}
+
+func withRequiredBallotAttestation(t *testing.T, static []byte) []byte {
+	t.Helper()
+	var cfg votingconfig.StaticConfig
+	if err := json.Unmarshal(static, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	cfg.RequireBallotAttestation = true
+	out, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
 }

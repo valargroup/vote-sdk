@@ -647,6 +647,13 @@ func mergeConfigPREntry(dynamicContent, staticContent []byte, roundID string, en
 		if existing.EaPK != entry.EaPK {
 			return nil, false, nil, fmt.Errorf("round %s: ea_pk mismatch in merge target", roundID)
 		}
+		// The admin UI signs only the v2 payload, so an incoming entry
+		// normally has no ballot attestation; keep the one already published.
+		attestation, err := votingconfig.MergeBallotAttestations(existing.BallotAttestation, entry.BallotAttestation)
+		if err != nil {
+			return nil, false, nil, fmt.Errorf("round %s: %w", roundID, err)
+		}
+		entry.BallotAttestation = attestation
 		switch existing.AuthVersion {
 		case votingconfig.AuthVersionV1:
 			// Legacy v1 signatures cover a different preimage.
@@ -666,6 +673,14 @@ func mergeConfigPREntry(dynamicContent, staticContent []byte, roundID string, en
 	// individually rather than blocking a newly signed round's PR.
 	if !votingconfig.VerifyEntrySignatures(roundID, entry, staticCfg.TrustedKeys, cfg.PIRLayout) {
 		return nil, false, nil, fmt.Errorf("round %s: no valid signature", roundID)
+	}
+	// Wallets skip a round whose ballot attestation does not verify, so never
+	// publish one that does not.
+	if err := votingconfig.ValidateBallotAttestation(roundID, entry, staticCfg.TrustedKeys, cfg.PIRLayout); err != nil {
+		return nil, false, nil, err
+	}
+	if err := votingconfig.RequireBallotAttestation(roundID, entry, &staticCfg); err != nil {
+		return nil, false, nil, err
 	}
 
 	data, err := json.MarshalIndent(&cfg, "", "  ")
