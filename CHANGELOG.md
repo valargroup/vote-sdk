@@ -8,6 +8,18 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- `voting-config sign --round-file` attests a round's ballot. Given a saved
+  `GET /shielded-vote/v1/round/{round_id}` response from a node the signer
+  trusts, it checks that the round id and `ea_pk` match, prints the ballot
+  for review, and adds a `ballot_attestation` (ballot digest plus a signature
+  over the `zcash-shielded-vote:round-auth:v3` payload) beside the entry's v2
+  signatures. The encoding matches the `zcash_voting` wallet library
+  (`docs/ballot_authentication.md` there), and the shared vectors are checked
+  in `internal/votingconfig/testdata`. `verify` and the admin config-PR merge
+  now reject an attestation that does not verify, and every merge keeps an
+  existing attestation instead of dropping it. Wallets that predate the field
+  ignore it.
+
 - Use 4 hour buckets instead of 3 hour buckets in public helper queue
   summaries for rounds of 7 to 21 days. Other round lengths keep their bucket
   sizes.

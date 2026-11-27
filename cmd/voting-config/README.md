@@ -49,6 +49,36 @@ Private-key input can come from exactly one of:
 - `--privkey-stdin`
 - `VOTING_CONFIG_PRIVKEY`
 
+## Attest a round's ballot
+
+Pass `--round-file` to also bind the round's displayed ballot: round title, description and discussion link, plus each proposal's title, description, ZIP number, forum link and options, in order. Save the round from a node you trust, not from a vote server you do not operate:
+
+```bash
+curl -s https://<your-node>/shielded-vote/v1/round/<round_id> > round.json
+
+voting-config sign \
+  --round-id <round_id> \
+  --ea-pk '<base64 32-byte ea_pk>' \
+  --signer-id valar-2026-q2 \
+  --privkey-file ./valar-2026-q2.seed \
+  --pir-depth 19 --tier0-layers 12 --tier1-layers 7 --poly-len 4096 \
+  --round-file round.json \
+  --merge ./dynamic-voting-config.json
+```
+
+The command refuses a round file whose `vote_round_id` or `ea_pk` differs from the flags, prints the ballot (quoted, so stray whitespace is visible) and its `ballot_digest` on stderr, and adds to the entry:
+
+```json
+"ballot_attestation": {
+  "ballot_digest": "<64 lowercase hex>",
+  "signatures": [{ "key_id": "...", "alg": "ed25519", "sig": "<base64>" }]
+}
+```
+
+The signature covers `"zcash-shielded-vote:round-auth:v3" || round_id || ea_pk || pir_layout (4 x u32 LE) || ballot_digest`. The digest is SHA-256 of the canonical ballot encoding defined in `zcash_voting`'s `docs/ballot_authentication.md`; `internal/votingconfig/testdata/ballot_digest_v1.json` holds the shared vectors. Read the printed ballot before publishing: the signature attests that this is the content wallets should display.
+
+The field is additive. Wallets that predate it ignore it, and merges keep it: re-signing the v2 entry without `--round-file` leaves the existing attestation in place, and merging an attestation over a different digest is refused. `verify` fails on any attestation that does not verify, because wallets skip such rounds.
+
 ## Verify a config
 
 ```bash

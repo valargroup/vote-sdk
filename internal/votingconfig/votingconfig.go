@@ -68,6 +68,9 @@ type RoundEntry struct {
 	AuthVersion int         `json:"auth_version"`
 	EaPK        string      `json:"ea_pk"`
 	Signatures  []Signature `json:"signatures"`
+	// BallotAttestation optionally binds the round's displayed ballot; see
+	// ValidateBallotAttestation. Carried through every merge.
+	BallotAttestation *BallotAttestation `json:"ballot_attestation,omitempty"`
 }
 
 type Signature struct {
@@ -348,26 +351,5 @@ func hasValidSignature(roundID string, entry RoundEntry, trusted []TrustedKey, e
 	if err != nil {
 		return false
 	}
-	keys := map[string]TrustedKey{}
-	for _, key := range trusted {
-		keys[key.KeyID] = key
-	}
-	for _, sigRef := range entry.Signatures {
-		key, ok := keys[sigRef.KeyID]
-		if !ok || sigRef.Alg != key.Alg || key.Alg != AlgEd25519 {
-			continue
-		}
-		pub, err := DecodeBase64Fixed(key.Pubkey, ed25519.PublicKeySize, "trusted_keys.pubkey")
-		if err != nil {
-			continue
-		}
-		sig, err := DecodeBase64Fixed(sigRef.Sig, ed25519.SignatureSize, "signatures.sig")
-		if err != nil {
-			continue
-		}
-		if ed25519.Verify(ed25519.PublicKey(pub), payload, sig) {
-			return true
-		}
-	}
-	return false
+	return anyTrustedSignature(payload, entry.Signatures, trusted)
 }

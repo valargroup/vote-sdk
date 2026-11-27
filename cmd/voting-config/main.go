@@ -196,6 +196,7 @@ func newSignCmd() *cobra.Command {
 		privFile    string
 		privStdin   bool
 		mergePath   string
+		roundFile   string
 		pirDepth    uint32
 		tier0Layers uint32
 		tier1Layers uint32
@@ -243,6 +244,14 @@ func newSignCmd() *cobra.Command {
 				}},
 			}
 
+			if roundFile != "" {
+				attestation, err := attestBallot(cmd.ErrOrStderr(), roundFile, roundID, eaPK, layout, signerID, priv)
+				if err != nil {
+					return err
+				}
+				entry.BallotAttestation = attestation
+			}
+
 			if mergePath != "" {
 				if err := mergeEntry(mergePath, roundID, entry, layout); err != nil {
 					return err
@@ -273,6 +282,7 @@ func newSignCmd() *cobra.Command {
 	cmd.Flags().StringVar(&privFile, "privkey-file", "", "Read base64(seed) Ed25519 private key from this file")
 	cmd.Flags().BoolVar(&privStdin, "privkey-stdin", false, "Read base64(seed) Ed25519 private key from stdin")
 	cmd.Flags().StringVar(&mergePath, "merge", "", "Rewrite this dynamic-voting-config.json with the signed entry merged in")
+	cmd.Flags().StringVar(&roundFile, "round-file", "", "Also attest the round's ballot, read from this saved GET /shielded-vote/v1/round/{round_id} response from a node you trust")
 	cmd.Flags().Uint32Var(&pirDepth, "pir-depth", 0, "pir_layout.pir_depth bound into the signature (must match the dynamic config)")
 	cmd.Flags().Uint32Var(&tier0Layers, "tier0-layers", 0, "pir_layout.tier0_layers bound into the signature")
 	cmd.Flags().Uint32Var(&tier1Layers, "tier1-layers", 0, "pir_layout.tier1_layers bound into the signature")
@@ -308,6 +318,7 @@ func newVerifyCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			attested := 0
 			for roundID, entry := range cfg.Rounds {
 				switch entry.AuthVersion {
 				case votingconfig.AuthVersionV1, votingconfig.AuthVersionV2:
@@ -317,12 +328,19 @@ func newVerifyCmd() *cobra.Command {
 				if !votingconfig.VerifyEntrySignatures(roundID, entry, staticConfig.TrustedKeys, cfg.PIRLayout) {
 					return fmt.Errorf("round %s: no valid signature", roundID)
 				}
+				if err := votingconfig.ValidateBallotAttestation(roundID, entry, staticConfig.TrustedKeys, cfg.PIRLayout); err != nil {
+					return err
+				}
+				if entry.BallotAttestation != nil {
+					attested++
+				}
 			}
 			if jsonOut {
 				result := struct {
-					OK     bool `json:"ok"`
-					Rounds int  `json:"rounds"`
-				}{OK: true, Rounds: len(cfg.Rounds)}
+					OK             bool `json:"ok"`
+					Rounds         int  `json:"rounds"`
+					BallotAttested int  `json:"ballot_attested"`
+				}{OK: true, Rounds: len(cfg.Rounds), BallotAttested: attested}
 				data, err := json.MarshalIndent(result, "", "  ")
 				if err != nil {
 					return fmt.Errorf("marshal verify result: %w", err)
@@ -330,7 +348,7 @@ func newVerifyCmd() *cobra.Command {
 				_, err = cmd.OutOrStdout().Write(append(data, '\n'))
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "OK: verified %d round entries\n", len(cfg.Rounds))
+			fmt.Fprintf(cmd.OutOrStdout(), "OK: verified %d round entries, %d with ballot attestation\n", len(cfg.Rounds), attested)
 			return nil
 		},
 	}
@@ -369,6 +387,11 @@ func mergeEntry(path, roundID string, entry votingconfig.RoundEntry, signedLayou
 		default:
 			return fmt.Errorf("round %s: cannot merge into auth_version %d", roundID, existing.AuthVersion)
 		}
+		attestation, err := votingconfig.MergeBallotAttestations(existing.BallotAttestation, entry.BallotAttestation)
+		if err != nil {
+			return fmt.Errorf("round %s: %w", roundID, err)
+		}
+		entry.BallotAttestation = attestation
 	}
 	cfg.Rounds[roundID] = entry
 
@@ -377,6 +400,62 @@ func mergeEntry(path, roundID string, entry votingconfig.RoundEntry, signedLayou
 		return fmt.Errorf("marshal merged config: %w", err)
 	}
 	return os.WriteFile(path, append(data, '\n'), 0o644)
+}
+
+// attestBallot reads a saved round, checks it is the round being signed, shows
+// the signer the ballot they are attesting, and signs its digest.
+func attestBallot(review io.Writer, roundFile, roundID string, eaPK [32]byte, layout votingconfig.PIRLayout, signerID string, priv ed25519.PrivateKey) (*votingconfig.BallotAttestation, error) {
+	raw, err := os.ReadFile(roundFile)
+	if err != nil {
+		return nil, fmt.Errorf("read round-file %q: %w", roundFile, err)
+	}
+	served, err := votingconfig.ParseServedRound(raw)
+	if err != nil {
+		return nil, err
+	}
+	if served.RoundID != roundID {
+		return nil, fmt.Errorf("round-file vote_round_id %s does not match --round-id %s", served.RoundID, roundID)
+	}
+	if served.EaPK != eaPK {
+		return nil, errors.New("round-file ea_pk does not match --ea-pk")
+	}
+	digest := served.Ballot.Digest()
+	printBallot(review, served.Ballot)
+	fmt.Fprintf(review, "ballot_digest: %s\n", hex.EncodeToString(digest[:]))
+
+	sig, err := votingconfig.SignBallotAttestation(priv, roundID, eaPK, layout, digest)
+	if err != nil {
+		return nil, err
+	}
+	return &votingconfig.BallotAttestation{
+		BallotDigest: hex.EncodeToString(digest[:]),
+		Signatures: []votingconfig.Signature{{
+			KeyID: signerID,
+			Alg:   votingconfig.AlgEd25519,
+			Sig:   base64.StdEncoding.EncodeToString(sig),
+		}},
+	}, nil
+}
+
+// printBallot writes the attested content in display order, quoted so that
+// leading, trailing, and invisible characters are visible to the signer.
+func printBallot(w io.Writer, ballot votingconfig.Ballot) {
+	fmt.Fprintln(w, "ballot being attested:")
+	fmt.Fprintf(w, "  title: %q\n", ballot.Title)
+	fmt.Fprintf(w, "  description: %q\n", ballot.Description)
+	fmt.Fprintf(w, "  discussion_url: %q\n", ballot.DiscussionURL)
+	for _, proposal := range ballot.Proposals {
+		fmt.Fprintf(w, "  proposal %d: %q\n", proposal.ID, proposal.Title)
+		fmt.Fprintf(w, "    description: %q\n", proposal.Description)
+		fmt.Fprintf(w, "    zip_number: %q  forum_url: %q\n", proposal.ZipNumber, proposal.ForumURL)
+		for _, option := range proposal.Options {
+			fmt.Fprintf(w, "    option %d: %q", option.Index, option.Label)
+			if option.Description != "" {
+				fmt.Fprintf(w, " (%q)", option.Description)
+			}
+			fmt.Fprintln(w)
+		}
+	}
 }
 
 func mergeSignatures(existing []votingconfig.Signature, sig votingconfig.Signature) []votingconfig.Signature {
