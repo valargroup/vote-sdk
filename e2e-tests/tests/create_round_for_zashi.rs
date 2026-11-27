@@ -19,14 +19,18 @@
 //!   ZASHI_PIR_URL          - PIR server URL (default: http://46.101.255.48:3000)
 //!   ZASHI_VOTE_WINDOW_SECS - Voting window in seconds (default: 604800 = 7 days)
 //!   ZASHI_PROPOSAL_COUNT   - Generate that many two-option speed-test proposals
+//!   ZASHI_PROXY_DELEGATION - `1` creates a proxy delegation round: the first
+//!                            vote manager proposes it and the second, from
+//!                            VM_PRIVKEYS, approves it (contracts-v1 §5.5)
 
 use e2e_tests::{
     api::{
-        self, broadcast_cosmos_msg, default_cosmos_tx_config, import_first_vote_manager_key,
-        wait_for_create_round_id, wait_for_round_status, FIRST_VOTE_MANAGER_KEY_NAME,
-        SESSION_STATUS_ACTIVE,
+        self, broadcast_cosmos_msg, default_cosmos_tx_config, get_json,
+        import_first_vote_manager_key, import_hex_key, key_account_address,
+        wait_for_create_round_id, wait_for_round_status, CosmosTxConfig,
+        FIRST_VOTE_MANAGER_KEY_NAME, SESSION_STATUS_ACTIVE,
     },
-    payloads::coordinator_action_proposal_payload,
+    payloads::{approve_coordinator_action_payload, coordinator_action_proposal_payload},
 };
 use serde_json::json;
 use shielded_vote_circuits::nc_root::compute_nc_root;
@@ -48,6 +52,73 @@ fn vote_window_secs() -> u64 {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(604800) // 7 days
+}
+
+/// Whether `ZASHI_PROXY_DELEGATION=1` asks for a proxy delegation round.
+fn proxy_delegation() -> bool {
+    std::env::var("ZASHI_PROXY_DELEGATION").is_ok_and(|value| value == "1")
+}
+
+/// Keyring name of the second vote manager, as init.sh names it.
+const SECOND_VOTE_MANAGER_KEY_NAME: &str = "vote-manager-2";
+
+/// Imports the second key of VM_PRIVKEYS as [`SECOND_VOTE_MANAGER_KEY_NAME`]
+/// and returns its account address. A proxy round needs its approval.
+fn import_second_vote_manager_key(home_dir: &str) -> String {
+    let raw = std::env::var("VM_PRIVKEYS").expect("VM_PRIVKEYS must be set");
+    let key = raw
+        .split(',')
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+        .nth(1)
+        .expect("a proxy round needs a second key in VM_PRIVKEYS");
+    import_hex_key(SECOND_VOTE_MANAGER_KEY_NAME, key, home_dir);
+    key_account_address(SECOND_VOTE_MANAGER_KEY_NAME, home_dir)
+        .expect("the second vote manager key must be in the keyring after import")
+}
+
+/// Polls `/shielded-vote/v1/tx/{hash}` until the tx commits, and returns
+/// the value of attribute `key` of its first `kind` event.
+fn committed_event_attribute(tx_hash: &str, kind: &str, key: &str) -> Option<String> {
+    let path = format!("/shielded-vote/v1/tx/{tx_hash}");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        let (status, body) = get_json(&path).expect("GET the tx");
+        if status == 200 {
+            assert_eq!(body["code"].as_u64().unwrap_or(0), 0, "tx failed: {body}");
+            return body["events"]
+                .as_array()?
+                .iter()
+                .filter(|event| event["type"] == kind)
+                .flat_map(|event| event["attributes"].as_array().into_iter().flatten())
+                .find(|attribute| attribute["key"] == key)
+                .and_then(|attribute| attribute["value"].as_str())
+                .map(str::to_owned);
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "tx {tx_hash} did not commit: HTTP {status} {body}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+}
+
+/// Broadcasts `msg` signed by `config`'s key and checks CheckTx accepted it.
+fn broadcast_accepted(msg: &serde_json::Value, config: &CosmosTxConfig) -> serde_json::Value {
+    let (status, json) = broadcast_cosmos_msg(msg, config).expect("broadcast");
+    assert_eq!(
+        status, 200,
+        "{}: HTTP {status}, body={json:?}",
+        msg["@type"]
+    );
+    assert_eq!(
+        json.get("code").and_then(|c| c.as_i64()).unwrap_or(-1),
+        0,
+        "{} rejected: {:?}",
+        msg["@type"],
+        json.get("log")
+    );
+    json
 }
 
 const LEGACY_PIR_DATASET_VERSION: u64 = 1;
@@ -342,7 +413,7 @@ fn create_round_for_zashi() {
 
     // ---- Step 6: Build and broadcast coordinator action proposal ----
     log("creating voting session...");
-    let create_body = json!({
+    let mut create_body = json!({
         "creator": vote_manager_address,
         "snapshot_height": snap_height,
         "snapshot_blockhash": to_base64(&snapshot_blockhash),
@@ -352,6 +423,9 @@ fn create_round_for_zashi() {
         "nc_root": to_base64(&nc_root),
         "proposals": proposals(),
     });
+    if proxy_delegation() {
+        create_body["proxy_delegation"] = json!(true);
+    }
     let body = coordinator_action_proposal_payload(
         &vote_manager_address,
         create_body,
@@ -364,19 +438,29 @@ fn create_round_for_zashi() {
         chain_id: config.chain_id.clone(),
         node_url: config.node_url.clone(),
     };
-    let (status, json) =
-        broadcast_cosmos_msg(&body, &vm_config).expect("broadcast create-voting-session");
-    assert_eq!(
-        status, 200,
-        "create session: HTTP {}, body={:?}",
-        status, json
-    );
-    assert_eq!(
-        json.get("code").and_then(|c| c.as_i64()).unwrap_or(-1),
-        0,
-        "create session rejected: {:?}",
-        json.get("log")
-    );
+    let mut json = broadcast_accepted(&body, &vm_config);
+    if proxy_delegation() {
+        // One approval is below a proxy round's floor; the second executes it.
+        let tx_hash = json["tx_hash"].as_str().expect("tx_hash").to_owned();
+        let action_id: u64 =
+            committed_event_attribute(&tx_hash, "propose_coordinator_action", "action_id")
+                .and_then(|id| id.parse().ok())
+                .expect("the proposal names its action id");
+        log(&format!(
+            "proxy round proposed as action {action_id}; approving..."
+        ));
+        let approver = import_second_vote_manager_key(&config.home_dir);
+        let approver_config = api::CosmosTxConfig {
+            key_name: SECOND_VOTE_MANAGER_KEY_NAME.to_string(),
+            home_dir: config.home_dir.clone(),
+            chain_id: config.chain_id.clone(),
+            node_url: config.node_url.clone(),
+        };
+        json = broadcast_accepted(
+            &approve_coordinator_action_payload(&approver, action_id),
+            &approver_config,
+        );
+    }
     let round_id_hex = wait_for_create_round_id(&json).expect("create tx should emit round_id");
     log(&format!("round_id: {}", round_id_hex));
     log("session TX broadcast ✓");
@@ -384,19 +468,20 @@ fn create_round_for_zashi() {
     // ---- Step 7: Wait for round to become ACTIVE ----
     log(&format!(
         "waiting for round {} to become ACTIVE...",
-        &round_id_hex
+        round_id_hex
     ));
     wait_for_round_status(&round_id_hex, SESSION_STATUS_ACTIVE, 30_000, 1_000)
         .expect("round should become ACTIVE");
 
     log("========================================");
-    log(&format!("ROUND CREATED SUCCESSFULLY"));
+    log("ROUND CREATED SUCCESSFULLY");
     log(&format!("  round_id:    {}", round_id_hex));
+    log(&format!("  proxy:       {}", proxy_delegation()));
     log(&format!("  snapshot:    {}", snap_height));
-    log(&format!("  nc_root:     {}", hex::encode(&nc_root)));
+    log(&format!("  nc_root:     {}", hex::encode(nc_root)));
     log(&format!(
         "  imt_root:    {}",
-        hex::encode(&nullifier_imt_root)
+        hex::encode(nullifier_imt_root)
     ));
     log(&format!(
         "  vote_end:    {} ({}s from now)",

@@ -123,6 +123,11 @@ fn push_string(out: &mut Vec<u8>, field_number: u32, value: &str) {
     push_bytes(out, field_number, value.as_bytes());
 }
 
+/// Appends a protobuf `bool` field, omitted when false as proto3 does.
+fn push_bool(out: &mut Vec<u8>, field_number: u32, value: bool) {
+    push_uint64(out, field_number, u64::from(value));
+}
+
 fn required_str<'a>(value: &'a Value, field: &str) -> &'a str {
     value
         .get(field)
@@ -219,6 +224,8 @@ fn encode_create_voting_session(value: &Value) -> Vec<u8> {
     if let Some(discussion_url) = value.get("discussion_url").and_then(Value::as_str) {
         push_string(&mut out, 11, discussion_url);
     }
+    let proxy_delegation = value.get("proxy_delegation").and_then(Value::as_bool);
+    push_bool(&mut out, 12, proxy_delegation.unwrap_or(false));
     out
 }
 
@@ -290,48 +297,14 @@ pub fn coordinator_action_proposal_payload(
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn coordinator_payload_uses_binary_any_value() {
-        let payload = json!({
-            "creator": "sv1creator",
-            "snapshot_height": 1000,
-            "snapshot_blockhash": to_base64(&[0xaa; 32]),
-            "proposals_hash": to_base64(&[0xbb; 32]),
-            "vote_end_time": 2000,
-            "nullifier_imt_root": to_base64(&[0x01; 32]),
-            "nc_root": to_base64(&[0x02; 32]),
-            "proposals": [{
-                "id": 1,
-                "title": "Proposal A",
-                "description": "First proposal",
-                "options": [
-                    {"index": 0, "label": "Support"},
-                    {"index": 1, "label": "Oppose"},
-                ],
-            }],
-        });
-
-        let wrapped = coordinator_action_proposal_payload(
-            "sv1creator",
-            payload,
-            "/svote.v1.MsgCreateVotingSession",
-        );
-        let any_payload = wrapped.get("payload").expect("payload");
-
-        assert_eq!(
-            any_payload.get("type_url").and_then(Value::as_str),
-            Some("/svote.v1.MsgCreateVotingSession")
-        );
-        assert!(any_payload.get("@type").is_none());
-        assert_eq!(
-            any_payload.get("value").and_then(Value::as_str),
-            Some("CgpzdjFjcmVhdG9yEOgHGiCqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqiIgu7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7so0A8yIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBOiACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAkI1CAESClByb3Bvc2FsIEEaDkZpcnN0IHByb3Bvc2FsIgkSB1N1cHBvcnQiCggBEgZPcHBvc2U=")
-        );
-    }
+/// Builds `MsgApproveCoordinatorAction`, a second vote manager's approval of
+/// pending action `action_id`.
+pub fn approve_coordinator_action_payload(creator: &str, action_id: u64) -> Value {
+    json!({
+        "@type": "/svote.v1.MsgApproveCoordinatorAction",
+        "creator": creator,
+        "action_id": action_id.to_string(),
+    })
 }
 
 /// Delegation bundle fields (from build_delegation_bundle + create_delegation_proof).
@@ -391,6 +364,7 @@ pub fn cast_vote_payload(round_id: &[u8], anchor_height: u32) -> Value {
 /// Build MsgCastVote body with a real ZKP #2 proof and public inputs.
 /// The FFI decompresses r_vpk to (x, y) for the circuit's public inputs.
 /// Sighash is computed on-chain from the message fields.
+#[allow(clippy::too_many_arguments)]
 pub fn cast_vote_payload_real(
     round_id: &[u8],
     anchor_height: u32,
@@ -488,6 +462,7 @@ pub fn create_validator_with_pallas_key_payload(staking_msg: &[u8], pallas_pk: &
 /// Build a share payload for the helper server's POST /shielded-vote/v1/shares endpoint.
 ///
 /// The helper server expects base64 for binary fields and hex for vote_round_id.
+#[allow(clippy::too_many_arguments)]
 pub fn helper_share_payload(
     round_id: &[u8],
     shares_hash: &[u8],
@@ -519,4 +494,60 @@ pub fn helper_share_payload(
         "share_comms": comms_json,
         "primary_blind": to_base64(primary_blind),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The session's `proxy_delegation` encodes as a proto3 bool: present
+    /// when true, omitted when false.
+    #[test]
+    fn proxy_delegation_flag_encodes_as_a_bool() {
+        let (mut session, _, _) = create_voting_session_payload("sv1c", 60, None);
+        let plain = encode_create_voting_session(&session);
+        session["proxy_delegation"] = json!(true);
+        let flagged = encode_create_voting_session(&session);
+        assert_eq!(flagged[..plain.len()], plain[..]);
+        assert_eq!(flagged[plain.len()..], [0x60, 1], "field 12, varint 1");
+    }
+
+    #[test]
+    fn coordinator_payload_uses_binary_any_value() {
+        let payload = json!({
+            "creator": "sv1creator",
+            "snapshot_height": 1000,
+            "snapshot_blockhash": to_base64(&[0xaa; 32]),
+            "proposals_hash": to_base64(&[0xbb; 32]),
+            "vote_end_time": 2000,
+            "nullifier_imt_root": to_base64(&[0x01; 32]),
+            "nc_root": to_base64(&[0x02; 32]),
+            "proposals": [{
+                "id": 1,
+                "title": "Proposal A",
+                "description": "First proposal",
+                "options": [
+                    {"index": 0, "label": "Support"},
+                    {"index": 1, "label": "Oppose"},
+                ],
+            }],
+        });
+
+        let wrapped = coordinator_action_proposal_payload(
+            "sv1creator",
+            payload,
+            "/svote.v1.MsgCreateVotingSession",
+        );
+        let any_payload = wrapped.get("payload").expect("payload");
+
+        assert_eq!(
+            any_payload.get("type_url").and_then(Value::as_str),
+            Some("/svote.v1.MsgCreateVotingSession")
+        );
+        assert!(any_payload.get("@type").is_none());
+        assert_eq!(
+            any_payload.get("value").and_then(Value::as_str),
+            Some("CgpzdjFjcmVhdG9yEOgHGiCqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqiIgu7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7so0A8yIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBOiACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAkI1CAESClByb3Bvc2FsIEEaDkZpcnN0IHByb3Bvc2FsIgkSB1N1cHBvcnQiCggBEgZPcHBvc2U=")
+        );
+    }
 }

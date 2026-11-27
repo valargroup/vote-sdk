@@ -118,6 +118,7 @@ fn vote_round_id_from_bytes(
         .ok_or_else(|| "vote_round_id must be a canonical Pallas Fp element".into())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_delegation_payload(
     note_inputs: Vec<RealNoteInput>,
     fvk: FullViewingKey,
@@ -170,7 +171,7 @@ fn build_delegation_payload(
     let tx1_effects = delegation_tx1_effects(&rk_bytes, &nf_signed_bytes, &cmx_new_bytes)?;
     let sighash = shielded_vote_circuits::tx1::sighash(&tx1_effects)
         .map_err(|e| format!("delegation TX1 sighash: {e}"))?;
-    let sig = rsk.sign(&mut rng, &sighash);
+    let sig = rsk.sign(rng, &sighash);
 
     let sig_bytes: [u8; 64] = (&sig).into();
 
@@ -201,7 +202,7 @@ fn rk_bytes_from_instance(instance: &voting_circuits::delegation::Instance) -> [
     let rk_affine =
         Option::<pallas::Affine>::from(pallas::Affine::from_xy(instance.rk_x, instance.rk_y))
             .expect("delegation instance rk coordinates must be on-curve");
-    rk_affine.to_bytes().into()
+    rk_affine.to_bytes()
 }
 
 /// Prepare delegation inputs and session fields for the E2E test.
@@ -302,8 +303,8 @@ fn prepare_delegation_bundle_with_recipient(
     let mut auth_path_0 = [MerkleHashOrchard::empty_leaf(); NOTE_COMMITMENT_TREE_DEPTH];
     auth_path_0[0] = leaves[1];
     auth_path_0[1] = l1_1;
-    for level in 2..NOTE_COMMITMENT_TREE_DEPTH {
-        auth_path_0[level] = MerkleHashOrchard::empty_root(Level::from(level as u8));
+    for (level, node) in auth_path_0.iter_mut().enumerate().skip(2) {
+        *node = MerkleHashOrchard::empty_root(Level::from(level as u8));
     }
     let merkle_path_0 = MerklePath::from_parts(0u32, auth_path_0);
 
@@ -315,8 +316,8 @@ fn prepare_delegation_bundle_with_recipient(
     let mut auth_path_1 = [MerkleHashOrchard::empty_leaf(); NOTE_COMMITMENT_TREE_DEPTH];
     auth_path_1[0] = leaves[0];
     auth_path_1[1] = l1_1;
-    for level in 2..NOTE_COMMITMENT_TREE_DEPTH {
-        auth_path_1[level] = MerkleHashOrchard::empty_root(Level::from(level as u8));
+    for (level, node) in auth_path_1.iter_mut().enumerate().skip(2) {
+        *node = MerkleHashOrchard::empty_root(Level::from(level as u8));
     }
     let merkle_path_1 = MerklePath::from_parts(1u32, auth_path_1);
 
@@ -714,7 +715,7 @@ fn build_multi_delegation_payloads(
                     delegation_tx1_effects(&rk_bytes, &nf_signed_bytes, &cmx_new_bytes)?;
                 let sighash = shielded_vote_circuits::tx1::sighash(&tx1_effects)
                     .map_err(|e| format!("delegation {} TX1 sighash: {e}", i))?;
-                let sig = rsk.sign(&mut rng, &sighash);
+                let sig = rsk.sign(rng, &sighash);
                 let sig_bytes: [u8; 64] = (&sig).into();
 
                 let van_cmx_bytes = bundle.instance.van_comm.to_repr();
@@ -761,6 +762,7 @@ fn build_multi_delegation_payloads(
 /// Build N delegation bundles using the legacy precomputed ID.
 /// Live-chain tests should prefer `prepare_multi_delegation_bundles` so proofs
 /// bind to the emitted on-chain round ID.
+#[allow(clippy::type_complexity)]
 pub fn build_multi_delegation_bundles(
     count: usize,
 ) -> Result<

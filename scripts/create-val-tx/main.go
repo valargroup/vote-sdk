@@ -167,10 +167,12 @@ func run() error {
 	}
 	defer os.Remove(signedPath) //nolint:errcheck
 
-	// Broadcast via svoted tx broadcast.
+	// Broadcast via svoted tx broadcast. --home keeps svoted from creating
+	// default config in ~/.svoted.
 	fmt.Printf("Broadcasting to %s ...\n", args.rpcURL)
 	broadcastCmd := exec.Command("svoted",
 		"tx", "broadcast", signedPath,
+		"--home", args.home,
 		"--node", args.rpcURL,
 		"--output", "json",
 	)
@@ -198,10 +200,10 @@ func buildUnsignedTx(stakingMsgBytes, pallasPkBytes []byte) map[string]interface
 					"pallas_pk":   base64.StdEncoding.EncodeToString(pallasPkBytes),
 				},
 			},
-			"memo":                            "",
-			"timeout_height":                  "0",
-			"extension_options":               []interface{}{},
-			"non_critical_extension_options":  []interface{}{},
+			"memo":                           "",
+			"timeout_height":                 "0",
+			"extension_options":              []interface{}{},
+			"non_critical_extension_options": []interface{}{},
 		},
 		"auth_info": map[string]interface{}{
 			"signer_infos": []interface{}{},
