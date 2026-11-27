@@ -123,6 +123,11 @@ fn push_string(out: &mut Vec<u8>, field_number: u32, value: &str) {
     push_bytes(out, field_number, value.as_bytes());
 }
 
+/// Appends a protobuf `bool` field, omitted when false as proto3 does.
+fn push_bool(out: &mut Vec<u8>, field_number: u32, value: bool) {
+    push_uint64(out, field_number, u64::from(value));
+}
+
 fn required_str<'a>(value: &'a Value, field: &str) -> &'a str {
     value
         .get(field)
@@ -219,6 +224,8 @@ fn encode_create_voting_session(value: &Value) -> Vec<u8> {
     if let Some(discussion_url) = value.get("discussion_url").and_then(Value::as_str) {
         push_string(&mut out, 11, discussion_url);
     }
+    let proxy_delegation = value.get("proxy_delegation").and_then(Value::as_bool);
+    push_bool(&mut out, 12, proxy_delegation.unwrap_or(false));
     out
 }
 
@@ -287,6 +294,16 @@ pub fn coordinator_action_proposal_payload(
             "type_url": payload_type_url,
             "value": to_base64(&payload_value),
         },
+    })
+}
+
+/// Builds `MsgApproveCoordinatorAction`, a second vote manager's approval of
+/// pending action `action_id`.
+pub fn approve_coordinator_action_payload(creator: &str, action_id: u64) -> Value {
+    json!({
+        "@type": "/svote.v1.MsgApproveCoordinatorAction",
+        "creator": creator,
+        "action_id": action_id.to_string(),
     })
 }
 
@@ -482,6 +499,18 @@ pub fn helper_share_payload(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The session's `proxy_delegation` encodes as a proto3 bool: present
+    /// when true, omitted when false.
+    #[test]
+    fn proxy_delegation_flag_encodes_as_a_bool() {
+        let (mut session, _, _) = create_voting_session_payload("sv1c", 60, None);
+        let plain = encode_create_voting_session(&session);
+        session["proxy_delegation"] = json!(true);
+        let flagged = encode_create_voting_session(&session);
+        assert_eq!(flagged[..plain.len()], plain[..]);
+        assert_eq!(flagged[plain.len()..], [0x60, 1], "field 12, varint 1");
+    }
 
     #[test]
     fn coordinator_payload_uses_binary_any_value() {
