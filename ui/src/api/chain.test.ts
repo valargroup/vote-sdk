@@ -14,6 +14,7 @@ import {
   setChainUrl,
   shouldMigrateNullifierUrl,
   subscribeToChainUrlChanges,
+  supportsProxyDelegation,
   type ChainRound,
   type PublishedSnapshotManifest,
   type VotingConfig,
@@ -112,6 +113,15 @@ function manifest(patch: Partial<PublishedSnapshotManifest> = {}): PublishedSnap
     ...patch,
   };
 }
+
+describe("proxy delegation capability", () => {
+  it("requires capability field 4 to report version 1 or more", () => {
+    expect(supportsProxyDelegation(null)).toBe(false);
+    expect(supportsProxyDelegation({})).toBe(false);
+    expect(supportsProxyDelegation({ proxy_delegation_version: 0 })).toBe(false);
+    expect(supportsProxyDelegation({ proxy_delegation_version: 1 })).toBe(true);
+  });
+});
 
 describe("default PIR URL resolution", () => {
   const stageConfig: VotingConfig = {

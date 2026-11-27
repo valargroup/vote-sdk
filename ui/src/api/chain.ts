@@ -560,6 +560,29 @@ export async function getVoteManagers(): Promise<{ vote_manager_addresses: strin
   };
 }
 
+/**
+ * The part of the chain's ProtocolCapabilities (contracts-v1 §8) the admin
+ * UI reads. Field 4 is absent until proxy delegation is enabled.
+ */
+export interface ProtocolCapabilities {
+  proxy_delegation_version?: number;
+}
+
+/** Fetches the chain's protocol capabilities. */
+export async function getProtocolCapabilities(): Promise<ProtocolCapabilities> {
+  return fetchJson<ProtocolCapabilities>("/shielded-vote/v1/protocol-capabilities");
+}
+
+/**
+ * Reports whether the chain accepts proxy delegation rounds: capability
+ * field 4, proxy_delegation_version, is 1 or more. Field 5 can stay empty
+ * after that until the node finishes warming its verifiers, and round
+ * creation does not need it.
+ */
+export function supportsProxyDelegation(capabilities: ProtocolCapabilities | null | undefined): boolean {
+  return (capabilities?.proxy_delegation_version ?? 0) >= 1;
+}
+
 export async function getPendingCoordinatorActions(): Promise<{ actions: CoordinatorAction[] }> {
   const resp = await fetchJson<{ actions?: CoordinatorAction[] }>("/shielded-vote/v1/coordinator-actions");
   return { actions: resp.actions ?? [] };
