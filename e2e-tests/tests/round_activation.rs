@@ -67,7 +67,7 @@ fn round_activation() {
     // take 20+ blocks depending on weighted round-robin scheduling.
     eprintln!(
         "[E2E] Waiting for round {} to become ACTIVE (3-validator DKG)...",
-        &round_id_hex
+        round_id_hex
     );
     wait_for_round_status(&round_id_hex, SESSION_STATUS_ACTIVE, 180_000, 2_000)
         .expect("round should become ACTIVE via per-round ceremony");

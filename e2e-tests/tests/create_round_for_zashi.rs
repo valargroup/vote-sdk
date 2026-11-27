@@ -384,19 +384,19 @@ fn create_round_for_zashi() {
     // ---- Step 7: Wait for round to become ACTIVE ----
     log(&format!(
         "waiting for round {} to become ACTIVE...",
-        &round_id_hex
+        round_id_hex
     ));
     wait_for_round_status(&round_id_hex, SESSION_STATUS_ACTIVE, 30_000, 1_000)
         .expect("round should become ACTIVE");
 
     log("========================================");
-    log(&format!("ROUND CREATED SUCCESSFULLY"));
+    log("ROUND CREATED SUCCESSFULLY");
     log(&format!("  round_id:    {}", round_id_hex));
     log(&format!("  snapshot:    {}", snap_height));
-    log(&format!("  nc_root:     {}", hex::encode(&nc_root)));
+    log(&format!("  nc_root:     {}", hex::encode(nc_root)));
     log(&format!(
         "  imt_root:    {}",
-        hex::encode(&nullifier_imt_root)
+        hex::encode(nullifier_imt_root)
     ));
     log(&format!(
         "  vote_end:    {} ({}s from now)",

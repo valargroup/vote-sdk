@@ -26,6 +26,13 @@ pub struct MetricsCollector {
     samples: Mutex<Vec<Sample>>,
 }
 
+impl Default for MetricsCollector {
+    /// Same as [`MetricsCollector::new`].
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MetricsCollector {
     pub fn new() -> Self {
         Self {
@@ -123,12 +130,19 @@ fn compute_phase_metrics(phase: &str, samples: &[&Sample]) -> PhaseMetrics {
     let succeeded = samples.iter().filter(|s| s.success).count();
     let failed = total - succeeded;
 
-    let mut latencies_ms: Vec<f64> = samples.iter().map(|s| s.latency.as_secs_f64() * 1000.0).collect();
+    let mut latencies_ms: Vec<f64> = samples
+        .iter()
+        .map(|s| s.latency.as_secs_f64() * 1000.0)
+        .collect();
     latencies_ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
     let wall_time = if total > 1 {
         let first = samples.iter().map(|s| s.timestamp).min().unwrap();
-        let last = samples.iter().map(|s| s.timestamp + s.latency).max().unwrap();
+        let last = samples
+            .iter()
+            .map(|s| s.timestamp + s.latency)
+            .max()
+            .unwrap();
         last.duration_since(first).as_secs_f64()
     } else {
         latencies_ms.first().copied().unwrap_or(0.0) / 1000.0
@@ -139,9 +153,17 @@ fn compute_phase_metrics(phase: &str, samples: &[&Sample]) -> PhaseMetrics {
         total_submitted: total,
         succeeded,
         failed,
-        success_rate: if total > 0 { succeeded as f64 / total as f64 } else { 0.0 },
+        success_rate: if total > 0 {
+            succeeded as f64 / total as f64
+        } else {
+            0.0
+        },
         wall_time_secs: wall_time,
-        tps_sustained: if wall_time > 0.0 { total as f64 / wall_time } else { 0.0 },
+        tps_sustained: if wall_time > 0.0 {
+            total as f64 / wall_time
+        } else {
+            0.0
+        },
         latency_p50_ms: percentile(&latencies_ms, 50.0),
         latency_p95_ms: percentile(&latencies_ms, 95.0),
         latency_p99_ms: percentile(&latencies_ms, 99.0),

@@ -53,7 +53,9 @@ use orchard::keys::SpendingKey;
 use pasta_curves::pallas;
 use rand::rngs::OsRng;
 use vote_commitment_tree::MemoryTreeServer;
-use voting_circuits::{vote_proof::build_vote_proof_from_delegation, VOTE_COMM_TREE_DEPTH};
+use voting_circuits::{
+    vote_proof::build_vote_proof_from_delegation, MAX_PROPOSAL_AUTHORITY, VOTE_COMM_TREE_DEPTH,
+};
 
 // ---------------------------------------------------------------------------
 // Round-bound voter inputs
@@ -255,7 +257,7 @@ fn submit_concurrent(
                 results.lock().unwrap().push((idx, tx_hash));
 
                 let done = submitted.fetch_add(1, Ordering::Relaxed) + 1;
-                if done % 100 == 0 || done == total {
+                if done.is_multiple_of(100) || done == total {
                     let ok = succeeded.load(Ordering::Relaxed);
                     eprintln!(
                         "[{phase}] {done}/{total} submitted ({ok} succeeded), latency={:.0}ms",
@@ -338,7 +340,8 @@ fn generate_cast_vote(
         1,
         ea_pk,
         alpha_v,
-        (1u64 << 16) - 1,
+        // A fresh delegation's VAN commits full authority over every proposal.
+        MAX_PROPOSAL_AUTHORITY,
         false,
     )
     .expect("cast-vote proof generation failed");
@@ -376,7 +379,7 @@ fn generate_cast_vote(
         out.copy_from_slice(h.as_bytes());
         out
     };
-    let sig = rsk.sign(&mut OsRng, &sighash);
+    let sig = rsk.sign(OsRng, &sighash);
     let sig_bytes: [u8; 64] = (&sig).into();
 
     let payload = payloads::cast_vote_payload_real(
@@ -401,8 +404,8 @@ fn generate_cast_vote(
                 "proposal_id": 1,
                 "vote_decision": 1,
                 "enc_share": {
-                    "c1": B64.encode(&es.c1),
-                    "c2": B64.encode(&es.c2),
+                    "c1": B64.encode(es.c1),
+                    "c2": B64.encode(es.c2),
                     "share_index": share_idx,
                 },
                 "tree_position": 0, // filled at runtime after position resolution
@@ -516,7 +519,7 @@ fn voter_throughput_stress() {
         expected_tree_root_b64,
     } = build_round_bound_voter_inputs(&round_id, bundles);
 
-    eprintln!("Waiting for round {} to become ACTIVE...", &round_id_hex);
+    eprintln!("Waiting for round {} to become ACTIVE...", round_id_hex);
     wait_for_round_status(&round_id_hex, SESSION_STATUS_ACTIVE, 90_000, 2_000)
         .expect("round should become ACTIVE");
     eprintln!("Round ACTIVE");
@@ -588,7 +591,7 @@ fn voter_throughput_stress() {
     let ea_pk_arr: [u8; 32] = ea_pk_bytes.try_into().expect("ea_pk must be 32 bytes");
     let ea_pk: pallas::Affine =
         Option::from(pallas::Affine::from_bytes(&ea_pk_arr)).expect("ea_pk decompression");
-    eprintln!("EA public key from round: {}", hex::encode(&ea_pk_arr));
+    eprintln!("EA public key from round: {}", hex::encode(ea_pk_arr));
 
     let anchor_height = on_chain_height as u32;
     let proof_threads: usize = std::env::var("PROOF_GEN_THREADS")
@@ -612,13 +615,11 @@ fn voter_throughput_stress() {
         let handles: Vec<_> = chunk
             .into_iter()
             .map(|(idx, input)| {
-                let round_id_fp = round_id_fp;
-                let ea_pk = ea_pk;
                 let completed = Arc::clone(&completed);
                 std::thread::spawn(move || {
                     let bundle = generate_cast_vote(&input, &round_id_fp, anchor_height, ea_pk);
                     let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
-                    if done % 10 == 0 || done == total_proofs {
+                    if done.is_multiple_of(10) || done == total_proofs {
                         eprintln!("[cast-vote-gen] {done}/{total_proofs} proofs complete");
                     }
                     (idx, bundle)
@@ -717,8 +718,6 @@ fn voter_throughput_stress() {
         }
 
         let wave_count = wave_payloads.len();
-        let wave_ok;
-        let wave_fail;
 
         let queue = Arc::new(std::sync::Mutex::new(wave_payloads));
         let wave_succeeded = Arc::new(AtomicUsize::new(0));
@@ -793,8 +792,8 @@ fn voter_throughput_stress() {
             h.join().expect("share worker panicked");
         }
 
-        wave_ok = wave_succeeded.load(Ordering::Relaxed);
-        wave_fail = wave_count - wave_ok;
+        let wave_ok = wave_succeeded.load(Ordering::Relaxed);
+        let wave_fail = wave_count - wave_ok;
         total_enqueued += wave_ok;
         let wave_elapsed = wave_start.elapsed();
         wave_timings.push((wave_num, wave_elapsed, wave_ok));
@@ -920,7 +919,8 @@ fn voter_throughput_stress() {
     let total_wall = collector.wall_time();
     let agg = metrics::compute_aggregate(&all_samples, total_wall);
 
-    let artifacts_dir = std::path::PathBuf::from("artifacts/voter-throughput");
+    let artifacts_dir =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/voter-throughput");
     let _ = metrics::write_report(&agg, &artifacts_dir);
 
     fn fmt_dur(secs: f64) -> String {
@@ -1042,12 +1042,12 @@ fn voter_throughput_stress() {
     eprintln!("\n  Per-Tx Latency (HTTP → CheckTx → ZKP verify → response)");
     eprintln!("  ─────────────────────────────────────────────────────────────");
     eprintln!(
-        "  {:15} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}  {}",
-        "Phase", "ok/total", "p50", "p95", "p99", "max", "min", "ZKP"
+        "  {:15} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}  ZKP",
+        "Phase", "ok/total", "p50", "p95", "p99", "max", "min"
     );
     eprintln!(
-        "  {:15} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}  {}",
-        "─────", "────────", "───", "───", "───", "───", "───", "───"
+        "  {:15} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}  ───",
+        "─────", "────────", "───", "───", "───", "───", "───"
     );
     let zkp_labels = ["#1 K=12", "#2 K=11", "—"];
     for (i, p) in agg.phases.iter().enumerate() {

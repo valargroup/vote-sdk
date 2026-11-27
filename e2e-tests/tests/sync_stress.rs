@@ -109,7 +109,7 @@ fn sync_stress_multi_delegation() {
 
     eprintln!(
         "[stress] Phase 2: waiting for round {} to become ACTIVE...",
-        &round_id_hex
+        round_id_hex
     );
     wait_for_round_status(&round_id_hex, SESSION_STATUS_ACTIVE, 60_000, 2_000)
         .expect("round should become ACTIVE");

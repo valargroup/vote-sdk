@@ -188,7 +188,7 @@ fn atomic_delegate_cast_real_proofs_helper_and_tally() {
             .zip(alphas.iter())
             .zip(proposals)
             .map(|((bundle, alpha), proposal_id)| {
-                let signature = ask.randomize(alpha).sign(&mut OsRng, &digest);
+                let signature = ask.randomize(alpha).sign(OsRng, &digest);
                 let signature: [u8; 64] = (&signature).into();
                 cast_json(&round_id, proposal_id, bundle, &signature)
             })

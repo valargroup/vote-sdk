@@ -15,8 +15,7 @@ pub fn base_url() -> String {
 /// serves on the same port as the chain REST API (default 1317).
 /// Uses 127.0.0.1 instead of localhost to avoid IPv6 resolution issues on macOS.
 pub fn helper_server_url() -> String {
-    std::env::var("HELPER_SERVER_URL")
-        .unwrap_or_else(|_| base_url())
+    std::env::var("HELPER_SERVER_URL").unwrap_or_else(|_| base_url())
 }
 
 fn helper_api_token() -> Option<String> {
@@ -27,7 +26,10 @@ fn helper_api_token() -> Option<String> {
 }
 
 /// POST JSON to the helper server. Retries on connection and decode errors.
-pub fn post_helper_json(path: &str, body: &Value) -> Result<(u16, Value), Box<dyn std::error::Error + Send + Sync>> {
+pub fn post_helper_json(
+    path: &str,
+    body: &Value,
+) -> Result<(u16, Value), Box<dyn std::error::Error + Send + Sync>> {
     let url = format!("{}{}", helper_server_url(), path);
     let mut last_err: Option<Box<dyn std::error::Error + Send + Sync>> = None;
     let token = helper_api_token();
@@ -91,7 +93,10 @@ fn is_retryable(err: &reqwest::Error) -> bool {
 const MAX_RETRIES: u32 = 12;
 
 /// Single POST with no retries. Use when 502 is an acceptable outcome (e.g. duplicate tx).
-pub fn post_json_once(path: &str, body: &Value) -> Result<(u16, Value), Box<dyn std::error::Error + Send + Sync>> {
+pub fn post_json_once(
+    path: &str,
+    body: &Value,
+) -> Result<(u16, Value), Box<dyn std::error::Error + Send + Sync>> {
     let url = format!("{}{}", base_url(), path);
     let resp = client().post(&url).json(body).send()?;
     let status = resp.status().as_u16();
@@ -103,7 +108,10 @@ pub fn post_json_once(path: &str, body: &Value) -> Result<(u16, Value), Box<dyn 
 /// Stops retrying immediately if the 502 body indicates the tx is already in the
 /// mempool cache (no point retrying — the server now returns 200 for that case,
 /// but this guard catches older server versions or race windows).
-pub fn post_json(path: &str, body: &Value) -> Result<(u16, Value), Box<dyn std::error::Error + Send + Sync>> {
+pub fn post_json(
+    path: &str,
+    body: &Value,
+) -> Result<(u16, Value), Box<dyn std::error::Error + Send + Sync>> {
     let url = format!("{}{}", base_url(), path);
     let mut last_err = None;
     for attempt in 0..MAX_RETRIES {
@@ -114,12 +122,23 @@ pub fn post_json(path: &str, body: &Value) -> Result<(u16, Value), Box<dyn std::
                     // Read body to check for "already in cache" before deciding to retry.
                     let json: Value = resp.json().unwrap_or(Value::Null);
                     let err_text = json.get("error").and_then(|e| e.as_str()).unwrap_or("");
-                    if err_text.contains("already exists in cache") || err_text.contains("already in cache") {
-                        eprintln!("[E2E] POST {} tx already in mempool cache; not retrying", path);
+                    if err_text.contains("already exists in cache")
+                        || err_text.contains("already in cache")
+                    {
+                        eprintln!(
+                            "[E2E] POST {} tx already in mempool cache; not retrying",
+                            path
+                        );
                         return Ok((status, json));
                     }
                     let backoff = 4 * (attempt + 1) as u64;
-                    eprintln!("[E2E] POST {} returned 502 (attempt {}/{}), retrying in {}s...", path, attempt + 1, MAX_RETRIES, backoff);
+                    eprintln!(
+                        "[E2E] POST {} returned 502 (attempt {}/{}), retrying in {}s...",
+                        path,
+                        attempt + 1,
+                        MAX_RETRIES,
+                        backoff
+                    );
                     std::thread::sleep(std::time::Duration::from_secs(backoff));
                     continue;
                 }
@@ -131,7 +150,13 @@ pub fn post_json(path: &str, body: &Value) -> Result<(u16, Value), Box<dyn std::
                 if let Some(ref err) = last_err {
                     if is_retryable(err) && attempt < MAX_RETRIES - 1 {
                         let backoff_ms = 500 * (attempt + 1) as u64;
-                        eprintln!("[E2E] POST {} connection error (attempt {}/{}), retrying in {}ms...", path, attempt + 1, MAX_RETRIES, backoff_ms);
+                        eprintln!(
+                            "[E2E] POST {} connection error (attempt {}/{}), retrying in {}ms...",
+                            path,
+                            attempt + 1,
+                            MAX_RETRIES,
+                            backoff_ms
+                        );
                         std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
                         continue;
                     }
@@ -153,7 +178,13 @@ pub fn get_json(path: &str) -> Result<(u16, Value), Box<dyn std::error::Error + 
                 let status = resp.status().as_u16();
                 if status == 502 && attempt < MAX_RETRIES - 1 {
                     let backoff = 2 * (attempt + 1) as u64;
-                    eprintln!("[E2E] GET {} returned 502 (attempt {}/{}), retrying in {}s...", path, attempt + 1, MAX_RETRIES, backoff);
+                    eprintln!(
+                        "[E2E] GET {} returned 502 (attempt {}/{}), retrying in {}s...",
+                        path,
+                        attempt + 1,
+                        MAX_RETRIES,
+                        backoff
+                    );
                     std::thread::sleep(std::time::Duration::from_secs(backoff));
                     continue;
                 }
@@ -165,7 +196,13 @@ pub fn get_json(path: &str) -> Result<(u16, Value), Box<dyn std::error::Error + 
                 if let Some(ref err) = last_err {
                     if is_retryable(err) && attempt < MAX_RETRIES - 1 {
                         let backoff_ms = 500 * (attempt + 1) as u64;
-                        eprintln!("[E2E] GET {} connection error (attempt {}/{}), retrying in {}ms...", path, attempt + 1, MAX_RETRIES, backoff_ms);
+                        eprintln!(
+                            "[E2E] GET {} connection error (attempt {}/{}), retrying in {}ms...",
+                            path,
+                            attempt + 1,
+                            MAX_RETRIES,
+                            backoff_ms
+                        );
                         std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
                         continue;
                     }
@@ -231,7 +268,6 @@ pub fn get_validator_operator_address() -> Option<String> {
         .map(|s| s.to_string())
 }
 
-
 /// Returns ALL validator operator addresses from the staking module.
 pub fn get_all_validator_operator_addresses() -> Option<Vec<String>> {
     let (status, json) = get_json("/cosmos/staking/v1beta1/validators").ok()?;
@@ -281,7 +317,11 @@ pub fn get_validators_with_monikers() -> Option<Vec<(String, String)>> {
 /// Returns commitment tree next_index (number of leaves) from GET /shielded-vote/v1/commitment-tree/{round_id}/latest.
 /// Used to detect if delegate/cast txs were committed after a 502 (e.g. EOF or tx in cache).
 pub fn commitment_tree_next_index(round_id: &str) -> Option<u64> {
-    let (status, json) = get_json(&format!("/shielded-vote/v1/commitment-tree/{}/latest", round_id)).ok()?;
+    let (status, json) = get_json(&format!(
+        "/shielded-vote/v1/commitment-tree/{}/latest",
+        round_id
+    ))
+    .ok()?;
     if status != 200 {
         return None;
     }
@@ -291,7 +331,11 @@ pub fn commitment_tree_next_index(round_id: &str) -> Option<u64> {
 
 /// Returns (height, root_b64, next_index) from the latest commitment tree state.
 pub fn commitment_tree_latest(round_id: &str) -> Option<(u64, String, u64)> {
-    let (status, json) = get_json(&format!("/shielded-vote/v1/commitment-tree/{}/latest", round_id)).ok()?;
+    let (status, json) = get_json(&format!(
+        "/shielded-vote/v1/commitment-tree/{}/latest",
+        round_id
+    ))
+    .ok()?;
     if status != 200 {
         return None;
     }
@@ -338,7 +382,10 @@ where
         // Give the node a moment to make the committed block visible to queries.
         std::thread::sleep(std::time::Duration::from_secs(2));
         if is_committed() {
-            eprintln!("[E2E] POST {} returned 502 but tx is committed on-chain; treating as success", path);
+            eprintln!(
+                "[E2E] POST {} returned 502 but tx is committed on-chain; treating as success",
+                path
+            );
             return Ok((
                 200,
                 serde_json::json!({ "code": 0, "tx_hash": "", "log": "accepted (verified committed)" }),
@@ -514,7 +561,11 @@ pub fn wait_for_create_round_id(
         std::thread::sleep(std::time::Duration::from_secs(1));
     }
 
-    Err(format!("timed out waiting for create_voting_session event in tx {}", tx_hash).into())
+    Err(format!(
+        "timed out waiting for create_voting_session event in tx {}",
+        tx_hash
+    )
+    .into())
 }
 
 // ---------------------------------------------------------------------------
@@ -537,10 +588,9 @@ pub struct CosmosTxConfig {
 /// `SVOTE_HOME`, `SVOTE_NODE_URL` and `SVOTE_CHAIN_ID` override the defaults.
 pub fn default_cosmos_tx_config() -> CosmosTxConfig {
     let home = std::env::var("HOME").expect("HOME env var must be set");
-    let home_dir = std::env::var("SVOTE_HOME")
-        .unwrap_or_else(|_| format!("{}/.svoted", home));
-    let node_url = std::env::var("SVOTE_NODE_URL")
-        .unwrap_or_else(|_| "tcp://localhost:26657".to_string());
+    let home_dir = std::env::var("SVOTE_HOME").unwrap_or_else(|_| format!("{}/.svoted", home));
+    let node_url =
+        std::env::var("SVOTE_NODE_URL").unwrap_or_else(|_| "tcp://localhost:26657".to_string());
     let chain_id = std::env::var("SVOTE_CHAIN_ID").unwrap_or_else(|_| "svote-1".to_string());
     CosmosTxConfig {
         key_name: "validator".to_string(),
@@ -599,14 +649,21 @@ fn broadcast_cosmos_msg_local(
     // Sign via svoted tx sign.
     let sign_output = Command::new("svoted")
         .args([
-            "tx", "sign",
+            "tx",
+            "sign",
             unsigned_path.to_str().unwrap(),
-            "--from", &config.key_name,
-            "--keyring-backend", "test",
-            "--chain-id", &config.chain_id,
-            "--home", &config.home_dir,
-            "--node", &config.node_url,
-            "--output-document", signed_path.to_str().unwrap(),
+            "--from",
+            &config.key_name,
+            "--keyring-backend",
+            "test",
+            "--chain-id",
+            &config.chain_id,
+            "--home",
+            &config.home_dir,
+            "--node",
+            &config.node_url,
+            "--output-document",
+            signed_path.to_str().unwrap(),
             "--yes",
         ])
         .output()?;
@@ -624,11 +681,15 @@ fn broadcast_cosmos_msg_local(
     // default config in ~/.svoted.
     let broadcast_output = Command::new("svoted")
         .args([
-            "tx", "broadcast",
+            "tx",
+            "broadcast",
             signed_path.to_str().unwrap(),
-            "--home", &config.home_dir,
-            "--node", &config.node_url,
-            "--output", "json",
+            "--home",
+            &config.home_dir,
+            "--node",
+            &config.node_url,
+            "--output",
+            "json",
         ])
         .output()?;
 
@@ -656,8 +717,8 @@ fn broadcast_cosmos_msg_ssh(
     use std::io::Write;
     use std::process::Command;
 
-    let remote_svoted = std::env::var("SVOTE_REMOTE_SVOTED")
-        .unwrap_or_else(|_| "svoted".to_string());
+    let remote_svoted =
+        std::env::var("SVOTE_REMOTE_SVOTED").unwrap_or_else(|_| "svoted".to_string());
 
     let unsigned_tx = build_unsigned_tx(msg);
     let unsigned_json = serde_json::to_string_pretty(&unsigned_tx)?;
@@ -808,8 +869,8 @@ pub fn key_account_address(key_name: &str, home_dir: &str) -> Option<String> {
 
     let ssh_host = std::env::var("SVOTE_SSH_HOST").ok();
     let output = if let Some(ref host) = ssh_host {
-        let remote_svoted = std::env::var("SVOTE_REMOTE_SVOTED")
-            .unwrap_or_else(|_| "svoted".to_string());
+        let remote_svoted =
+            std::env::var("SVOTE_REMOTE_SVOTED").unwrap_or_else(|_| "svoted".to_string());
         Command::new("ssh")
             .args([
                 host.as_str(),
@@ -825,11 +886,14 @@ pub fn key_account_address(key_name: &str, home_dir: &str) -> Option<String> {
     } else {
         Command::new("svoted")
             .args([
-                "keys", "show",
+                "keys",
+                "show",
                 key_name,
                 "-a",
-                "--keyring-backend", "test",
-                "--home", home_dir,
+                "--keyring-backend",
+                "test",
+                "--home",
+                home_dir,
             ])
             .output()
             .ok()?
@@ -839,7 +903,11 @@ pub fn key_account_address(key_name: &str, home_dir: &str) -> Option<String> {
         return None;
     }
     let addr = String::from_utf8(output.stdout).ok()?.trim().to_string();
-    if addr.is_empty() { None } else { Some(addr) }
+    if addr.is_empty() {
+        None
+    } else {
+        Some(addr)
+    }
 }
 
 /// Import a hex-encoded secp256k1 private key into the svoted test keyring.
@@ -852,8 +920,8 @@ pub fn import_hex_key(name: &str, hex_privkey: &str, home_dir: &str) {
 
     let ssh_host = std::env::var("SVOTE_SSH_HOST").ok();
     let output = if let Some(ref host) = ssh_host {
-        let remote_svoted = std::env::var("SVOTE_REMOTE_SVOTED")
-            .unwrap_or_else(|_| "svoted".to_string());
+        let remote_svoted =
+            std::env::var("SVOTE_REMOTE_SVOTED").unwrap_or_else(|_| "svoted".to_string());
         Command::new("ssh")
             .args([
                 host.as_str(),
@@ -870,11 +938,14 @@ pub fn import_hex_key(name: &str, hex_privkey: &str, home_dir: &str) {
     } else {
         Command::new("svoted")
             .args([
-                "keys", "import-hex",
+                "keys",
+                "import-hex",
                 name,
                 hex_privkey,
-                "--keyring-backend", "test",
-                "--home", home_dir,
+                "--keyring-backend",
+                "test",
+                "--home",
+                home_dir,
             ])
             .output()
             .expect("failed to run svoted keys import-hex")
@@ -883,14 +954,14 @@ pub fn import_hex_key(name: &str, hex_privkey: &str, home_dir: &str) {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         // "duplicated address" or "already exists" means the key was previously imported.
-        if stderr.contains("duplicated") || stderr.contains("already exists") || stderr.contains("overwrite") {
+        if stderr.contains("duplicated")
+            || stderr.contains("already exists")
+            || stderr.contains("overwrite")
+        {
             eprintln!("[E2E] Key '{}' already in keyring, skipping import", name);
             return;
         }
-        panic!(
-            "svoted keys import-hex failed: {}",
-            stderr
-        );
+        panic!("svoted keys import-hex failed: {}", stderr);
     }
     eprintln!("[E2E] Imported key '{}' into keyring at {}", name, home_dir);
 }
@@ -924,7 +995,10 @@ pub fn import_first_vote_manager_key(home_dir: &str) -> String {
         .to_string();
     import_hex_key(FIRST_VOTE_MANAGER_KEY_NAME, &vm_privkey, home_dir);
     key_account_address(FIRST_VOTE_MANAGER_KEY_NAME, home_dir).unwrap_or_else(|| {
-        panic!("{} key must be in keyring after import", FIRST_VOTE_MANAGER_KEY_NAME)
+        panic!(
+            "{} key must be in keyring after import",
+            FIRST_VOTE_MANAGER_KEY_NAME
+        )
     })
 }
 
@@ -1063,11 +1137,17 @@ pub fn wait_for_round_status(
             .unwrap_or(SESSION_STATUS_UNSPECIFIED);
         polls += 1;
         if lifecycle_rank(status) >= expected_rank {
-            eprintln!("[E2E] Round {} reached status {} (wanted {}) after {} poll(s)", round_id_hex, status, expected, polls);
+            eprintln!(
+                "[E2E] Round {} reached status {} (wanted {}) after {} poll(s)",
+                round_id_hex, status, expected, polls
+            );
             return Ok(());
         }
-        if polls == 1 || polls % 10 == 0 {
-            eprintln!("[E2E] Round {} status={} (waiting for {}), poll #{}", round_id_hex, status, expected, polls);
+        if polls == 1 || polls.is_multiple_of(10) {
+            eprintln!(
+                "[E2E] Round {} status={} (waiting for {}), poll #{}",
+                round_id_hex, status, expected, polls
+            );
         }
         std::thread::sleep(std::time::Duration::from_millis(interval_ms));
     }
