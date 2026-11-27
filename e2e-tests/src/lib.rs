@@ -12,3 +12,4 @@ pub mod payloads;
 pub mod setup;
 pub mod sighash;
 pub mod tree_transport;
+pub mod voting_db;

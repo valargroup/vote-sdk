@@ -51,8 +51,8 @@ use ff::{Field, PrimeField};
 use group::GroupEncoding;
 use orchard::keys::SpendingKey;
 use pasta_curves::pallas;
-use rand::rngs::OsRng;
 use vote_commitment_tree::MemoryTreeServer;
+use voting_circuits::rand::rngs::OsRng;
 use voting_circuits::{vote_proof::build_vote_proof_from_delegation, VOTE_COMM_TREE_DEPTH};
 
 // ---------------------------------------------------------------------------

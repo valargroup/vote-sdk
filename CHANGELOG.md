@@ -8,6 +8,12 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Build the validator circuits on the voting-circuits 0.15 line (Zakura
+  Common 5.4, `voting-crypto-deps` 0.5.0), pinned by git rev until the
+  voting-circuits release with ZKP4 is out. The ZKP1 to ZKP3 verifying keys
+  are byte-identical, so proofs from existing clients still verify. The Rust
+  e2e tests move to the matching `zcash_voting` 5.4.1.
+
 - Use 4 hour buckets instead of 3 hour buckets in public helper queue
   summaries for rounds of 7 to 21 days. Other round lengths keep their bucket
   sizes.

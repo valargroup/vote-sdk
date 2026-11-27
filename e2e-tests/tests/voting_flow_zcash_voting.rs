@@ -1,9 +1,11 @@
-//! E2E test exercising the full voting flow: VotingDb → TreeClient →
-//! real ZKP #2 → cast-vote → helper (ZKP #3) → tally → finalize.
+//! E2E test exercising the full voting flow: VotingDb → ChainSubmissionClient
+//! delegation → TreeClient → real ZKP #2 → cast-vote → helper (ZKP #3) →
+//! tally → finalize.
 //!
 //! Validates that the full library stack works: DB persistence of delegation
-//! data, HTTP tree sync, witness generation, and proof generation all through
-//! the zcash_voting / vote-commitment-tree-client APIs.
+//! data, SDK-driven delegation submission and confirmation, HTTP tree sync,
+//! witness generation, and proof generation all through the zcash_voting /
+//! vote-commitment-tree-client APIs.
 //!
 //! Share payloads are sent to the helper (integrated into svoted), which
 //! generates ZKP #3 and submits reveal-share TXs to the chain.
@@ -19,15 +21,19 @@ use e2e_tests::{
     },
     payloads::{
         cast_vote_payload_real, coordinator_action_proposal_payload, create_voting_session_payload,
-        delegate_vote_payload, helper_share_payload,
+        helper_share_payload,
     },
     setup::prepare_delegation_bundle_for_hotkey,
     tree_transport::ReqwestTreeTransport,
+    voting_db::{
+        committed_share_payloads, persist_delegation, snapshot, submit_delegation, DelegationRecord,
+    },
 };
 use ff::PrimeField;
 use group::{Curve, GroupEncoding};
 use pasta_curves::{arithmetic::CurveAffine, pallas};
 use std::sync::Arc;
+use std::time::Duration;
 use vote_commitment_tree::TreeClient;
 use vote_commitment_tree_client::http_sync_api::HttpTreeSyncApi;
 use zcash_voting::vote::{commit as commit_vote, DraftVote, VanWitness, VoteSigner};
@@ -111,6 +117,8 @@ fn voting_flow_zcash_voting_path() {
         "Step 1c",
         "building delegation bundle for emitted round ID (K=12 proof)...",
     );
+    let delegated_notes = prepared_delegation.voting_db_notes();
+    let delegation_alpha = prepared_delegation.alpha_repr();
     let (delegation_bundle, vote_proof_data) = prepared_delegation
         .build_for_round_id(&round_id)
         .expect("build delegation bundle for emitted round_id");
@@ -123,7 +131,7 @@ fn voting_flow_zcash_voting_path() {
         "Step 1b",
         &format!(
             "waiting for round {} to become ACTIVE (per-round ceremony)...",
-            &round_id_hex
+            round_id_hex
         ),
     );
     wait_for_round_status(&round_id_hex, SESSION_STATUS_ACTIVE, 180_000, 2_000)
@@ -185,32 +193,75 @@ fn voting_flow_zcash_voting_path() {
         );
     }
 
-    // ---- Step 2: Delegate vote (real ZKP #1) ----
-    // The commitment tree is global across rounds/tests. Capture the current
-    // next_index so we can compute our VAN/VC positions relative to it.
+    // ---- Step 2: Persist the delegation and submit it through the SDK ----
+    // zcash_voting's chain submission lifecycle is the only writer of the VAN
+    // position that vote::commit checks the witness against, so the SDK
+    // submits this delegation (real ZKP #1) rather than a direct POST.
+    log_step("Step 2", "creating VotingDb, persisting delegation data");
+    let db = Arc::new(zcash_voting::storage::VotingDb::open(":memory:").expect("open VotingDb"));
+    db.set_wallet_id("test");
+    db.init_round(
+        Network::Testnet,
+        &VotingRoundParams {
+            vote_round_id: round_id_hex.clone(),
+            snapshot_height: fields_for_db.snapshot_height,
+            ea_pk: ea_pk_bytes.to_vec(),
+            nc_root: fields_for_db.nc_root.to_vec(),
+            nullifier_imt_root: fields_for_db.nullifier_imt_root.to_vec(),
+        },
+        None,
+    )
+    .expect("init_round");
+    persist_delegation(
+        &db,
+        &DelegationRecord {
+            round_id_hex: &round_id_hex,
+            bundle_index: 0,
+            notes: &delegated_notes,
+            alpha: delegation_alpha,
+            address_index: hotkey.address_index(),
+            payload: &delegation_bundle,
+            vote_data: &vote_proof_data,
+        },
+    )
+    .expect("persist delegation");
+
     let pre_delegate_next_index = commitment_tree_next_index(&round_id_hex).unwrap_or(0);
-    let van_position = pre_delegate_next_index;
-    log_step("Step 2", "delegate vote (ZKP #1)");
-    let deleg_body = delegate_vote_payload(&round_id, &delegation_bundle);
-    let (status, json) =
-        post_json_accept_committed("/shielded-vote/v1/delegate-vote", &deleg_body, || {
-            commitment_tree_next_index(&round_id_hex)
-                .map(|n| n >= pre_delegate_next_index + 1)
-                .unwrap_or(false)
-        })
-        .expect("POST delegate-vote");
-    assert_eq!(
-        status, 200,
-        "delegate-vote: HTTP {}, body={:?}",
-        status, json
+    log_step(
+        "Step 2",
+        "delegate vote (ZKP #1) through ChainSubmissionClient",
     );
-    assert_eq!(
-        json.get("code").and_then(|c| c.as_i64()).unwrap_or(-1),
+    let round_id_bytes: [u8; 32] = round_id.as_slice().try_into().expect("32-byte round id");
+    let confirmation = submit_delegation(
+        &db,
+        round_id_bytes,
         0,
-        "delegation rejected: {:?}",
-        json.get("log")
+        &delegation_bundle.spend_auth_sig,
+        Duration::from_secs(180),
+    )
+    .expect("delegation confirmed by the SDK lifecycle");
+    let van_position = confirmation.final_van_position();
+    assert_eq!(
+        van_position, pre_delegate_next_index,
+        "the delegation's VAN must be the round's next leaf"
     );
-    block_wait();
+    assert_eq!(
+        u64::from(
+            db.load_van_position(&round_id_hex, 0)
+                .expect("the SDK records the confirmed VAN position")
+        ),
+        van_position
+    );
+    log_step(
+        "Step 2",
+        &format!(
+            "delegation confirmed (tx {}), VAN at position {}",
+            confirmation
+                .transaction_hash()
+                .map_or_else(|| "unknown".to_string(), |hash| hash.to_string()),
+            van_position
+        ),
+    );
 
     // ---- Step 3: Wait for tree to include this delegation's VAN ----
     // Only van_cmx is appended to the tree (cmx_new is not included), so this
@@ -233,7 +284,7 @@ fn voting_flow_zcash_voting_path() {
         if let Some(tree) = json.get("tree") {
             let h = tree.get("height").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
             let next_idx = tree.get("next_index").and_then(|x| x.as_u64()).unwrap_or(0);
-            if h > 0 && next_idx >= pre_delegate_next_index + 1 {
+            if h > 0 && next_idx > van_position {
                 anchor_height = h;
                 assert!(tree.get("root").is_some());
                 break;
@@ -246,68 +297,12 @@ fn voting_flow_zcash_voting_path() {
         "tree never included delegated VAN leaf after delegation"
     );
 
-    let tx1_sighash = shielded_vote_circuits::tx1::sighash(&delegation_bundle.tx1_effects)
-        .expect("delegation TX1 effects should be canonical");
-    let create_voting_db = || {
-        let db = zcash_voting::storage::VotingDb::open(":memory:").expect("open VotingDb");
-        db.set_wallet_id("test");
-        db.init_round(
-            Network::Testnet,
-            &VotingRoundParams {
-                vote_round_id: round_id_hex.clone(),
-                snapshot_height: fields_for_db.snapshot_height,
-                ea_pk: ea_pk_bytes.to_vec(),
-                nc_root: fields_for_db.nc_root.to_vec(),
-                nullifier_imt_root: fields_for_db.nullifier_imt_root.to_vec(),
-            },
-            None,
-        )
-        .expect("init_round");
-
-        // Create a single bundle (bundle_index = 0) and store ZKP #2 fields.
-        // Other store_delegation_data fields (rho_signed, alpha, etc.) are only needed
-        // for delegation proof reconstruction, not ZKP #2.
-        {
-            let conn = db.conn();
-            zcash_voting::storage::queries::insert_bundle(&conn, &round_id_hex, "test", 0, &[])
-                .expect("insert_bundle");
-            zcash_voting::storage::queries::store_delegation_data(
-                &conn,
-                &round_id_hex,
-                "test", // wallet_id
-                0,      // bundle_index
-                vote_proof_data.van_comm_rand.to_repr().as_ref(),
-                &[],        // dummy_nullifiers (not needed for ZKP #2)
-                &[0u8; 32], // rho_signed
-                &[],        // padded_cmx
-                &[0u8; 32], // nf_signed
-                &delegation_bundle.cmx_new,
-                &[0u8; 32], // alpha
-                &[0u8; 32], // rseed_signed
-                &[0u8; 32], // rseed_output
-                &delegation_bundle.van_cmx,
-                vote_proof_data.total_note_value,
-                hotkey.address_index(),
-                &[], // padded_note_secrets (not needed for ZKP #2 test)
-                &tx1_sighash,
-                &delegation_bundle.tx1_effects,
-            )
-            .expect("store_delegation_data");
-        }
-
-        // VAN position is global tree index captured before delegation.
-        db.store_van_position(
-            &round_id_hex,
-            0, // bundle_index
-            u32::try_from(van_position).expect("van_position fits in u32"),
-        )
-        .expect("store_van_position");
-        db
-    };
-
-    // ---- Step 4: Create VotingDb and persist delegation data ----
-    log_step("Step 4", "creating VotingDb, persisting delegation data");
-    let db = create_voting_db();
+    // ---- Step 4: Snapshot the confirmed delegation for Step 9b ----
+    // Step 9b proves a second vote from the same VAN. It runs on a copy taken
+    // before proposal 1's vote is committed, so it neither competes with that
+    // pending vote chain nor changes the primary state.
+    log_step("Step 4", "snapshotting VotingDb for the single-share check");
+    let single_share_db = snapshot(&db).expect("snapshot VotingDb");
 
     // ---- Step 5: Sync tree via TreeClient + HttpTreeSyncApi ----
     log_step("Step 5", "syncing vote commitment tree from chain");
@@ -319,7 +314,7 @@ fn voting_flow_zcash_voting_path() {
         .sync(&sync_api)
         .expect("TreeClient sync from chain");
     assert!(
-        tree_client.size() >= van_position + 1,
+        tree_client.size() > van_position,
         "tree should include VAN leaf after sync"
     );
     log_step(
@@ -416,8 +411,10 @@ fn voting_flow_zcash_voting_path() {
         16,
         "should have 16 encrypted shares"
     );
-    assert_eq!(bundle.share_payloads.len(), 16);
-    assert_eq!(bundle.share_payloads[0].shares_hash.len(), 32);
+    let payloads = committed_share_payloads(&db, &round_id_hex, 0, 1)
+        .expect("share payloads of the committed vote");
+    assert_eq!(payloads.len(), 16);
+    assert_eq!(payloads[0].shares_hash.len(), 32);
 
     // ---- Step 7b: Local proof verification (same binary = same VK) ----
     {
@@ -551,7 +548,6 @@ fn voting_flow_zcash_voting_path() {
     );
 
     // ---- Step 9: Validate share payloads built by the public API ----
-    let payloads = bundle.share_payloads.clone();
     assert_eq!(payloads.len(), 16, "should have 16 share payloads");
     let shares_hash = payloads[0].shares_hash.clone();
     for (i, p) in payloads.iter().enumerate() {
@@ -566,16 +562,16 @@ fn voting_flow_zcash_voting_path() {
     // ---- Step 9b: Verify single_share=true produces valid proof + 1 payload ----
     // In single-share mode, all voting weight goes into share 0 ([num_ballots, 0, ..., 0])
     // instead of splitting evenly across 16 shares. The ZKP #2 circuit accepts both.
-    // We can't submit this to chain (same VAN nullifier as above), so use an isolated
-    // DB. The primary DB intentionally retains proposal 1's pending recovery state
-    // because this test broadcasts directly instead of recording SDK confirmation.
-    // The isolated DB lets us verify the proof and payload without creating a
-    // competing pending vote chain in that primary state.
+    // We can't submit this to chain (same VAN nullifier as above), so use the
+    // isolated DB snapshotted in Step 4. The primary DB intentionally retains
+    // proposal 1's pending recovery state because this test broadcasts the cast
+    // directly instead of recording SDK confirmation. The isolated DB lets us
+    // verify the proof and payload without creating a competing pending vote
+    // chain in that primary state.
     log_step(
         "Step 9b",
         "building vote commitment with single_share=true (K=11 proof)...",
     );
-    let single_share_db = create_voting_db();
     let single_draft = DraftVote {
         proposal_id: 2,
         choice: 1,
@@ -584,7 +580,7 @@ fn voting_flow_zcash_voting_path() {
         single_share: true,
     };
     let single_bundle = commit_vote(
-        &single_share_db,
+        single_share_db.db(),
         &round_id_hex,
         0,
         &single_draft,
@@ -601,7 +597,9 @@ fn voting_flow_zcash_voting_path() {
         16,
         "circuit always produces 16 encrypted shares"
     );
-    assert_eq!(single_bundle.share_payloads[0].shares_hash.len(), 32);
+    let single_payloads = committed_share_payloads(single_share_db.db(), &round_id_hex, 0, 2)
+        .expect("share payloads of the single-share vote");
+    assert_eq!(single_payloads[0].shares_hash.len(), 32);
 
     // Verify the proof locally — the circuit must accept [num_ballots, 0, ..., 0] shares
     {
@@ -655,7 +653,6 @@ fn voting_flow_zcash_voting_path() {
         log_step("Step 9b", "single-share local verification PASSED");
     }
 
-    let single_payloads = &single_bundle.share_payloads;
     assert_eq!(
         single_payloads.len(),
         1,

@@ -16,7 +16,7 @@ use voting_crypto_deps::zcash_primitives::transaction::{
     self,
     components::orchard::read_action_without_auth,
     txid::{to_txid, TxIdDigester},
-    TransactionDigest, TxDigests, TxVersion,
+    TransactionDigest, TxVersion,
 };
 use zcash_protocol::{
     consensus::{BlockHeight, BranchId},
@@ -120,15 +120,20 @@ pub fn sighash(effects: &[u8]) -> Result<[u8; 32], Error> {
         .commitment(OrchardTxVersion::V6)
         .map_err(|err| Error::InvalidBundle(err.to_string()))?
         .0;
-    let digests = TxDigests {
+    let digests = <TxIdDigester as TransactionDigest<transaction::Authorized>>::combine(
+        &digester,
         header_digest,
-        transparent_digests: None,
-        sapling_digest: None,
-        orchard_digest: None,
-        ironwood_digest: Some(ironwood_digest),
-    };
+        None,
+        None,
+        None,
+        Some(ironwood_digest),
+    );
 
-    Ok(to_txid(TxVersion::V6, BranchId::Nu6_3, &digests).into())
+    let txid = to_txid(TxVersion::V6, BranchId::Nu6_3, &digests);
+    // LRZ's `to_txid` returns an `Option` that is `None` only before V5.
+    #[cfg(feature = "upstream")]
+    let txid = txid.expect("a V6 transaction has a ZIP 244 txid");
+    Ok(txid.into())
 }
 
 #[cfg(test)]

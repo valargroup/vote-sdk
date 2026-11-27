@@ -17,12 +17,14 @@ use e2e_tests::{
 };
 use ff::{Field, PrimeField};
 use group::{Curve, GroupEncoding};
-use incrementalmerkletree::{Hashable, Level};
 use orchard::keys::{FullViewingKey, SpendAuthorizingKey, SpendingKey};
 use pasta_curves::pallas;
-use rand::rngs::OsRng;
 use serde_json::Value;
-use vote_commitment_tree::{MerkleHashVote, TREE_DEPTH};
+use vote_commitment_tree::{
+    incrementalmerkletree::{Hashable, Level},
+    MerkleHashVote, TREE_DEPTH,
+};
+use voting_circuits::rand::rngs::OsRng;
 use voting_circuits::vote_proof::{build_vote_proof_from_delegation, VoteProofBundle};
 use zcash_keys::keys::UnifiedSpendingKey;
 use zcash_voting::{Network, VotingHotkey};
@@ -30,9 +32,10 @@ use zip32::{AccountId, Scope};
 
 fn spending_key_for_hotkey(hotkey: &VotingHotkey) -> SpendingKey {
     let spending_key =
-        *UnifiedSpendingKey::from_seed(&hotkey.network(), hotkey.stored_secret(), AccountId::ZERO)
+        UnifiedSpendingKey::from_seed(&hotkey.network(), hotkey.stored_secret(), AccountId::ZERO)
             .expect("derive voting hotkey spending key")
-            .orchard();
+            .orchard()
+            .clone();
     let address = FullViewingKey::from(&spending_key)
         .address_at(u64::from(hotkey.address_index()), Scope::External);
     assert_eq!(

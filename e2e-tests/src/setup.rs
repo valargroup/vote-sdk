@@ -17,12 +17,12 @@ use orchard::{
 };
 use pasta_curves::arithmetic::CurveAffine;
 use pasta_curves::pallas;
-use rand::rngs::OsRng;
 use serde::Deserialize;
 use voting_circuits::delegation::{
     build_delegation_bundle, create_delegation_proof, verify_delegation_proof, ImtProofData,
     ImtProvider, RealNoteInput, SpacedLeafImtProvider,
 };
+use voting_circuits::rand::rngs::OsRng;
 use zcash_voting::VotingHotkey;
 
 /// Far-future vote_end_time (Jan 1 2100 UTC) for long-running E2E tests.
@@ -85,6 +85,36 @@ pub struct PreparedDelegationBundle {
 }
 
 impl PreparedDelegationBundle {
+    /// The real notes this delegation spends, as zcash_voting's bundle rows
+    /// record them (`insert_bundle_notes`). The fixture has no UFVK string,
+    /// so `ufvk_str` is empty; the SDK only hashes it into the note identity.
+    pub fn voting_db_notes(&self) -> Vec<zcash_voting::NoteInfo> {
+        self.note_inputs
+            .iter()
+            .map(|input| zcash_voting::NoteInfo {
+                commitment: ExtractedNoteCommitment::from(input.note.commitment())
+                    .to_bytes()
+                    .to_vec(),
+                nullifier: input.note.nullifier(&input.fvk).to_bytes().to_vec(),
+                value: input.note.value().inner(),
+                position: u64::from(input.merkle_path.position()),
+                diversifier: input.note.recipient().diversifier().as_array().to_vec(),
+                rho: input.note.rho().to_bytes().to_vec(),
+                rseed: input.note.rseed().as_bytes().to_vec(),
+                scope: match input.scope {
+                    Scope::External => 0,
+                    Scope::Internal => 1,
+                },
+                ufvk_str: String::new(),
+            })
+            .collect()
+    }
+
+    /// The spend authorization randomizer `alpha`, in its canonical encoding.
+    pub fn alpha_repr(&self) -> [u8; 32] {
+        self.alpha.to_repr()
+    }
+
     /// Build ZKP #1 and its payload using the round ID emitted by the create tx.
     pub fn build_for_round_id(
         self,
