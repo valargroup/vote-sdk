@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 #
 # Shared genesis account helpers for auth-only vote-manager accounts and
-# module-funded native-token pools.
+# module-funded native-token pools. BINARY names the svoted to run; when
+# GENESIS_LIB_HOME is set, it is passed as --home so svoted leaves its
+# default home (~/.svoted) alone.
 
 genesis_module_address_hex() {
     if command -v sha256sum >/dev/null 2>&1; then
@@ -17,7 +19,8 @@ genesis_module_account_address() {
     local module_hex
     local module_addr
     module_hex=$(genesis_module_address_hex "$module_name")
-    module_addr=$("$binary" debug addr "$module_hex" | awk '/Bech32 Acc:/ {print $3}')
+    module_addr=$("$binary" debug addr "$module_hex" ${GENESIS_LIB_HOME:+--home "$GENESIS_LIB_HOME"} \
+        | awk '/Bech32 Acc:/ {print $3}')
     if [ -z "$module_addr" ]; then
         echo "ERROR: failed to derive module account address for ${module_name}" >&2
         return 1

@@ -534,16 +534,18 @@ pub struct CosmosTxConfig {
 }
 
 /// Returns a default CosmosTxConfig for the single-validator dev chain setup.
+/// `SVOTE_HOME`, `SVOTE_NODE_URL` and `SVOTE_CHAIN_ID` override the defaults.
 pub fn default_cosmos_tx_config() -> CosmosTxConfig {
     let home = std::env::var("HOME").expect("HOME env var must be set");
     let home_dir = std::env::var("SVOTE_HOME")
         .unwrap_or_else(|_| format!("{}/.svoted", home));
     let node_url = std::env::var("SVOTE_NODE_URL")
         .unwrap_or_else(|_| "tcp://localhost:26657".to_string());
+    let chain_id = std::env::var("SVOTE_CHAIN_ID").unwrap_or_else(|_| "svote-1".to_string());
     CosmosTxConfig {
         key_name: "validator".to_string(),
         home_dir,
-        chain_id: std::env::var("SVOTE_CHAIN_ID").unwrap_or_else(|_| "svote-1".to_string()),
+        chain_id,
         node_url,
     }
 }
@@ -618,11 +620,13 @@ fn broadcast_cosmos_msg_local(
         return Err(format!("svoted tx sign failed: {}", stderr).into());
     }
 
-    // Broadcast via svoted tx broadcast.
+    // Broadcast via svoted tx broadcast. --home keeps svoted from creating
+    // default config in ~/.svoted.
     let broadcast_output = Command::new("svoted")
         .args([
             "tx", "broadcast",
             signed_path.to_str().unwrap(),
+            "--home", &config.home_dir,
             "--node", &config.node_url,
             "--output", "json",
         ])
@@ -725,10 +729,12 @@ fn broadcast_cosmos_msg_ssh(
             ssh_host,
             &format!(
                 "{svoted} tx broadcast {signed} \
+                 --home {home} \
                  --node {node} \
                  --output json",
                 svoted = remote_svoted,
                 signed = remote_signed,
+                home = config.home_dir,
                 node = config.node_url,
             ),
         ])

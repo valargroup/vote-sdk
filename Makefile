@@ -18,7 +18,7 @@ LDFLAGS := -X $(VERSION_PKG).Name=shielded-vote \
            -X $(VERSION_PKG).Commit=$(COMMIT) \
            -X "$(VERSION_PKG).BuildTags=$(BUILD_TAGS_LIST)"
 
-.PHONY: install install-ffi init init-multi init-benchmark start start-multi clean clean-all build build-ffi build-create-val-tx install-create-val-tx build-voting-config install-voting-config test-voting-config fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi caddy docker-build docker-testnet docker-testnet-down ui-build start-admin
+.PHONY: install install-ffi init init-multi init-benchmark start start-multi clean clean-all build build-ffi build-create-val-tx install-create-val-tx build-voting-config install-voting-config test-voting-config fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi localnet-isolated-init localnet-isolated-start localnet-isolated-stop localnet-isolated-test localnet-isolated-env caddy docker-build docker-testnet docker-testnet-down ui-build start-admin
 
 ## install: Build and install the svoted binary to $GOPATH/bin
 install:
@@ -179,6 +179,34 @@ test-redpallas-ante: circuits
 ## test-all-ffi: Run all FFI-backed tests (Halo2 + RedPallas) (requires circuits)
 test-all-ffi: circuits
 	go test -tags "halo2 redpallas" -count=1 -v ./ffi/zkp/halo2/... ./ffi/redpallas/... ./ffi/tx1/... ./x/vote/ante/...
+
+# ---------------------------------------------------------------------------
+# Isolated e2e localnet (docs/localnet-isolated.md)
+# ---------------------------------------------------------------------------
+# Everything lives under LOCALNET_DIR (default ${TMPDIR:-/tmp}/svote-localnet-isolated)
+# on non-default ports, so ~/.svoted*, ~/go/bin and a chain from `make init`
+# are never touched. PROXY=1 builds with -tags proxyenabled; LOCALNET_VALIDATORS=3
+# runs round_activation too. scripts/localnet-isolated/common.sh lists every variable.
+
+## localnet-isolated-init: Build svoted into $LOCALNET_DIR/bin and init an isolated localnet (PROXY=1 opens the proxy gate; LOCALNET_VALIDATORS sets the validator count)
+localnet-isolated-init:
+	bash scripts/localnet-isolated/init.sh
+
+## localnet-isolated-start: Start the isolated localnet in the background (logs in $LOCALNET_DIR/logs)
+localnet-isolated-start:
+	bash scripts/localnet-isolated/start.sh
+
+## localnet-isolated-stop: Stop the isolated localnet's validators (state is kept until the next init)
+localnet-isolated-stop:
+	bash scripts/localnet-isolated/stop.sh
+
+## localnet-isolated-test: Run the ignored e2e tests, as test-api does, against the running isolated localnet (E2E_TEST_ARGS passes libtest arguments)
+localnet-isolated-test:
+	bash scripts/localnet-isolated/test.sh $(E2E_TEST_ARGS)
+
+## localnet-isolated-env: Print export lines pointing the e2e tests at the isolated localnet
+localnet-isolated-env:
+	@bash scripts/localnet-isolated/env.sh
 
 # ---------------------------------------------------------------------------
 # Deployment targets

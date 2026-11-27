@@ -85,6 +85,12 @@ make test-all-ffi
 
 # Rust circuit unit tests
 make circuits-test
+
+# Rust e2e suite on an isolated localnet that leaves ~/.svoted and ~/go/bin
+# alone (PROXY=1 opens the proxy gate; see docs/localnet-isolated.md)
+make localnet-isolated-init localnet-isolated-start
+make localnet-isolated-test
+make localnet-isolated-stop
 ```
 
 ## Project Structure

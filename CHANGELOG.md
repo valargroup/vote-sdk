@@ -8,6 +8,12 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Add an isolated localnet for the Rust e2e suite (`make localnet-isolated-init`,
+  `-start`, `-test`, `-stop`). It keeps its binary, homes and logs under
+  `LOCALNET_DIR` on non-default ports, so it runs beside a developer's own
+  chain and never touches `~/.svoted` or `~/go/bin`. See
+  [docs/localnet-isolated.md](docs/localnet-isolated.md).
+
 - Use 4 hour buckets instead of 3 hour buckets in public helper queue
   summaries for rounds of 7 to 21 days. Other round lengths keep their bucket
   sizes.
