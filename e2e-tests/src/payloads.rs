@@ -245,7 +245,7 @@ pub fn create_voting_session_payload(
         SetupRoundFields {
             snapshot_height: 1000 + round_counter_next(),
             snapshot_blockhash: [0xaa; 32],
-            proposals_hash: [0xbb; 32],
+            proposals_hash: default_proposals_hash(),
             vote_end_time: now + expires_in_sec,
             nullifier_imt_root: [0x01; 32],
             nc_root: [0x02; 32],
@@ -260,14 +260,79 @@ pub fn create_voting_session_payload(
         "vote_end_time": fields.vote_end_time,
         "nullifier_imt_root": to_base64(&fields.nullifier_imt_root),
         "nc_root": to_base64(&fields.nc_root),
-        "proposals": [
-            { "id": 1, "title": "Proposal A", "description": "First proposal",
-              "options": [{"index": 0, "label": "Support"}, {"index": 1, "label": "Oppose"}] },
-            { "id": 2, "title": "Proposal B", "description": "Second proposal",
-              "options": [{"index": 0, "label": "Support"}, {"index": 1, "label": "Oppose"}] },
-        ],
+        "proposals": default_proposals(),
     });
+    assert_eq!(
+        fields.proposals_hash,
+        ballot_digest(&body),
+        "proposals_hash must be the ballot digest of the session body"
+    );
     (body, fields, round_id)
+}
+
+/// Proposals used by `create_voting_session_payload`.
+pub fn default_proposals() -> Value {
+    json!([
+        { "id": 1, "title": "Proposal A", "description": "First proposal",
+          "options": [{"index": 0, "label": "Support"}, {"index": 1, "label": "Oppose"}] },
+        { "id": 2, "title": "Proposal B", "description": "Second proposal",
+          "options": [{"index": 0, "label": "Support"}, {"index": 1, "label": "Oppose"}] },
+    ])
+}
+
+/// The `proposals_hash` of a session created from `default_proposals` with no
+/// round title, description, or discussion link.
+pub fn default_proposals_hash() -> Bytes32 {
+    ballot_digest(&json!({ "proposals": default_proposals() }))
+}
+
+/// The ballot digest the chain requires as `proposals_hash`, computed from a
+/// MsgCreateVotingSession JSON body: SHA-256 of the canonical encoding of its
+/// title, description, discussion_url, and proposals (see
+/// `x/vote/types/ballot_digest.go`). Absent strings encode as empty.
+pub fn ballot_digest(session: &Value) -> Bytes32 {
+    use sha2::{Digest, Sha256};
+
+    fn push_str(out: &mut Vec<u8>, value: &Value, field: &str) {
+        let text = value.get(field).and_then(Value::as_str).unwrap_or("");
+        out.extend_from_slice(&(text.len() as u64).to_le_bytes());
+        out.extend_from_slice(text.as_bytes());
+    }
+    fn push_u32(out: &mut Vec<u8>, value: &Value, field: &str) {
+        let number = value.get(field).and_then(Value::as_u64).unwrap_or(0);
+        let number = u32::try_from(number).expect("ballot integer fits u32");
+        out.extend_from_slice(&number.to_le_bytes());
+    }
+    let empty = Vec::new();
+    let list = |value: &Value, field: &str| -> Vec<Value> {
+        value
+            .get(field)
+            .and_then(Value::as_array)
+            .unwrap_or(&empty)
+            .clone()
+    };
+
+    let mut out = b"zcash-shielded-vote:ballot:v1".to_vec();
+    push_str(&mut out, session, "title");
+    push_str(&mut out, session, "description");
+    push_str(&mut out, session, "discussion_url");
+    let proposals = list(session, "proposals");
+    out.extend_from_slice(&(proposals.len() as u64).to_le_bytes());
+    for proposal in &proposals {
+        push_u32(&mut out, proposal, "id");
+        push_str(&mut out, proposal, "title");
+        push_str(&mut out, proposal, "description");
+        push_str(&mut out, proposal, "zip_number");
+        push_str(&mut out, proposal, "forum_url");
+        let options = list(proposal, "options");
+        out.extend_from_slice(&(options.len() as u64).to_le_bytes());
+        for option in &options {
+            push_u32(&mut out, option, "index");
+            push_str(&mut out, option, "label");
+            push_str(&mut out, option, "description");
+        }
+    }
+    Sha256::digest(&out).into()
 }
 
 /// Wrap a coordinator-owned message body in MsgProposeCoordinatorAction.
@@ -293,6 +358,24 @@ pub fn coordinator_action_proposal_payload(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ballot_digest_matches_shared_vectors() {
+        let vectors: Value = serde_json::from_str(include_str!(
+            "../../x/vote/types/testdata/ballot_digest_v1.json"
+        ))
+        .unwrap();
+        let cases = vectors["ballot_digest_v1"].as_array().unwrap();
+        assert!(!cases.is_empty());
+        for case in cases {
+            assert_eq!(
+                hex::encode(ballot_digest(&case["ballot"])),
+                case["digest_hex"].as_str().unwrap(),
+                "vector {}",
+                case["name"]
+            );
+        }
+    }
 
     #[test]
     fn coordinator_payload_uses_binary_any_value() {

@@ -148,7 +148,7 @@ var (
 )
 
 func newValidMsgCreateVotingSession() *types.MsgCreateVotingSession {
-	return &types.MsgCreateVotingSession{
+	return svtest.WithBallotDigest(&types.MsgCreateVotingSession{
 		Creator:           "sv1testcreator",
 		SnapshotHeight:    100,
 		SnapshotBlockhash: bytes.Repeat([]byte{0x01}, 32),
@@ -160,7 +160,7 @@ func newValidMsgCreateVotingSession() *types.MsgCreateVotingSession {
 			{Id: 1, Title: "Proposal A", Description: "First", Options: svtest.DefaultOptions()},
 			{Id: 2, Title: "Proposal B", Description: "Second", Options: svtest.DefaultOptions()},
 		},
-	}
+	})
 }
 
 func newValidMsgDelegateVote() *types.MsgDelegateVote {

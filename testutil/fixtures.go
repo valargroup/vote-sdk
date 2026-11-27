@@ -129,64 +129,70 @@ func SampleProposals() []*types.Proposal {
 	}
 }
 
+// WithBallotDigest sets msg.ProposalsHash to the ballot digest of the
+// message's current title, description, discussion_url, and proposals, as
+// MsgCreateVotingSession.ValidateBasic requires. Call it again after editing
+// any of those fields.
+func WithBallotDigest(msg *types.MsgCreateVotingSession) *types.MsgCreateVotingSession {
+	digest := msg.BallotDigest()
+	msg.ProposalsHash = digest[:]
+	return msg
+}
+
 // ValidCreateVotingSession returns a MsgCreateVotingSession with all fields populated.
 // The VoteEndTime is set 1 hour in the future from the reference time.
 func ValidCreateVotingSession() *types.MsgCreateVotingSession {
-	return &types.MsgCreateVotingSession{
+	return WithBallotDigest(&types.MsgCreateVotingSession{
 		Creator:           DefaultVoteManagerAddress,
 		SnapshotHeight:    100,
 		SnapshotBlockhash: bytes.Repeat([]byte{0xAA}, 32),
-		ProposalsHash:     bytes.Repeat([]byte{0xBB}, 32),
 		VoteEndTime:       uint64(time.Now().Add(1 * time.Hour).Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x01}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x02}, 32),
 		Proposals:         SampleProposals(),
-	}
+	})
 }
 
 // ValidCreateVotingSessionAt returns a MsgCreateVotingSession with VoteEndTime set relative
 // to the given reference time. Use this when the block time is deterministic.
 func ValidCreateVotingSessionAt(refTime time.Time) *types.MsgCreateVotingSession {
-	return &types.MsgCreateVotingSession{
+	return WithBallotDigest(&types.MsgCreateVotingSession{
 		Creator:           DefaultVoteManagerAddress,
 		SnapshotHeight:    100,
 		SnapshotBlockhash: bytes.Repeat([]byte{0xAA}, 32),
-		ProposalsHash:     bytes.Repeat([]byte{0xBB}, 32),
 		VoteEndTime:       uint64(refTime.Add(1 * time.Hour).Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x01}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x02}, 32),
 		Proposals:         SampleProposals(),
-	}
+	})
 }
 
 // ValidCreateVotingSessionWithEndTime returns a MsgCreateVotingSession with an explicit
 // VoteEndTime. Use when you need a specific end time (e.g. 10 seconds from block time).
 func ValidCreateVotingSessionWithEndTime(endTime time.Time) *types.MsgCreateVotingSession {
-	return &types.MsgCreateVotingSession{
+	return WithBallotDigest(&types.MsgCreateVotingSession{
 		Creator:           DefaultVoteManagerAddress,
 		SnapshotHeight:    100,
 		SnapshotBlockhash: bytes.Repeat([]byte{0xAA}, 32),
-		ProposalsHash:     bytes.Repeat([]byte{0xBB}, 32),
 		VoteEndTime:       uint64(endTime.Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x01}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x02}, 32),
 		Proposals:         SampleProposals(),
-	}
+	})
 }
 
 // ExpiredCreateVotingSessionAt returns a MsgCreateVotingSession with VoteEndTime in the past
 // relative to the given reference time.
 func ExpiredCreateVotingSessionAt(refTime time.Time) *types.MsgCreateVotingSession {
-	return &types.MsgCreateVotingSession{
+	return WithBallotDigest(&types.MsgCreateVotingSession{
 		Creator:           DefaultVoteManagerAddress,
 		SnapshotHeight:    100,
 		SnapshotBlockhash: bytes.Repeat([]byte{0xAA}, 32),
-		ProposalsHash:     bytes.Repeat([]byte{0xBB}, 32),
 		VoteEndTime:       uint64(refTime.Add(-1 * time.Hour).Unix()),
 		NullifierImtRoot:  bytes.Repeat([]byte{0x01}, 32),
 		NcRoot:            bytes.Repeat([]byte{0x02}, 32),
 		Proposals:         SampleProposals(),
-	}
+	})
 }
 
 // ValidDelegation returns a MsgDelegateVote with mock proof data.

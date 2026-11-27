@@ -330,7 +330,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 				s.seedEligibleValidators(2)
 				s.seedVoteManagers(svtest.DefaultVoteManagerAddress)
 			},
-			msg: &types.MsgCreateVotingSession{
+			msg: svtest.WithBallotDigest(&types.MsgCreateVotingSession{
 				Creator:           svtest.DefaultVoteManagerAddress,
 				SnapshotHeight:    999,
 				SnapshotBlockhash: bytes.Repeat([]byte{0x01}, 32),
@@ -342,7 +342,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 					{Id: 1, Title: "Proposal A", Description: "First", Options: svtest.DefaultOptions()},
 					{Id: 2, Title: "Proposal B", Description: "Second", Options: svtest.DefaultOptions()},
 				},
-			},
+			}),
 			checkResp: func(resp *types.MsgCreateVotingSessionResponse) {
 				expectedID := computeExpectedRoundID(msg, uint64(s.ctx.BlockHeight()))
 				s.Require().NotEqual(expectedID, resp.VoteRoundId)
@@ -455,7 +455,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 				s.seedEligibleValidators(2)
 				s.seedVoteManagers(svtest.DefaultVoteManagerAddress)
 				// Create a different round first to put it in PENDING.
-				_, err := s.createVotingSessionViaCoordinator(s.ctx, &types.MsgCreateVotingSession{
+				_, err := s.createVotingSessionViaCoordinator(s.ctx, svtest.WithBallotDigest(&types.MsgCreateVotingSession{
 					Creator:           svtest.DefaultVoteManagerAddress,
 					SnapshotHeight:    999,
 					SnapshotBlockhash: bytes.Repeat([]byte{0x01}, 32),
@@ -464,7 +464,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession() {
 					NullifierImtRoot:  bytes.Repeat([]byte{0x03}, 32),
 					NcRoot:            bytes.Repeat([]byte{0x04}, 32),
 					Proposals:         msg.Proposals,
-				})
+				}))
 				s.Require().NoError(err)
 			},
 			msg:         msg,
@@ -1393,6 +1393,7 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_DescriptionPersisted() {
 	msg := validSetupMsg()
 	msg.Creator = vm
 	msg.Description = "Test round description"
+	svtest.WithBallotDigest(msg)
 	resp, err := s.createVotingSessionViaCoordinator(s.ctx, msg)
 	s.Require().NoError(err)
 
@@ -1400,6 +1401,19 @@ func (s *MsgServerTestSuite) TestCreateVotingSession_DescriptionPersisted() {
 	round, err := s.keeper.GetVoteRound(kv, resp.VoteRoundId)
 	s.Require().NoError(err)
 	s.Require().Equal("Test round description", round.Description)
+}
+
+// The rule is re-checked when the round is created, not only in ValidateBasic,
+// so a coordinator action queued before the rule activated cannot bypass it.
+func (s *MsgServerTestSuite) TestCreateVotingSession_ExecutionRejectsAProposalsHashThatIsNotTheBallotDigest() {
+	s.SetupTest()
+	s.seedEligibleValidators(2)
+
+	msg := validSetupMsg()
+	msg.ProposalsHash = bytes.Repeat([]byte{0x02}, 32)
+	_, err := keeper.ExecuteCreateVotingSessionForTest(s.keeper, s.ctx, msg)
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "ballot digest")
 }
 
 // ---------------------------------------------------------------------------

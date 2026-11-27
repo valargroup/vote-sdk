@@ -342,7 +342,7 @@ fn prepare_delegation_bundle_with_recipient(
     ];
 
     let snapshot_blockhash = [0xAAu8; 32];
-    let proposals_hash = [0xBBu8; 32];
+    let proposals_hash = crate::payloads::default_proposals_hash();
 
     let nc_root_repr = nc_root.to_repr();
     let nf_imt_root_repr = nf_imt_root.to_repr();
@@ -570,7 +570,7 @@ pub fn prepare_multi_delegation_bundles(
     let nf_imt_root = imt.root();
 
     let snapshot_blockhash = [0xAAu8; 32];
-    let proposals_hash = [0xBBu8; 32];
+    let proposals_hash = crate::payloads::default_proposals_hash();
 
     let snapshot_height: u64 = 42_000;
     let round_fields = SetupRoundFields {

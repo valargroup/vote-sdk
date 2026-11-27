@@ -338,20 +338,21 @@ fn create_round_for_zashi() {
     let vote_end_time = now + vote_window_secs();
 
     let snapshot_blockhash = [0xAAu8; 32]; // placeholder — chain doesn't validate this
-    let proposals_hash = [0xBBu8; 32]; // placeholder — chain doesn't validate this
 
     // ---- Step 6: Build and broadcast coordinator action proposal ----
     log("creating voting session...");
-    let create_body = json!({
+    let mut create_body = json!({
         "creator": vote_manager_address,
         "snapshot_height": snap_height,
         "snapshot_blockhash": to_base64(&snapshot_blockhash),
-        "proposals_hash": to_base64(&proposals_hash),
         "vote_end_time": vote_end_time,
         "nullifier_imt_root": to_base64(&nullifier_imt_root),
         "nc_root": to_base64(&nc_root),
         "proposals": proposals(),
     });
+    // The chain requires proposals_hash to be the ballot digest of the body.
+    let proposals_hash = e2e_tests::payloads::ballot_digest(&create_body);
+    create_body["proposals_hash"] = json!(to_base64(&proposals_hash));
     let body = coordinator_action_proposal_payload(
         &vote_manager_address,
         create_body,

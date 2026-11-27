@@ -8,6 +8,19 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- **State-breaking.** `MsgCreateVotingSession.proposals_hash` must now be the
+  ballot digest of the message's title, description, `discussion_url`, and
+  proposals: SHA-256 of the canonical `zcash-shielded-vote:ballot:v1`
+  encoding (`x/vote/types/ballot_digest.go`, with vectors shared with the
+  wallet library and the config signer). `ValidateBasic` enforces it, and round
+  creation re-checks it so that a coordinator action queued before activation
+  must also comply. Because the round id commits to `proposals_hash`, a round
+  id now commits to the ballot wallets display. Rounds created before
+  activation keep their stored hashes. `svoted tx vote create-voting-session`
+  computes the hash (a supplied value must match) and now reads
+  `discussion_url`; the admin UI computes the same digest. Requires a
+  coordinated upgrade.
+
 - Use 4 hour buckets instead of 3 hour buckets in public helper queue
   summaries for rounds of 7 to 21 days. Other round lengths keep their bucket
   sizes.
