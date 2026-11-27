@@ -68,7 +68,9 @@ func ValidateAndNormalizeVoteManagerPolicy(addrs []string, threshold uint32) ([]
 	return normalized, effectiveThreshold, nil
 }
 
-// ValidateGenesisState performs structural validation of the vote module genesis state.
+// ValidateGenesisState performs structural validation of the vote module
+// genesis state, the proxy delegate registry included
+// (docs/proxy-delegation/contracts-v1.md §9).
 func ValidateGenesisState(gs *GenesisState) error {
 	if gs == nil {
 		return nil
@@ -237,5 +239,5 @@ func ValidateGenesisState(gs *GenesisState) error {
 		}
 	}
 
-	return nil
+	return ValidateProxyRegistryGenesis(gs)
 }

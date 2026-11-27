@@ -76,6 +76,10 @@ message VoteRound {
 
   string discussion_url = 29; // Overall forum discussion link for the vote round
   uint64 created_at_time = 30; // Unix seconds when this round was registered on-chain
+
+  // Written only for rounds created with the proxy flag. It is outside the
+  // round-id preimage.
+  ProxyDelegationRoundState proxy_delegation = 31;
 }
 
 // CoordinatorActionStatus is the lifecycle of a proposed coordinator action.
@@ -129,6 +133,9 @@ message GenesisState {
   uint32                           vote_manager_threshold    = 16;
   repeated CoordinatorAction       coordinator_actions       = 17;
   uint64                           next_coordinator_action_id = 18;
+  repeated ProxyDelegateEntry      proxy_delegates           = 19;
+  repeated DelegateBallotRecord    proxy_delegate_ballots    = 20;
+  ProxyDelegationParams            proxy_params              = 21;
 }
 
 // Endorser records a stable identifier's currently authorized bech32 address.
@@ -299,4 +306,50 @@ message AckEntry {
   string validator_address = 1;
   bytes  ack_signature     = 2; // Commitment digest: SHA256("ack" || ea_pk || validator_address). Not a cryptographic signature; field name kept for wire compatibility.
   uint64 ack_height        = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Proxy delegation state (docs/proxy-delegation/contracts-v1.md §3.1).
+// ---------------------------------------------------------------------------
+
+// ProxyDelegationRoundState is VoteRound field 31.
+message ProxyDelegationRoundState {
+  bool enabled = 1;
+  uint32 next_delegate_index_at_creation = 2;
+  bool pools_routed = 3;
+}
+
+// ProxyDelegateEntry is the value at 0x1A 0x01 u32be(d).
+message ProxyDelegateEntry {
+  uint32 index = 1;
+  bytes dk = 2;                // 32; one key per entry, forever
+  uint32 provider = 3;         // 1 = X, 2 = GitHub
+  string handle = 4;
+  string proof_id = 5;
+  uint32 status = 6;           // 0 ACTIVE, 1 SUSPENDED, 2 RETIRED
+  uint32 status_reason = 7;    // coordinator reason code; 0 when retired by its own key or never set
+  uint64 registered_height = 8;
+}
+
+// DelegateBallotRecord is the value at 0x1B round(32) u32be(d).
+message DelegateBallotRecord {
+  bytes vote_round_id = 1;
+  uint32 delegate_index = 2;
+  repeated uint32 options = 3;    // one per proposal, in proposal order
+  uint64 height = 4;
+}
+
+// ProxyDelegationParams is the value at 0x1A 0x06.
+message ProxyDelegationParams {
+  repeated ProxyVerifier verifiers = 1;
+  uint32 verifier_threshold = 2;
+  uint32 max_delegates = 3;
+  bool proxy_dc_paused = 4;
+}
+
+// ProxyVerifier is a registration verifier's key in ProxyDelegationParams and
+// MsgSetProxyDelegationParams.
+message ProxyVerifier {
+  uint32 verifier_id = 1;
+  bytes pubkey = 2;            // 32, Ed25519
 }

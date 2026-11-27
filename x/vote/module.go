@@ -63,6 +63,8 @@ func init() {
 			ProvideContributeDKGSigner,
 			ProvideAckExecutiveAuthorityKeySigner,
 			ProvideCreateValidatorWithPallasKeySigner,
+			ProvideProxyDelegationBatchSigner,
+			ProvideDelegateOpSigner,
 		),
 	)
 }
@@ -224,6 +226,27 @@ func ProvideCreateValidatorWithPallasKeySigner() signing.CustomGetSigner {
 	return signing.CustomGetSigner{
 		MsgType: protoreflect.FullName("svote.v1.MsgCreateValidatorWithPallasKey"),
 		Fn:      createValidatorWithPallasKeySignerFn,
+	}
+}
+
+// ProvideProxyDelegationBatchSigner registers the no-op Cosmos signer for
+// MsgProxyDelegationBatch (tag 0x09), which each DC's RedPallas signature
+// over D1 authenticates. Startup validation needs it even while dormant
+// (docs/proxy-delegation/contracts-v1.md §1).
+func ProvideProxyDelegationBatchSigner() signing.CustomGetSigner {
+	return signing.CustomGetSigner{
+		MsgType: protoreflect.FullName("svote.v1.MsgProxyDelegationBatch"),
+		Fn:      noopSignerFn,
+	}
+}
+
+// ProvideDelegateOpSigner registers the no-op Cosmos signer for MsgDelegateOp
+// (tag 0x0B), which Ed25519 delegate-key signatures authenticate. See
+// ProvideProxyDelegationBatchSigner (contracts-v1 §1).
+func ProvideDelegateOpSigner() signing.CustomGetSigner {
+	return signing.CustomGetSigner{
+		MsgType: protoreflect.FullName("svote.v1.MsgDelegateOp"),
+		Fn:      noopSignerFn,
 	}
 }
 

@@ -20,6 +20,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/testutil"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
+	gogoproto "github.com/cosmos/gogoproto/proto"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
@@ -1068,6 +1069,52 @@ func TestRegisterInterfaces_IncludesCeremonyMsgs(t *testing.T) {
 	}
 }
 
+// TestProxyDelegationRegistration checks the registration traps of
+// docs/proxy-delegation/contracts-v1.md §1 and §5.5: both proxy delegation
+// Msgs and the three coordinator payloads resolve, the Msgs' Cosmos signers
+// are no-ops, and every nested type is bridged into the gogoproto registry.
+func TestProxyDelegationRegistration(t *testing.T) {
+	reg := codectypes.NewInterfaceRegistry()
+	types.RegisterInterfaces(reg)
+	for _, msg := range []sdk.Msg{
+		&types.MsgProxyDelegationBatch{},
+		&types.MsgDelegateOp{},
+		&types.MsgSetProxyDelegationParams{},
+		&types.MsgSetProxyDelegationPause{},
+		&types.MsgSetDelegateStatus{},
+	} {
+		require.NoError(t, reg.EnsureRegistered(msg), "expected %T to be registered", msg)
+	}
+
+	for _, provide := range []func() signing.CustomGetSigner{
+		vote.ProvideProxyDelegationBatchSigner,
+		vote.ProvideDelegateOpSigner,
+	} {
+		signers, err := provide().Fn(nil)
+		require.NoError(t, err)
+		require.Nil(t, signers)
+	}
+
+	for _, name := range []string{
+		"svote.v1.ProxyDelegationAction",
+		"svote.v1.DelegateAttestation",
+		"svote.v1.DelegateRegister",
+		"svote.v1.DelegateRetire",
+		"svote.v1.DelegateBallot",
+		"svote.v1.ProxyVerifier",
+	} {
+		require.NotNil(t, gogoproto.MessageType(name), "%s is not bridged into gogoproto", name)
+	}
+
+	msgService := types.File_svote_v1_tx_proto.Services().ByName("Msg")
+	for _, method := range []protoreflect.Name{"ProxyDelegationBatch", "DelegateOp"} {
+		require.NotNil(t, msgService.Methods().ByName(method), "Msg RPC %s is missing", method)
+	}
+	for _, payload := range []protoreflect.Name{"SetProxyDelegationParams", "SetProxyDelegationPause", "SetDelegateStatus"} {
+		require.Nil(t, msgService.Methods().ByName(payload), "coordinator payload %s must not be a public Msg RPC", payload)
+	}
+}
+
 func TestMsgServiceSurface_RemovesCoordinatorPayloadRPCs(t *testing.T) {
 	msgService := types.File_svote_v1_tx_proto.Services().ByName("Msg")
 	require.NotNil(t, msgService)
@@ -1108,6 +1155,8 @@ func TestCustomSignerProviders_Registered(t *testing.T) {
 		vote.ProvideContributeDKGSigner(),
 		vote.ProvideAckExecutiveAuthorityKeySigner(),
 		vote.ProvideCreateValidatorWithPallasKeySigner(),
+		vote.ProvideProxyDelegationBatchSigner(),
+		vote.ProvideDelegateOpSigner(),
 	}
 
 	wantMsgTypes := []protoreflect.FullName{
@@ -1122,6 +1171,8 @@ func TestCustomSignerProviders_Registered(t *testing.T) {
 		"svote.v1.MsgContributeDKG",
 		"svote.v1.MsgAckExecutiveAuthorityKey",
 		"svote.v1.MsgCreateValidatorWithPallasKey",
+		"svote.v1.MsgProxyDelegationBatch",
+		"svote.v1.MsgDelegateOp",
 	}
 
 	signerMap := make(map[protoreflect.FullName]bool, len(allSigners))

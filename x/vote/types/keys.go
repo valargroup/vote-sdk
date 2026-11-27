@@ -1,6 +1,10 @@
 package types
 
-import "fmt"
+import (
+	"fmt"
+
+	errorsmod "cosmossdk.io/errors"
+)
 
 const (
 	// ModuleName defines the module name.
@@ -75,7 +79,8 @@ const MaxProofSize = 15 * 1024
 
 // MaxTreePosition is the largest valid commitment tree leaf index.
 // The tree uses zero-based uint32 leaf addressing (depth-24 Poseidon Merkle tree),
-// so valid positions are 0..2^32-1.
+// so valid positions are 0..2^32-1. Appends stop at ProxyMaxTreePosition
+// once proxy delegation is enabled.
 const MaxTreePosition = (1 << 32) - 1
 
 // MaxCommitmentLeavesPerResponse caps paginated CommitmentLeaves responses.
@@ -95,7 +100,7 @@ const (
 	SessionKeyProposalsHash    = "proposals_hash"
 )
 
-// NullifierType distinguishes the three independent nullifier sets per voting round.
+// NullifierType distinguishes the independent nullifier sets per voting round.
 type NullifierType byte
 
 const (
@@ -105,6 +110,9 @@ const (
 	NullifierTypeVoteAuthorityNote NullifierType = 0x01
 	// NullifierTypeShare identifies share nullifiers recorded by MsgRevealShare.
 	NullifierTypeShare NullifierType = 0x02
+	// NullifierTypeProxySlot identifies DC slot nullifiers recorded by
+	// MsgProxyDelegationBatch (docs/proxy-delegation/contracts-v1.md §3.2).
+	NullifierTypeProxySlot NullifierType = 0x03
 )
 
 // KV store key prefixes for the vote module.
@@ -205,6 +213,35 @@ var (
 	// NextCoordinatorActionIDKey stores the next allocated coordinator action ID:
 	//   single key -> big-endian uint64. IDs start at 1.
 	NextCoordinatorActionIDKey = []byte{0x19}
+
+	// ProxyDelegateEntryPrefix stores proxy delegate entries
+	// (docs/proxy-delegation/contracts-v1.md §3.2):
+	//   0x1A 0x01 || big-endian uint32 delegate_index -> ProxyDelegateEntry (deterministic protobuf)
+	// Under 0x1A, sub-prefix 0x05 and those from 0x07 stay unused.
+	ProxyDelegateEntryPrefix = []byte{0x1A, 0x01}
+
+	// ProxyUsedDelegateKeyPrefix records every delegate key ever registered,
+	// so none is reused:
+	//   0x1A 0x02 || dk (32 bytes) -> big-endian uint32 delegate_index
+	ProxyUsedDelegateKeyPrefix = []byte{0x1A, 0x02}
+
+	// ProxyDelegateHandlePrefix records the live entry of each handle,
+	// written at register and deleted at retire:
+	//   0x1A 0x03 || provider (1 byte) || handle -> big-endian uint32 delegate_index
+	ProxyDelegateHandlePrefix = []byte{0x1A, 0x03}
+
+	// ProxyNextDelegateIndexKey stores the next delegate index to assign:
+	//   single key -> big-endian uint32. Absent reads as 1; index 0 is never assigned.
+	ProxyNextDelegateIndexKey = []byte{0x1A, 0x04}
+
+	// ProxyDelegationParamsKey stores the registry params:
+	//   single key -> ProxyDelegationParams. Absent reads as the zero value.
+	ProxyDelegationParamsKey = []byte{0x1A, 0x06}
+
+	// DelegateBallotPrefix stores delegate ballots, at most one per round and
+	// delegate and never overwritten:
+	//   0x1B || round_id (32 bytes) || big-endian uint32 delegate_index -> DelegateBallotRecord
+	DelegateBallotPrefix = []byte{0x1B}
 )
 
 // NullifierKey returns the store key for a nullifier scoped by type and round.
@@ -250,6 +287,58 @@ func CoordinatorActionKey(actionID uint64) []byte {
 	copy(key, CoordinatorActionPrefix)
 	putUint64BE(key[len(CoordinatorActionPrefix):], actionID)
 	return key
+}
+
+// ProxyDelegateEntryKey returns the store key for proxy delegate entry d.
+// Format: 0x1A 0x01 || big-endian uint32 d
+func ProxyDelegateEntryKey(delegateIndex uint32) []byte {
+	key := make([]byte, 0, len(ProxyDelegateEntryPrefix)+4)
+	key = append(key, ProxyDelegateEntryPrefix...)
+	return appendUint32BE(key, delegateIndex)
+}
+
+// ProxyUsedDelegateKeyKey returns the store key that records delegate key dk
+// as registered. A dk that is not 32 bytes is ErrInvalidField.
+// Format: 0x1A 0x02 || dk (32 B)
+func ProxyUsedDelegateKeyKey(dk []byte) ([]byte, error) {
+	if len(dk) != 32 {
+		return nil, errorsmod.Wrapf(ErrInvalidField, "dk must be 32 bytes, got %d", len(dk))
+	}
+	key := make([]byte, 0, len(ProxyUsedDelegateKeyPrefix)+32)
+	key = append(key, ProxyUsedDelegateKeyPrefix...)
+	return append(key, dk...), nil
+}
+
+// ProxyDelegateHandleKey returns the store key that records the live entry of
+// a canonical handle at provider.
+// Format: 0x1A 0x03 || provider (1 B) || handle
+func ProxyDelegateHandleKey(provider uint32, handle string) []byte {
+	key := make([]byte, 0, len(ProxyDelegateHandlePrefix)+1+len(handle))
+	key = append(key, ProxyDelegateHandlePrefix...)
+	key = append(key, byte(provider))
+	return append(key, handle...)
+}
+
+// DelegateBallotKey returns the store key for delegate d's ballot in a round.
+// Format: 0x1B || round_id (32 B) || big-endian uint32 d
+func DelegateBallotKey(roundID []byte, delegateIndex uint32) ([]byte, error) {
+	prefix, err := DelegateBallotPrefixForRound(roundID)
+	if err != nil {
+		return nil, err
+	}
+	return appendUint32BE(prefix, delegateIndex), nil
+}
+
+// DelegateBallotPrefixForRound returns the prefix of a round's delegate
+// ballots, which iterate in ascending delegate index order.
+// Format: 0x1B || round_id (32 B)
+func DelegateBallotPrefixForRound(roundID []byte) ([]byte, error) {
+	if err := ValidateRoundID(roundID); err != nil {
+		return nil, err
+	}
+	key := make([]byte, 0, len(DelegateBallotPrefix)+RoundIDLen+4)
+	key = append(key, DelegateBallotPrefix...)
+	return append(key, roundID...), nil
 }
 
 // CommitmentLeafKey returns the store key for a commitment tree leaf scoped to a round.

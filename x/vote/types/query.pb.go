@@ -62,8 +62,12 @@ type QueryProtocolCapabilitiesResponse struct {
 	AtomicCastVoteBatch                   bool                   `protobuf:"varint,1,opt,name=atomic_cast_vote_batch,json=atomicCastVoteBatch,proto3" json:"atomic_cast_vote_batch,omitempty"`
 	AtomicDelegateAndCastVoteBatch        bool                   `protobuf:"varint,2,opt,name=atomic_delegate_and_cast_vote_batch,json=atomicDelegateAndCastVoteBatch,proto3" json:"atomic_delegate_and_cast_vote_batch,omitempty"`
 	AtomicDelegateAndCastVoteBatchWireTag uint32                 `protobuf:"varint,3,opt,name=atomic_delegate_and_cast_vote_batch_wire_tag,json=atomicDelegateAndCastVoteBatchWireTag,proto3" json:"atomic_delegate_and_cast_vote_batch_wire_tag,omitempty"`
-	unknownFields                         protoimpl.UnknownFields
-	sizeCache                             protoimpl.SizeCache
+	// 0 = off, 1 = tags 0x09 and 0x0B with 8 DC slots per registration.
+	ProxyDelegationVersion uint32 `protobuf:"varint,4,opt,name=proxy_delegation_version,json=proxyDelegationVersion,proto3" json:"proxy_delegation_version,omitempty"`
+	// Names zkp1 to zkp4.
+	CircuitFingerprints []*CircuitFingerprint `protobuf:"bytes,5,rep,name=circuit_fingerprints,json=circuitFingerprints,proto3" json:"circuit_fingerprints,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *QueryProtocolCapabilitiesResponse) Reset() {
@@ -115,6 +119,20 @@ func (x *QueryProtocolCapabilitiesResponse) GetAtomicDelegateAndCastVoteBatchWir
 		return x.AtomicDelegateAndCastVoteBatchWireTag
 	}
 	return 0
+}
+
+func (x *QueryProtocolCapabilitiesResponse) GetProxyDelegationVersion() uint32 {
+	if x != nil {
+		return x.ProxyDelegationVersion
+	}
+	return 0
+}
+
+func (x *QueryProtocolCapabilitiesResponse) GetCircuitFingerprints() []*CircuitFingerprint {
+	if x != nil {
+		return x.CircuitFingerprints
+	}
+	return nil
 }
 
 type QueryCommitmentTreeRequest struct {
@@ -1810,16 +1828,648 @@ func (x *QueryRoundOverviewResponse) GetCompletedRoundCount() uint64 {
 	return 0
 }
 
+// CircuitFingerprint is a circuit's verifying-key fingerprint: vk_blake2b is
+// BLAKE2b-256 of the circuit's pinned verifying key (§10).
+type CircuitFingerprint struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	VkBlake2B     []byte                 `protobuf:"bytes,2,opt,name=vk_blake2b,json=vkBlake2b,proto3" json:"vk_blake2b,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CircuitFingerprint) Reset() {
+	*x = CircuitFingerprint{}
+	mi := &file_svote_v1_query_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CircuitFingerprint) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CircuitFingerprint) ProtoMessage() {}
+
+func (x *CircuitFingerprint) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_query_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CircuitFingerprint.ProtoReflect.Descriptor instead.
+func (*CircuitFingerprint) Descriptor() ([]byte, []int) {
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{39}
+}
+
+func (x *CircuitFingerprint) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CircuitFingerprint) GetVkBlake2B() []byte {
+	if x != nil {
+		return x.VkBlake2B
+	}
+	return nil
+}
+
+type QueryProxyDelegatesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	StartAfter    uint32                 `protobuf:"varint,1,opt,name=start_after,json=startAfter,proto3" json:"start_after,omitempty"`
+	Limit         uint32                 `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryProxyDelegatesRequest) Reset() {
+	*x = QueryProxyDelegatesRequest{}
+	mi := &file_svote_v1_query_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryProxyDelegatesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryProxyDelegatesRequest) ProtoMessage() {}
+
+func (x *QueryProxyDelegatesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_query_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryProxyDelegatesRequest.ProtoReflect.Descriptor instead.
+func (*QueryProxyDelegatesRequest) Descriptor() ([]byte, []int) {
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *QueryProxyDelegatesRequest) GetStartAfter() uint32 {
+	if x != nil {
+		return x.StartAfter
+	}
+	return 0
+}
+
+func (x *QueryProxyDelegatesRequest) GetLimit() uint32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type QueryProxyDelegatesResponse struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Delegates      []*ProxyDelegateEntry  `protobuf:"bytes,1,rep,name=delegates,proto3" json:"delegates,omitempty"`
+	NextStartAfter uint32                 `protobuf:"varint,2,opt,name=next_start_after,json=nextStartAfter,proto3" json:"next_start_after,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *QueryProxyDelegatesResponse) Reset() {
+	*x = QueryProxyDelegatesResponse{}
+	mi := &file_svote_v1_query_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryProxyDelegatesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryProxyDelegatesResponse) ProtoMessage() {}
+
+func (x *QueryProxyDelegatesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_query_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryProxyDelegatesResponse.ProtoReflect.Descriptor instead.
+func (*QueryProxyDelegatesResponse) Descriptor() ([]byte, []int) {
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *QueryProxyDelegatesResponse) GetDelegates() []*ProxyDelegateEntry {
+	if x != nil {
+		return x.Delegates
+	}
+	return nil
+}
+
+func (x *QueryProxyDelegatesResponse) GetNextStartAfter() uint32 {
+	if x != nil {
+		return x.NextStartAfter
+	}
+	return 0
+}
+
+type QueryProxyDelegateRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DelegateIndex uint32                 `protobuf:"varint,1,opt,name=delegate_index,json=delegateIndex,proto3" json:"delegate_index,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryProxyDelegateRequest) Reset() {
+	*x = QueryProxyDelegateRequest{}
+	mi := &file_svote_v1_query_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryProxyDelegateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryProxyDelegateRequest) ProtoMessage() {}
+
+func (x *QueryProxyDelegateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_query_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryProxyDelegateRequest.ProtoReflect.Descriptor instead.
+func (*QueryProxyDelegateRequest) Descriptor() ([]byte, []int) {
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{42}
+}
+
+func (x *QueryProxyDelegateRequest) GetDelegateIndex() uint32 {
+	if x != nil {
+		return x.DelegateIndex
+	}
+	return 0
+}
+
+type QueryProxyDelegateResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Delegate      *ProxyDelegateEntry    `protobuf:"bytes,1,opt,name=delegate,proto3" json:"delegate,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryProxyDelegateResponse) Reset() {
+	*x = QueryProxyDelegateResponse{}
+	mi := &file_svote_v1_query_proto_msgTypes[43]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryProxyDelegateResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryProxyDelegateResponse) ProtoMessage() {}
+
+func (x *QueryProxyDelegateResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_query_proto_msgTypes[43]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryProxyDelegateResponse.ProtoReflect.Descriptor instead.
+func (*QueryProxyDelegateResponse) Descriptor() ([]byte, []int) {
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{43}
+}
+
+func (x *QueryProxyDelegateResponse) GetDelegate() *ProxyDelegateEntry {
+	if x != nil {
+		return x.Delegate
+	}
+	return nil
+}
+
+type QueryProxyDelegateByKeyRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Dk            []byte                 `protobuf:"bytes,1,opt,name=dk,proto3" json:"dk,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryProxyDelegateByKeyRequest) Reset() {
+	*x = QueryProxyDelegateByKeyRequest{}
+	mi := &file_svote_v1_query_proto_msgTypes[44]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryProxyDelegateByKeyRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryProxyDelegateByKeyRequest) ProtoMessage() {}
+
+func (x *QueryProxyDelegateByKeyRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_query_proto_msgTypes[44]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryProxyDelegateByKeyRequest.ProtoReflect.Descriptor instead.
+func (*QueryProxyDelegateByKeyRequest) Descriptor() ([]byte, []int) {
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{44}
+}
+
+func (x *QueryProxyDelegateByKeyRequest) GetDk() []byte {
+	if x != nil {
+		return x.Dk
+	}
+	return nil
+}
+
+type QueryProxyDelegateByKeyResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Delegate      *ProxyDelegateEntry    `protobuf:"bytes,1,opt,name=delegate,proto3" json:"delegate,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryProxyDelegateByKeyResponse) Reset() {
+	*x = QueryProxyDelegateByKeyResponse{}
+	mi := &file_svote_v1_query_proto_msgTypes[45]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryProxyDelegateByKeyResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryProxyDelegateByKeyResponse) ProtoMessage() {}
+
+func (x *QueryProxyDelegateByKeyResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_query_proto_msgTypes[45]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryProxyDelegateByKeyResponse.ProtoReflect.Descriptor instead.
+func (*QueryProxyDelegateByKeyResponse) Descriptor() ([]byte, []int) {
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{45}
+}
+
+func (x *QueryProxyDelegateByKeyResponse) GetDelegate() *ProxyDelegateEntry {
+	if x != nil {
+		return x.Delegate
+	}
+	return nil
+}
+
+type QueryDelegateBallotsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	VoteRoundId   []byte                 `protobuf:"bytes,1,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`
+	StartAfter    uint32                 `protobuf:"varint,2,opt,name=start_after,json=startAfter,proto3" json:"start_after,omitempty"`
+	Limit         uint32                 `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryDelegateBallotsRequest) Reset() {
+	*x = QueryDelegateBallotsRequest{}
+	mi := &file_svote_v1_query_proto_msgTypes[46]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryDelegateBallotsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryDelegateBallotsRequest) ProtoMessage() {}
+
+func (x *QueryDelegateBallotsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_query_proto_msgTypes[46]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryDelegateBallotsRequest.ProtoReflect.Descriptor instead.
+func (*QueryDelegateBallotsRequest) Descriptor() ([]byte, []int) {
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{46}
+}
+
+func (x *QueryDelegateBallotsRequest) GetVoteRoundId() []byte {
+	if x != nil {
+		return x.VoteRoundId
+	}
+	return nil
+}
+
+func (x *QueryDelegateBallotsRequest) GetStartAfter() uint32 {
+	if x != nil {
+		return x.StartAfter
+	}
+	return 0
+}
+
+func (x *QueryDelegateBallotsRequest) GetLimit() uint32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type QueryDelegateBallotsResponse struct {
+	state          protoimpl.MessageState  `protogen:"open.v1"`
+	Ballots        []*DelegateBallotRecord `protobuf:"bytes,1,rep,name=ballots,proto3" json:"ballots,omitempty"`
+	NextStartAfter uint32                  `protobuf:"varint,2,opt,name=next_start_after,json=nextStartAfter,proto3" json:"next_start_after,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *QueryDelegateBallotsResponse) Reset() {
+	*x = QueryDelegateBallotsResponse{}
+	mi := &file_svote_v1_query_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryDelegateBallotsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryDelegateBallotsResponse) ProtoMessage() {}
+
+func (x *QueryDelegateBallotsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_query_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryDelegateBallotsResponse.ProtoReflect.Descriptor instead.
+func (*QueryDelegateBallotsResponse) Descriptor() ([]byte, []int) {
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{47}
+}
+
+func (x *QueryDelegateBallotsResponse) GetBallots() []*DelegateBallotRecord {
+	if x != nil {
+		return x.Ballots
+	}
+	return nil
+}
+
+func (x *QueryDelegateBallotsResponse) GetNextStartAfter() uint32 {
+	if x != nil {
+		return x.NextStartAfter
+	}
+	return 0
+}
+
+type QueryProxyDelegationParamsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryProxyDelegationParamsRequest) Reset() {
+	*x = QueryProxyDelegationParamsRequest{}
+	mi := &file_svote_v1_query_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryProxyDelegationParamsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryProxyDelegationParamsRequest) ProtoMessage() {}
+
+func (x *QueryProxyDelegationParamsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_query_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryProxyDelegationParamsRequest.ProtoReflect.Descriptor instead.
+func (*QueryProxyDelegationParamsRequest) Descriptor() ([]byte, []int) {
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{48}
+}
+
+type QueryProxyDelegationParamsResponse struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Params            *ProxyDelegationParams `protobuf:"bytes,1,opt,name=params,proto3" json:"params,omitempty"`
+	NextDelegateIndex uint32                 `protobuf:"varint,2,opt,name=next_delegate_index,json=nextDelegateIndex,proto3" json:"next_delegate_index,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *QueryProxyDelegationParamsResponse) Reset() {
+	*x = QueryProxyDelegationParamsResponse{}
+	mi := &file_svote_v1_query_proto_msgTypes[49]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryProxyDelegationParamsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryProxyDelegationParamsResponse) ProtoMessage() {}
+
+func (x *QueryProxyDelegationParamsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_query_proto_msgTypes[49]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryProxyDelegationParamsResponse.ProtoReflect.Descriptor instead.
+func (*QueryProxyDelegationParamsResponse) Descriptor() ([]byte, []int) {
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{49}
+}
+
+func (x *QueryProxyDelegationParamsResponse) GetParams() *ProxyDelegationParams {
+	if x != nil {
+		return x.Params
+	}
+	return nil
+}
+
+func (x *QueryProxyDelegationParamsResponse) GetNextDelegateIndex() uint32 {
+	if x != nil {
+		return x.NextDelegateIndex
+	}
+	return 0
+}
+
+type QueryProxyDelegateByHandleRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Provider      uint32                 `protobuf:"varint,1,opt,name=provider,proto3" json:"provider,omitempty"`
+	Handle        string                 `protobuf:"bytes,2,opt,name=handle,proto3" json:"handle,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryProxyDelegateByHandleRequest) Reset() {
+	*x = QueryProxyDelegateByHandleRequest{}
+	mi := &file_svote_v1_query_proto_msgTypes[50]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryProxyDelegateByHandleRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryProxyDelegateByHandleRequest) ProtoMessage() {}
+
+func (x *QueryProxyDelegateByHandleRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_query_proto_msgTypes[50]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryProxyDelegateByHandleRequest.ProtoReflect.Descriptor instead.
+func (*QueryProxyDelegateByHandleRequest) Descriptor() ([]byte, []int) {
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{50}
+}
+
+func (x *QueryProxyDelegateByHandleRequest) GetProvider() uint32 {
+	if x != nil {
+		return x.Provider
+	}
+	return 0
+}
+
+func (x *QueryProxyDelegateByHandleRequest) GetHandle() string {
+	if x != nil {
+		return x.Handle
+	}
+	return ""
+}
+
+type QueryProxyDelegateByHandleResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Delegate      *ProxyDelegateEntry    `protobuf:"bytes,1,opt,name=delegate,proto3" json:"delegate,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *QueryProxyDelegateByHandleResponse) Reset() {
+	*x = QueryProxyDelegateByHandleResponse{}
+	mi := &file_svote_v1_query_proto_msgTypes[51]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *QueryProxyDelegateByHandleResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*QueryProxyDelegateByHandleResponse) ProtoMessage() {}
+
+func (x *QueryProxyDelegateByHandleResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_query_proto_msgTypes[51]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use QueryProxyDelegateByHandleResponse.ProtoReflect.Descriptor instead.
+func (*QueryProxyDelegateByHandleResponse) Descriptor() ([]byte, []int) {
+	return file_svote_v1_query_proto_rawDescGZIP(), []int{51}
+}
+
+func (x *QueryProxyDelegateByHandleResponse) GetDelegate() *ProxyDelegateEntry {
+	if x != nil {
+		return x.Delegate
+	}
+	return nil
+}
+
 var File_svote_v1_query_proto protoreflect.FileDescriptor
 
 const file_svote_v1_query_proto_rawDesc = "" +
 	"\n" +
 	"\x14svote/v1/query.proto\x12\bsvote.v1\x1a\x14svote/v1/types.proto\"\"\n" +
-	" QueryProtocolCapabilitiesRequest\"\x82\x02\n" +
+	" QueryProtocolCapabilitiesRequest\"\x8d\x03\n" +
 	"!QueryProtocolCapabilitiesResponse\x123\n" +
 	"\x16atomic_cast_vote_batch\x18\x01 \x01(\bR\x13atomicCastVoteBatch\x12K\n" +
 	"#atomic_delegate_and_cast_vote_batch\x18\x02 \x01(\bR\x1eatomicDelegateAndCastVoteBatch\x12[\n" +
-	",atomic_delegate_and_cast_vote_batch_wire_tag\x18\x03 \x01(\rR%atomicDelegateAndCastVoteBatchWireTag\"X\n" +
+	",atomic_delegate_and_cast_vote_batch_wire_tag\x18\x03 \x01(\rR%atomicDelegateAndCastVoteBatchWireTag\x128\n" +
+	"\x18proxy_delegation_version\x18\x04 \x01(\rR\x16proxyDelegationVersion\x12O\n" +
+	"\x14circuit_fingerprints\x18\x05 \x03(\v2\x1c.svote.v1.CircuitFingerprintR\x13circuitFingerprints\"X\n" +
 	"\x1aQueryCommitmentTreeRequest\x12\x16\n" +
 	"\x06height\x18\x01 \x01(\x04R\x06height\x12\"\n" +
 	"\rvote_round_id\x18\x02 \x01(\fR\vvoteRoundId\"P\n" +
@@ -1912,7 +2562,43 @@ const file_svote_v1_query_proto_rawDesc = "" +
 	"\x19QueryRoundOverviewRequest\"\x8c\x01\n" +
 	"\x1aQueryRoundOverviewResponse\x12:\n" +
 	"\x0ecurrent_rounds\x18\x01 \x03(\v2\x13.svote.v1.VoteRoundR\rcurrentRounds\x122\n" +
-	"\x15completed_round_count\x18\x02 \x01(\x04R\x13completedRoundCount2\x8b\x0e\n" +
+	"\x15completed_round_count\x18\x02 \x01(\x04R\x13completedRoundCount\"G\n" +
+	"\x12CircuitFingerprint\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
+	"\n" +
+	"vk_blake2b\x18\x02 \x01(\fR\tvkBlake2b\"S\n" +
+	"\x1aQueryProxyDelegatesRequest\x12\x1f\n" +
+	"\vstart_after\x18\x01 \x01(\rR\n" +
+	"startAfter\x12\x14\n" +
+	"\x05limit\x18\x02 \x01(\rR\x05limit\"\x83\x01\n" +
+	"\x1bQueryProxyDelegatesResponse\x12:\n" +
+	"\tdelegates\x18\x01 \x03(\v2\x1c.svote.v1.ProxyDelegateEntryR\tdelegates\x12(\n" +
+	"\x10next_start_after\x18\x02 \x01(\rR\x0enextStartAfter\"B\n" +
+	"\x19QueryProxyDelegateRequest\x12%\n" +
+	"\x0edelegate_index\x18\x01 \x01(\rR\rdelegateIndex\"V\n" +
+	"\x1aQueryProxyDelegateResponse\x128\n" +
+	"\bdelegate\x18\x01 \x01(\v2\x1c.svote.v1.ProxyDelegateEntryR\bdelegate\"0\n" +
+	"\x1eQueryProxyDelegateByKeyRequest\x12\x0e\n" +
+	"\x02dk\x18\x01 \x01(\fR\x02dk\"[\n" +
+	"\x1fQueryProxyDelegateByKeyResponse\x128\n" +
+	"\bdelegate\x18\x01 \x01(\v2\x1c.svote.v1.ProxyDelegateEntryR\bdelegate\"x\n" +
+	"\x1bQueryDelegateBallotsRequest\x12\"\n" +
+	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\x12\x1f\n" +
+	"\vstart_after\x18\x02 \x01(\rR\n" +
+	"startAfter\x12\x14\n" +
+	"\x05limit\x18\x03 \x01(\rR\x05limit\"\x82\x01\n" +
+	"\x1cQueryDelegateBallotsResponse\x128\n" +
+	"\aballots\x18\x01 \x03(\v2\x1e.svote.v1.DelegateBallotRecordR\aballots\x12(\n" +
+	"\x10next_start_after\x18\x02 \x01(\rR\x0enextStartAfter\"#\n" +
+	"!QueryProxyDelegationParamsRequest\"\x8d\x01\n" +
+	"\"QueryProxyDelegationParamsResponse\x127\n" +
+	"\x06params\x18\x01 \x01(\v2\x1f.svote.v1.ProxyDelegationParamsR\x06params\x12.\n" +
+	"\x13next_delegate_index\x18\x02 \x01(\rR\x11nextDelegateIndex\"W\n" +
+	"!QueryProxyDelegateByHandleRequest\x12\x1a\n" +
+	"\bprovider\x18\x01 \x01(\rR\bprovider\x12\x16\n" +
+	"\x06handle\x18\x02 \x01(\tR\x06handle\"^\n" +
+	"\"QueryProxyDelegateByHandleResponse\x128\n" +
+	"\bdelegate\x18\x01 \x01(\v2\x1c.svote.v1.ProxyDelegateEntryR\bdelegate2\xfb\x12\n" +
 	"\x05Query\x12e\n" +
 	"\x16CommitmentTreeAtHeight\x12$.svote.v1.QueryCommitmentTreeRequest\x1a%.svote.v1.QueryCommitmentTreeResponse\x12[\n" +
 	"\x14LatestCommitmentTree\x12 .svote.v1.QueryLatestTreeRequest\x1a!.svote.v1.QueryLatestTreeResponse\x12N\n" +
@@ -1934,7 +2620,13 @@ const file_svote_v1_query_proto_rawDesc = "" +
 	"\x11CoordinatorAction\x12'.svote.v1.QueryCoordinatorActionRequest\x1a(.svote.v1.QueryCoordinatorActionResponse\x12~\n" +
 	"\x19PendingCoordinatorActions\x12/.svote.v1.QueryPendingCoordinatorActionsRequest\x1a0.svote.v1.QueryPendingCoordinatorActionsResponse\x12Z\n" +
 	"\rRoundOverview\x12#.svote.v1.QueryRoundOverviewRequest\x1a$.svote.v1.QueryRoundOverviewResponse\x12o\n" +
-	"\x14ProtocolCapabilities\x12*.svote.v1.QueryProtocolCapabilitiesRequest\x1a+.svote.v1.QueryProtocolCapabilitiesResponseB-Z+github.com/valargroup/vote-sdk/x/vote/typesb\x06proto3"
+	"\x14ProtocolCapabilities\x12*.svote.v1.QueryProtocolCapabilitiesRequest\x1a+.svote.v1.QueryProtocolCapabilitiesResponse\x12]\n" +
+	"\x0eProxyDelegates\x12$.svote.v1.QueryProxyDelegatesRequest\x1a%.svote.v1.QueryProxyDelegatesResponse\x12Z\n" +
+	"\rProxyDelegate\x12#.svote.v1.QueryProxyDelegateRequest\x1a$.svote.v1.QueryProxyDelegateResponse\x12i\n" +
+	"\x12ProxyDelegateByKey\x12(.svote.v1.QueryProxyDelegateByKeyRequest\x1a).svote.v1.QueryProxyDelegateByKeyResponse\x12r\n" +
+	"\x15ProxyDelegateByHandle\x12+.svote.v1.QueryProxyDelegateByHandleRequest\x1a,.svote.v1.QueryProxyDelegateByHandleResponse\x12`\n" +
+	"\x0fDelegateBallots\x12%.svote.v1.QueryDelegateBallotsRequest\x1a&.svote.v1.QueryDelegateBallotsResponse\x12r\n" +
+	"\x15ProxyDelegationParams\x12+.svote.v1.QueryProxyDelegationParamsRequest\x1a,.svote.v1.QueryProxyDelegationParamsResponseB-Z+github.com/valargroup/vote-sdk/x/vote/typesb\x06proto3"
 
 var (
 	file_svote_v1_query_proto_rawDescOnce sync.Once
@@ -1948,7 +2640,7 @@ func file_svote_v1_query_proto_rawDescGZIP() []byte {
 	return file_svote_v1_query_proto_rawDescData
 }
 
-var file_svote_v1_query_proto_msgTypes = make([]protoimpl.MessageInfo, 40)
+var file_svote_v1_query_proto_msgTypes = make([]protoimpl.MessageInfo, 53)
 var file_svote_v1_query_proto_goTypes = []any{
 	(*QueryProtocolCapabilitiesRequest)(nil),       // 0: svote.v1.QueryProtocolCapabilitiesRequest
 	(*QueryProtocolCapabilitiesResponse)(nil),      // 1: svote.v1.QueryProtocolCapabilitiesResponse
@@ -1989,79 +2681,114 @@ var file_svote_v1_query_proto_goTypes = []any{
 	(*QueryPendingCoordinatorActionsResponse)(nil), // 36: svote.v1.QueryPendingCoordinatorActionsResponse
 	(*QueryRoundOverviewRequest)(nil),              // 37: svote.v1.QueryRoundOverviewRequest
 	(*QueryRoundOverviewResponse)(nil),             // 38: svote.v1.QueryRoundOverviewResponse
-	nil,                                            // 39: svote.v1.QueryProposalTallyResponse.TallyEntry
-	(*CommitmentTreeState)(nil),                    // 40: svote.v1.CommitmentTreeState
-	(*VoteRound)(nil),                              // 41: svote.v1.VoteRound
-	(*TallyResult)(nil),                            // 42: svote.v1.TallyResult
-	(*BlockCommitments)(nil),                       // 43: svote.v1.BlockCommitments
-	(*CeremonyState)(nil),                          // 44: svote.v1.CeremonyState
-	(SessionStatus)(0),                             // 45: svote.v1.SessionStatus
-	(*ProposalSummary)(nil),                        // 46: svote.v1.ProposalSummary
-	(*ValidatorPallasKey)(nil),                     // 47: svote.v1.ValidatorPallasKey
-	(*Endorser)(nil),                               // 48: svote.v1.Endorser
-	(*CoordinatorAction)(nil),                      // 49: svote.v1.CoordinatorAction
+	(*CircuitFingerprint)(nil),                     // 39: svote.v1.CircuitFingerprint
+	(*QueryProxyDelegatesRequest)(nil),             // 40: svote.v1.QueryProxyDelegatesRequest
+	(*QueryProxyDelegatesResponse)(nil),            // 41: svote.v1.QueryProxyDelegatesResponse
+	(*QueryProxyDelegateRequest)(nil),              // 42: svote.v1.QueryProxyDelegateRequest
+	(*QueryProxyDelegateResponse)(nil),             // 43: svote.v1.QueryProxyDelegateResponse
+	(*QueryProxyDelegateByKeyRequest)(nil),         // 44: svote.v1.QueryProxyDelegateByKeyRequest
+	(*QueryProxyDelegateByKeyResponse)(nil),        // 45: svote.v1.QueryProxyDelegateByKeyResponse
+	(*QueryDelegateBallotsRequest)(nil),            // 46: svote.v1.QueryDelegateBallotsRequest
+	(*QueryDelegateBallotsResponse)(nil),           // 47: svote.v1.QueryDelegateBallotsResponse
+	(*QueryProxyDelegationParamsRequest)(nil),      // 48: svote.v1.QueryProxyDelegationParamsRequest
+	(*QueryProxyDelegationParamsResponse)(nil),     // 49: svote.v1.QueryProxyDelegationParamsResponse
+	(*QueryProxyDelegateByHandleRequest)(nil),      // 50: svote.v1.QueryProxyDelegateByHandleRequest
+	(*QueryProxyDelegateByHandleResponse)(nil),     // 51: svote.v1.QueryProxyDelegateByHandleResponse
+	nil,                           // 52: svote.v1.QueryProposalTallyResponse.TallyEntry
+	(*CommitmentTreeState)(nil),   // 53: svote.v1.CommitmentTreeState
+	(*VoteRound)(nil),             // 54: svote.v1.VoteRound
+	(*TallyResult)(nil),           // 55: svote.v1.TallyResult
+	(*BlockCommitments)(nil),      // 56: svote.v1.BlockCommitments
+	(*CeremonyState)(nil),         // 57: svote.v1.CeremonyState
+	(SessionStatus)(0),            // 58: svote.v1.SessionStatus
+	(*ProposalSummary)(nil),       // 59: svote.v1.ProposalSummary
+	(*ValidatorPallasKey)(nil),    // 60: svote.v1.ValidatorPallasKey
+	(*Endorser)(nil),              // 61: svote.v1.Endorser
+	(*CoordinatorAction)(nil),     // 62: svote.v1.CoordinatorAction
+	(*ProxyDelegateEntry)(nil),    // 63: svote.v1.ProxyDelegateEntry
+	(*DelegateBallotRecord)(nil),  // 64: svote.v1.DelegateBallotRecord
+	(*ProxyDelegationParams)(nil), // 65: svote.v1.ProxyDelegationParams
 }
 var file_svote_v1_query_proto_depIdxs = []int32{
-	40, // 0: svote.v1.QueryCommitmentTreeResponse.tree:type_name -> svote.v1.CommitmentTreeState
-	40, // 1: svote.v1.QueryLatestTreeResponse.tree:type_name -> svote.v1.CommitmentTreeState
-	41, // 2: svote.v1.QueryVoteRoundResponse.round:type_name -> svote.v1.VoteRound
-	39, // 3: svote.v1.QueryProposalTallyResponse.tally:type_name -> svote.v1.QueryProposalTallyResponse.TallyEntry
-	42, // 4: svote.v1.QueryTallyResultsResponse.results:type_name -> svote.v1.TallyResult
-	14, // 5: svote.v1.QueryPartialDecryptionsResponse.entries:type_name -> svote.v1.StoredPartialDecryption
-	43, // 6: svote.v1.QueryCommitmentLeavesResponse.blocks:type_name -> svote.v1.BlockCommitments
-	41, // 7: svote.v1.QueryActiveRoundResponse.round:type_name -> svote.v1.VoteRound
-	44, // 8: svote.v1.QueryCeremonyStateResponse.ceremony:type_name -> svote.v1.CeremonyState
-	45, // 9: svote.v1.QueryVoteSummaryResponse.status:type_name -> svote.v1.SessionStatus
-	46, // 10: svote.v1.QueryVoteSummaryResponse.proposals:type_name -> svote.v1.ProposalSummary
-	41, // 11: svote.v1.QueryListRoundsResponse.rounds:type_name -> svote.v1.VoteRound
-	47, // 12: svote.v1.QueryPallasKeysResponse.validators:type_name -> svote.v1.ValidatorPallasKey
-	48, // 13: svote.v1.QueryEndorsersResponse.endorsers:type_name -> svote.v1.Endorser
-	49, // 14: svote.v1.QueryCoordinatorActionResponse.action:type_name -> svote.v1.CoordinatorAction
-	49, // 15: svote.v1.QueryPendingCoordinatorActionsResponse.actions:type_name -> svote.v1.CoordinatorAction
-	41, // 16: svote.v1.QueryRoundOverviewResponse.current_rounds:type_name -> svote.v1.VoteRound
-	2,  // 17: svote.v1.Query.CommitmentTreeAtHeight:input_type -> svote.v1.QueryCommitmentTreeRequest
-	4,  // 18: svote.v1.Query.LatestCommitmentTree:input_type -> svote.v1.QueryLatestTreeRequest
-	6,  // 19: svote.v1.Query.VoteRound:input_type -> svote.v1.QueryVoteRoundRequest
-	8,  // 20: svote.v1.Query.ProposalTally:input_type -> svote.v1.QueryProposalTallyRequest
-	10, // 21: svote.v1.Query.TallyResults:input_type -> svote.v1.QueryTallyResultsRequest
-	12, // 22: svote.v1.Query.PartialDecryptions:input_type -> svote.v1.QueryPartialDecryptionsRequest
-	15, // 23: svote.v1.Query.CommitmentLeaves:input_type -> svote.v1.QueryCommitmentLeavesRequest
-	17, // 24: svote.v1.Query.ActiveRound:input_type -> svote.v1.QueryActiveRoundRequest
-	19, // 25: svote.v1.Query.CeremonyState:input_type -> svote.v1.QueryCeremonyStateRequest
-	21, // 26: svote.v1.Query.VoteManagers:input_type -> svote.v1.QueryVoteManagersRequest
-	23, // 27: svote.v1.Query.VoteSummary:input_type -> svote.v1.QueryVoteSummaryRequest
-	25, // 28: svote.v1.Query.ListRounds:input_type -> svote.v1.QueryListRoundsRequest
-	27, // 29: svote.v1.Query.PallasKeys:input_type -> svote.v1.QueryPallasKeysRequest
-	29, // 30: svote.v1.Query.Endorsers:input_type -> svote.v1.QueryEndorsersRequest
-	31, // 31: svote.v1.Query.EndorsedRounds:input_type -> svote.v1.QueryEndorsedRoundsRequest
-	33, // 32: svote.v1.Query.CoordinatorAction:input_type -> svote.v1.QueryCoordinatorActionRequest
-	35, // 33: svote.v1.Query.PendingCoordinatorActions:input_type -> svote.v1.QueryPendingCoordinatorActionsRequest
-	37, // 34: svote.v1.Query.RoundOverview:input_type -> svote.v1.QueryRoundOverviewRequest
-	0,  // 35: svote.v1.Query.ProtocolCapabilities:input_type -> svote.v1.QueryProtocolCapabilitiesRequest
-	3,  // 36: svote.v1.Query.CommitmentTreeAtHeight:output_type -> svote.v1.QueryCommitmentTreeResponse
-	5,  // 37: svote.v1.Query.LatestCommitmentTree:output_type -> svote.v1.QueryLatestTreeResponse
-	7,  // 38: svote.v1.Query.VoteRound:output_type -> svote.v1.QueryVoteRoundResponse
-	9,  // 39: svote.v1.Query.ProposalTally:output_type -> svote.v1.QueryProposalTallyResponse
-	11, // 40: svote.v1.Query.TallyResults:output_type -> svote.v1.QueryTallyResultsResponse
-	13, // 41: svote.v1.Query.PartialDecryptions:output_type -> svote.v1.QueryPartialDecryptionsResponse
-	16, // 42: svote.v1.Query.CommitmentLeaves:output_type -> svote.v1.QueryCommitmentLeavesResponse
-	18, // 43: svote.v1.Query.ActiveRound:output_type -> svote.v1.QueryActiveRoundResponse
-	20, // 44: svote.v1.Query.CeremonyState:output_type -> svote.v1.QueryCeremonyStateResponse
-	22, // 45: svote.v1.Query.VoteManagers:output_type -> svote.v1.QueryVoteManagersResponse
-	24, // 46: svote.v1.Query.VoteSummary:output_type -> svote.v1.QueryVoteSummaryResponse
-	26, // 47: svote.v1.Query.ListRounds:output_type -> svote.v1.QueryListRoundsResponse
-	28, // 48: svote.v1.Query.PallasKeys:output_type -> svote.v1.QueryPallasKeysResponse
-	30, // 49: svote.v1.Query.Endorsers:output_type -> svote.v1.QueryEndorsersResponse
-	32, // 50: svote.v1.Query.EndorsedRounds:output_type -> svote.v1.QueryEndorsedRoundsResponse
-	34, // 51: svote.v1.Query.CoordinatorAction:output_type -> svote.v1.QueryCoordinatorActionResponse
-	36, // 52: svote.v1.Query.PendingCoordinatorActions:output_type -> svote.v1.QueryPendingCoordinatorActionsResponse
-	38, // 53: svote.v1.Query.RoundOverview:output_type -> svote.v1.QueryRoundOverviewResponse
-	1,  // 54: svote.v1.Query.ProtocolCapabilities:output_type -> svote.v1.QueryProtocolCapabilitiesResponse
-	36, // [36:55] is the sub-list for method output_type
-	17, // [17:36] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	39, // 0: svote.v1.QueryProtocolCapabilitiesResponse.circuit_fingerprints:type_name -> svote.v1.CircuitFingerprint
+	53, // 1: svote.v1.QueryCommitmentTreeResponse.tree:type_name -> svote.v1.CommitmentTreeState
+	53, // 2: svote.v1.QueryLatestTreeResponse.tree:type_name -> svote.v1.CommitmentTreeState
+	54, // 3: svote.v1.QueryVoteRoundResponse.round:type_name -> svote.v1.VoteRound
+	52, // 4: svote.v1.QueryProposalTallyResponse.tally:type_name -> svote.v1.QueryProposalTallyResponse.TallyEntry
+	55, // 5: svote.v1.QueryTallyResultsResponse.results:type_name -> svote.v1.TallyResult
+	14, // 6: svote.v1.QueryPartialDecryptionsResponse.entries:type_name -> svote.v1.StoredPartialDecryption
+	56, // 7: svote.v1.QueryCommitmentLeavesResponse.blocks:type_name -> svote.v1.BlockCommitments
+	54, // 8: svote.v1.QueryActiveRoundResponse.round:type_name -> svote.v1.VoteRound
+	57, // 9: svote.v1.QueryCeremonyStateResponse.ceremony:type_name -> svote.v1.CeremonyState
+	58, // 10: svote.v1.QueryVoteSummaryResponse.status:type_name -> svote.v1.SessionStatus
+	59, // 11: svote.v1.QueryVoteSummaryResponse.proposals:type_name -> svote.v1.ProposalSummary
+	54, // 12: svote.v1.QueryListRoundsResponse.rounds:type_name -> svote.v1.VoteRound
+	60, // 13: svote.v1.QueryPallasKeysResponse.validators:type_name -> svote.v1.ValidatorPallasKey
+	61, // 14: svote.v1.QueryEndorsersResponse.endorsers:type_name -> svote.v1.Endorser
+	62, // 15: svote.v1.QueryCoordinatorActionResponse.action:type_name -> svote.v1.CoordinatorAction
+	62, // 16: svote.v1.QueryPendingCoordinatorActionsResponse.actions:type_name -> svote.v1.CoordinatorAction
+	54, // 17: svote.v1.QueryRoundOverviewResponse.current_rounds:type_name -> svote.v1.VoteRound
+	63, // 18: svote.v1.QueryProxyDelegatesResponse.delegates:type_name -> svote.v1.ProxyDelegateEntry
+	63, // 19: svote.v1.QueryProxyDelegateResponse.delegate:type_name -> svote.v1.ProxyDelegateEntry
+	63, // 20: svote.v1.QueryProxyDelegateByKeyResponse.delegate:type_name -> svote.v1.ProxyDelegateEntry
+	64, // 21: svote.v1.QueryDelegateBallotsResponse.ballots:type_name -> svote.v1.DelegateBallotRecord
+	65, // 22: svote.v1.QueryProxyDelegationParamsResponse.params:type_name -> svote.v1.ProxyDelegationParams
+	63, // 23: svote.v1.QueryProxyDelegateByHandleResponse.delegate:type_name -> svote.v1.ProxyDelegateEntry
+	2,  // 24: svote.v1.Query.CommitmentTreeAtHeight:input_type -> svote.v1.QueryCommitmentTreeRequest
+	4,  // 25: svote.v1.Query.LatestCommitmentTree:input_type -> svote.v1.QueryLatestTreeRequest
+	6,  // 26: svote.v1.Query.VoteRound:input_type -> svote.v1.QueryVoteRoundRequest
+	8,  // 27: svote.v1.Query.ProposalTally:input_type -> svote.v1.QueryProposalTallyRequest
+	10, // 28: svote.v1.Query.TallyResults:input_type -> svote.v1.QueryTallyResultsRequest
+	12, // 29: svote.v1.Query.PartialDecryptions:input_type -> svote.v1.QueryPartialDecryptionsRequest
+	15, // 30: svote.v1.Query.CommitmentLeaves:input_type -> svote.v1.QueryCommitmentLeavesRequest
+	17, // 31: svote.v1.Query.ActiveRound:input_type -> svote.v1.QueryActiveRoundRequest
+	19, // 32: svote.v1.Query.CeremonyState:input_type -> svote.v1.QueryCeremonyStateRequest
+	21, // 33: svote.v1.Query.VoteManagers:input_type -> svote.v1.QueryVoteManagersRequest
+	23, // 34: svote.v1.Query.VoteSummary:input_type -> svote.v1.QueryVoteSummaryRequest
+	25, // 35: svote.v1.Query.ListRounds:input_type -> svote.v1.QueryListRoundsRequest
+	27, // 36: svote.v1.Query.PallasKeys:input_type -> svote.v1.QueryPallasKeysRequest
+	29, // 37: svote.v1.Query.Endorsers:input_type -> svote.v1.QueryEndorsersRequest
+	31, // 38: svote.v1.Query.EndorsedRounds:input_type -> svote.v1.QueryEndorsedRoundsRequest
+	33, // 39: svote.v1.Query.CoordinatorAction:input_type -> svote.v1.QueryCoordinatorActionRequest
+	35, // 40: svote.v1.Query.PendingCoordinatorActions:input_type -> svote.v1.QueryPendingCoordinatorActionsRequest
+	37, // 41: svote.v1.Query.RoundOverview:input_type -> svote.v1.QueryRoundOverviewRequest
+	0,  // 42: svote.v1.Query.ProtocolCapabilities:input_type -> svote.v1.QueryProtocolCapabilitiesRequest
+	40, // 43: svote.v1.Query.ProxyDelegates:input_type -> svote.v1.QueryProxyDelegatesRequest
+	42, // 44: svote.v1.Query.ProxyDelegate:input_type -> svote.v1.QueryProxyDelegateRequest
+	44, // 45: svote.v1.Query.ProxyDelegateByKey:input_type -> svote.v1.QueryProxyDelegateByKeyRequest
+	50, // 46: svote.v1.Query.ProxyDelegateByHandle:input_type -> svote.v1.QueryProxyDelegateByHandleRequest
+	46, // 47: svote.v1.Query.DelegateBallots:input_type -> svote.v1.QueryDelegateBallotsRequest
+	48, // 48: svote.v1.Query.ProxyDelegationParams:input_type -> svote.v1.QueryProxyDelegationParamsRequest
+	3,  // 49: svote.v1.Query.CommitmentTreeAtHeight:output_type -> svote.v1.QueryCommitmentTreeResponse
+	5,  // 50: svote.v1.Query.LatestCommitmentTree:output_type -> svote.v1.QueryLatestTreeResponse
+	7,  // 51: svote.v1.Query.VoteRound:output_type -> svote.v1.QueryVoteRoundResponse
+	9,  // 52: svote.v1.Query.ProposalTally:output_type -> svote.v1.QueryProposalTallyResponse
+	11, // 53: svote.v1.Query.TallyResults:output_type -> svote.v1.QueryTallyResultsResponse
+	13, // 54: svote.v1.Query.PartialDecryptions:output_type -> svote.v1.QueryPartialDecryptionsResponse
+	16, // 55: svote.v1.Query.CommitmentLeaves:output_type -> svote.v1.QueryCommitmentLeavesResponse
+	18, // 56: svote.v1.Query.ActiveRound:output_type -> svote.v1.QueryActiveRoundResponse
+	20, // 57: svote.v1.Query.CeremonyState:output_type -> svote.v1.QueryCeremonyStateResponse
+	22, // 58: svote.v1.Query.VoteManagers:output_type -> svote.v1.QueryVoteManagersResponse
+	24, // 59: svote.v1.Query.VoteSummary:output_type -> svote.v1.QueryVoteSummaryResponse
+	26, // 60: svote.v1.Query.ListRounds:output_type -> svote.v1.QueryListRoundsResponse
+	28, // 61: svote.v1.Query.PallasKeys:output_type -> svote.v1.QueryPallasKeysResponse
+	30, // 62: svote.v1.Query.Endorsers:output_type -> svote.v1.QueryEndorsersResponse
+	32, // 63: svote.v1.Query.EndorsedRounds:output_type -> svote.v1.QueryEndorsedRoundsResponse
+	34, // 64: svote.v1.Query.CoordinatorAction:output_type -> svote.v1.QueryCoordinatorActionResponse
+	36, // 65: svote.v1.Query.PendingCoordinatorActions:output_type -> svote.v1.QueryPendingCoordinatorActionsResponse
+	38, // 66: svote.v1.Query.RoundOverview:output_type -> svote.v1.QueryRoundOverviewResponse
+	1,  // 67: svote.v1.Query.ProtocolCapabilities:output_type -> svote.v1.QueryProtocolCapabilitiesResponse
+	41, // 68: svote.v1.Query.ProxyDelegates:output_type -> svote.v1.QueryProxyDelegatesResponse
+	43, // 69: svote.v1.Query.ProxyDelegate:output_type -> svote.v1.QueryProxyDelegateResponse
+	45, // 70: svote.v1.Query.ProxyDelegateByKey:output_type -> svote.v1.QueryProxyDelegateByKeyResponse
+	51, // 71: svote.v1.Query.ProxyDelegateByHandle:output_type -> svote.v1.QueryProxyDelegateByHandleResponse
+	47, // 72: svote.v1.Query.DelegateBallots:output_type -> svote.v1.QueryDelegateBallotsResponse
+	49, // 73: svote.v1.Query.ProxyDelegationParams:output_type -> svote.v1.QueryProxyDelegationParamsResponse
+	49, // [49:74] is the sub-list for method output_type
+	24, // [24:49] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_svote_v1_query_proto_init() }
@@ -2076,7 +2803,7 @@ func file_svote_v1_query_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_svote_v1_query_proto_rawDesc), len(file_svote_v1_query_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   40,
+			NumMessages:   53,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

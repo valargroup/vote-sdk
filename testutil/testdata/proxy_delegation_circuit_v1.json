@@ -1,0 +1,100 @@
+{
+  "format": "proxy_delegation_circuit_v1",
+  "contract": "Proxy delegation contracts, version 1, section 13",
+  "generator": "voting-circuits: src/proxy_delegation/vectors.rs, written by `VOTING_CIRCUITS_WRITE_VECTORS=1 cargo test --locked --lib write_circuit_vectors -- --ignored`. Seeded bytes are BLAKE2b with an N-byte output (personal = \"zvc-vectors-v1__\") of a label naming the section, case and field; a seeded field element or scalar is from_uniform_bytes of 64 such bytes. The rest are literals in that file. Field elements are canonical 32-byte little-endian encodings. zkp4_instance inputs are the 11 Instance::from_parts arguments and expected.public_inputs is Instance::to_halo2_instance. The *_from_builder cases are build_proxy_delegation_proof outputs; registration_from_builder anchors at height 0 to the tree holding only its VAN, as a batch with a registration does. no_registration_extreme_values uses the largest canonical encodings and anchor height 2^64 - 1. share_secrets come from build_proxy_delegation_proof, whose other inputs do not affect them: the shares after the split and shuffle, their El Gamal randomness and their commitment blinds, in share order. prf_outputs[i] is the contracts v1 section 10 PRF at prf_inputs[i]; domains 16 to 20 are 0x10 to 0x14.",
+  "zkp4_instance": [
+    {
+      "name": "registration_from_builder",
+      "inputs": {
+        "van_nullifier": "b6a3c1aa06a86bbe2caddea7921ca0875b64e7baade62f43173cd1dd84ccef11",
+        "r_vpk_x": "29c61ee0614ed4fca056a60eb4d4fdd867bccf48394316ebe5ef7f6ba43fef3d",
+        "r_vpk_y": "e6223772709a7f7c4b42b53aaa70d9fa3dd38ec47128fd7434e3e7ad3f8a092c",
+        "vote_authority_note_new": "45e7edc86e3055cfdcef4ca6ff3e2630586dda59ccea0068238ec381a05f903d",
+        "delegation_commitment": "a9fbdcb2616175e38b049951a206e6751f7dc7ff3db130b72a77af775476c028",
+        "vote_comm_tree_root": "7d9b55064a57ddcb3c725c53c22bb8e9fab386895feeeb814b282ed792a5e339",
+        "vote_comm_tree_anchor_height": "0000000000000000000000000000000000000000000000000000000000000000",
+        "voting_round_id": "99f813af36d130b2c22706a1ed50662355d2460813c9881212fbf4d6de854e19",
+        "ea_pk_x": "02abd250571e7aec1a5b54bde990901b4c07eb5e2d763c707b3ed473e20f1e01",
+        "ea_pk_y": "4f5851a43f08f33a979e592bc3698e5f33be501c4190cf7724a374bb66162c2a",
+        "dc_slot_nullifier": "79198979d1e246e6687e2337399c75ddd451943ebb25803e2ee238315d0aaf04"
+      },
+      "expected": {
+        "public_inputs": [
+          "b6a3c1aa06a86bbe2caddea7921ca0875b64e7baade62f43173cd1dd84ccef11",
+          "29c61ee0614ed4fca056a60eb4d4fdd867bccf48394316ebe5ef7f6ba43fef3d",
+          "e6223772709a7f7c4b42b53aaa70d9fa3dd38ec47128fd7434e3e7ad3f8a092c",
+          "45e7edc86e3055cfdcef4ca6ff3e2630586dda59ccea0068238ec381a05f903d",
+          "a9fbdcb2616175e38b049951a206e6751f7dc7ff3db130b72a77af775476c028",
+          "7d9b55064a57ddcb3c725c53c22bb8e9fab386895feeeb814b282ed792a5e339",
+          "0000000000000000000000000000000000000000000000000000000000000000",
+          "99f813af36d130b2c22706a1ed50662355d2460813c9881212fbf4d6de854e19",
+          "02abd250571e7aec1a5b54bde990901b4c07eb5e2d763c707b3ed473e20f1e01",
+          "4f5851a43f08f33a979e592bc3698e5f33be501c4190cf7724a374bb66162c2a",
+          "79198979d1e246e6687e2337399c75ddd451943ebb25803e2ee238315d0aaf04"
+        ]
+      }
+    },
+    {
+      "name": "no_registration_from_builder",
+      "inputs": {
+        "van_nullifier": "a477b84d51eca81960c8e255992c463c16901930eef7d5f63a625b14ccf9610e",
+        "r_vpk_x": "0caf01e949be4b499ce64cdaf668f85ddbd13eff24da5a24a7dfa2872c134e0d",
+        "r_vpk_y": "274090c9831a804b9ab44be5fe1b84d5d559c560e35518b2fda7a24d2ec55128",
+        "vote_authority_note_new": "e756dbf2d2545bb319430de08d83c14e47769ef20358184d0b57621ce3107526",
+        "delegation_commitment": "8801b87e6e80fdddb25c0d7b5daa268560fc5c9778069a15af00270667b41335",
+        "vote_comm_tree_root": "5b97e3bb05f083ee47275a5793d492c7f1ecac560d0a34746cc3a4a6d69d9d10",
+        "vote_comm_tree_anchor_height": "951c320000000000000000000000000000000000000000000000000000000000",
+        "voting_round_id": "d8e6b7fc974390453455ea8afd410af3d2624164ea32f3bacd9825563859f93c",
+        "ea_pk_x": "cac13af3a3f9c7d6d768d8a196056e7678fe4562d3414c2cc9947052f829a012",
+        "ea_pk_y": "3c46b92c9911afbf3506530ddc365b40c4cedfa1b5baafc9cef46af8f183283e",
+        "dc_slot_nullifier": "8d07e4a5e594e8b4d32662f50443276bc772f4a8fec6169abd62d9dd738f8b11"
+      },
+      "expected": {
+        "public_inputs": [
+          "a477b84d51eca81960c8e255992c463c16901930eef7d5f63a625b14ccf9610e",
+          "0caf01e949be4b499ce64cdaf668f85ddbd13eff24da5a24a7dfa2872c134e0d",
+          "274090c9831a804b9ab44be5fe1b84d5d559c560e35518b2fda7a24d2ec55128",
+          "e756dbf2d2545bb319430de08d83c14e47769ef20358184d0b57621ce3107526",
+          "8801b87e6e80fdddb25c0d7b5daa268560fc5c9778069a15af00270667b41335",
+          "5b97e3bb05f083ee47275a5793d492c7f1ecac560d0a34746cc3a4a6d69d9d10",
+          "951c320000000000000000000000000000000000000000000000000000000000",
+          "d8e6b7fc974390453455ea8afd410af3d2624164ea32f3bacd9825563859f93c",
+          "cac13af3a3f9c7d6d768d8a196056e7678fe4562d3414c2cc9947052f829a012",
+          "3c46b92c9911afbf3506530ddc365b40c4cedfa1b5baafc9cef46af8f183283e",
+          "8d07e4a5e594e8b4d32662f50443276bc772f4a8fec6169abd62d9dd738f8b11"
+        ]
+      }
+    },
+    {
+      "name": "no_registration_extreme_values",
+      "inputs": {
+        "van_nullifier": "feffffffec302d991bf94c09fc98462200000000000000000000000000000040",
+        "r_vpk_x": "00000000ed302d991bf94c09fc98462200000000000000000000000000000040",
+        "r_vpk_y": "0200000000000000000000000000000000000000000000000000000000000000",
+        "vote_authority_note_new": "fdffffffec302d991bf94c09fc98462200000000000000000000000000000040",
+        "delegation_commitment": "fcffffffec302d991bf94c09fc98462200000000000000000000000000000040",
+        "vote_comm_tree_root": "fbffffffec302d991bf94c09fc98462200000000000000000000000000000040",
+        "vote_comm_tree_anchor_height": "ffffffffffffffff000000000000000000000000000000000000000000000000",
+        "voting_round_id": "faffffffec302d991bf94c09fc98462200000000000000000000000000000040",
+        "ea_pk_x": "00000000ed302d991bf94c09fc98462200000000000000000000000000000040",
+        "ea_pk_y": "ffffffffec302d991bf94c09fc98462200000000000000000000000000000040",
+        "dc_slot_nullifier": "f9ffffffec302d991bf94c09fc98462200000000000000000000000000000040"
+      },
+      "expected": {
+        "public_inputs": [
+          "feffffffec302d991bf94c09fc98462200000000000000000000000000000040",
+          "00000000ed302d991bf94c09fc98462200000000000000000000000000000040",
+          "0200000000000000000000000000000000000000000000000000000000000000",
+          "fdffffffec302d991bf94c09fc98462200000000000000000000000000000040",
+          "fcffffffec302d991bf94c09fc98462200000000000000000000000000000040",
+          "fbffffffec302d991bf94c09fc98462200000000000000000000000000000040",
+          "ffffffffffffffff000000000000000000000000000000000000000000000000",
+          "faffffffec302d991bf94c09fc98462200000000000000000000000000000040",
+          "00000000ed302d991bf94c09fc98462200000000000000000000000000000040",
+          "ffffffffec302d991bf94c09fc98462200000000000000000000000000000040",
+          "f9ffffffec302d991bf94c09fc98462200000000000000000000000000000040"
+        ]
+      }
+    }
+  ]
+}

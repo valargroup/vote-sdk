@@ -29,6 +29,8 @@ service Msg {
   rpc ClearRoundEndorsement(MsgClearRoundEndorsement) returns (MsgClearRoundEndorsementResponse);
   rpc ProposeCoordinatorAction(MsgProposeCoordinatorAction) returns (MsgProposeCoordinatorActionResponse);
   rpc ApproveCoordinatorAction(MsgApproveCoordinatorAction) returns (MsgApproveCoordinatorActionResponse);
+  rpc ProxyDelegationBatch(MsgProxyDelegationBatch) returns (MsgProxyDelegationBatchResponse);
+  rpc DelegateOp(MsgDelegateOp) returns (MsgDelegateOpResponse);
 }
 
 // MsgCreateVotingSession creates a new voting session.
@@ -47,6 +49,7 @@ message MsgCreateVotingSession {
   string description          = 9;  // Human-readable round description
   string title                = 10; // Short human-readable round title
   string discussion_url       = 11; // Overall forum discussion link for the vote round
+  bool   proxy_delegation     = 12; // Proxy delegation round (contracts-v1 §2.3); raises the approval floor
 }
 
 message MsgCreateVotingSessionResponse {
@@ -341,4 +344,100 @@ message MsgApproveCoordinatorAction {
 message MsgApproveCoordinatorActionResponse {
   uint64 action_id = 1;
   bool executed = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Proxy delegation (docs/proxy-delegation/contracts-v1.md §2). Dormant until
+// ProxyDelegationEnabled is set (§9).
+// ---------------------------------------------------------------------------
+
+// ProxyDelegationAction is one DC of a 0x09 batch.
+message ProxyDelegationAction {
+  bytes van_nullifier = 1;               // 32
+  bytes r_vpk = 2;                       // 32, compressed, non-identity
+  bytes vote_authority_note_new = 3;     // 32, successor VAN (W - w, MAX authority)
+  bytes proxy_delegation_commitment = 4; // 32, the DC
+  bytes dc_slot_nullifier = 5;           // 32
+  bytes proof = 6;                       // ZKP4, 1..MaxProofSize bytes
+  bytes vote_auth_sig = 7;               // 64, RedPallas under r_vpk over D1
+}
+
+// MsgProxyDelegationBatch, tag 0x09, carries DC batches (§2.1).
+message MsgProxyDelegationBatch {
+  bytes vote_round_id = 1;                 // 32
+  uint64 vote_comm_tree_anchor_height = 2; // 0 if and only if registration is set
+  MsgDelegateVote registration = 3;        // optional ZKP1, today's message unchanged
+  repeated ProxyDelegationAction dcs = 4;  // 1..8
+  uint64 expiry_height = 5;                // rejected at or after this height
+}
+
+message MsgProxyDelegationBatchResponse {
+  bytes batch_digest = 1; // D1 with expiry_height = 0 (§4.1)
+}
+
+// DelegateAttestation is one verifier's attestation of a delegate registration.
+message DelegateAttestation {
+  uint32 verifier_id = 1;
+  uint64 not_before = 2;  // unix seconds
+  uint64 expires_at = 3;  // unix seconds, at most 72 h after not_before
+  bytes sig = 4;          // 64, Ed25519 over ATTEST by the verifier's params key
+}
+
+// DelegateRegister registers a new delegate entry (§2.2).
+message DelegateRegister {
+  bytes dk = 1;                // 32, the Ed25519 delegate key
+  uint32 provider = 2;         // 1 = X, 2 = GitHub
+  string handle = 3;           // canonical (§2.5)
+  string proof_id = 4;         // canonical: the X post id or the gist id (§2.5)
+  repeated DelegateAttestation attestations = 5; // 1..16
+  bytes dk_sig = 6;            // 64, Ed25519 over REGISTER by dk
+}
+
+// DelegateRetire retires a delegate entry with its own key.
+message DelegateRetire {
+  uint32 delegate_index = 1;
+  bytes dk_sig = 2;            // 64, Ed25519 over RETIRE by the entry's dk
+}
+
+// DelegateBallot is a delegate's one public, complete vote for a round.
+message DelegateBallot {
+  bytes vote_round_id = 1;     // 32
+  uint32 delegate_index = 2;
+  repeated uint32 options = 3; // options[i] is the choice on proposal i + 1
+  bytes dk_sig = 4;            // 64, Ed25519 over BALLOT by the entry's dk
+}
+
+// MsgDelegateOp, tag 0x0B, carries a delegate register, retire or ballot (§2.2).
+// Exactly one of register, retire and ballot is set.
+message MsgDelegateOp {
+  DelegateRegister register = 1;
+  DelegateRetire retire = 2;
+  DelegateBallot ballot = 3;
+}
+
+message MsgDelegateOpResponse {
+  uint32 delegate_index = 1; // the entry the op touched; for a new entry, its assigned index
+}
+
+// MsgSetProxyDelegationParams is a coordinator payload (§2.4). ProxyVerifier
+// is defined in types.proto.
+message MsgSetProxyDelegationParams {
+  string creator = 1;
+  repeated ProxyVerifier verifiers = 2; // 0..16; empty turns registration off
+  uint32 verifier_threshold = 3;        // 1..len(verifiers); 0 only when verifiers is empty
+  uint32 max_delegates = 4;             // 0..2000
+}
+
+// MsgSetProxyDelegationPause is a coordinator payload (§2.4).
+message MsgSetProxyDelegationPause {
+  string creator = 1;
+  bool paused = 2;
+}
+
+// MsgSetDelegateStatus is a coordinator payload (§2.4).
+message MsgSetDelegateStatus {
+  string creator = 1;
+  repeated uint32 delegate_indexes = 2; // 1..64, each >= 1, unique
+  uint32 action = 3;                    // 1 suspend, 2 lift, 3 retire
+  uint32 reason = 4;                    // 1 impersonation, 2 key lost or compromised, 3 legal, 4 verifier review, 99 other
 }

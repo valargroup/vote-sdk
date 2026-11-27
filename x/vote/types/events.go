@@ -29,6 +29,17 @@ const (
 	EventTypeProposeCoordinatorAction = "propose_coordinator_action"
 	EventTypeApproveCoordinatorAction = "approve_coordinator_action"
 	EventTypeExecuteCoordinatorAction = "execute_coordinator_action"
+
+	// Proxy delegation events (docs/proxy-delegation/contracts-v1.md §7).
+	EventTypeProxyDelegationBatch  = "proxy_delegation_batch"
+	EventTypeDelegateRegistered    = "delegate_registered"
+	EventTypeDelegateRetired       = "delegate_retired"
+	EventTypeDelegateBallot        = "delegate_ballot"
+	EventTypeRevealPoolShare       = "reveal_pool_share"
+	EventTypeProxyPoolsRouted      = "proxy_pools_routed"
+	EventTypeDelegateStatus        = "delegate_status"
+	EventTypeProxyDelegationParams = "proxy_delegation_params"
+	EventTypeProxyDelegationPause  = "proxy_delegation_pause"
 )
 
 // Event attribute keys.
@@ -74,4 +85,22 @@ const (
 	AttributeKeyVoteCommitmentLeafIndices = "vote_commitment_leaf_indices"
 	AttributeKeyProposalIDs               = "proposal_ids"
 	AttributeKeyVANNullifiers             = "van_nullifiers"
+
+	// Proxy delegation attribute keys (contracts-v1 §7).
+	AttributeKeyHasRegistration   = "has_registration"
+	AttributeKeyDCLeafIndices     = "dc_leaf_indices"
+	AttributeKeyDCCount           = "dc_count"
+	AttributeKeyDelegateIndex     = "delegate_index"
+	AttributeKeyProvider          = "provider"
+	AttributeKeyHandle            = "handle"
+	AttributeKeyProofID           = "proof_id"
+	AttributeKeyOptions           = "options"
+	AttributeKeyBallots           = "ballots"
+	AttributeKeyRoutedPools       = "routed_pools"
+	AttributeKeyAction            = "action"
+	AttributeKeyReason            = "reason"
+	AttributeKeyVerifierCount     = "verifier_count"
+	AttributeKeyVerifierThreshold = "verifier_threshold"
+	AttributeKeyMaxDelegates      = "max_delegates"
+	AttributeKeyPaused            = "paused"
 )

@@ -371,8 +371,11 @@ type VoteRound struct {
 	DkgContributions []*DKGContribution `protobuf:"bytes,28,rep,name=dkg_contributions,json=dkgContributions,proto3" json:"dkg_contributions,omitempty"`
 	DiscussionUrl    string             `protobuf:"bytes,29,opt,name=discussion_url,json=discussionUrl,proto3" json:"discussion_url,omitempty"`    // Overall forum discussion link for the vote round
 	CreatedAtTime    uint64             `protobuf:"varint,30,opt,name=created_at_time,json=createdAtTime,proto3" json:"created_at_time,omitempty"` // Unix seconds when this round was registered on-chain
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Written only for rounds created with the proxy flag. It is outside the
+	// round-id preimage.
+	ProxyDelegation *ProxyDelegationRoundState `protobuf:"bytes,31,opt,name=proxy_delegation,json=proxyDelegation,proto3" json:"proxy_delegation,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *VoteRound) Reset() {
@@ -599,6 +602,13 @@ func (x *VoteRound) GetCreatedAtTime() uint64 {
 		return x.CreatedAtTime
 	}
 	return 0
+}
+
+func (x *VoteRound) GetProxyDelegation() *ProxyDelegationRoundState {
+	if x != nil {
+		return x.ProxyDelegation
+	}
+	return nil
 }
 
 // VoteManagerSet stores the vote coordinator policy.
@@ -842,6 +852,9 @@ type GenesisState struct {
 	VoteManagerThreshold    uint32                      `protobuf:"varint,16,opt,name=vote_manager_threshold,json=voteManagerThreshold,proto3" json:"vote_manager_threshold,omitempty"`
 	CoordinatorActions      []*CoordinatorAction        `protobuf:"bytes,17,rep,name=coordinator_actions,json=coordinatorActions,proto3" json:"coordinator_actions,omitempty"`
 	NextCoordinatorActionId uint64                      `protobuf:"varint,18,opt,name=next_coordinator_action_id,json=nextCoordinatorActionId,proto3" json:"next_coordinator_action_id,omitempty"`
+	ProxyDelegates          []*ProxyDelegateEntry       `protobuf:"bytes,19,rep,name=proxy_delegates,json=proxyDelegates,proto3" json:"proxy_delegates,omitempty"`
+	ProxyDelegateBallots    []*DelegateBallotRecord     `protobuf:"bytes,20,rep,name=proxy_delegate_ballots,json=proxyDelegateBallots,proto3" json:"proxy_delegate_ballots,omitempty"`
+	ProxyParams             *ProxyDelegationParams      `protobuf:"bytes,21,opt,name=proxy_params,json=proxyParams,proto3" json:"proxy_params,omitempty"`
 	unknownFields           protoimpl.UnknownFields
 	sizeCache               protoimpl.SizeCache
 }
@@ -979,6 +992,27 @@ func (x *GenesisState) GetNextCoordinatorActionId() uint64 {
 		return x.NextCoordinatorActionId
 	}
 	return 0
+}
+
+func (x *GenesisState) GetProxyDelegates() []*ProxyDelegateEntry {
+	if x != nil {
+		return x.ProxyDelegates
+	}
+	return nil
+}
+
+func (x *GenesisState) GetProxyDelegateBallots() []*DelegateBallotRecord {
+	if x != nil {
+		return x.ProxyDelegateBallots
+	}
+	return nil
+}
+
+func (x *GenesisState) GetProxyParams() *ProxyDelegationParams {
+	if x != nil {
+		return x.ProxyParams
+	}
+	return nil
 }
 
 // Endorser records a stable identifier's currently authorized bech32 address.
@@ -2258,6 +2292,360 @@ func (x *AckEntry) GetAckHeight() uint64 {
 	return 0
 }
 
+// ProxyDelegationRoundState is VoteRound field 31.
+type ProxyDelegationRoundState struct {
+	state                       protoimpl.MessageState `protogen:"open.v1"`
+	Enabled                     bool                   `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	NextDelegateIndexAtCreation uint32                 `protobuf:"varint,2,opt,name=next_delegate_index_at_creation,json=nextDelegateIndexAtCreation,proto3" json:"next_delegate_index_at_creation,omitempty"`
+	PoolsRouted                 bool                   `protobuf:"varint,3,opt,name=pools_routed,json=poolsRouted,proto3" json:"pools_routed,omitempty"`
+	unknownFields               protoimpl.UnknownFields
+	sizeCache                   protoimpl.SizeCache
+}
+
+func (x *ProxyDelegationRoundState) Reset() {
+	*x = ProxyDelegationRoundState{}
+	mi := &file_svote_v1_types_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProxyDelegationRoundState) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProxyDelegationRoundState) ProtoMessage() {}
+
+func (x *ProxyDelegationRoundState) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_types_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProxyDelegationRoundState.ProtoReflect.Descriptor instead.
+func (*ProxyDelegationRoundState) Descriptor() ([]byte, []int) {
+	return file_svote_v1_types_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *ProxyDelegationRoundState) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *ProxyDelegationRoundState) GetNextDelegateIndexAtCreation() uint32 {
+	if x != nil {
+		return x.NextDelegateIndexAtCreation
+	}
+	return 0
+}
+
+func (x *ProxyDelegationRoundState) GetPoolsRouted() bool {
+	if x != nil {
+		return x.PoolsRouted
+	}
+	return false
+}
+
+// ProxyDelegateEntry is the value at 0x1A 0x01 u32be(d).
+type ProxyDelegateEntry struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Index            uint32                 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
+	Dk               []byte                 `protobuf:"bytes,2,opt,name=dk,proto3" json:"dk,omitempty"`              // 32; one key per entry, forever
+	Provider         uint32                 `protobuf:"varint,3,opt,name=provider,proto3" json:"provider,omitempty"` // 1 = X, 2 = GitHub
+	Handle           string                 `protobuf:"bytes,4,opt,name=handle,proto3" json:"handle,omitempty"`
+	ProofId          string                 `protobuf:"bytes,5,opt,name=proof_id,json=proofId,proto3" json:"proof_id,omitempty"`
+	Status           uint32                 `protobuf:"varint,6,opt,name=status,proto3" json:"status,omitempty"`                                 // 0 ACTIVE, 1 SUSPENDED, 2 RETIRED
+	StatusReason     uint32                 `protobuf:"varint,7,opt,name=status_reason,json=statusReason,proto3" json:"status_reason,omitempty"` // coordinator reason code; 0 when retired by its own key or never set
+	RegisteredHeight uint64                 `protobuf:"varint,8,opt,name=registered_height,json=registeredHeight,proto3" json:"registered_height,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *ProxyDelegateEntry) Reset() {
+	*x = ProxyDelegateEntry{}
+	mi := &file_svote_v1_types_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProxyDelegateEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProxyDelegateEntry) ProtoMessage() {}
+
+func (x *ProxyDelegateEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_types_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProxyDelegateEntry.ProtoReflect.Descriptor instead.
+func (*ProxyDelegateEntry) Descriptor() ([]byte, []int) {
+	return file_svote_v1_types_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *ProxyDelegateEntry) GetIndex() uint32 {
+	if x != nil {
+		return x.Index
+	}
+	return 0
+}
+
+func (x *ProxyDelegateEntry) GetDk() []byte {
+	if x != nil {
+		return x.Dk
+	}
+	return nil
+}
+
+func (x *ProxyDelegateEntry) GetProvider() uint32 {
+	if x != nil {
+		return x.Provider
+	}
+	return 0
+}
+
+func (x *ProxyDelegateEntry) GetHandle() string {
+	if x != nil {
+		return x.Handle
+	}
+	return ""
+}
+
+func (x *ProxyDelegateEntry) GetProofId() string {
+	if x != nil {
+		return x.ProofId
+	}
+	return ""
+}
+
+func (x *ProxyDelegateEntry) GetStatus() uint32 {
+	if x != nil {
+		return x.Status
+	}
+	return 0
+}
+
+func (x *ProxyDelegateEntry) GetStatusReason() uint32 {
+	if x != nil {
+		return x.StatusReason
+	}
+	return 0
+}
+
+func (x *ProxyDelegateEntry) GetRegisteredHeight() uint64 {
+	if x != nil {
+		return x.RegisteredHeight
+	}
+	return 0
+}
+
+// DelegateBallotRecord is the value at 0x1B round(32) u32be(d).
+type DelegateBallotRecord struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	VoteRoundId   []byte                 `protobuf:"bytes,1,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`
+	DelegateIndex uint32                 `protobuf:"varint,2,opt,name=delegate_index,json=delegateIndex,proto3" json:"delegate_index,omitempty"`
+	Options       []uint32               `protobuf:"varint,3,rep,packed,name=options,proto3" json:"options,omitempty"` // one per proposal, in proposal order
+	Height        uint64                 `protobuf:"varint,4,opt,name=height,proto3" json:"height,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DelegateBallotRecord) Reset() {
+	*x = DelegateBallotRecord{}
+	mi := &file_svote_v1_types_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DelegateBallotRecord) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DelegateBallotRecord) ProtoMessage() {}
+
+func (x *DelegateBallotRecord) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_types_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DelegateBallotRecord.ProtoReflect.Descriptor instead.
+func (*DelegateBallotRecord) Descriptor() ([]byte, []int) {
+	return file_svote_v1_types_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *DelegateBallotRecord) GetVoteRoundId() []byte {
+	if x != nil {
+		return x.VoteRoundId
+	}
+	return nil
+}
+
+func (x *DelegateBallotRecord) GetDelegateIndex() uint32 {
+	if x != nil {
+		return x.DelegateIndex
+	}
+	return 0
+}
+
+func (x *DelegateBallotRecord) GetOptions() []uint32 {
+	if x != nil {
+		return x.Options
+	}
+	return nil
+}
+
+func (x *DelegateBallotRecord) GetHeight() uint64 {
+	if x != nil {
+		return x.Height
+	}
+	return 0
+}
+
+// ProxyDelegationParams is the value at 0x1A 0x06.
+type ProxyDelegationParams struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Verifiers         []*ProxyVerifier       `protobuf:"bytes,1,rep,name=verifiers,proto3" json:"verifiers,omitempty"`
+	VerifierThreshold uint32                 `protobuf:"varint,2,opt,name=verifier_threshold,json=verifierThreshold,proto3" json:"verifier_threshold,omitempty"`
+	MaxDelegates      uint32                 `protobuf:"varint,3,opt,name=max_delegates,json=maxDelegates,proto3" json:"max_delegates,omitempty"`
+	ProxyDcPaused     bool                   `protobuf:"varint,4,opt,name=proxy_dc_paused,json=proxyDcPaused,proto3" json:"proxy_dc_paused,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *ProxyDelegationParams) Reset() {
+	*x = ProxyDelegationParams{}
+	mi := &file_svote_v1_types_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProxyDelegationParams) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProxyDelegationParams) ProtoMessage() {}
+
+func (x *ProxyDelegationParams) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_types_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProxyDelegationParams.ProtoReflect.Descriptor instead.
+func (*ProxyDelegationParams) Descriptor() ([]byte, []int) {
+	return file_svote_v1_types_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *ProxyDelegationParams) GetVerifiers() []*ProxyVerifier {
+	if x != nil {
+		return x.Verifiers
+	}
+	return nil
+}
+
+func (x *ProxyDelegationParams) GetVerifierThreshold() uint32 {
+	if x != nil {
+		return x.VerifierThreshold
+	}
+	return 0
+}
+
+func (x *ProxyDelegationParams) GetMaxDelegates() uint32 {
+	if x != nil {
+		return x.MaxDelegates
+	}
+	return 0
+}
+
+func (x *ProxyDelegationParams) GetProxyDcPaused() bool {
+	if x != nil {
+		return x.ProxyDcPaused
+	}
+	return false
+}
+
+// ProxyVerifier is a registration verifier's key in ProxyDelegationParams and
+// MsgSetProxyDelegationParams.
+type ProxyVerifier struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	VerifierId    uint32                 `protobuf:"varint,1,opt,name=verifier_id,json=verifierId,proto3" json:"verifier_id,omitempty"`
+	Pubkey        []byte                 `protobuf:"bytes,2,opt,name=pubkey,proto3" json:"pubkey,omitempty"` // 32, Ed25519
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProxyVerifier) Reset() {
+	*x = ProxyVerifier{}
+	mi := &file_svote_v1_types_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProxyVerifier) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProxyVerifier) ProtoMessage() {}
+
+func (x *ProxyVerifier) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_types_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProxyVerifier.ProtoReflect.Descriptor instead.
+func (*ProxyVerifier) Descriptor() ([]byte, []int) {
+	return file_svote_v1_types_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *ProxyVerifier) GetVerifierId() uint32 {
+	if x != nil {
+		return x.VerifierId
+	}
+	return 0
+}
+
+func (x *ProxyVerifier) GetPubkey() []byte {
+	if x != nil {
+		return x.Pubkey
+	}
+	return nil
+}
+
 var File_svote_v1_types_proto protoreflect.FileDescriptor
 
 const file_svote_v1_types_proto_rawDesc = "" +
@@ -2275,7 +2663,8 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"\aoptions\x18\x04 \x03(\v2\x14.svote.v1.VoteOptionR\aoptions\x12\x1d\n" +
 	"\n" +
 	"zip_number\x18\x05 \x01(\tR\tzipNumber\x12\x1b\n" +
-	"\tforum_url\x18\x06 \x01(\tR\bforumUrl\"\xdb\t\n" +
+	"\tforum_url\x18\x06 \x01(\tR\bforumUrl\"\xab\n" +
+	"\n" +
 	"\tVoteRound\x12\"\n" +
 	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\x12'\n" +
 	"\x0fsnapshot_height\x18\x02 \x01(\x04R\x0esnapshotHeight\x12-\n" +
@@ -2305,7 +2694,8 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"\x0ftally_timed_out\x18\x1b \x01(\bR\rtallyTimedOut\x12F\n" +
 	"\x11dkg_contributions\x18\x1c \x03(\v2\x19.svote.v1.DKGContributionR\x10dkgContributions\x12%\n" +
 	"\x0ediscussion_url\x18\x1d \x01(\tR\rdiscussionUrl\x12&\n" +
-	"\x0fcreated_at_time\x18\x1e \x01(\x04R\rcreatedAtTimeJ\x04\b\x11\x10\x12J\x04\b\x13\x10\x14\"L\n" +
+	"\x0fcreated_at_time\x18\x1e \x01(\x04R\rcreatedAtTime\x12N\n" +
+	"\x10proxy_delegation\x18\x1f \x01(\v2#.svote.v1.ProxyDelegationRoundStateR\x0fproxyDelegationJ\x04\b\x11\x10\x12J\x04\b\x13\x10\x14\"L\n" +
 	"\x0eVoteManagerSet\x12\x1c\n" +
 	"\taddresses\x18\x01 \x03(\tR\taddresses\x12\x1c\n" +
 	"\tthreshold\x18\x02 \x01(\rR\tthreshold\"\xb4\x02\n" +
@@ -2326,7 +2716,7 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"next_index\x18\x01 \x01(\x04R\tnextIndex\x12\x12\n" +
 	"\x04root\x18\x02 \x01(\fR\x04root\x12\x16\n" +
 	"\x06height\x18\x03 \x01(\x04R\x06height\x12+\n" +
-	"\x12next_index_at_root\x18\x04 \x01(\x04R\x0fnextIndexAtRoot\"\xb7\a\n" +
+	"\x12next_index_at_root\x18\x04 \x01(\x04R\x0fnextIndexAtRoot\"\x98\t\n" +
 	"\fGenesisState\x12+\n" +
 	"\x06rounds\x18\x01 \x03(\v2\x13.svote.v1.VoteRoundR\x06rounds\x128\n" +
 	"\n" +
@@ -2346,7 +2736,10 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"\x0fendorsed_rounds\x18\x0f \x03(\v2\x17.svote.v1.EndorsedRoundR\x0eendorsedRounds\x124\n" +
 	"\x16vote_manager_threshold\x18\x10 \x01(\rR\x14voteManagerThreshold\x12L\n" +
 	"\x13coordinator_actions\x18\x11 \x03(\v2\x1b.svote.v1.CoordinatorActionR\x12coordinatorActions\x12;\n" +
-	"\x1anext_coordinator_action_id\x18\x12 \x01(\x04R\x17nextCoordinatorActionId\"E\n" +
+	"\x1anext_coordinator_action_id\x18\x12 \x01(\x04R\x17nextCoordinatorActionId\x12E\n" +
+	"\x0fproxy_delegates\x18\x13 \x03(\v2\x1c.svote.v1.ProxyDelegateEntryR\x0eproxyDelegates\x12T\n" +
+	"\x16proxy_delegate_ballots\x18\x14 \x03(\v2\x1e.svote.v1.DelegateBallotRecordR\x14proxyDelegateBallots\x12B\n" +
+	"\fproxy_params\x18\x15 \x01(\v2\x1f.svote.v1.ProxyDelegationParamsR\vproxyParams\"E\n" +
 	"\bEndorser\x12\x1f\n" +
 	"\vendorser_id\x18\x01 \x01(\tR\n" +
 	"endorserId\x12\x18\n" +
@@ -2456,7 +2849,34 @@ const file_svote_v1_types_proto_rawDesc = "" +
 	"\x11validator_address\x18\x01 \x01(\tR\x10validatorAddress\x12#\n" +
 	"\rack_signature\x18\x02 \x01(\fR\fackSignature\x12\x1d\n" +
 	"\n" +
-	"ack_height\x18\x03 \x01(\x04R\tackHeight*\xc5\x01\n" +
+	"ack_height\x18\x03 \x01(\x04R\tackHeight\"\x9e\x01\n" +
+	"\x19ProxyDelegationRoundState\x12\x18\n" +
+	"\aenabled\x18\x01 \x01(\bR\aenabled\x12D\n" +
+	"\x1fnext_delegate_index_at_creation\x18\x02 \x01(\rR\x1bnextDelegateIndexAtCreation\x12!\n" +
+	"\fpools_routed\x18\x03 \x01(\bR\vpoolsRouted\"\xf3\x01\n" +
+	"\x12ProxyDelegateEntry\x12\x14\n" +
+	"\x05index\x18\x01 \x01(\rR\x05index\x12\x0e\n" +
+	"\x02dk\x18\x02 \x01(\fR\x02dk\x12\x1a\n" +
+	"\bprovider\x18\x03 \x01(\rR\bprovider\x12\x16\n" +
+	"\x06handle\x18\x04 \x01(\tR\x06handle\x12\x19\n" +
+	"\bproof_id\x18\x05 \x01(\tR\aproofId\x12\x16\n" +
+	"\x06status\x18\x06 \x01(\rR\x06status\x12#\n" +
+	"\rstatus_reason\x18\a \x01(\rR\fstatusReason\x12+\n" +
+	"\x11registered_height\x18\b \x01(\x04R\x10registeredHeight\"\x93\x01\n" +
+	"\x14DelegateBallotRecord\x12\"\n" +
+	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\x12%\n" +
+	"\x0edelegate_index\x18\x02 \x01(\rR\rdelegateIndex\x12\x18\n" +
+	"\aoptions\x18\x03 \x03(\rR\aoptions\x12\x16\n" +
+	"\x06height\x18\x04 \x01(\x04R\x06height\"\xca\x01\n" +
+	"\x15ProxyDelegationParams\x125\n" +
+	"\tverifiers\x18\x01 \x03(\v2\x17.svote.v1.ProxyVerifierR\tverifiers\x12-\n" +
+	"\x12verifier_threshold\x18\x02 \x01(\rR\x11verifierThreshold\x12#\n" +
+	"\rmax_delegates\x18\x03 \x01(\rR\fmaxDelegates\x12&\n" +
+	"\x0fproxy_dc_paused\x18\x04 \x01(\bR\rproxyDcPaused\"H\n" +
+	"\rProxyVerifier\x12\x1f\n" +
+	"\vverifier_id\x18\x01 \x01(\rR\n" +
+	"verifierId\x12\x16\n" +
+	"\x06pubkey\x18\x02 \x01(\fR\x06pubkey*\xc5\x01\n" +
 	"\rSessionStatus\x12\x1e\n" +
 	"\x1aSESSION_STATUS_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15SESSION_STATUS_ACTIVE\x10\x01\x12\x1b\n" +
@@ -2488,38 +2908,43 @@ func file_svote_v1_types_proto_rawDescGZIP() []byte {
 }
 
 var file_svote_v1_types_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_svote_v1_types_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
+var file_svote_v1_types_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
 var file_svote_v1_types_proto_goTypes = []any{
-	(SessionStatus)(0),               // 0: svote.v1.SessionStatus
-	(CoordinatorActionStatus)(0),     // 1: svote.v1.CoordinatorActionStatus
-	(CeremonyStatus)(0),              // 2: svote.v1.CeremonyStatus
-	(*VoteOption)(nil),               // 3: svote.v1.VoteOption
-	(*Proposal)(nil),                 // 4: svote.v1.Proposal
-	(*VoteRound)(nil),                // 5: svote.v1.VoteRound
-	(*VoteManagerSet)(nil),           // 6: svote.v1.VoteManagerSet
-	(*CoordinatorAction)(nil),        // 7: svote.v1.CoordinatorAction
-	(*CommitmentTreeState)(nil),      // 8: svote.v1.CommitmentTreeState
-	(*GenesisState)(nil),             // 9: svote.v1.GenesisState
-	(*Endorser)(nil),                 // 10: svote.v1.Endorser
-	(*EndorsedRound)(nil),            // 11: svote.v1.EndorsedRound
-	(*GenesisRoundTree)(nil),         // 12: svote.v1.GenesisRoundTree
-	(*GenesisCommitmentRoot)(nil),    // 13: svote.v1.GenesisCommitmentRoot
-	(*GenesisTallyAccumulator)(nil),  // 14: svote.v1.GenesisTallyAccumulator
-	(*GenesisShareCount)(nil),        // 15: svote.v1.GenesisShareCount
-	(*GenesisPartialDecryption)(nil), // 16: svote.v1.GenesisPartialDecryption
-	(*GenesisBlockLeafIndex)(nil),    // 17: svote.v1.GenesisBlockLeafIndex
-	(*CommitmentLeaf)(nil),           // 18: svote.v1.CommitmentLeaf
-	(*NullifierEntry)(nil),           // 19: svote.v1.NullifierEntry
-	(*TallyResult)(nil),              // 20: svote.v1.TallyResult
-	(*BlockCommitments)(nil),         // 21: svote.v1.BlockCommitments
-	(*ProposalSummary)(nil),          // 22: svote.v1.ProposalSummary
-	(*OptionSummary)(nil),            // 23: svote.v1.OptionSummary
-	(*CeremonyState)(nil),            // 24: svote.v1.CeremonyState
-	(*ValidatorPallasKey)(nil),       // 25: svote.v1.ValidatorPallasKey
-	(*DKGContribution)(nil),          // 26: svote.v1.DKGContribution
-	(*DealerPayload)(nil),            // 27: svote.v1.DealerPayload
-	(*AckEntry)(nil),                 // 28: svote.v1.AckEntry
-	(*anypb.Any)(nil),                // 29: google.protobuf.Any
+	(SessionStatus)(0),                // 0: svote.v1.SessionStatus
+	(CoordinatorActionStatus)(0),      // 1: svote.v1.CoordinatorActionStatus
+	(CeremonyStatus)(0),               // 2: svote.v1.CeremonyStatus
+	(*VoteOption)(nil),                // 3: svote.v1.VoteOption
+	(*Proposal)(nil),                  // 4: svote.v1.Proposal
+	(*VoteRound)(nil),                 // 5: svote.v1.VoteRound
+	(*VoteManagerSet)(nil),            // 6: svote.v1.VoteManagerSet
+	(*CoordinatorAction)(nil),         // 7: svote.v1.CoordinatorAction
+	(*CommitmentTreeState)(nil),       // 8: svote.v1.CommitmentTreeState
+	(*GenesisState)(nil),              // 9: svote.v1.GenesisState
+	(*Endorser)(nil),                  // 10: svote.v1.Endorser
+	(*EndorsedRound)(nil),             // 11: svote.v1.EndorsedRound
+	(*GenesisRoundTree)(nil),          // 12: svote.v1.GenesisRoundTree
+	(*GenesisCommitmentRoot)(nil),     // 13: svote.v1.GenesisCommitmentRoot
+	(*GenesisTallyAccumulator)(nil),   // 14: svote.v1.GenesisTallyAccumulator
+	(*GenesisShareCount)(nil),         // 15: svote.v1.GenesisShareCount
+	(*GenesisPartialDecryption)(nil),  // 16: svote.v1.GenesisPartialDecryption
+	(*GenesisBlockLeafIndex)(nil),     // 17: svote.v1.GenesisBlockLeafIndex
+	(*CommitmentLeaf)(nil),            // 18: svote.v1.CommitmentLeaf
+	(*NullifierEntry)(nil),            // 19: svote.v1.NullifierEntry
+	(*TallyResult)(nil),               // 20: svote.v1.TallyResult
+	(*BlockCommitments)(nil),          // 21: svote.v1.BlockCommitments
+	(*ProposalSummary)(nil),           // 22: svote.v1.ProposalSummary
+	(*OptionSummary)(nil),             // 23: svote.v1.OptionSummary
+	(*CeremonyState)(nil),             // 24: svote.v1.CeremonyState
+	(*ValidatorPallasKey)(nil),        // 25: svote.v1.ValidatorPallasKey
+	(*DKGContribution)(nil),           // 26: svote.v1.DKGContribution
+	(*DealerPayload)(nil),             // 27: svote.v1.DealerPayload
+	(*AckEntry)(nil),                  // 28: svote.v1.AckEntry
+	(*ProxyDelegationRoundState)(nil), // 29: svote.v1.ProxyDelegationRoundState
+	(*ProxyDelegateEntry)(nil),        // 30: svote.v1.ProxyDelegateEntry
+	(*DelegateBallotRecord)(nil),      // 31: svote.v1.DelegateBallotRecord
+	(*ProxyDelegationParams)(nil),     // 32: svote.v1.ProxyDelegationParams
+	(*ProxyVerifier)(nil),             // 33: svote.v1.ProxyVerifier
+	(*anypb.Any)(nil),                 // 34: google.protobuf.Any
 }
 var file_svote_v1_types_proto_depIdxs = []int32{
 	3,  // 0: svote.v1.Proposal.options:type_name -> svote.v1.VoteOption
@@ -2529,33 +2954,38 @@ var file_svote_v1_types_proto_depIdxs = []int32{
 	25, // 4: svote.v1.VoteRound.ceremony_validators:type_name -> svote.v1.ValidatorPallasKey
 	28, // 5: svote.v1.VoteRound.ceremony_acks:type_name -> svote.v1.AckEntry
 	26, // 6: svote.v1.VoteRound.dkg_contributions:type_name -> svote.v1.DKGContribution
-	29, // 7: svote.v1.CoordinatorAction.payload:type_name -> google.protobuf.Any
-	1,  // 8: svote.v1.CoordinatorAction.status:type_name -> svote.v1.CoordinatorActionStatus
-	5,  // 9: svote.v1.GenesisState.rounds:type_name -> svote.v1.VoteRound
-	19, // 10: svote.v1.GenesisState.nullifiers:type_name -> svote.v1.NullifierEntry
-	20, // 11: svote.v1.GenesisState.tally_results:type_name -> svote.v1.TallyResult
-	25, // 12: svote.v1.GenesisState.pallas_keys:type_name -> svote.v1.ValidatorPallasKey
-	14, // 13: svote.v1.GenesisState.tally_accumulators:type_name -> svote.v1.GenesisTallyAccumulator
-	15, // 14: svote.v1.GenesisState.share_counts:type_name -> svote.v1.GenesisShareCount
-	12, // 15: svote.v1.GenesisState.round_trees:type_name -> svote.v1.GenesisRoundTree
-	16, // 16: svote.v1.GenesisState.partial_decryptions:type_name -> svote.v1.GenesisPartialDecryption
-	10, // 17: svote.v1.GenesisState.endorsers:type_name -> svote.v1.Endorser
-	11, // 18: svote.v1.GenesisState.endorsed_rounds:type_name -> svote.v1.EndorsedRound
-	7,  // 19: svote.v1.GenesisState.coordinator_actions:type_name -> svote.v1.CoordinatorAction
-	8,  // 20: svote.v1.GenesisRoundTree.tree_state:type_name -> svote.v1.CommitmentTreeState
-	18, // 21: svote.v1.GenesisRoundTree.commitment_leaves:type_name -> svote.v1.CommitmentLeaf
-	13, // 22: svote.v1.GenesisRoundTree.commitment_roots:type_name -> svote.v1.GenesisCommitmentRoot
-	17, // 23: svote.v1.GenesisRoundTree.block_leaf_indices:type_name -> svote.v1.GenesisBlockLeafIndex
-	23, // 24: svote.v1.ProposalSummary.options:type_name -> svote.v1.OptionSummary
-	2,  // 25: svote.v1.CeremonyState.status:type_name -> svote.v1.CeremonyStatus
-	25, // 26: svote.v1.CeremonyState.validators:type_name -> svote.v1.ValidatorPallasKey
-	28, // 27: svote.v1.CeremonyState.acks:type_name -> svote.v1.AckEntry
-	27, // 28: svote.v1.DKGContribution.payloads:type_name -> svote.v1.DealerPayload
-	29, // [29:29] is the sub-list for method output_type
-	29, // [29:29] is the sub-list for method input_type
-	29, // [29:29] is the sub-list for extension type_name
-	29, // [29:29] is the sub-list for extension extendee
-	0,  // [0:29] is the sub-list for field type_name
+	29, // 7: svote.v1.VoteRound.proxy_delegation:type_name -> svote.v1.ProxyDelegationRoundState
+	34, // 8: svote.v1.CoordinatorAction.payload:type_name -> google.protobuf.Any
+	1,  // 9: svote.v1.CoordinatorAction.status:type_name -> svote.v1.CoordinatorActionStatus
+	5,  // 10: svote.v1.GenesisState.rounds:type_name -> svote.v1.VoteRound
+	19, // 11: svote.v1.GenesisState.nullifiers:type_name -> svote.v1.NullifierEntry
+	20, // 12: svote.v1.GenesisState.tally_results:type_name -> svote.v1.TallyResult
+	25, // 13: svote.v1.GenesisState.pallas_keys:type_name -> svote.v1.ValidatorPallasKey
+	14, // 14: svote.v1.GenesisState.tally_accumulators:type_name -> svote.v1.GenesisTallyAccumulator
+	15, // 15: svote.v1.GenesisState.share_counts:type_name -> svote.v1.GenesisShareCount
+	12, // 16: svote.v1.GenesisState.round_trees:type_name -> svote.v1.GenesisRoundTree
+	16, // 17: svote.v1.GenesisState.partial_decryptions:type_name -> svote.v1.GenesisPartialDecryption
+	10, // 18: svote.v1.GenesisState.endorsers:type_name -> svote.v1.Endorser
+	11, // 19: svote.v1.GenesisState.endorsed_rounds:type_name -> svote.v1.EndorsedRound
+	7,  // 20: svote.v1.GenesisState.coordinator_actions:type_name -> svote.v1.CoordinatorAction
+	30, // 21: svote.v1.GenesisState.proxy_delegates:type_name -> svote.v1.ProxyDelegateEntry
+	31, // 22: svote.v1.GenesisState.proxy_delegate_ballots:type_name -> svote.v1.DelegateBallotRecord
+	32, // 23: svote.v1.GenesisState.proxy_params:type_name -> svote.v1.ProxyDelegationParams
+	8,  // 24: svote.v1.GenesisRoundTree.tree_state:type_name -> svote.v1.CommitmentTreeState
+	18, // 25: svote.v1.GenesisRoundTree.commitment_leaves:type_name -> svote.v1.CommitmentLeaf
+	13, // 26: svote.v1.GenesisRoundTree.commitment_roots:type_name -> svote.v1.GenesisCommitmentRoot
+	17, // 27: svote.v1.GenesisRoundTree.block_leaf_indices:type_name -> svote.v1.GenesisBlockLeafIndex
+	23, // 28: svote.v1.ProposalSummary.options:type_name -> svote.v1.OptionSummary
+	2,  // 29: svote.v1.CeremonyState.status:type_name -> svote.v1.CeremonyStatus
+	25, // 30: svote.v1.CeremonyState.validators:type_name -> svote.v1.ValidatorPallasKey
+	28, // 31: svote.v1.CeremonyState.acks:type_name -> svote.v1.AckEntry
+	27, // 32: svote.v1.DKGContribution.payloads:type_name -> svote.v1.DealerPayload
+	33, // 33: svote.v1.ProxyDelegationParams.verifiers:type_name -> svote.v1.ProxyVerifier
+	34, // [34:34] is the sub-list for method output_type
+	34, // [34:34] is the sub-list for method input_type
+	34, // [34:34] is the sub-list for extension type_name
+	34, // [34:34] is the sub-list for extension extendee
+	0,  // [0:34] is the sub-list for field type_name
 }
 
 func init() { file_svote_v1_types_proto_init() }
@@ -2569,7 +2999,7 @@ func file_svote_v1_types_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_svote_v1_types_proto_rawDesc), len(file_svote_v1_types_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   26,
+			NumMessages:   31,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

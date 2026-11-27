@@ -1,6 +1,7 @@
 package types
 
 import (
+	stderrors "errors"
 	"fmt"
 
 	"cosmossdk.io/errors"
@@ -73,6 +74,26 @@ var (
 	// returns it: CheckTx, proposal validation, and block execution do not see
 	// the client's fingerprint and are unaffected by it.
 	ErrClientCircuitKeyMismatch = errors.Register(ModuleName, 50, "client delegation circuit key does not match this chain")
+
+	// Proxy delegation errors (docs/proxy-delegation/contracts-v1.md §6).
+	// Codes 15, 20 and 44 were used before and are never reused; 56, 63 and
+	// 67 are unused.
+	ErrProxyDelegationPaused    = errors.Register(ModuleName, 51, "proxy delegation is paused")
+	ErrProxyBatchExpired        = errors.Register(ModuleName, 52, "proxy delegation batch expired")
+	ErrDelegateNotFound         = errors.Register(ModuleName, 53, "delegate not found")
+	ErrDelegateSuspended        = errors.Register(ModuleName, 54, "delegate is suspended")
+	ErrDelegateRetired          = errors.Register(ModuleName, 55, "delegate is retired")
+	ErrDelegateBallotExists     = errors.Register(ModuleName, 57, "delegate ballot already exists")
+	ErrInvalidBallot            = errors.Register(ModuleName, 58, "invalid delegate ballot")
+	ErrRegistrationClosed       = errors.Register(ModuleName, 59, "delegate registration is closed")
+	ErrRegistryFull             = errors.Register(ModuleName, 60, "delegate registry is full")
+	ErrDelegateKeyReused        = errors.Register(ModuleName, 61, "delegate key was already registered")
+	ErrHandleTaken              = errors.Register(ModuleName, 62, "handle has a live delegate entry")
+	ErrInvalidAttestation       = errors.Register(ModuleName, 64, "invalid delegate attestation")
+	ErrInsufficientAttestations = errors.Register(ModuleName, 65, "too few valid delegate attestations")
+	ErrInvalidDelegateKey       = errors.Register(ModuleName, 66, "invalid delegate key")
+	ErrInvalidProxyParams       = errors.Register(ModuleName, 68, "invalid proxy delegation params")
+	ErrProxyDelegationDisabled  = errors.Register(ModuleName, 69, "proxy delegation is disabled")
 )
 
 // CommitmentRootUnavailableError identifies a reveal-share anchor whose
@@ -90,3 +111,40 @@ func (e *CommitmentRootUnavailableError) Error() string {
 func (e *CommitmentRootUnavailableError) Unwrap() error {
 	return ErrInvalidProof
 }
+
+// SurfaceRegisteredCode returns err reporting the ABCI code and codespace of
+// the first registered error in its Go error chain, with err's message and
+// chain unchanged. ABCIInfo follows Cause, not Unwrap, so a registered error
+// wrapped with fmt.Errorf reports code 1 (docs/proxy-delegation/contracts-v1.md
+// §0). An error that already reports a registered code, or holds none, is
+// returned unchanged.
+func SurfaceRegisteredCode(err error) error {
+	if err == nil {
+		return nil
+	}
+	if codespace, _, _ := errors.ABCIInfo(err, false); codespace != errors.UndefinedCodespace {
+		return err
+	}
+	var registered *errors.Error
+	if !stderrors.As(err, &registered) {
+		return err
+	}
+	return &registeredCodeError{err: err, code: registered}
+}
+
+// registeredCodeError is err reporting code's ABCI code; see
+// SurfaceRegisteredCode.
+type registeredCodeError struct {
+	err  error
+	code *errors.Error
+}
+
+// Error returns the wrapped error's message.
+func (e *registeredCodeError) Error() string { return e.err.Error() }
+
+// Unwrap returns the wrapped error, so errors.Is and errors.As see its chain.
+func (e *registeredCodeError) Unwrap() error { return e.err }
+
+// Cause returns the registered error whose code and codespace ABCIInfo
+// reports.
+func (e *registeredCodeError) Cause() error { return e.code }

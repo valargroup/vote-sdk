@@ -1,0 +1,195 @@
+{
+  "format": "proxy_delegation_chain_v1",
+  "contract": "Proxy delegation contracts, version 1, section 13",
+  "generator": "vote-sdk: scripts/proxy-chain-vectors, written by `make proxy-chain-vectors`. Seeded bytes are BLAKE2b-256(\"vote-sdk proxy chain vectors v1/\" || label), unkeyed, for a label naming the section, case and field (for example \"entry_value/active_x/dk\"). Each dk is the Ed25519 public key of its seeded bytes taken as an RFC 8032 secret seed; each routing vote_round_id is its seeded bytes with the top two bits cleared, a canonical Pallas field encoding; and routing's ea_sk and ciphertext randomness are curvey's ScalarPallas.Hash of their seeded bytes. The rest are literals. entry_value.expected.value is the entry's deterministic protobuf encoding, the bytes the chain stores at 0x1A 0x01 u32be(index) (contracts-v1 §3.2). routing.expected is keeper.RerandomizeRoutedBucket's output (contracts-v1 §5.6). combined and final are MarshalCiphertext encodings (compressed C1 || C2, the identity as 32 zero bytes), ea_pk is a compressed point, and ea_sk and rho are 32-byte little-endian scalars; ea_sk is given only so tests can decrypt.",
+  "entry_value": [
+    {
+      "name": "active_x",
+      "inputs": {
+        "index": 1,
+        "dk": "650bcde823a70b9a5ddd64e79137b819971648cab6e1886990b029ba552f2cd6",
+        "provider": 1,
+        "handle": "alice",
+        "proof_id": "1790000000000000000",
+        "status": 0,
+        "status_reason": 0,
+        "registered_height": 1204517
+      },
+      "expected": {
+        "value": "08011220650bcde823a70b9a5ddd64e79137b819971648cab6e1886990b029ba552f2cd618012205616c6963652a133137393030303030303030303030303030303040a5c249"
+      }
+    },
+    {
+      "name": "active_github",
+      "inputs": {
+        "index": 2,
+        "dk": "459a043b9d4c52499710b4e865d34155604a445660dd7ffdbd9bae6dafafb86d",
+        "provider": 2,
+        "handle": "alice-example",
+        "proof_id": "0123456789abcdef0123456789abcdef",
+        "status": 0,
+        "status_reason": 0,
+        "registered_height": 1204900
+      },
+      "expected": {
+        "value": "08021220459a043b9d4c52499710b4e865d34155604a445660dd7ffdbd9bae6dafafb86d1802220d616c6963652d6578616d706c652a20303132333435363738396162636465663031323334353637383961626364656640a4c549"
+      }
+    },
+    {
+      "name": "suspended",
+      "inputs": {
+        "index": 3,
+        "dk": "999003ad65d7663ae400ae806d1ea0d34e55d4f871577f51ce2bab27a50e8cd0",
+        "provider": 1,
+        "handle": "bob_01",
+        "proof_id": "1790000000000000001",
+        "status": 1,
+        "status_reason": 1,
+        "registered_height": 1150000
+      },
+      "expected": {
+        "value": "08031220999003ad65d7663ae400ae806d1ea0d34e55d4f871577f51ce2bab27a50e8cd018012206626f625f30312a13313739303030303030303030303030303030313001380140b09846"
+      }
+    },
+    {
+      "name": "retired_by_key",
+      "inputs": {
+        "index": 4,
+        "dk": "0ce76f6a000d6e037820866d158340703fa76515ccbe11cd215a04165c14fb6d",
+        "provider": 1,
+        "handle": "carol",
+        "proof_id": "1790000000000000002",
+        "status": 2,
+        "status_reason": 0,
+        "registered_height": 1100000
+      },
+      "expected": {
+        "value": "080412200ce76f6a000d6e037820866d158340703fa76515ccbe11cd215a04165c14fb6d180122056361726f6c2a1331373930303030303030303030303030303032300240e09143"
+      }
+    },
+    {
+      "name": "retired_by_coordinators",
+      "inputs": {
+        "index": 5,
+        "dk": "dc0734c7b87dccd35c05e335dd0659f259674f541d30940088be6a744b1eead7",
+        "provider": 2,
+        "handle": "dave",
+        "proof_id": "abcdef",
+        "status": 2,
+        "status_reason": 2,
+        "registered_height": 1100001
+      },
+      "expected": {
+        "value": "08051220dc0734c7b87dccd35c05e335dd0659f259674f541d30940088be6a744b1eead718022204646176652a066162636465663002380240e19143"
+      }
+    },
+    {
+      "name": "max_values",
+      "inputs": {
+        "index": 2000,
+        "dk": "a34f772b1e4d35e01c5e03c8809795dc7e2dd33daadaf6e9aeea6efe14ea16f1",
+        "provider": 2,
+        "handle": "a123456789012345678901234567890123456-z",
+        "proof_id": "0123456789abcdef0123456789abcdef01234567",
+        "status": 2,
+        "status_reason": 99,
+        "registered_height": 18446744073709551615
+      },
+      "expected": {
+        "value": "08d00f1220a34f772b1e4d35e01c5e03c8809795dc7e2dd33daadaf6e9aeea6efe14ea16f118022227613132333435363738393031323334353637383930313233343536373839303132333435362d7a2a28303132333435363738396162636465663031323334353637383961626364656630313233343536373002386340ffffffffffffffffff01"
+      }
+    }
+  ],
+  "routing": [
+    {
+      "name": "direct_tally_and_one_pool",
+      "inputs": {
+        "vote_round_id": "1f441d34b751ac952dd483f06f80a2ef6d5b9961e2f8653847c09f2ee512a504",
+        "proposal_id": 1,
+        "vote_decision": 0,
+        "combined": "b619e4b0c580d8dd14e7bd896e1ea92e2a1bb0fcc955d2928413cd9f9466b1bf6eb38b005447e35fa266638f2f78a83bc05973e6094cb67f2c1b9ea3a64680bc",
+        "ea_pk": "5c69dd0632ef42ba80cf9e55847e23a7df8e96c9b97c28edb0dfab4ea2cc1094",
+        "ea_sk": "8898b5d54ddf1cb5b44ef8ae64591ef2f6fc6a4d17d4b7e0f3a427a7b84fdf1f"
+      },
+      "expected": {
+        "rho": "4cefd840ba9b3b2d6090972c734ae005fb834834a8a8b594f3f1845b311f0c0a",
+        "final": "8a28d57b64a3e11da911b8d1337dc7926c6a4f0f534fad885f36b8654ce37091867609908f17f13abc11a8a8bdc65f112e480f04e1f5d54d27f1c89ebf7bbe92"
+      }
+    },
+    {
+      "name": "pools_without_direct_tally",
+      "inputs": {
+        "vote_round_id": "1f441d34b751ac952dd483f06f80a2ef6d5b9961e2f8653847c09f2ee512a504",
+        "proposal_id": 2,
+        "vote_decision": 1,
+        "combined": "c84195491271bb32d26d81c8aa5f8a3ab11cabc66fb01fbfb2c74f4140bbf312616dd975325b11feae13beceaede42773601ec8db7cd54656809c7fc2ac9ed83",
+        "ea_pk": "5c69dd0632ef42ba80cf9e55847e23a7df8e96c9b97c28edb0dfab4ea2cc1094",
+        "ea_sk": "8898b5d54ddf1cb5b44ef8ae64591ef2f6fc6a4d17d4b7e0f3a427a7b84fdf1f"
+      },
+      "expected": {
+        "rho": "3d8ad5dbb987fe2f1f6a6183586ad7671c9aecaefc7e13cb066fedd088eab612",
+        "final": "b45a1e05670168af6a834aee9a7c21852a65fd41c7a32cb15ca36961334c7a28ff7fa5580e72e81afd6798433297ff3ba45663026db552ee050f05ed11100099"
+      }
+    },
+    {
+      "name": "last_proposal_last_option",
+      "inputs": {
+        "vote_round_id": "1f441d34b751ac952dd483f06f80a2ef6d5b9961e2f8653847c09f2ee512a504",
+        "proposal_id": 50,
+        "vote_decision": 7,
+        "combined": "a849334a27111d0f18376e0c7260a4a22fd85dfc58e0ed95287c5dae10e3112a4f54c46248a580c53ca52feece34157a50c142060fd7cd4cb816f5b06a86d43e",
+        "ea_pk": "5c69dd0632ef42ba80cf9e55847e23a7df8e96c9b97c28edb0dfab4ea2cc1094",
+        "ea_sk": "8898b5d54ddf1cb5b44ef8ae64591ef2f6fc6a4d17d4b7e0f3a427a7b84fdf1f"
+      },
+      "expected": {
+        "rho": "d8a642c614ff0375c76229dff248a87061dca0835492a9c15ae05a070a34382c",
+        "final": "965160474d830378a25df05224d8fcb097becee2331301595af308a68383251de9dd14eb78505ecc1aa108c617cac2cbb45c1e35023af1f6a78c23ffeefa1d1d"
+      }
+    },
+    {
+      "name": "same_bucket_other_round",
+      "inputs": {
+        "vote_round_id": "13db48edab78f794cd30d2e03f27bc7b72aaf3c584c1ecc038645b3dd1b1da33",
+        "proposal_id": 1,
+        "vote_decision": 0,
+        "combined": "b619e4b0c580d8dd14e7bd896e1ea92e2a1bb0fcc955d2928413cd9f9466b1bf6eb38b005447e35fa266638f2f78a83bc05973e6094cb67f2c1b9ea3a64680bc",
+        "ea_pk": "5c69dd0632ef42ba80cf9e55847e23a7df8e96c9b97c28edb0dfab4ea2cc1094",
+        "ea_sk": "8898b5d54ddf1cb5b44ef8ae64591ef2f6fc6a4d17d4b7e0f3a427a7b84fdf1f"
+      },
+      "expected": {
+        "rho": "c5c128f4557f3f3a928dcdcf03d032f863e860437988716a0833d82cb6b64900",
+        "final": "6ba0397c6daa7b7b1782607d5ae43f9db9b9a2397924b16f7650dc4dbb617209c18f3a6dc02780bf4b2cfcf2ed751e3ab76b5bad0187dbe52b4bcd2982d911b6"
+      }
+    },
+    {
+      "name": "identity_c1_griefing",
+      "inputs": {
+        "vote_round_id": "1f441d34b751ac952dd483f06f80a2ef6d5b9961e2f8653847c09f2ee512a504",
+        "proposal_id": 1,
+        "vote_decision": 1,
+        "combined": "0000000000000000000000000000000000000000000000000000000000000000063dee13bfbf85e51134ae24da377b611a195d92c3607e08ccbf753e85b4fd93",
+        "ea_pk": "5c69dd0632ef42ba80cf9e55847e23a7df8e96c9b97c28edb0dfab4ea2cc1094",
+        "ea_sk": "8898b5d54ddf1cb5b44ef8ae64591ef2f6fc6a4d17d4b7e0f3a427a7b84fdf1f"
+      },
+      "expected": {
+        "rho": "11f948d91f84b0397677da3721b4276cc5495facb45f98f3c81257c74c17bd13",
+        "final": "79a4b27d531020962ec565237696329624174a6e3809b2a0d7ff33efae2a0fa7e3409386d456571f1a4e3e354ce3fdc80c0a9eaa03898db1df09decd664c749b"
+      }
+    },
+    {
+      "name": "identity_ciphertext_griefing",
+      "inputs": {
+        "vote_round_id": "1f441d34b751ac952dd483f06f80a2ef6d5b9961e2f8653847c09f2ee512a504",
+        "proposal_id": 3,
+        "vote_decision": 2,
+        "combined": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "ea_pk": "5c69dd0632ef42ba80cf9e55847e23a7df8e96c9b97c28edb0dfab4ea2cc1094",
+        "ea_sk": "8898b5d54ddf1cb5b44ef8ae64591ef2f6fc6a4d17d4b7e0f3a427a7b84fdf1f"
+      },
+      "expected": {
+        "rho": "8cb920e20cd35c2ae9ec74367d194e25e1eb8a6bd8a9eff1d5397169fd3b420f",
+        "final": "b03afcc5e1ade5de4196a9a26ac4476836fabf0fbabe20f5ab37ffbd6784b7375949428d7b645464e74064324a2fb01e111101261af3093d358ff7b6e40c699e"
+      }
+    }
+  ]
+}

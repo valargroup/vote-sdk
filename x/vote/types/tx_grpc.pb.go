@@ -35,6 +35,8 @@ const (
 	Msg_ClearRoundEndorsement_FullMethodName        = "/svote.v1.Msg/ClearRoundEndorsement"
 	Msg_ProposeCoordinatorAction_FullMethodName     = "/svote.v1.Msg/ProposeCoordinatorAction"
 	Msg_ApproveCoordinatorAction_FullMethodName     = "/svote.v1.Msg/ApproveCoordinatorAction"
+	Msg_ProxyDelegationBatch_FullMethodName         = "/svote.v1.Msg/ProxyDelegationBatch"
+	Msg_DelegateOp_FullMethodName                   = "/svote.v1.Msg/DelegateOp"
 )
 
 // MsgClient is the client API for Msg service.
@@ -62,6 +64,8 @@ type MsgClient interface {
 	ClearRoundEndorsement(ctx context.Context, in *MsgClearRoundEndorsement, opts ...grpc.CallOption) (*MsgClearRoundEndorsementResponse, error)
 	ProposeCoordinatorAction(ctx context.Context, in *MsgProposeCoordinatorAction, opts ...grpc.CallOption) (*MsgProposeCoordinatorActionResponse, error)
 	ApproveCoordinatorAction(ctx context.Context, in *MsgApproveCoordinatorAction, opts ...grpc.CallOption) (*MsgApproveCoordinatorActionResponse, error)
+	ProxyDelegationBatch(ctx context.Context, in *MsgProxyDelegationBatch, opts ...grpc.CallOption) (*MsgProxyDelegationBatchResponse, error)
+	DelegateOp(ctx context.Context, in *MsgDelegateOp, opts ...grpc.CallOption) (*MsgDelegateOpResponse, error)
 }
 
 type msgClient struct {
@@ -232,6 +236,26 @@ func (c *msgClient) ApproveCoordinatorAction(ctx context.Context, in *MsgApprove
 	return out, nil
 }
 
+func (c *msgClient) ProxyDelegationBatch(ctx context.Context, in *MsgProxyDelegationBatch, opts ...grpc.CallOption) (*MsgProxyDelegationBatchResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MsgProxyDelegationBatchResponse)
+	err := c.cc.Invoke(ctx, Msg_ProxyDelegationBatch_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) DelegateOp(ctx context.Context, in *MsgDelegateOp, opts ...grpc.CallOption) (*MsgDelegateOpResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MsgDelegateOpResponse)
+	err := c.cc.Invoke(ctx, Msg_DelegateOp_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MsgServer is the server API for Msg service.
 // All implementations must embed UnimplementedMsgServer
 // for forward compatibility.
@@ -257,6 +281,8 @@ type MsgServer interface {
 	ClearRoundEndorsement(context.Context, *MsgClearRoundEndorsement) (*MsgClearRoundEndorsementResponse, error)
 	ProposeCoordinatorAction(context.Context, *MsgProposeCoordinatorAction) (*MsgProposeCoordinatorActionResponse, error)
 	ApproveCoordinatorAction(context.Context, *MsgApproveCoordinatorAction) (*MsgApproveCoordinatorActionResponse, error)
+	ProxyDelegationBatch(context.Context, *MsgProxyDelegationBatch) (*MsgProxyDelegationBatchResponse, error)
+	DelegateOp(context.Context, *MsgDelegateOp) (*MsgDelegateOpResponse, error)
 	mustEmbedUnimplementedMsgServer()
 }
 
@@ -314,6 +340,12 @@ func (UnimplementedMsgServer) ProposeCoordinatorAction(context.Context, *MsgProp
 }
 func (UnimplementedMsgServer) ApproveCoordinatorAction(context.Context, *MsgApproveCoordinatorAction) (*MsgApproveCoordinatorActionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ApproveCoordinatorAction not implemented")
+}
+func (UnimplementedMsgServer) ProxyDelegationBatch(context.Context, *MsgProxyDelegationBatch) (*MsgProxyDelegationBatchResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ProxyDelegationBatch not implemented")
+}
+func (UnimplementedMsgServer) DelegateOp(context.Context, *MsgDelegateOp) (*MsgDelegateOpResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DelegateOp not implemented")
 }
 func (UnimplementedMsgServer) mustEmbedUnimplementedMsgServer() {}
 func (UnimplementedMsgServer) testEmbeddedByValue()             {}
@@ -624,6 +656,42 @@ func _Msg_ApproveCoordinatorAction_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Msg_ProxyDelegationBatch_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgProxyDelegationBatch)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).ProxyDelegationBatch(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Msg_ProxyDelegationBatch_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).ProxyDelegationBatch(ctx, req.(*MsgProxyDelegationBatch))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_DelegateOp_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgDelegateOp)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).DelegateOp(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Msg_DelegateOp_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).DelegateOp(ctx, req.(*MsgDelegateOp))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Msg_ServiceDesc is the grpc.ServiceDesc for Msg service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -694,6 +762,14 @@ var Msg_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ApproveCoordinatorAction",
 			Handler:    _Msg_ApproveCoordinatorAction_Handler,
+		},
+		{
+			MethodName: "ProxyDelegationBatch",
+			Handler:    _Msg_ProxyDelegationBatch_Handler,
+		},
+		{
+			MethodName: "DelegateOp",
+			Handler:    _Msg_DelegateOp_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
