@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -874,4 +875,104 @@ func TestBatchBranchNameDeterministic(t *testing.T) {
 	if got == other {
 		t.Fatalf("different round sets produced the same branch name: %q", got)
 	}
+}
+
+// extensionsFixture is votingconfig's canonical dynamic config with an
+// "extensions" object and unknown top-level members that a typed rewrite
+// would change; its pir_layout matches testConfigPIRLayout.
+const extensionsFixture = "../votingconfig/testdata/dynamic-config-extensions.json"
+
+// assertSameMembers fails unless each named top-level member of got has
+// exactly the bytes it has in want.
+func assertSameMembers(t *testing.T, want, got []byte, keys ...string) {
+	t.Helper()
+	var in, out map[string]json.RawMessage
+	if err := json.Unmarshal(want, &in); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(got, &out); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range keys {
+		if in[key] == nil || !bytes.Equal(in[key], out[key]) {
+			t.Fatalf("%s changed\n got: %s\nwant: %s", key, out[key], in[key])
+		}
+	}
+}
+
+// TestMergeConfigPREntryKeepsExtensions merges a round entry into a config
+// with extensions and expects every extension byte back.
+func TestMergeConfigPREntryKeepsExtensions(t *testing.T) {
+	t.Parallel()
+
+	fixture, err := os.ReadFile(extensionsFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := validCreateConfigPRRequest(t)
+	_, staticConfig := configDocuments(t, nil)
+	merged, _, _, err := mergeConfigPREntry(fixture, staticConfig, body.RoundID, body.Entry, body.PIRLayout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSameMembers(t, fixture, merged, "extensions", "x_rollout", "operator_note")
+	if !bytes.Contains(merged, []byte(body.RoundID)) {
+		t.Fatalf("merged config misses round %s", body.RoundID)
+	}
+}
+
+// TestHandleCreateConfigPRKeepsExtensions runs the round PR flow against a
+// base config with extensions and checks the committed file keeps them.
+func TestHandleCreateConfigPRKeepsExtensions(t *testing.T) {
+	t.Parallel()
+
+	fixture, err := os.ReadFile(extensionsFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := validCreateConfigPRRequest(t)
+	_, staticConfig := configDocuments(t, nil)
+	var committed []byte
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		const repo = "/repos/valargroup/token-holder-voting-config/"
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == repo+"git/ref/heads/main":
+			writeJSON(t, w, map[string]any{"object": map[string]string{"sha": "main-sha"}})
+		case r.Method == http.MethodPost && r.URL.Path == repo+"git/refs":
+			writeJSON(t, w, map[string]any{})
+		case r.Method == http.MethodGet && r.URL.Path == repo+"contents/prod/dynamic-voting-config.json" && r.URL.Query().Get("ref") == "main":
+			writeContent(t, w, fixture, "dynamic-main-sha")
+		case r.Method == http.MethodGet && r.URL.Path == repo+"contents/prod/static-voting-config.json":
+			writeContent(t, w, staticConfig, "static-main-sha")
+		case r.Method == http.MethodGet && r.URL.Path == repo+"contents/prod/dynamic-voting-config.json":
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		case r.Method == http.MethodPut && r.URL.Path == repo+"contents/prod/dynamic-voting-config.json":
+			var req struct {
+				Content string `json:"content"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Error(err)
+			}
+			committed, _ = base64.StdEncoding.DecodeString(req.Content)
+			writeJSON(t, w, map[string]any{"commit": map[string]string{"sha": "commit-sha"}})
+		case r.Method == http.MethodPost && r.URL.Path == repo+"pulls":
+			writeJSON(t, w, map[string]string{"html_url": "https://github.com/valargroup/token-holder-voting-config/pull/1"})
+		default:
+			t.Errorf("unexpected GitHub request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
+			http.Error(w, "unexpected", http.StatusInternalServerError)
+		}
+	}))
+	defer gh.Close()
+
+	r := mux.NewRouter()
+	a := &Admin{
+		configPR:         testConfigPRAutomation(gh.URL),
+		logger:           log.NewNopLogger(),
+		checkVoteManager: func(string) bool { return true },
+	}
+	RegisterRoutes(r, func() *Admin { return a }, log.NewNopLogger())
+	if w := serveCreateConfigPR(t, r, body); w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	assertSameMembers(t, fixture, committed, "extensions", "x_rollout", "operator_note")
 }

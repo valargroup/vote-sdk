@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/valargroup/vote-sdk/internal/votingconfig"
 	svtest "github.com/valargroup/vote-sdk/testutil"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
@@ -189,7 +190,8 @@ func TestProxyVectorsD1(t *testing.T) {
 }
 
 // TestProxyVectorsCanonicalForms checks the canonical handle and proof id
-// rules (contracts-v1 §2.5).
+// rules (contracts-v1 §2.5), and that the config tooling's copy of the
+// handle rule agrees.
 func TestProxyVectorsCanonicalForms(t *testing.T) {
 	type expected struct {
 		Canonical bool `json:"canonical"`
@@ -204,6 +206,7 @@ func TestProxyVectorsCanonicalForms(t *testing.T) {
 		t.Run("handle/"+c.Name, func(t *testing.T) {
 			err := types.ValidateDelegateHandle(c.Inputs.Provider, c.Inputs.Handle)
 			require.Equal(t, c.Expected.Canonical, err == nil, "%v", err)
+			require.Equal(t, c.Expected.Canonical, votingconfig.IsDelegateHandle(c.Inputs.Provider, c.Inputs.Handle))
 			if err != nil {
 				require.ErrorIs(t, err, types.ErrInvalidField)
 			}

@@ -32,7 +32,7 @@ func newRootCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	root.AddCommand(newKeygenCmd(), newConfigAttestationKeygenCmd(), newSignCmd(), newVerifyCmd())
+	root.AddCommand(newKeygenCmd(), newConfigAttestationKeygenCmd(), newSignCmd(), newVerifyCmd(), newWalletListCmd())
 	return root
 }
 
@@ -316,6 +316,15 @@ func newVerifyCmd() *cobra.Command {
 				}
 				if !votingconfig.VerifyEntrySignatures(roundID, entry, staticConfig.TrustedKeys, cfg.PIRLayout) {
 					return fmt.Errorf("round %s: no valid signature", roundID)
+				}
+			}
+			proxyExt, err := cfg.ProxyDelegationV1()
+			if err != nil {
+				return err
+			}
+			if proxyExt != nil {
+				if err := votingconfig.ValidateProxyDelegationV1(proxyExt); err != nil {
+					return err
 				}
 			}
 			if jsonOut {

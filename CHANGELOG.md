@@ -8,6 +8,15 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Add proxy delegation's config tooling. `voting-config wallet-list`
+  creates, signs and verifies a wallet's signed list of vetted delegates, and
+  `voting-config verify` checks the dynamic config's proxy delegation
+  extension, keeping unknown fields byte for byte. The admin UI gains a Sign
+  Wallet List page that shows every signed field before signing, decodes the
+  proxy coordinator payloads for approvers, and offers a proxy delegation
+  round when the chain reports the capability. See
+  [cmd/voting-config/README.md](cmd/voting-config/README.md).
+
 - Add proxy delegation itself, still dormant behind
   `types.ProxyDelegationEnabled`: 0x09 batches that move a VAN's weight into
   delegation commitments with ZKP4 proofs, proposal-0 reveals that fill each
