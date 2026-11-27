@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"cosmossdk.io/core/store"
+	errorsmod "cosmossdk.io/errors"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/valargroup/vote-sdk/x/vote/types"
@@ -95,8 +96,52 @@ func (k *Keeper) SetCommitmentTreeState(kvStore store.KVStore, roundID []byte, s
 	return kvStore.Set(types.RoundTreeStateKey(roundID), bz)
 }
 
-// AppendCommitment appends a commitment to a round's tree and returns its index.
+// EnsureCommitmentCapacity returns ErrCommitmentTreeFull unless count more
+// leaves fit in the round's tree with none at an index above
+// types.ProxyMaxTreePosition. Every check of that bound goes through it.
+func (k *Keeper) EnsureCommitmentCapacity(kvStore store.KVStore, roundID []byte, count uint64) error {
+	state, err := k.GetCommitmentTreeState(kvStore, roundID)
+	if err != nil {
+		return err
+	}
+	// The leaves would take indices next..next+count-1.
+	maxPosition := types.ProxyMaxTreePosition
+	if next := state.NextIndex; count > 0 && (next > maxPosition || count-1 > maxPosition-next) {
+		return errorsmod.Wrapf(types.ErrCommitmentTreeFull, "round %x has %d leaves; %d more would pass leaf index %d", roundID, next, count, maxPosition)
+	}
+	return nil
+}
+
+// CommitmentAppendCount returns how many leaves msg's handler appends to its
+// round's tree: van_cmx for 0x02; the successor VAN and the vote commitment
+// for 0x03; the final successor VAN and every vote commitment for 0x06 and
+// 0x07; the final successor VAN and every DC for 0x09; none otherwise.
+func CommitmentAppendCount(msg types.VoteMessage) uint64 {
+	switch m := msg.(type) {
+	case *types.MsgDelegateVote:
+		return 1
+	case *types.MsgCastVote:
+		return 2
+	case *types.MsgCastVoteBatch:
+		return 1 + uint64(len(m.GetVotes()))
+	case *types.MsgDelegateAndCastVoteBatch:
+		return 1 + uint64(len(m.GetBatch().GetVotes()))
+	case *types.MsgProxyDelegationBatch:
+		return 1 + uint64(len(m.GetDcs()))
+	}
+	return 0
+}
+
+// AppendCommitment appends a commitment to a round's tree and returns its
+// index. With the gate open it returns ErrCommitmentTreeFull rather than
+// append past types.ProxyMaxTreePosition (EnsureCommitmentCapacity); while
+// it is closed it appends without a bound, as before.
 func (k *Keeper) AppendCommitment(kvStore store.KVStore, roundID, commitment []byte) (uint64, error) {
+	if types.ProxyDelegationEnabled {
+		if err := k.EnsureCommitmentCapacity(kvStore, roundID, 1); err != nil {
+			return 0, err
+		}
+	}
 	state, err := k.GetCommitmentTreeState(kvStore, roundID)
 	if err != nil {
 		return 0, err

@@ -2,14 +2,10 @@ package keeper_test
 
 import (
 	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math"
-	"strings"
-	"testing"
 
-	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
 	svtest "github.com/valargroup/vote-sdk/testutil"
@@ -153,13 +149,4 @@ func (s *ProxyRegistryTestSuite) TestRegistryStoreRejectsCorruptValues() {
 	s.Require().NoError(kv.Set(types.ProxyNextDelegateIndexKey, binary.BigEndian.AppendUint64(nil, 2)))
 	_, err = s.keeper.GetProxyNextDelegateIndex(kv)
 	s.Require().ErrorContains(err, "expected 4")
-}
-
-// routingVectorHex decodes a lowercase hex field of a vector file.
-func routingVectorHex(t *testing.T, s string) []byte {
-	t.Helper()
-	require.Equal(t, strings.ToLower(s), s, "hex is lowercase")
-	b, err := hex.DecodeString(s)
-	require.NoError(t, err)
-	return b
 }

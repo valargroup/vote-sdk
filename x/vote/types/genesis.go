@@ -69,8 +69,8 @@ func ValidateAndNormalizeVoteManagerPolicy(addrs []string, threshold uint32) ([]
 }
 
 // ValidateGenesisState performs structural validation of the vote module
-// genesis state, the proxy delegate registry included
-// (docs/proxy-delegation/contracts-v1.md §9).
+// genesis state. Only with the gate open does it accept nullifier type 3, the
+// DC slot nullifiers (docs/proxy-delegation/contracts-v1.md §9).
 func ValidateGenesisState(gs *GenesisState) error {
 	if gs == nil {
 		return nil
@@ -92,10 +92,14 @@ func ValidateGenesisState(gs *GenesisState) error {
 		seenRounds[key] = struct{}{}
 	}
 
-	// Validate nullifiers: type in {0,1,2}, round_id is 32 bytes, nullifier is non-empty.
+	// Validate nullifiers: a known type, round_id is 32 bytes, nullifier is non-empty.
+	maxNullifierType := NullifierTypeShare
+	if ProxyDelegationEnabled {
+		maxNullifierType = NullifierTypeProxySlot
+	}
 	for i, entry := range gs.Nullifiers {
-		if entry.NullifierType > 2 {
-			return fmt.Errorf("nullifiers[%d].nullifier_type is %d, expected 0-2", i, entry.NullifierType)
+		if entry.NullifierType > uint32(maxNullifierType) {
+			return fmt.Errorf("nullifiers[%d].nullifier_type is %d, expected 0-%d", i, entry.NullifierType, maxNullifierType)
 		}
 		if len(entry.RoundId) != RoundIDLen {
 			return fmt.Errorf("nullifiers[%d].round_id is %d bytes, expected %d", i, len(entry.RoundId), RoundIDLen)
@@ -239,5 +243,8 @@ func ValidateGenesisState(gs *GenesisState) error {
 		}
 	}
 
-	return ValidateProxyRegistryGenesis(gs)
+	if err := ValidateProxyRegistryGenesis(gs); err != nil {
+		return err
+	}
+	return ValidateProxyRoundGenesis(gs)
 }

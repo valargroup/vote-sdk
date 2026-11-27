@@ -32,7 +32,8 @@ func NewMsgServerImpl(keeper *Keeper) types.MsgServer {
 // proposals_hash_hi, vote_end_time, nullifier_imt_root, nc_root) via FFI, stores
 // the VoteRound in PENDING status with a ceremony validator snapshot, and emits
 // an event. The round transitions to ACTIVE when its per-round ceremony
-// confirms.
+// confirms. A round with the proxy_delegation flag also gets VoteRound field
+// 31, which callers refuse while proxy delegation is dormant.
 func (ms msgServer) executeCreateVotingSession(goCtx context.Context, msg *types.MsgCreateVotingSession) (*types.MsgCreateVotingSessionResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
@@ -121,6 +122,15 @@ func (ms msgServer) executeCreateVotingSession(goCtx context.Context, msg *types
 		CeremonyPhaseStart:   uint64(ctx.BlockTime().Unix()),
 		CeremonyPhaseTimeout: types.DefaultContributionTimeout,
 	}
+	// Field 31 is outside the round-id preimage, so the flag leaves the id
+	// as it is (contracts-v1 §3.1, §5.5).
+	if msg.ProxyDelegation {
+		next, err := ms.k.GetProxyNextDelegateIndex(kvStore)
+		if err != nil {
+			return nil, err
+		}
+		round.ProxyDelegation = &types.ProxyDelegationRoundState{Enabled: true, NextDelegateIndexAtCreation: next}
+	}
 
 	AppendCeremonyLog(round, uint64(ctx.BlockHeight()),
 		fmt.Sprintf("round created with %d ceremony validators", len(eligible)))
@@ -138,12 +148,18 @@ func (ms msgServer) executeCreateVotingSession(goCtx context.Context, msg *types
 	return &types.MsgCreateVotingSessionResponse{VoteRoundId: roundID}, nil
 }
 
-// DelegateVote handles MsgDelegateVote (ZKP #1).
-// Records governance nullifiers, appends van_cmx to the commitment tree,
-// and emits an event.
+// DelegateVote handles MsgDelegateVote (ZKP #1). It records governance
+// nullifiers, appends van_cmx to the commitment tree, and emits an event.
+// With the gate open it first checks that the tree has room.
 func (ms msgServer) DelegateVote(goCtx context.Context, msg *types.MsgDelegateVote) (*types.MsgDelegateVoteResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
+
+	if types.ProxyDelegationEnabled {
+		if err := ms.k.EnsureCommitmentCapacity(kvStore, msg.VoteRoundId, CommitmentAppendCount(msg)); err != nil {
+			return nil, err
+		}
+	}
 
 	// Record each governance nullifier (scoped to gov type + round).
 	for _, nf := range msg.GovNullifiers {
@@ -170,9 +186,10 @@ func (ms msgServer) DelegateVote(goCtx context.Context, msg *types.MsgDelegateVo
 	return &types.MsgDelegateVoteResponse{}, nil
 }
 
-// CastVote handles MsgCastVote (ZKP #2).
-// Validates the anchor height, records the vote-authority-note nullifier, appends
-// vote_authority_note_new and vote_commitment to the tree, and emits an event.
+// CastVote handles MsgCastVote (ZKP #2). It validates the anchor height,
+// records the vote-authority-note nullifier, appends vote_authority_note_new
+// and vote_commitment to the tree, and emits an event. With the gate open it
+// checks that the tree has room before any write.
 func (ms msgServer) CastVote(goCtx context.Context, msg *types.MsgCastVote) (*types.MsgCastVoteResponse, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := ms.k.OpenKVStore(ctx)
@@ -189,6 +206,11 @@ func (ms msgServer) CastVote(goCtx context.Context, msg *types.MsgCastVote) (*ty
 	}
 	if root == nil {
 		return nil, fmt.Errorf("%w: no root at height %d", types.ErrInvalidAnchorHeight, msg.VoteCommTreeAnchorHeight)
+	}
+	if types.ProxyDelegationEnabled {
+		if err := ms.k.EnsureCommitmentCapacity(kvStore, msg.VoteRoundId, CommitmentAppendCount(msg)); err != nil {
+			return nil, err
+		}
 	}
 
 	// Reject double-vote: VAN nullifier must not already be recorded (scoped to type + round).
@@ -217,7 +239,8 @@ func (ms msgServer) CastVote(goCtx context.Context, msg *types.MsgCastVote) (*ty
 
 // CastVoteBatch handles an ordered, atomic sequence of ZKP #2 actions. Only
 // the final successor VAN is appended globally; every vote commitment is
-// retained in action order for later share reveals.
+// retained in action order for later share reveals. With the gate open it
+// checks that the tree has room before any write.
 func (ms msgServer) CastVoteBatch(goCtx context.Context, msg *types.MsgCastVoteBatch) (*types.MsgCastVoteBatchResponse, error) {
 	if err := msg.ValidateBasic(); err != nil {
 		return nil, err
@@ -241,6 +264,11 @@ func (ms msgServer) CastVoteBatch(goCtx context.Context, msg *types.MsgCastVoteB
 	}
 	if err := ms.k.CheckNullifiersUnique(ctx, types.NullifierTypeVoteAuthorityNote, first.VoteRoundId, msg.GetNullifiers()); err != nil {
 		return nil, err
+	}
+	if types.ProxyDelegationEnabled {
+		if err := ms.k.EnsureCommitmentCapacity(kvStore, first.VoteRoundId, CommitmentAppendCount(msg)); err != nil {
+			return nil, err
+		}
 	}
 
 	for _, vote := range msg.Votes {
@@ -283,10 +311,12 @@ func (ms msgServer) CastVoteBatch(goCtx context.Context, msg *types.MsgCastVoteB
 	return &types.MsgCastVoteBatchResponse{BatchDigest: batchDigest}, nil
 }
 
-// DelegateAndCastVoteBatch atomically consumes governance and VAN nullifiers,
-// omits the ephemeral delegation VAN from global state, and appends only the
-// final successor VAN plus every vote commitment. Proof verification has
-// already bound the first cast to delegation.van_cmx via its synthetic root.
+// DelegateAndCastVoteBatch handles an atomic delegation followed by casts.
+// It atomically consumes governance and VAN nullifiers, omits the ephemeral
+// delegation VAN from global state, and appends only the final successor VAN
+// plus every vote commitment. Proof verification has already bound the first
+// cast to delegation.van_cmx via its synthetic root. With the gate open it
+// checks that the tree has room before any write.
 func (ms msgServer) DelegateAndCastVoteBatch(goCtx context.Context, msg *types.MsgDelegateAndCastVoteBatch) (*types.MsgDelegateAndCastVoteBatchResponse, error) {
 	if err := msg.ValidateBasic(); err != nil {
 		return nil, err
@@ -307,6 +337,11 @@ func (ms msgServer) DelegateAndCastVoteBatch(goCtx context.Context, msg *types.M
 	}
 	if err := ms.k.CheckNullifiersUnique(ctx, types.NullifierTypeVoteAuthorityNote, roundID, msg.Batch.GetNullifiers()); err != nil {
 		return nil, err
+	}
+	if types.ProxyDelegationEnabled {
+		if err := ms.k.EnsureCommitmentCapacity(kvStore, roundID, CommitmentAppendCount(msg)); err != nil {
+			return nil, err
+		}
 	}
 
 	for _, nf := range msg.Delegation.GovNullifiers {

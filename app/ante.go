@@ -41,7 +41,8 @@ type DualAnteHandlerOptions struct {
 
 	// LocalCommittedHeight returns the latest locally committed block height. When
 	// set, it lets CheckTx distinguish a future commitment tree anchor from a
-	// proof failure without changing transaction validation.
+	// proof failure, and gives CheckTx and RecheckTx the height that admits a
+	// 0x09 batch (voteante.ValidateOpts.LastCommittedHeight).
 	LocalCommittedHeight func() int64
 }
 
@@ -55,6 +56,12 @@ func ProductionOpts() voteante.ValidateOpts {
 		ZKPVerifier: halo2.NewVerifier(),
 	}
 }
+
+// anteZKPVerifier returns the ZKP verifier a new app's ante handler uses,
+// ProductionOpts().ZKPVerifier outside tests. Only this package's tests
+// replace it (SetAnteZKPVerifier in export_test.go), to mock one circuit in
+// a whole app.
+var anteZKPVerifier = func() zkp.Verifier { return ProductionOpts().ZKPVerifier }
 
 // NewDualAnteHandler returns an AnteHandler that detects the tx type and routes
 // to the appropriate validation pipeline:
@@ -155,9 +162,10 @@ func handleVoteAnte(
 	}
 
 	opts := voteante.ValidateOpts{
-		IsRecheck:   ctx.IsReCheckTx(),
-		SigVerifier: sigVerifier,
-		ZKPVerifier: zkpVerifier,
+		IsRecheck:           ctx.IsReCheckTx(),
+		SigVerifier:         sigVerifier,
+		ZKPVerifier:         zkpVerifier,
+		LastCommittedHeight: committedHeight,
 	}
 
 	start := time.Now()

@@ -18,7 +18,7 @@ const PoolProposalID uint32 = 0
 
 // ProxyMaxTreePosition is the largest leaf index any append may fill once
 // proxy delegation is enabled, since every round's vote commitment tree has
-// depth 24 (contracts-v1 §5.1 step 5).
+// depth 24 (contracts-v1 §5.1 step 5). See keeper.EnsureCommitmentCapacity.
 const ProxyMaxTreePosition uint64 = 1<<24 - 1
 
 // MaxDelegateAttestations is the most verifier attestations one delegate
@@ -37,8 +37,8 @@ const DelegateProviderX uint32 = 1
 const DelegateProviderGitHub uint32 = 2
 
 // MaxDelegates is the largest max_delegates the params accept, so the
-// largest registry (contracts-v1 §2.5), the size routing at the tally
-// transition is measured up to.
+// largest registry (contracts-v1 §2.5): routing at the tally transition is
+// measured up to it (docs/proxy-delegation/routing-performance.md).
 const MaxDelegates uint32 = 2000
 
 // MaxProxyVerifiers is the most verifiers the registry params list

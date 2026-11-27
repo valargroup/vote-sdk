@@ -87,6 +87,7 @@ func newValidatedSubmitRouter(t *testing.T, validator SharePayloadValidator, rou
 		func() RoundStatusChecker { return roundStatus },
 		func() SharePayloadValidator { return validator },
 		func() ShareChoiceValidator { return choiceValidator },
+		nil,
 		log.NewNopLogger(),
 	)
 	return router, store

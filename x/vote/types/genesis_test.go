@@ -69,10 +69,26 @@ func TestValidateGenesisState_DuplicateRoundID(t *testing.T) {
 
 func TestValidateGenesisState_NullifierTypeTooHigh(t *testing.T) {
 	gs := validGenesis()
-	gs.Nullifiers[0].NullifierType = 3
+	gs.Nullifiers[0].NullifierType = 4
 	err := types.ValidateGenesisState(gs)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "nullifiers[0].nullifier_type is 3")
+	require.Contains(t, err.Error(), "nullifiers[0].nullifier_type is 4")
+}
+
+// TestValidateGenesisState_SlotNullifiersFollowTheGate checks nullifier type
+// 3, the DC slot nullifiers (contracts-v1 §9): rejected as before while proxy
+// delegation is dormant, accepted with the gate open, where type 4 is not.
+func TestValidateGenesisState_SlotNullifiersFollowTheGate(t *testing.T) {
+	gs := validGenesis()
+	gs.Nullifiers[0].NullifierType = uint32(types.NullifierTypeProxySlot)
+	if !types.ProxyDelegationEnabled {
+		require.EqualError(t, types.ValidateGenesisState(gs), "nullifiers[0].nullifier_type is 3, expected 0-2")
+		return
+	}
+	require.NoError(t, types.ValidateGenesisState(gs))
+
+	gs.Nullifiers[0].NullifierType = 4
+	require.EqualError(t, types.ValidateGenesisState(gs), "nullifiers[0].nullifier_type is 4, expected 0-3")
 }
 
 func TestValidateGenesisState_NullifierRoundIDBadLength(t *testing.T) {

@@ -19,6 +19,9 @@ func (k *Keeper) InitGenesis(kvStore store.KVStore, genesis *types.GenesisState)
 	if err := types.ValidateProxyRegistryGenesis(genesis); err != nil {
 		return err
 	}
+	if err := types.ValidateProxyRoundGenesis(genesis); err != nil {
+		return err
+	}
 
 	// Restore vote rounds.
 	for _, round := range genesis.Rounds {
@@ -171,7 +174,7 @@ func (k *Keeper) InitGenesis(kvStore store.KVStore, genesis *types.GenesisState)
 }
 
 // initProxyDelegationGenesis writes the validated delegate registry, which is
-// the entries and the params when set. It rebuilds
+// the entries and the params when set, and the delegate ballots. It rebuilds
 // each entry's used-key record, each live entry's handle record, and
 // next_index as one more than the highest entry index, which stays absent,
 // reading as 1, without entries (contracts-v1 §9).
@@ -199,6 +202,11 @@ func (k *Keeper) initProxyDelegationGenesis(kvStore store.KVStore, genesis *type
 	if genesis.ProxyParams != nil {
 		if err := k.SetProxyDelegationParams(kvStore, genesis.ProxyParams); err != nil {
 			return err
+		}
+	}
+	for _, ballot := range genesis.ProxyDelegateBallots {
+		if err := k.SetDelegateBallot(kvStore, ballot); err != nil {
+			return fmt.Errorf("delegate %d's ballot in round %x: %w", ballot.DelegateIndex, ballot.VoteRoundId, err)
 		}
 	}
 	return nil
@@ -331,9 +339,9 @@ func (k *Keeper) ExportGenesis(kvStore store.KVStore) (*types.GenesisState, erro
 }
 
 // exportProxyDelegationGenesis adds the delegate registry (0x1A) to gs, which
-// is every entry and the params when set (contracts-v1 §9). The used-key and
-// handle records and next_index are not exported; import rebuilds them from
-// the entries.
+// is every entry and the params when set, and every delegate ballot (0x1B)
+// in key order (contracts-v1 §9). The used-key and handle records and
+// next_index are not exported; import rebuilds them from the entries.
 func (k *Keeper) exportProxyDelegationGenesis(kvStore store.KVStore, gs *types.GenesisState) error {
 	if err := k.IterateProxyDelegateEntries(kvStore, 0, func(entry *types.ProxyDelegateEntry) bool {
 		gs.ProxyDelegates = append(gs.ProxyDelegates, entry)
@@ -349,6 +357,12 @@ func (k *Keeper) exportProxyDelegationGenesis(kvStore store.KVStore, gs *types.G
 		if gs.ProxyParams, err = k.GetProxyDelegationParams(kvStore); err != nil {
 			return fmt.Errorf("export proxy delegation params: %w", err)
 		}
+	}
+	if err := k.IterateAllDelegateBallots(kvStore, func(ballot *types.DelegateBallotRecord) bool {
+		gs.ProxyDelegateBallots = append(gs.ProxyDelegateBallots, ballot)
+		return false
+	}); err != nil {
+		return fmt.Errorf("export delegate ballots: %w", err)
 	}
 	return nil
 }

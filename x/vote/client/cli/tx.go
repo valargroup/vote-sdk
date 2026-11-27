@@ -726,7 +726,7 @@ func parseProxyVerifier(value string) (*types.ProxyVerifier, error) {
 // and large binary blobs.
 func CmdCreateVotingSession() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "create-voting-session [msg-json-file]",
+		Use:   "create-voting-session [msg-json-file] [--proxy-delegation]",
 		Short: "Create a new voting session through coordinator approval",
 		Long: `Propose a MsgCreateVotingSession coordinator action from a JSON description file.
 
@@ -744,6 +744,12 @@ All byte fields are hex-encoded in the JSON.  Required fields:
                                  (string), and options (2-8 elements with index
                                  (0-based uint32), label (ASCII string), and
                                  optional description (string))
+
+--proxy-delegation creates a proxy delegation round. The chain then executes
+the action only with at least two coordinator approvals, or the coordinator
+threshold if that is higher, so never in the proposing transaction, even at
+threshold 1. Until proxy delegation is enabled, the chain rejects a flagged
+session. The flag is set only on the command line, never in the file.
 
 Example:
   {
@@ -779,97 +785,121 @@ Example:
 			if err != nil {
 				return fmt.Errorf("reading msg file: %w", err)
 			}
-
-			var input struct {
-				SnapshotHeight    uint64 `json:"snapshot_height"`
-				SnapshotBlockhash string `json:"snapshot_blockhash"`
-				ProposalsHash     string `json:"proposals_hash"`
-				VoteEndTime       uint64 `json:"vote_end_time"`
-				NullifierImtRoot  string `json:"nullifier_imt_root"`
-				NcRoot            string `json:"nc_root"`
-				Description       string `json:"description"`
-				Title             string `json:"title"`
-				Proposals         []struct {
-					Id          uint32 `json:"id"`
-					Title       string `json:"title"`
-					Description string `json:"description"`
-					ZipNumber   string `json:"zip_number"`
-					ForumUrl    string `json:"forum_url"`
-					Options     []struct {
-						Index       uint32 `json:"index"`
-						Label       string `json:"label"`
-						Description string `json:"description"`
-					} `json:"options"`
-				} `json:"proposals"`
-			}
-			if err := json.Unmarshal(data, &input); err != nil {
-				return fmt.Errorf("parsing msg JSON: %w", err)
-			}
-
-			decodeHex := func(field, s string) ([]byte, error) {
-				b, err := hex.DecodeString(s)
-				if err != nil {
-					return nil, fmt.Errorf("field %q: invalid hex: %w", field, err)
-				}
-				return b, nil
-			}
-
-			snapshotBlockhash, err := decodeHex(types.SessionKeyBlockhash, input.SnapshotBlockhash)
+			proxyDelegation, err := cmd.Flags().GetBool(flagProxyDelegation)
 			if err != nil {
 				return err
 			}
-			proposalsHash, err := decodeHex(types.SessionKeyProposalsHash, input.ProposalsHash)
+			msg, err := createVotingSessionMsg(clientCtx.GetFromAddress().String(), data, proxyDelegation)
 			if err != nil {
 				return err
-			}
-			nullifierImtRoot, err := decodeHex(types.SessionKeyNullifierImtRoot, input.NullifierImtRoot)
-			if err != nil {
-				return err
-			}
-			ncRoot, err := decodeHex(types.SessionKeyNcRoot, input.NcRoot)
-			if err != nil {
-				return err
-			}
-
-			proposals := make([]*types.Proposal, len(input.Proposals))
-			for i, p := range input.Proposals {
-				opts := make([]*types.VoteOption, len(p.Options))
-				for j, o := range p.Options {
-					opts[j] = &types.VoteOption{
-						Index:       o.Index,
-						Label:       o.Label,
-						Description: o.Description,
-					}
-				}
-				proposals[i] = &types.Proposal{
-					Id:          p.Id,
-					Title:       p.Title,
-					Description: p.Description,
-					ZipNumber:   p.ZipNumber,
-					ForumUrl:    p.ForumUrl,
-					Options:     opts,
-				}
-			}
-
-			msg := &types.MsgCreateVotingSession{
-				Creator:           clientCtx.GetFromAddress().String(),
-				SnapshotHeight:    input.SnapshotHeight,
-				SnapshotBlockhash: snapshotBlockhash,
-				ProposalsHash:     proposalsHash,
-				VoteEndTime:       input.VoteEndTime,
-				NullifierImtRoot:  nullifierImtRoot,
-				NcRoot:            ncRoot,
-				Proposals:         proposals,
-				Description:       input.Description,
-				Title:             input.Title,
 			}
 
 			return broadcastCoordinatorProposal(clientCtx, cmd.Flags(), msg)
 		},
 	}
 
+	cmd.Flags().Bool(flagProxyDelegation, false, "Create a proxy delegation round; it executes only with at least two coordinator approvals")
 	flags.AddTxFlagsToCmd(cmd)
 	return cmd
+}
+
+// flagProxyDelegation is create-voting-session's flag that sets
+// MsgCreateVotingSession.proxy_delegation (contracts-v1 §2.3).
+const flagProxyDelegation = "proxy-delegation"
+
+// createVotingSessionMsg builds create-voting-session's message from its
+// JSON description file, with proxyDelegation from the command line. A file
+// that sets proxy_delegation itself is refused, so the flag can't be left off
+// by mistake.
+func createVotingSessionMsg(creator string, data []byte, proxyDelegation bool) (*types.MsgCreateVotingSession, error) {
+	var input struct {
+		SnapshotHeight    uint64 `json:"snapshot_height"`
+		SnapshotBlockhash string `json:"snapshot_blockhash"`
+		ProposalsHash     string `json:"proposals_hash"`
+		VoteEndTime       uint64 `json:"vote_end_time"`
+		NullifierImtRoot  string `json:"nullifier_imt_root"`
+		NcRoot            string `json:"nc_root"`
+		Description       string `json:"description"`
+		Title             string `json:"title"`
+		Proposals         []struct {
+			Id          uint32 `json:"id"`
+			Title       string `json:"title"`
+			Description string `json:"description"`
+			ZipNumber   string `json:"zip_number"`
+			ForumUrl    string `json:"forum_url"`
+			Options     []struct {
+				Index       uint32 `json:"index"`
+				Label       string `json:"label"`
+				Description string `json:"description"`
+			} `json:"options"`
+		} `json:"proposals"`
+		ProxyDelegation *bool `json:"proxy_delegation"`
+	}
+	if err := json.Unmarshal(data, &input); err != nil {
+		return nil, fmt.Errorf("parsing msg JSON: %w", err)
+	}
+	if input.ProxyDelegation != nil {
+		return nil, fmt.Errorf("the msg file sets proxy_delegation; set it with --%s instead", flagProxyDelegation)
+	}
+
+	decodeHex := func(field, s string) ([]byte, error) {
+		b, err := hex.DecodeString(s)
+		if err != nil {
+			return nil, fmt.Errorf("field %q: invalid hex: %w", field, err)
+		}
+		return b, nil
+	}
+
+	snapshotBlockhash, err := decodeHex(types.SessionKeyBlockhash, input.SnapshotBlockhash)
+	if err != nil {
+		return nil, err
+	}
+	proposalsHash, err := decodeHex(types.SessionKeyProposalsHash, input.ProposalsHash)
+	if err != nil {
+		return nil, err
+	}
+	nullifierImtRoot, err := decodeHex(types.SessionKeyNullifierImtRoot, input.NullifierImtRoot)
+	if err != nil {
+		return nil, err
+	}
+	ncRoot, err := decodeHex(types.SessionKeyNcRoot, input.NcRoot)
+	if err != nil {
+		return nil, err
+	}
+
+	proposals := make([]*types.Proposal, len(input.Proposals))
+	for i, p := range input.Proposals {
+		opts := make([]*types.VoteOption, len(p.Options))
+		for j, o := range p.Options {
+			opts[j] = &types.VoteOption{
+				Index:       o.Index,
+				Label:       o.Label,
+				Description: o.Description,
+			}
+		}
+		proposals[i] = &types.Proposal{
+			Id:          p.Id,
+			Title:       p.Title,
+			Description: p.Description,
+			ZipNumber:   p.ZipNumber,
+			ForumUrl:    p.ForumUrl,
+			Options:     opts,
+		}
+	}
+
+	return &types.MsgCreateVotingSession{
+		Creator:           creator,
+		SnapshotHeight:    input.SnapshotHeight,
+		SnapshotBlockhash: snapshotBlockhash,
+		ProposalsHash:     proposalsHash,
+		VoteEndTime:       input.VoteEndTime,
+		NullifierImtRoot:  nullifierImtRoot,
+		NcRoot:            ncRoot,
+		Proposals:         proposals,
+		Description:       input.Description,
+		Title:             input.Title,
+		ProxyDelegation:   proxyDelegation,
+	}, nil
 }
 
 // CmdSubmitTally broadcasts MsgSubmitTally.

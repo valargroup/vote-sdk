@@ -29,7 +29,18 @@ import (
 
 // These tests cover the proxy delegation REST routes
 // (docs/proxy-delegation/contracts-v1.md §8): 404 while dormant, and with the
-// gate open the delegate-op endpoint and the registry queries.
+// gate open the two submission endpoints and the queries.
+
+const proxyRouteTestChainID = "svote-proxy-route-test"
+
+// proxyBatchForRouteTest returns a 0x09 batch without a registration that
+// passes ValidateBasic.
+func proxyBatchForRouteTest() *types.MsgProxyDelegationBatch {
+	batch := proxyBatchForCodecTest()
+	batch.Registration = nil
+	batch.VoteCommTreeAnchorHeight = 10
+	return batch
+}
 
 // fakeQueryNode answers ABCI queries with handle. The client.CometRPC methods
 // the query routes never call stay nil.
@@ -75,7 +86,7 @@ func (n *fakeQueryNode) ABCIQueryWithOptions(_ context.Context, path string, dat
 // proxyRouter mounts a handler's tx and query routes, broadcasting to
 // cometURL and querying through handle.
 func proxyRouter(cometURL string, handle func(path string, data []byte) (proto.Message, error)) *mux.Router {
-	handler := NewHandler(HandlerConfig{CometRPCEndpoint: cometURL})
+	handler := NewHandler(HandlerConfig{CometRPCEndpoint: cometURL, ChainID: proxyRouteTestChainID})
 	router := mux.NewRouter()
 	handler.RegisterTxRoutes(router)
 	handler.RegisterQueryRoutes(router, client.Context{}.WithClient(&fakeQueryNode{handle: handle}))
@@ -129,13 +140,19 @@ func TestProxyRoutesDormant(t *testing.T) {
 		return nil, status.Error(codes.Internal, "unexpected query")
 	}}))
 
+	batch, err := json.Marshal(proxyBatchForRouteTest())
+	require.NoError(t, err)
+	round := hex.EncodeToString(bytes.Repeat([]byte{0x01}, 32))
 	for _, req := range []*http.Request{
+		httptest.NewRequest(http.MethodPost, "/shielded-vote/v1/proxy-delegation-batch", bytes.NewReader(batch)),
 		httptest.NewRequest(http.MethodPost, "/shielded-vote/v1/delegate-op", strings.NewReader(`{}`)),
 		httptest.NewRequest(http.MethodGet, "/shielded-vote/v1/delegates?start_after=1&limit=2", nil),
 		httptest.NewRequest(http.MethodGet, "/shielded-vote/v1/delegates/1", nil),
 		httptest.NewRequest(http.MethodGet, "/shielded-vote/v1/delegates/by-key/"+strings.Repeat("ab", 32), nil),
 		httptest.NewRequest(http.MethodGet, "/shielded-vote/v1/delegates/by-handle/1/alice", nil),
+		httptest.NewRequest(http.MethodGet, "/shielded-vote/v1/delegate-ballots/"+round, nil),
 		httptest.NewRequest(http.MethodGet, "/shielded-vote/v1/proxy-delegation-params", nil),
+		httptest.NewRequest(http.MethodGet, "/shielded-vote/v1/height", nil),
 	} {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
@@ -144,8 +161,55 @@ func TestProxyRoutesDormant(t *testing.T) {
 	}
 }
 
-// TestProxySubmissionRoutesRejectNonCanonicalOrInvalidBodies checks that the
-// delegate-op endpoint decodes canonically and runs ValidateBasic, answering
+// TestProxyDelegationBatchRoute checks POST /proxy-delegation-batch with the
+// gate open: canonical decoding, a 0x09 broadcast, and a body that always
+// carries codespace and batch_digest, D1 with expiry_height = 0 under the
+// node's chain id.
+func TestProxyDelegationBatchRoute(t *testing.T) {
+	proxytest.SkipUnlessEnabled(t)
+	batch := proxyBatchForRouteTest()
+	digest, err := types.ComputeProxyDelegationBatchDigest(proxyRouteTestChainID, batch.SighashFields())
+	require.NoError(t, err)
+	d1, err := types.ComputeProxyDelegationBatchSighash(proxyRouteTestChainID, batch.SighashFields())
+	require.NoError(t, err)
+	require.NotEqual(t, d1, digest, "the digest zeroes expiry_height")
+
+	for _, c := range []struct {
+		name   string
+		result string
+		status int
+		body   map[string]any
+	}{
+		{"accepted", `{"code":0,"data":"","log":"","codespace":"","hash":"ABC123"}`, http.StatusOK,
+			map[string]any{"tx_hash": "ABC123", "code": 0.0, "codespace": "", "batch_digest": hex.EncodeToString(digest)}},
+		{"rejected", `{"code":52,"data":"","log":"proxy delegation batch expired","codespace":"vote","hash":"ABC123"}`, http.StatusUnprocessableEntity,
+			map[string]any{"tx_hash": "ABC123", "code": 52.0, "codespace": "vote", "log": "proxy delegation batch expired", "batch_digest": hex.EncodeToString(digest)}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			comet := cometExpectingTx(t, TagProxyDelegationBatch, batch, c.result)
+			rec := postJSON(t, proxyRouter(comet.URL, nil), "/shielded-vote/v1/proxy-delegation-batch", batch, false)
+			require.Equal(t, c.status, rec.Code, rec.Body.String())
+			var body map[string]any
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+			require.Equal(t, c.body, body)
+		})
+	}
+
+	// A re-signed attempt, with a new expiry and new signatures, keeps the
+	// batch's digest; another chain id changes it.
+	resigned := proxyBatchForRouteTest()
+	resigned.ExpiryHeight++
+	resigned.Dcs[0].VoteAuthSig = bytes.Repeat([]byte{0x77}, 64)
+	again, err := types.ComputeProxyDelegationBatchDigest(proxyRouteTestChainID, resigned.SighashFields())
+	require.NoError(t, err)
+	require.Equal(t, digest, again)
+	other, err := types.ComputeProxyDelegationBatchDigest("another-chain", batch.SighashFields())
+	require.NoError(t, err)
+	require.NotEqual(t, digest, other)
+}
+
+// TestProxySubmissionRoutesRejectNonCanonicalOrInvalidBodies checks that both
+// submission endpoints decode canonically and run ValidateBasic, answering
 // 400 without a broadcast.
 func TestProxySubmissionRoutesRejectNonCanonicalOrInvalidBodies(t *testing.T) {
 	proxytest.SkipUnlessEnabled(t)
@@ -155,13 +219,18 @@ func TestProxySubmissionRoutesRejectNonCanonicalOrInvalidBodies(t *testing.T) {
 	defer comet.Close()
 	router := proxyRouter(comet.URL, nil)
 
+	batch, err := json.Marshal(proxyBatchForRouteTest())
+	require.NoError(t, err)
 	retire, err := json.Marshal(delegateOpsForCodecTest()["retire"])
 	require.NoError(t, err)
 	for name, c := range map[string]struct {
 		path, body, want string
 	}{
-		"op unknown field": {"/shielded-vote/v1/delegate-op", strings.Replace(string(retire), "{", `{"memo":"x",`, 1), "unknown field"},
-		"op no variant":    {"/shielded-vote/v1/delegate-op", `{}`, "exactly one of register, retire and ballot"},
+		"batch unknown field": {"/shielded-vote/v1/proxy-delegation-batch", strings.Replace(string(batch), "{", `{"memo":"x",`, 1), "unknown field"},
+		"batch trailing":      {"/shielded-vote/v1/proxy-delegation-batch", string(batch) + ` {}`, "trailing value"},
+		"batch invalid":       {"/shielded-vote/v1/proxy-delegation-batch", `{"vote_round_id":"AQ=="}`, "validation failed"},
+		"op unknown field":    {"/shielded-vote/v1/delegate-op", strings.Replace(string(retire), "{", `{"memo":"x",`, 1), "unknown field"},
+		"op no variant":       {"/shielded-vote/v1/delegate-op", `{}`, "exactly one of register, retire and ballot"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
@@ -196,6 +265,7 @@ func TestDelegateOpRoute(t *testing.T) {
 // snake_case JSON, and maps NotFound to 404 and InvalidArgument to 400.
 func TestProxyQueryRoutes(t *testing.T) {
 	proxytest.SkipUnlessEnabled(t)
+	roundID := bytes.Repeat([]byte{0x01}, 32)
 	dk := bytes.Repeat([]byte{0xab}, 32)
 	entry := &types.ProxyDelegateEntry{
 		Index:            7,
@@ -205,6 +275,7 @@ func TestProxyQueryRoutes(t *testing.T) {
 		ProofId:          "1790000000000000000",
 		RegisteredHeight: 12,
 	}
+	ballot := &types.DelegateBallotRecord{VoteRoundId: roundID, DelegateIndex: 7, Options: []uint32{1, 0}, Height: 30}
 	params := &types.ProxyDelegationParams{
 		Verifiers:         []*types.ProxyVerifier{{VerifierId: 1, Pubkey: bytes.Repeat([]byte{0x09}, 32)}},
 		VerifierThreshold: 1,
@@ -239,6 +310,11 @@ func TestProxyQueryRoutes(t *testing.T) {
 			&types.QueryProxyDelegateByHandleRequest{Provider: 1, Handle: "alice"}, &types.QueryProxyDelegateByHandleResponse{Delegate: entry}, nil, http.StatusOK},
 		{"handle without a live entry", "/shielded-vote/v1/delegates/by-handle/2/bob", "/svote.v1.Query/ProxyDelegateByHandle",
 			&types.QueryProxyDelegateByHandleRequest{Provider: 2, Handle: "bob"}, nil, status.Error(codes.NotFound, "no live delegate entry"), http.StatusNotFound},
+		{"ballots", "/shielded-vote/v1/delegate-ballots/" + hex.EncodeToString(roundID) + "?start_after=1&limit=5", "/svote.v1.Query/DelegateBallots",
+			&types.QueryDelegateBallotsRequest{VoteRoundId: roundID, StartAfter: 1, Limit: 5},
+			&types.QueryDelegateBallotsResponse{Ballots: []*types.DelegateBallotRecord{ballot}}, nil, http.StatusOK},
+		{"unknown round", "/shielded-vote/v1/delegate-ballots/" + hex.EncodeToString(roundID), "/svote.v1.Query/DelegateBallots",
+			&types.QueryDelegateBallotsRequest{VoteRoundId: roundID}, nil, status.Error(codes.NotFound, "round not found"), http.StatusNotFound},
 		{"params", "/shielded-vote/v1/proxy-delegation-params", "/svote.v1.Query/ProxyDelegationParams",
 			&types.QueryProxyDelegationParamsRequest{},
 			&types.QueryProxyDelegationParamsResponse{Params: params, NextDelegateIndex: 8}, nil, http.StatusOK},
@@ -283,6 +359,8 @@ func TestProxyQueryRoutesRejectBadParameters(t *testing.T) {
 		"/shielded-vote/v1/delegates/4294967296",
 		"/shielded-vote/v1/delegates/by-key/zz",
 		"/shielded-vote/v1/delegates/by-handle/x/alice",
+		"/shielded-vote/v1/delegate-ballots/abcd",
+		"/shielded-vote/v1/delegate-ballots/" + strings.Repeat("01", 32) + "?limit=-1",
 	} {
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))

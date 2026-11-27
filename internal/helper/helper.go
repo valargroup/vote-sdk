@@ -19,6 +19,7 @@ type Helper struct {
 	VCHash                VCHashFunc
 	PayloadValidator      SharePayloadValidator
 	ChoiceValidator       ShareChoiceValidator
+	NextDelegateIndex     NextDelegateIndexReader
 	RoundStatus           RoundStatusChecker
 	ShareNullifierChecker ShareNullifierChecker
 	Logger                log.Logger
@@ -37,10 +38,11 @@ type Helper struct {
 //   - vcHash: computes vote commitment Poseidon hash
 //   - payloadValidator: checks caller-controlled share commitment relationships
 //   - choiceValidator: checks proposal and vote-decision membership in the round
+//   - nextDelegateIndex: reads the proxy delegate registry's next_index for pool shares
 //   - shareNFHash: computes share nullifier Poseidon hash before proof generation
 //   - homeDir: the chain's home directory (for default DB path)
 //   - logger: module logger
-func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundInfoFetcher, isRoundActive RoundStatusChecker, isRoundClosed RoundClosureChecker, isNodeReady func() bool, vcHash VCHashFunc, payloadValidator SharePayloadValidator, choiceValidator ShareChoiceValidator, shareNFHash ShareNullifierHashFunc, shareNF ShareNullifierChecker, homeDir string, logger log.Logger) (*Helper, error) {
+func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundInfoFetcher, isRoundActive RoundStatusChecker, isRoundClosed RoundClosureChecker, isNodeReady func() bool, vcHash VCHashFunc, payloadValidator SharePayloadValidator, choiceValidator ShareChoiceValidator, nextDelegateIndex NextDelegateIndexReader, shareNFHash ShareNullifierHashFunc, shareNF ShareNullifierChecker, homeDir string, logger log.Logger) (*Helper, error) {
 	logger = logger.With("module", "helper")
 
 	if cfg.Disable {
@@ -57,6 +59,7 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundI
 		{name: "vote commitment hash", unavailable: vcHash == nil},
 		{name: "share payload validator", unavailable: payloadValidator == nil},
 		{name: "share choice validator", unavailable: choiceValidator == nil},
+		{name: "delegate index reader", unavailable: nextDelegateIndex == nil},
 	} {
 		if dependency.unavailable {
 			return nil, fmt.Errorf("%w: %s", ErrShareValidationUnavailable, dependency.name)
@@ -123,6 +126,7 @@ func New(cfg Config, tree TreeReader, prover ProofGenerator, roundFetcher RoundI
 		VCHash:                vcHash,
 		PayloadValidator:      payloadValidator,
 		ChoiceValidator:       choiceValidator,
+		NextDelegateIndex:     nextDelegateIndex,
 		RoundStatus:           isRoundActive,
 		ShareNullifierChecker: shareNF,
 		Logger:                logger,
@@ -144,6 +148,7 @@ func (h *Helper) RegisterRoutes(router *mux.Router) {
 		func() RoundStatusChecker { return h.RoundStatus },
 		func() SharePayloadValidator { return h.PayloadValidator },
 		func() ShareChoiceValidator { return h.ChoiceValidator },
+		func() NextDelegateIndexReader { return h.NextDelegateIndex },
 		h.Logger,
 	)
 }

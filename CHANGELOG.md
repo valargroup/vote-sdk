@@ -8,6 +8,16 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Add proxy delegation itself, still dormant behind
+  `types.ProxyDelegationEnabled`: 0x09 batches that move a VAN's weight into
+  delegation commitments with ZKP4 proofs, proposal-0 reveals that fill each
+  delegate's pool, delegate ballots, and routing of the pools onto the
+  delegates' ballots when a proxy round starts tallying. Coordinators create a
+  proxy round with `create-voting-session --proxy-delegation`, which needs two
+  approvals. With the gate open, capability fields 4 and 5 report the proxy
+  delegation version and the circuit fingerprints, and the helper accepts pool
+  shares. See [docs/proxy-delegation/contracts-v1.md](docs/proxy-delegation/contracts-v1.md).
+
 - Add the proxy delegation wire types and delegate registry, dormant behind
   `types.ProxyDelegationEnabled`, which stays false in production builds
   (`-tags proxyenabled` opens it for tests). The contract is

@@ -847,9 +847,15 @@ func (ta *TestApp) NextBlockWithTxs(txs [][]byte) {
 // and returns the encoded tx bytes. Panics on failure (safe for tests).
 func (ta *TestApp) MustBuildSignedCeremonyTx(msg sdk.Msg) []byte {
 	ta.t.Helper()
+	return ta.MustBuildSignedTx(ta.ValPrivKey, msg)
+}
+
+// MustBuildSignedTx is MustBuildSignedCeremonyTx signed with privKey, whose
+// account must exist in committed state.
+func (ta *TestApp) MustBuildSignedTx(privKey *secp256k1.PrivKey, msg sdk.Msg) []byte {
+	ta.t.Helper()
 
 	txConfig := ta.SvoteApp.TxConfig()
-	privKey := ta.ValPrivKey
 	accAddr := sdk.AccAddress(privKey.PubKey().Address())
 
 	// Query the account for the current sequence number.

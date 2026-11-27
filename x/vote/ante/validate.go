@@ -8,22 +8,28 @@
 // Validation order:
 //  1. Basic field validation (stateless)
 //  2. Vote round existence and liveness check (stateful, KV read)
-//  3. Cast proposal existence check (stateful, KV read) — runs even on RecheckTx
+//  3. Cast proposal existence check, or a pool share's round flag and
+//     delegate index (stateful, KV read) — runs even on RecheckTx
 //  4. Nullifier uniqueness check (stateful, KV read) — runs even on RecheckTx
-//  5. RedPallas signature verification — skipped on RecheckTx
-//  6. ZKP verification — skipped on RecheckTx
+//  5. Commitment tree capacity once proxy delegation is enabled (stateful,
+//     KV read) — runs even on RecheckTx
+//  6. RedPallas signature verification — skipped on RecheckTx
+//  7. ZKP verification — skipped on RecheckTx
 //
-// A 0x0B delegate op replaces steps 2-6 with its own checks; see
-// keeper.ValidateDelegateOp. A 0x09 batch is not accepted yet
-// (docs/proxy-delegation/contracts-v1.md §5.1).
+// A 0x0B delegate op replaces steps 2-7 with its own checks; see
+// keeper.ValidateDelegateOp. A 0x09 batch replaces them with the order of
+// docs/proxy-delegation/contracts-v1.md §5.1; see
+// validateProxyDelegationBatch.
 package ante
 
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 
 	errorsmod "cosmossdk.io/errors"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/ffi/redpallas"
@@ -50,6 +56,12 @@ type ValidateOpts struct {
 	// Production: halo2.NewVerifier() (requires -tags halo2 build).
 	// Tests: zkp.NewMockVerifier() (always succeeds, no FFI needed).
 	ZKPVerifier zkp.Verifier
+
+	// LastCommittedHeight returns the store's last committed height,
+	// BaseApp.LastBlockHeight. CheckTx and RecheckTx admit a 0x09 batch at
+	// that height plus 1 (see admissionHeight). Production wires it; a 0x09
+	// batch fails CheckTx without it.
+	LastCommittedHeight func() int64
 }
 
 // ValidateVoteTx runs the full validation pipeline for a vote module transaction.
@@ -101,9 +113,9 @@ func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper
 			return k.ValidateDelegateOp(ctx, op, !opts.IsRecheck)
 		})
 	}
-	// A 0x09 batch is not accepted yet.
-	if _, ok := msg.(*types.MsgProxyDelegationBatch); ok {
-		return errorsmod.Wrap(types.ErrProxyDelegationDisabled, "0x09 batches are not accepted yet")
+	// A 0x09 batch runs its own checks in §5.1 order.
+	if batch, ok := msg.(*types.MsgProxyDelegationBatch); ok {
+		return validateProxyDelegationBatch(ctx, batch, k, opts, observation)
 	}
 
 	// 2. Vote round existence and status check (message-type-aware).
@@ -132,6 +144,13 @@ func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper
 	// 3. Reject nonexistent cast proposals before paying for any signatures or
 	// proofs. Late rejection in the message server leaves authorization unspent
 	// and lets fresh signatures repeatedly admit the same proofs to the mempool.
+	// A pool share instead needs a proxy round and a registered delegate
+	// index (contracts-v1 §5.4); neither can change once it holds, so a
+	// landed pool share's retry still reaches the nullifier check, code 2.
+	var pool *types.MsgRevealShare
+	if reveal, ok := msg.(*types.MsgRevealShare); ok && types.ProxyDelegationEnabled && reveal.ProposalId == types.PoolProposalID {
+		pool = reveal
+	}
 	var votes []*types.MsgCastVote
 	switch m := msg.(type) {
 	case *types.MsgCastVote:
@@ -142,6 +161,9 @@ func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper
 		votes = m.Batch.Votes
 	}
 	if err := observation.observe("proposal_validation", func() error {
+		if pool != nil {
+			return k.CheckPoolReveal(ctx, pool)
+		}
 		if len(votes) > 0 {
 			kvStore := k.OpenKVStore(ctx)
 			for _, vote := range votes {
@@ -173,12 +195,25 @@ func ValidateVoteTx(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper
 		return err
 	}
 
+	// 5. Tree capacity (ALWAYS runs, even on RecheckTx), once proxy
+	// delegation is enabled: as for 0x09, a tx needs room for every leaf it
+	// appends, so an overfull tx never reaches EndBlock's depth-24 tree
+	// (types.ProxyMaxTreePosition). It follows the nullifier check, so a
+	// landed tx's retry is still ErrDuplicateNullifier.
+	if appends := keeper.CommitmentAppendCount(msg); types.ProxyDelegationEnabled && appends > 0 {
+		if err := observation.observe("tree_capacity", func() error {
+			return k.EnsureCommitmentCapacity(k.OpenKVStore(ctx), msg.GetVoteRoundId(), appends)
+		}); err != nil {
+			return err
+		}
+	}
+
 	// Skip expensive cryptographic checks on RecheckTx.
 	if opts.IsRecheck {
 		return nil
 	}
 
-	// 5–6. Per-message-type signature and ZKP verification.
+	// 6–7. Per-message-type signature and ZKP verification.
 	return verifyProofs(ctx, msg, k, opts, observation)
 }
 
@@ -215,6 +250,135 @@ func verifyProofs(ctx context.Context, msg types.VoteMessage, k *keeper.Keeper, 
 			return fmt.Errorf("unknown vote message type: %T", msg)
 		})
 	}
+}
+
+// admissionHeight returns the height h that a 0x09 batch's expiry_height is
+// checked against (contracts-v1 §5.1 step 4): the block's height in
+// FinalizeBlock, and in CheckTx and RecheckTx the last committed height plus
+// 1, never the context header's height, which reads 0 just after a restart.
+func admissionHeight(ctx context.Context, opts ValidateOpts) (uint64, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	if !opts.IsRecheck && !sdkCtx.IsCheckTx() {
+		return uint64(sdkCtx.BlockHeight()), nil
+	}
+	if opts.LastCommittedHeight == nil {
+		return 0, errors.New("ante options carry no last committed height")
+	}
+	last := opts.LastCommittedHeight()
+	if last < 0 {
+		return 0, fmt.Errorf("invalid last committed height %d", last)
+	}
+	return uint64(last) + 1, nil
+}
+
+// validateProxyDelegationBatch runs steps 2 to 8 of the 0x09 ante
+// (contracts-v1 §5.1) in order: keeper.CheckProxyDelegationBatch at the
+// admission height, then, except in RecheckTx, every DC's signature over
+// D1, the registration's own checks and the ZKP4 proofs. Every failure
+// reports its registered code (§0).
+func validateProxyDelegationBatch(ctx context.Context, msg *types.MsgProxyDelegationBatch, k *keeper.Keeper, opts ValidateOpts, observation *verificationObservation) error {
+	height, err := admissionHeight(ctx, opts)
+	if err != nil {
+		return err
+	}
+	if err := observation.observe("proxy_batch_state", func() error {
+		return k.CheckProxyDelegationBatch(ctx, msg, height)
+	}); err != nil {
+		return err
+	}
+	if opts.IsRecheck {
+		return nil
+	}
+
+	// Step 6: every DC's signature over D1, all before any proof.
+	var digest []byte
+	if err := observation.observe("proxy_sighash", func() error {
+		var err error
+		digest, err = types.ComputeProxyDelegationBatchSighash(sdk.UnwrapSDKContext(ctx).ChainID(), msg.SighashFields())
+		return err
+	}); err != nil {
+		return err
+	}
+	for i, dc := range msg.Dcs {
+		if err := observation.observe("proxy_key_decode", func() error {
+			_, err := elgamal.UnmarshalPublicKey(dc.RVpk)
+			return err
+		}); err != nil {
+			return errorsmod.Wrapf(types.ErrInvalidSignature, "dcs[%d] r_vpk: %v", i, err)
+		}
+		if err := observation.observe("proxy_signature", func() error {
+			return opts.SigVerifier.Verify(dc.RVpk, digest, dc.VoteAuthSig)
+		}); err != nil {
+			return errorsmod.Wrapf(types.ErrInvalidSignature, "dcs[%d]: %v", i, err)
+		}
+	}
+
+	// Step 7: the registration's SpendAuth signature and ZKP1, as in 0x07.
+	if msg.Registration != nil {
+		if err := verifyDelegation(ctx, msg.Registration, k, opts, observation); err != nil {
+			return errorsmod.Wrap(types.SurfaceRegisteredCode(err), "registration")
+		}
+	}
+
+	// Step 8: the ZKP4 proofs. The first spends a VAN under root0, the
+	// registration's single-leaf root or the tree root at the anchor; each
+	// later one spends its predecessor's successor VAN under that VAN's
+	// single-leaf root. Every DC proves at the batch's anchor height.
+	kvStore := k.OpenKVStore(ctx)
+	var round *types.VoteRound
+	if err := observation.observe("round_lookup", func() error {
+		var err error
+		round, err = k.GetVoteRound(kvStore, msg.VoteRoundId)
+		return err
+	}); err != nil {
+		return err
+	}
+	var root []byte
+	if msg.Registration != nil {
+		if err := observation.observe("synthetic_root", func() error {
+			var err error
+			root, err = votetree.SingleLeafRoot(msg.Registration.VanCmx)
+			return err
+		}); err != nil {
+			return errorsmod.Wrapf(types.ErrInvalidProof, "registration van_cmx: %v", err)
+		}
+	} else if err := observation.observe("commitment_root_lookup", func() error {
+		var err error
+		root, err = k.GetCommitmentRootAtHeight(kvStore, msg.VoteRoundId, msg.VoteCommTreeAnchorHeight)
+		if err == nil && root == nil {
+			err = errorsmod.Wrapf(types.ErrInvalidAnchorHeight, "no commitment tree root at height %d", msg.VoteCommTreeAnchorHeight)
+		}
+		return err
+	}); err != nil {
+		return err
+	}
+	for i, dc := range msg.Dcs {
+		if err := observation.observe("proxy_proof", func() error {
+			return opts.ZKPVerifier.VerifyProxyDelegation(dc.Proof, zkp.ProxyDelegationInputs{
+				VanNullifier:              dc.VanNullifier,
+				RVpk:                      dc.RVpk,
+				VoteAuthorityNoteNew:      dc.VoteAuthorityNoteNew,
+				ProxyDelegationCommitment: dc.ProxyDelegationCommitment,
+				VoteCommTreeRoot:          root,
+				AnchorHeight:              msg.VoteCommTreeAnchorHeight,
+				VoteRoundId:               msg.VoteRoundId,
+				EaPk:                      round.EaPk,
+				DcSlotNullifier:           dc.DcSlotNullifier,
+			})
+		}); err != nil {
+			return errorsmod.Wrapf(types.ErrInvalidProof, "dcs[%d]: proxy delegation: %v", i, err)
+		}
+		if i+1 < len(msg.Dcs) {
+			if err := observation.observe("synthetic_root", func() error {
+				var err error
+				root, err = votetree.SingleLeafRoot(dc.VoteAuthorityNoteNew)
+				return err
+			}); err != nil {
+				return errorsmod.Wrapf(types.ErrInvalidProof, "dcs[%d] vote_authority_note_new: %v", i, err)
+			}
+		}
+	}
+	return nil
 }
 
 // verifyDelegateAndCastVoteBatch verifies the delegation and then anchors the

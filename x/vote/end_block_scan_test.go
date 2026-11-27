@@ -27,7 +27,9 @@ import (
 // The state and ordered-event digests were captured from the five-scan EndBlock
 // at c157ca61cda5a34bfb98d6d9eb0aa7f9b8b03a89. Keep phase ordering, including
 // newly ACTIVE rounds waiting one block and newly TALLYING rounds being eligible
-// for the final phase in the same block.
+// for the final phase in the same block. The digests are the same with the
+// proxy delegation gate open (-tags proxyenabled): no round here has the proxy
+// flag, so routing changes nothing.
 func TestEndBlockCommittedStateCompatibility(t *testing.T) {
 	expected := map[string][][2]string{
 		"transitions": {
@@ -41,7 +43,7 @@ func TestEndBlockCommittedStateCompatibility(t *testing.T) {
 			{"d9ddc990c7d4f8344486d86a8a05278675233491728e7914b46043a9103018d1", "004770fd53f60aadfd41f15095f6e8a236eadf3ca1a44be974e3a3d1a8ef65ee"},
 		},
 	}
-	for _, scenario := range []struct {
+	scenarios := []struct {
 		name  string
 		times []int64
 	}{
@@ -49,7 +51,8 @@ func TestEndBlockCommittedStateCompatibility(t *testing.T) {
 		// Preserve existing uint64 deadline overflow behavior, even when a round
 		// starts tallying and times out in the same block.
 		{"overflow", []int64{-1}},
-	} {
+	}
+	for _, scenario := range scenarios {
 		t.Run(scenario.name, func(t *testing.T) {
 			key := storetypes.NewKVStoreKey(types.StoreKey)
 			testCtx := testutil.DefaultContextWithDB(t, key, storetypes.NewTransientStoreKey("transient"))
@@ -126,11 +129,12 @@ func TestEndBlockCommittedStateCompatibility(t *testing.T) {
 				}
 			}
 
+			module := vote.NewAppModule(k, nil)
 			for block, now := range scenario.times {
 				service.scans, service.values = 0, 0
 				ctx := testCtx.Ctx.WithBlockHeight(int64(block + 1)).WithBlockTime(time.Unix(now, 0).UTC()).
 					WithEventManager(sdk.NewEventManager())
-				require.NoError(t, vote.NewAppModule(k, nil).EndBlock(ctx))
+				require.NoError(t, module.EndBlock(ctx))
 				require.Equal(t, 1, service.scans)
 				require.Equal(t, 18, service.values)
 				require.Zero(t, service.open)

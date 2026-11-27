@@ -84,11 +84,14 @@ who proposes the action, and once the coordinator threshold is met the native
 ## Proxy Delegation Actions
 
 Three payloads manage proxy delegation (`docs/proxy-delegation/contracts-v1.md`
-sections 2.4 and 5.5). Until proxy delegation is enabled at the v1.7.0
-upgrade, the chain rejects all three payloads as unsupported.
+sections 2.4 and 5.5), and `MsgCreateVotingSession` gains a flag. Until proxy
+delegation is enabled at the v1.7.0 upgrade, the chain rejects all three
+payloads as unsupported, and a flagged session with code 69
+(`ErrProxyDelegationDisabled`).
 
-**Approval floor.** The three payloads execute only with at least
-`max(2, threshold)` distinct current coordinator approvals. They never execute inside the proposing
+**Approval floor.** The three payloads, and a `MsgCreateVotingSession` with
+`proxy_delegation` set, execute only with at least `max(2, threshold)` distinct
+current coordinator approvals. They never execute inside the proposing
 transaction, even at threshold 1, so proxy delegation needs at least two vote
 managers in the coordinator policy. Other actions keep their threshold.
 
@@ -96,6 +99,7 @@ managers in the coordinator policy. Other actions keep their threshold.
 `max_delegates`, `MsgSetProxyDelegationPause` pauses new delegation batches,
 and `MsgSetDelegateStatus` suspends, lifts or retires delegates. Their fields,
 bounds, error codes and events are in contracts-v1 sections 2.4 and 5.5.
+| `MsgCreateVotingSession` with `proxy_delegation` | The session's fields, plus the flag | Creates a proxy delegation round, which records the registry's next delegate index at creation. |
 
 From the CLI:
 
@@ -105,10 +109,13 @@ svoted tx vote set-proxy-delegation-pause true --from <key>
 svoted tx vote set-delegate-status suspend --delegate 17 --delegate 18 --reason 1 --from <key>
 svoted tx vote set-delegate-status lift --delegate 17 --reason 4 --from <key>
 svoted tx vote set-delegate-status retire --delegate 18 --reason 2 --from <key>
+svoted tx vote create-voting-session session.json --proxy-delegation --from <key>
 ```
 
 Each command only proposes the action, which then waits for other
-coordinators to approve it with `approve-coordinator-action`.
+coordinators to approve it with `approve-coordinator-action`. The proxy flag is
+set only with `--proxy-delegation`; a session file that names
+`proxy_delegation` is refused.
 
 ## Actions Outside Coordinator Multisig
 
@@ -138,7 +145,7 @@ actions list.
 
 The CLI commands for coordinator-owned actions create coordinator proposals:
 
-- `svoted tx vote create-voting-session ...`
+- `svoted tx vote create-voting-session ... [--proxy-delegation]`
 - `svoted tx vote update-vote-managers ... --threshold <n>`
 - `svoted tx vote schedule-upgrade ...`
 - `svoted tx vote cancel-upgrade`

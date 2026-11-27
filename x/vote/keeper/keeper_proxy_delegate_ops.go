@@ -3,7 +3,11 @@ package keeper
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
+	"errors"
+	"slices"
 	"strconv"
+	"strings"
 
 	"cosmossdk.io/core/store"
 	errorsmod "cosmossdk.io/errors"
@@ -16,8 +20,7 @@ import (
 // (docs/proxy-delegation/contracts-v1.md §5.3), in that section's order,
 // without writing state. verifySignatures is false in RecheckTx, which skips
 // the Ed25519 checks and keeps every other check. Each failure carries its
-// registered code (§6). Callers check the dormancy gate. Delegate ballots
-// are not accepted yet (errDelegateBallotsNotAccepted).
+// registered code (§6). Callers check the dormancy gate.
 func (k *Keeper) ValidateDelegateOp(ctx context.Context, op *types.MsgDelegateOp, verifySignatures bool) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	kvStore := k.OpenKVStore(ctx)
@@ -29,7 +32,7 @@ func (k *Keeper) ValidateDelegateOp(ctx context.Context, op *types.MsgDelegateOp
 		_, err := k.checkDelegateRetire(sdkCtx, kvStore, op.Retire, verifySignatures)
 		return err
 	case op.GetBallot() != nil:
-		return errDelegateBallotsNotAccepted()
+		return k.checkDelegateBallot(sdkCtx, kvStore, op.Ballot, verifySignatures)
 	default:
 		return errorsmod.Wrap(types.ErrInvalidField, "no delegate op is set")
 	}
@@ -251,8 +254,90 @@ func requireActiveDelegate(entry *types.ProxyDelegateEntry) error {
 	}
 }
 
-// errDelegateBallotsNotAccepted refuses a 0x0B ballot. Ballots are not
-// accepted yet, since there are no proxy rounds to ballot in.
-func errDelegateBallotsNotAccepted() error {
-	return errorsmod.Wrap(types.ErrProxyDelegationDisabled, "delegate ballots are not accepted yet")
+// checkDelegateBallot runs the ballot checks of contracts-v1 §5.3 in order.
+// See ValidateDelegateOp. CheckTx and RecheckTx skip the vote_end_time check
+// while the header time is unset after a restart, as ValidateRoundForVoting
+// does; FinalizeBlock always applies it.
+func (k *Keeper) checkDelegateBallot(ctx sdk.Context, kvStore store.KVStore, op *types.DelegateBallot, verifySignatures bool) error {
+	roundID, d := op.GetVoteRoundId(), op.GetDelegateIndex()
+	round, err := k.GetVoteRound(kvStore, roundID)
+	if errors.Is(err, types.ErrRoundNotFound) {
+		return errorsmod.Wrapf(types.ErrRoundNotFound, "round %x", roundID)
+	}
+	if err != nil {
+		return err
+	}
+	// Nothing that can change after a ballot lands comes before this check,
+	// so a retry of a landed ballot is always ErrDelegateBallotExists.
+	stored, err := k.HasDelegateBallot(kvStore, roundID, d)
+	if err != nil {
+		return err
+	}
+	if stored {
+		return errorsmod.Wrapf(types.ErrDelegateBallotExists, "delegate %d has a ballot in round %x", d, roundID)
+	}
+
+	if round.Status != types.SessionStatus_SESSION_STATUS_ACTIVE {
+		return errorsmod.Wrapf(types.ErrRoundNotActive, "round %x is %s", roundID, round.Status)
+	}
+	switch blockTime := ctx.BlockTime().Unix(); {
+	case blockTime < 0 && (ctx.IsCheckTx() || ctx.IsReCheckTx()):
+		// The header time is unset; FinalizeBlock checks the end time.
+	case blockTime < 0:
+		return errorsmod.Wrapf(types.ErrRoundNotActive, "invalid block time %d", blockTime)
+	case uint64(blockTime) >= round.VoteEndTime:
+		return errorsmod.Wrapf(types.ErrRoundNotActive, "vote_end_time %d <= block_time %d", round.VoteEndTime, blockTime)
+	}
+	if !round.GetProxyDelegation().GetEnabled() {
+		return errorsmod.Wrapf(types.ErrProxyDelegationDisabled, "round %x is not a proxy round", roundID)
+	}
+
+	entry, err := k.GetProxyDelegateEntry(kvStore, d)
+	if err != nil {
+		return err
+	}
+	if err := requireActiveDelegate(entry); err != nil {
+		return err
+	}
+	if verifySignatures {
+		digest, err := types.ComputeDelegateBallotDigest(ctx.ChainID(), roundID, d, op.GetOptions())
+		if err != nil {
+			return err
+		}
+		if err := types.VerifyEd25519ZIP215(entry.Dk, digest, op.GetDkSig()); err != nil {
+			return errorsmod.Wrapf(types.ErrInvalidSignature, "dk_sig: ed25519 over BALLOT under delegate %d's key: %v", d, err)
+		}
+	}
+
+	return types.ValidateDelegateBallotOptions(round, op.GetOptions())
+}
+
+// executeDelegateBallot re-runs every ballot check, the signature included,
+// then stores the ballot at 0x1B round d, emits delegate_ballot and returns d
+// (contracts-v1 §5.3).
+func (k *Keeper) executeDelegateBallot(ctx sdk.Context, op *types.DelegateBallot) (uint32, error) {
+	kvStore := k.OpenKVStore(ctx)
+	if err := k.checkDelegateBallot(ctx, kvStore, op, true); err != nil {
+		return 0, err
+	}
+	if err := k.SetDelegateBallot(kvStore, &types.DelegateBallotRecord{
+		VoteRoundId:   bytes.Clone(op.VoteRoundId),
+		DelegateIndex: op.DelegateIndex,
+		Options:       slices.Clone(op.Options),
+		Height:        uint64(ctx.BlockHeight()),
+	}); err != nil {
+		return 0, err
+	}
+
+	options := make([]string, len(op.Options))
+	for i, option := range op.Options {
+		options[i] = strconv.FormatUint(uint64(option), 10)
+	}
+	ctx.EventManager().EmitEvent(sdk.NewEvent(
+		types.EventTypeDelegateBallot,
+		sdk.NewAttribute(types.AttributeKeyRoundID, hex.EncodeToString(op.VoteRoundId)),
+		sdk.NewAttribute(types.AttributeKeyDelegateIndex, strconv.FormatUint(uint64(op.DelegateIndex), 10)),
+		sdk.NewAttribute(types.AttributeKeyOptions, strings.Join(options, ",")),
+	))
+	return op.DelegateIndex, nil
 }

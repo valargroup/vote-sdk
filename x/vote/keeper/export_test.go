@@ -1,6 +1,8 @@
 package keeper
 
-import "cosmossdk.io/core/store"
+import (
+	"cosmossdk.io/core/store"
+)
 
 // TreeSizeForTest exposes the tree handle Size() for testing. Returns 0 if the
 // handle has not been initialized yet for the given round.

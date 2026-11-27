@@ -379,3 +379,92 @@ func (s *ProxyRegistryTestSuite) TestProxyPayloadExecutionRevalidates() {
 	proxytest.RequireCode(s.T(), s.approve(proxyManagerB, 7).err, types.ErrInvalidProxyParams, 68)
 	s.requireNoRegistryKeys()
 }
+
+// TestProxyRoundFlagApprovalFloor checks a MsgCreateVotingSession that sets
+// proxy_delegation with the gate open: the floor holds it at one approval
+// under threshold 1, a repeated approval does not count, and a second
+// manager's approval executes it, creating a proxy round (§5.5).
+func (s *MsgServerTestSuite) TestProxyRoundFlagApprovalFloor() {
+	proxytest.SkipUnlessEnabled(s.T())
+	s.seedEligibleValidators(2)
+	manager, managerB := svtest.DefaultVoteManagerAddress, svtest.TestAccAddr(0xB2)
+	s.seedVoteManagers(manager, managerB)
+	msg := validSetupMsg()
+	msg.ProxyDelegation = true
+	roundID := computeExpectedRoundID(msg, uint64(s.ctx.BlockHeight()))
+
+	resp, err := s.proposeCoordinatorAction(s.ctx, manager, msg)
+	s.Require().NoError(err)
+	s.Require().False(resp.Executed)
+	_, err = s.keeper.GetVoteRound(s.keeper.OpenKVStore(s.ctx), roundID)
+	s.Require().ErrorIs(err, types.ErrRoundNotFound)
+
+	_, err = s.msgServer.ApproveCoordinatorAction(s.ctx, &types.MsgApproveCoordinatorAction{Creator: manager, ActionId: resp.ActionId})
+	s.Require().ErrorIs(err, types.ErrCoordinatorAlreadyApproved)
+
+	approved, err := s.msgServer.ApproveCoordinatorAction(s.ctx, &types.MsgApproveCoordinatorAction{Creator: managerB, ActionId: resp.ActionId})
+	s.Require().NoError(err)
+	s.Require().True(approved.Executed)
+	round, err := s.keeper.GetVoteRound(s.keeper.OpenKVStore(s.ctx), roundID)
+	s.Require().NoError(err)
+	s.Require().True(round.GetProxyDelegation().GetEnabled())
+}
+
+// TestProxyRoundFlagWritesRoundState checks the round the flag creates with
+// the gate open (§3.1, §5.5): field 31 records enabled, next_index at
+// creation and pools_routed false, and the round id is the one the same
+// payload gets without the flag, because field 31 is outside the round-id
+// preimage. A round without the flag has no field 31.
+func (s *MsgServerTestSuite) TestProxyRoundFlagWritesRoundState() {
+	proxytest.SkipUnlessEnabled(s.T())
+	create := func(flag bool) *types.VoteRound {
+		s.SetupTest()
+		s.seedEligibleValidators(2)
+		manager, managerB := svtest.DefaultVoteManagerAddress, svtest.TestAccAddr(0xB2)
+		s.seedVoteManagers(manager, managerB)
+		kv := s.keeper.OpenKVStore(s.ctx)
+		s.Require().NoError(s.keeper.SetProxyNextDelegateIndex(kv, 4))
+		msg := validSetupMsg()
+		msg.ProxyDelegation = flag
+
+		resp, err := s.proposeCoordinatorAction(s.ctx, manager, msg)
+		s.Require().NoError(err)
+		if !resp.Executed {
+			_, err = s.msgServer.ApproveCoordinatorAction(s.ctx, &types.MsgApproveCoordinatorAction{Creator: managerB, ActionId: resp.ActionId})
+			s.Require().NoError(err)
+		}
+		var rounds []*types.VoteRound
+		s.Require().NoError(s.keeper.IterateAllRounds(kv, func(round *types.VoteRound) bool {
+			rounds = append(rounds, round)
+			return false
+		}))
+		s.Require().Len(rounds, 1)
+		return rounds[0]
+	}
+
+	flagged := create(true)
+	s.Require().True(proto.Equal(&types.ProxyDelegationRoundState{Enabled: true, NextDelegateIndexAtCreation: 4}, flagged.ProxyDelegation))
+	unflagged := create(false)
+	s.Require().Nil(unflagged.ProxyDelegation)
+	s.Require().Equal(unflagged.VoteRoundId, flagged.VoteRoundId)
+	s.Require().Equal(computeExpectedRoundID(validSetupMsg(), uint64(s.ctx.BlockHeight())), flagged.VoteRoundId)
+	// Each setup registers fresh random Pallas keys.
+	flagged.ProxyDelegation, flagged.CeremonyValidators, unflagged.CeremonyValidators = nil, nil, nil
+	s.Require().True(proto.Equal(unflagged, flagged), "the flag changes nothing else")
+}
+
+// TestCreateVotingSessionWithoutFlagKeepsThreshold checks that, with the gate
+// open or closed, a create-session without the flag still executes in its
+// proposing tx at threshold 1, as today.
+func (s *MsgServerTestSuite) TestCreateVotingSessionWithoutFlagKeepsThreshold() {
+	s.seedEligibleValidators(2)
+	s.seedVoteManagers(svtest.DefaultVoteManagerAddress, svtest.TestAccAddr(0xB2))
+	msg := validSetupMsg()
+
+	resp, err := s.proposeCoordinatorAction(s.ctx, msg.Creator, msg)
+	s.Require().NoError(err)
+	s.Require().True(resp.Executed)
+	round, err := s.keeper.GetVoteRound(s.keeper.OpenKVStore(s.ctx), computeExpectedRoundID(msg, uint64(s.ctx.BlockHeight())))
+	s.Require().NoError(err)
+	s.Require().Nil(round.ProxyDelegation)
+}

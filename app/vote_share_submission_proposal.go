@@ -27,7 +27,9 @@ type voteShareSubmissionFilterStats struct {
 // filterVoteShareSubmissionTransactions keeps the first well-formed
 // transaction for each round-scoped share nullifier, preserves the relative
 // order of all retained transactions, and enforces
-// MaxVoteShareSubmissionsPerBlock.
+// MaxVoteShareSubmissionsPerBlock. With the gate open a pool share
+// (proposal 0) is well formed too and counts toward the cap
+// (docs/proxy-delegation/contracts-v1.md §5.4).
 func filterVoteShareSubmissionTransactions(txs [][]byte) ([][]byte, voteShareSubmissionFilterStats) {
 	filtered := make([][]byte, 0, len(txs))
 	seen := make(map[voteShareSubmissionProposalKey]struct{})
@@ -90,7 +92,9 @@ func validateVoteShareSubmissionTransactions(txs [][]byte) error {
 
 // voteShareSubmissionProposalKeyFromTx recognizes the existing MsgRevealShare
 // wire type and cheaply extracts the fields used for proposal deduplication.
-// Full signature and proof verification remain in the ante handler.
+// Its stateless checks follow the proxy delegation gate
+// (MsgRevealShare.ValidateBasic). Full signature and proof verification
+// remain in the ante handler.
 func voteShareSubmissionProposalKeyFromTx(txBytes []byte) (voteShareSubmissionProposalKey, bool, error) {
 	if len(txBytes) == 0 || txBytes[0] != voteapi.TagRevealShare {
 		return voteShareSubmissionProposalKey{}, false, nil

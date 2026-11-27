@@ -122,11 +122,46 @@ func (qs queryServer) ProxyDelegateByHandle(goCtx context.Context, req *types.Qu
 	return &types.QueryProxyDelegateByHandleResponse{Delegate: entry}, nil
 }
 
-// DelegateBallots pages through a round's delegate ballots (contracts-v1
-// §8). Ballots are not stored yet, so it is gRPC Unimplemented whatever the
-// gate.
-func (qs queryServer) DelegateBallots(context.Context, *types.QueryDelegateBallotsRequest) (*types.QueryDelegateBallotsResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "delegate ballots are not served yet")
+// DelegateBallots pages through a round's delegate ballots by delegate index
+// (contracts-v1 §8). It returns the round's ballots with a delegate index
+// above start_after in ascending order, at most limit of them, and
+// next_start_after as the last index returned while more remain, else 0. An
+// unknown round is NotFound, and a known round without ballots has an empty
+// page.
+func (qs queryServer) DelegateBallots(goCtx context.Context, req *types.QueryDelegateBallotsRequest) (*types.QueryDelegateBallotsResponse, error) {
+	if !types.ProxyDelegationEnabled {
+		return nil, errProxyDelegationQueryDormant()
+	}
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "empty request")
+	}
+	if len(req.VoteRoundId) != types.RoundIDLen {
+		return nil, status.Errorf(codes.InvalidArgument, "vote_round_id must be exactly %d bytes, got %d", types.RoundIDLen, len(req.VoteRoundId))
+	}
+	limit, err := proxyQueryPageLimit(req.Limit)
+	if err != nil {
+		return nil, err
+	}
+	kvStore := qs.k.OpenKVStore(sdk.UnwrapSDKContext(goCtx))
+	_, err = qs.k.GetVoteRound(kvStore, req.VoteRoundId)
+	if errors.Is(err, types.ErrRoundNotFound) {
+		return nil, status.Errorf(codes.NotFound, "round %x not found", req.VoteRoundId)
+	}
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get round %x: %v", req.VoteRoundId, err)
+	}
+	resp := &types.QueryDelegateBallotsResponse{}
+	if err := qs.k.IterateDelegateBallots(kvStore, req.VoteRoundId, req.StartAfter, func(ballot *types.DelegateBallotRecord) bool {
+		if len(resp.Ballots) == limit {
+			resp.NextStartAfter = resp.Ballots[limit-1].DelegateIndex
+			return true
+		}
+		resp.Ballots = append(resp.Ballots, ballot)
+		return false
+	}); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to iterate delegate ballots: %v", err)
+	}
+	return resp, nil
 }
 
 // ProxyDelegationParams returns the registry params and the next delegate

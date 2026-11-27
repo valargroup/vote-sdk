@@ -24,15 +24,23 @@ func NewQueryServerImpl(keeper *Keeper) types.QueryServer {
 	return &queryServer{k: keeper}
 }
 
-// ProtocolCapabilities advertises additive wire features. Upgrade coordination
-// still controls when operators deploy this binary; clients use this query to
-// avoid attempting the new transaction against an older node.
+// ProtocolCapabilities advertises additive wire features. Upgrade
+// coordination still controls when operators deploy this binary; clients use
+// this query to avoid attempting the new transaction against an older node.
+// With the gate open, field 4 is ProxyDelegationVersion and field 5 the
+// published circuit fingerprints (Keeper.SetCircuitFingerprints). While
+// dormant both stay empty (docs/proxy-delegation/contracts-v1.md §9, §11.4).
 func (qs queryServer) ProtocolCapabilities(_ context.Context, _ *types.QueryProtocolCapabilitiesRequest) (*types.QueryProtocolCapabilitiesResponse, error) {
-	return &types.QueryProtocolCapabilitiesResponse{
+	resp := &types.QueryProtocolCapabilitiesResponse{
 		AtomicCastVoteBatch:                   true,
 		AtomicDelegateAndCastVoteBatch:        true,
 		AtomicDelegateAndCastVoteBatchWireTag: 0x07,
-	}, nil
+	}
+	if types.ProxyDelegationEnabled {
+		resp.ProxyDelegationVersion = types.ProxyDelegationVersion
+		resp.CircuitFingerprints = qs.k.CircuitFingerprints()
+	}
+	return resp, nil
 }
 
 // CommitmentTreeAtHeight returns the commitment tree root at a specific anchor height for a round.
@@ -113,8 +121,12 @@ func (qs queryServer) VoteRound(goCtx context.Context, req *types.QueryVoteRound
 	return &types.QueryVoteRoundResponse{Round: round}, nil
 }
 
-// ProposalTally returns the accumulated tally for a proposal within a vote round.
-// The tally maps each vote decision to the total accumulated vote amount.
+// ProposalTally returns the accumulated tally for a proposal within a vote
+// round. The tally maps each vote decision to the total accumulated vote
+// amount. With the gate open it answers only for a proposal of a known
+// round, so no query exposes a delegate pool (contracts-v1 §8, plan OPS-12):
+// an unknown round is NotFound, and proposal 0 or an id past the proposals
+// is InvalidArgument.
 func (qs queryServer) ProposalTally(goCtx context.Context, req *types.QueryProposalTallyRequest) (*types.QueryProposalTallyResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "empty request")
@@ -125,6 +137,19 @@ func (qs queryServer) ProposalTally(goCtx context.Context, req *types.QueryPropo
 
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := qs.k.OpenKVStore(ctx)
+
+	if types.ProxyDelegationEnabled {
+		round, err := qs.k.GetVoteRound(kvStore, req.VoteRoundId)
+		if errors.Is(err, types.ErrRoundNotFound) {
+			return nil, status.Errorf(codes.NotFound, "vote round %x not found", req.VoteRoundId)
+		}
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to get vote round: %v", err)
+		}
+		if req.ProposalId < types.MinProposalID || int(req.ProposalId) > len(round.Proposals) {
+			return nil, status.Errorf(codes.InvalidArgument, "proposal_id must be %d..%d, got %d", types.MinProposalID, len(round.Proposals), req.ProposalId)
+		}
+	}
 
 	tally, err := qs.k.GetProposalTally(kvStore, req.VoteRoundId, req.ProposalId)
 	if err != nil {

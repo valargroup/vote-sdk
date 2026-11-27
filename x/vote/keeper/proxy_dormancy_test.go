@@ -3,6 +3,7 @@
 package keeper_test
 
 import (
+	"bytes"
 	"testing"
 
 	"google.golang.org/grpc/codes"
@@ -134,9 +135,51 @@ func (s *QueryServerTestSuite) TestProxyDelegationQueriesDormant() {
 	}
 }
 
-// TestProxyHandlersDormant checks that with the gate closed the 0x0B
-// handler answers a bare ErrProxyDelegationDisabled before any other check,
-// well-formed or not, and writes nothing.
+// TestProposalTallyDormantReadsAnyID checks that while dormant ProposalTally
+// reads any id of any round as today; no pool exists then.
+func (s *QueryServerTestSuite) TestProposalTallyDormantReadsAnyID() {
+	resp, err := s.queryServer.ProposalTally(s.ctx, &types.QueryProposalTallyRequest{VoteRoundId: bytes.Repeat([]byte{0x7C}, 32), ProposalId: 3})
+	s.Require().NoError(err)
+	s.Require().Empty(resp.Tally)
+}
+
+func (s *QueryServerTestSuite) TestProtocolCapabilities_ProxyDelegationOff() {
+	for _, published := range []bool{false, true} {
+		if published {
+			s.keeper.SetCircuitFingerprints(testCircuitFingerprints())
+		}
+		resp, err := s.queryServer.ProtocolCapabilities(s.ctx, &types.QueryProtocolCapabilitiesRequest{})
+		s.Require().NoError(err)
+		s.Require().True(resp.AtomicCastVoteBatch)
+		s.Require().True(resp.AtomicDelegateAndCastVoteBatch)
+		s.Require().Equal(uint32(0x07), resp.AtomicDelegateAndCastVoteBatchWireTag)
+		s.Require().Zero(resp.ProxyDelegationVersion, "published %t", published)
+		s.Require().Empty(resp.CircuitFingerprints, "published %t", published)
+	}
+}
+
+// TestTreeCapacityDormant checks that while proxy delegation is dormant the
+// existing handlers and AppendCommitment keep today's unbounded appends: on
+// a tree already holding 2^24 leaves, each tag still lands its leaves.
+func TestTreeCapacityDormant(t *testing.T) {
+	s := new(ProxyBatchTestSuite)
+	s.SetT(t)
+	s.SetupTest()
+	next := types.ProxyMaxTreePosition + 1
+	s.seedTree(next)
+	for _, tx := range existingAppendingTxs() {
+		s.Require().NoError(s.deliver(tx.msg), tx.tag)
+		next += tx.appends
+		s.Require().Equal(next, s.state().treeSize, tx.tag)
+	}
+	index, err := s.keeper.AppendCommitment(s.kv(), proxyBatchRound, svtest.FpLE(0xE1))
+	s.Require().NoError(err)
+	s.Require().Equal(next, index)
+}
+
+// TestProxyHandlersDormant checks that with the gate closed the 0x09 and
+// 0x0B handlers answer a bare ErrProxyDelegationDisabled before any other
+// check, well-formed or not, and write nothing.
 func TestProxyHandlersDormant(t *testing.T) {
 	s := new(ProxyRegistryTestSuite)
 	s.SetT(t)
@@ -147,4 +190,14 @@ func TestProxyHandlersDormant(t *testing.T) {
 	_, err = s.msgServer.DelegateOp(s.ctx, &types.MsgDelegateOp{})
 	requireProxyDelegationDisabled(t, err)
 	s.requireNoRegistrations()
+
+	batches := new(ProxyBatchTestSuite)
+	batches.SetT(t)
+	batches.SetupTest()
+	before := batches.state()
+	for _, msg := range []*types.MsgProxyDelegationBatch{proxyBatch(1, false), {}} {
+		_, err := batches.msgServer.ProxyDelegationBatch(batches.ctx, msg)
+		requireProxyDelegationDisabled(t, err)
+	}
+	batches.Require().Equal(before, batches.state())
 }
