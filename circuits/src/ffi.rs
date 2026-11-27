@@ -16,7 +16,9 @@ use voting_crypto_deps::halo2_proofs::pasta::Fp;
 use voting_crypto_deps::pasta_curves::group::ff::PrimeField;
 
 use crate::delegation;
+use crate::fingerprints;
 use crate::proof::{verify_halo2_proof_bytes, ProofVerifyError};
+use crate::proxy_delegation;
 use crate::redpallas;
 use crate::share_reveal;
 use crate::toy;
@@ -39,7 +41,7 @@ thread_local! {
 ///
 /// Called internally by every FFI function before returning a non-zero code.
 /// The message is retrievable via `sv_last_error()`.
-fn set_ffi_error(msg: impl AsRef<str>) {
+pub(crate) fn set_ffi_error(msg: impl AsRef<str>) {
     let s = msg.as_ref();
     let cstr = CString::new(s)
         .unwrap_or_else(|_| CString::new("<error message contained NUL byte>").unwrap());
@@ -923,21 +925,242 @@ pub unsafe extern "C" fn sv_verify_vote_proof(
 }
 
 // ---------------------------------------------------------------------------
+// Proxy delegation circuit (ZKP #4) — real Halo2 proof verification
+// ---------------------------------------------------------------------------
+
+/// Length of the ZKP #4 public-input wire encoding: 9 × 32-byte chunks.
+const PROXY_DELEGATION_INPUTS_LEN: usize = 9 * 32;
+
+/// Decodes the ZKP #4 wire encoding described at
+/// [`sv_verify_proxy_delegation_proof`] into the circuit instance, built
+/// through `Instance::from_parts`, the only source of the public-input order
+/// (contracts-v1 §10). An `Err` carries the message for [`sv_last_error`].
+fn decode_proxy_delegation_instance(
+    raw: &[u8; PROXY_DELEGATION_INPUTS_LEN],
+) -> Result<proxy_delegation::Instance, String> {
+    use voting_crypto_deps::pasta_curves::group::{Curve, GroupEncoding};
+    use voting_crypto_deps::pasta_curves::{
+        arithmetic::{Coordinates, CurveAffine},
+        pallas,
+    };
+
+    let chunk = |slot: usize| -> [u8; 32] {
+        raw[slot * 32..(slot + 1) * 32]
+            .try_into()
+            .expect("a slot is 32 bytes")
+    };
+    let field = |slot: usize, name: &str| -> Result<pallas::Base, String> {
+        Option::from(pallas::Base::from_repr(chunk(slot))).ok_or_else(|| {
+            format!("proxy delegation: slot {slot} ({name}) is not a canonical Pallas Fp element")
+        })
+    };
+    let point = |slot: usize, name: &str| -> Result<(pallas::Base, pallas::Base), String> {
+        let bytes = chunk(slot);
+        let point: pallas::Point = Option::from(pallas::Point::from_bytes(&bytes))
+            .ok_or_else(|| {
+                format!(
+                    "proxy delegation: slot {slot} ({name}) is not a valid compressed Pallas point: {:02x?}",
+                    &bytes[..4]
+                )
+            })?;
+        let coords: Option<Coordinates<pallas::Affine>> = point.to_affine().coordinates().into();
+        let coords = coords.ok_or_else(|| {
+            format!("proxy delegation: slot {slot} ({name}) decompressed to the identity point")
+        })?;
+        Ok((*coords.x(), *coords.y()))
+    };
+
+    let van_nullifier = field(0, "van_nullifier")?;
+    let (r_vpk_x, r_vpk_y) = point(1, "r_vpk")?;
+    let vote_authority_note_new = field(2, "vote_authority_note_new")?;
+    let delegation_commitment = field(3, "delegation_commitment")?;
+    let vote_comm_tree_root = field(4, "vote_comm_tree_root")?;
+    let anchor = chunk(5);
+    // Reject nonzero padding, so each encoding has exactly one meaning.
+    if anchor[8..].iter().any(|&byte| byte != 0) {
+        return Err(
+            "proxy delegation: slot 5 (vote_comm_tree_anchor_height) is not a zero-padded u64"
+                .to_owned(),
+        );
+    }
+    let anchor_height = u64::from_le_bytes(anchor[..8].try_into().expect("8 bytes"));
+    let voting_round_id = field(6, "voting_round_id")?;
+    let (ea_pk_x, ea_pk_y) = point(7, "ea_pk")?;
+    let dc_slot_nullifier = field(8, "dc_slot_nullifier")?;
+
+    Ok(proxy_delegation::Instance::from_parts(
+        van_nullifier,
+        r_vpk_x,
+        r_vpk_y,
+        vote_authority_note_new,
+        delegation_commitment,
+        vote_comm_tree_root,
+        pallas::Base::from(anchor_height),
+        voting_round_id,
+        ea_pk_x,
+        ea_pk_y,
+        dc_slot_nullifier,
+    ))
+}
+
+/// Verify a real proxy delegation circuit proof (ZKP #4).
+///
+/// The caller sends 9 × 32-byte chunks (288 bytes). This function
+/// decompresses the two compressed Pallas points and reads the anchor height
+/// as an integer, then builds the circuit's 11 public inputs through
+/// voting-circuits' `Instance::from_parts` (contracts-v1 §10):
+///
+/// | Wire slot | Field                     | Expansion                       |
+/// |-----------|---------------------------|---------------------------------|
+/// | 0         | van_nullifier             | Fp (1 element)                  |
+/// | 1         | r_vpk (compressed point)  | → r_vpk_x, r_vpk_y (2 elements) |
+/// | 2         | vote_authority_note_new   | Fp (1 element)                  |
+/// | 3         | delegation_commitment     | Fp (1 element)                  |
+/// | 4         | vote_comm_tree_root       | Fp (1 element)                  |
+/// | 5         | anchor_height (u64 LE)    | → Fp::from(u64) (1 element)     |
+/// | 6         | voting_round_id           | Fp (1 element)                  |
+/// | 7         | ea_pk (compressed point)  | → ea_pk_x, ea_pk_y (2 elements) |
+/// | 8         | dc_slot_nullifier         | Fp (1 element)                  |
+///
+/// Total: 9 wire chunks → 11 circuit public inputs. Bytes 8..32 of slot 5
+/// must be zero.
+///
+/// # Arguments
+/// * `proof_ptr`         - Pointer to the serialized Halo2 proof bytes.
+/// * `proof_len`         - Length of the proof byte slice.
+/// * `public_inputs_ptr` - Pointer to 288 bytes (9 × 32-byte chunks).
+/// * `public_inputs_len` - Length of the public inputs byte slice (must be 288).
+///
+/// # Returns
+/// * `0`  on successful verification.
+/// * `-1` if inputs are invalid (null pointers or wrong lengths).
+/// * `-2` if the proof does not verify.
+/// * `-3` if a slot does not decode (non-canonical Fp, invalid or identity
+///   point, or nonzero anchor-height padding).
+/// * `-6` if key generation fails or an internal panic is caught.
+///
+/// # Safety
+/// Caller must ensure the pointers are valid and the lengths are correct.
+#[no_mangle]
+pub unsafe extern "C" fn sv_verify_proxy_delegation_proof(
+    proof_ptr: *const u8,
+    proof_len: usize,
+    public_inputs_ptr: *const u8,
+    public_inputs_len: usize,
+) -> i32 {
+    if proof_ptr.is_null()
+        || public_inputs_ptr.is_null()
+        || proof_len == 0
+        || public_inputs_len != PROXY_DELEGATION_INPUTS_LEN
+    {
+        set_ffi_error("proxy delegation: invalid pointer or length");
+        return -1;
+    }
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let proof = std::slice::from_raw_parts(proof_ptr, proof_len);
+        let raw: &[u8; PROXY_DELEGATION_INPUTS_LEN] =
+            std::slice::from_raw_parts(public_inputs_ptr, public_inputs_len)
+                .try_into()
+                .expect("length checked above");
+
+        let instance = match decode_proxy_delegation_instance(raw) {
+            Ok(instance) => instance,
+            Err(msg) => {
+                set_ffi_error(msg);
+                return -3;
+            }
+        };
+
+        let (params, _pk, vk) = match proxy_delegation::proxy_delegation_cached_keys() {
+            Ok(keys) => keys,
+            Err(e) => {
+                set_ffi_error(format!("proxy delegation: key generation failed: {:?}", e));
+                return -6;
+            }
+        };
+        verify_ffi_halo2_proof(
+            "proxy delegation",
+            params,
+            vk,
+            proof,
+            &instance.to_halo2_instance(),
+        )
+    }));
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_ffi_error("sv_verify_proxy_delegation_proof: internal panic");
+            -6
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Circuit fingerprints
+// ---------------------------------------------------------------------------
+
+/// Write the verifying-key fingerprints of ZKP #1, #2, #3 and #4 to `out_ptr`,
+/// 32 bytes each in that order (see [`fingerprints::circuit_fingerprints`]).
+///
+/// # Arguments
+/// * `out_ptr` - Pointer to a caller-owned 128-byte output buffer.
+/// * `out_len` - Length of the output buffer (must be 128).
+///
+/// # Returns
+/// * `0`  on success.
+/// * `-1` if `out_ptr` is null or `out_len` is not 128.
+/// * `-6` if key generation fails or an internal panic is caught.
+///
+/// # Safety
+/// `out_ptr` must be valid for writes of `out_len` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn sv_circuit_fingerprints(out_ptr: *mut u8, out_len: usize) -> i32 {
+    if out_ptr.is_null() || out_len != 4 * 32 {
+        set_ffi_error("circuit fingerprints: invalid pointer or output length");
+        return -1;
+    }
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        match fingerprints::circuit_fingerprints() {
+            Ok(values) => {
+                let bytes = values.concat();
+                std::ptr::copy_nonoverlapping(bytes.as_ptr(), out_ptr, bytes.len());
+                0
+            }
+            Err(e) => {
+                set_ffi_error(format!("circuit fingerprints: {e}"));
+                -6
+            }
+        }
+    }));
+    match result {
+        Ok(code) => code,
+        Err(_) => {
+            set_ffi_error("sv_circuit_fingerprints: internal panic");
+            -6
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Share Reveal circuit (ZKP #3) — real Halo2 proof verification
 // ---------------------------------------------------------------------------
 
-/// Warm all real verifier/prover caches used by the vote chain.
+/// Warm the verifying material of the four circuits the chain verifies.
 ///
-/// This performs the deterministic Halo2 params/keygen work normally triggered
-/// by the first proof verification or helper proof generation. Calling it
-/// during node readiness warm-up keeps the first live vote transaction and
-/// first helper proof off the cold-cache path.
-/// Each circuit cache is initialized on its own thread so process readiness is
-/// bounded by the slowest verifier keygen rather than the sum of all three.
+/// This performs the deterministic Halo2 params and keygen work that the first
+/// proof verification would otherwise pay, so a node's first live vote
+/// transaction stays off the cold-cache path. It goes through the cached-key
+/// accessors that verification itself reads, not the `warm_*_keys` helpers,
+/// which since voting-circuits 0.12.1 also build proving tables a verifier
+/// never uses; the helper's ZKP #3 prover warms its tables with
+/// [`sv_warm_share_reveal_prover`]. Each circuit warms on its own thread, so
+/// readiness is bounded by the slowest keygen rather than the sum of all four.
 ///
 /// # Returns
 /// * `0` on success.
-/// * `-6` if cache initialization panics.
+/// * `-6` if key generation fails or panics.
 #[no_mangle]
 pub extern "C" fn sv_warm_verifier_caches() -> i32 {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -945,19 +1168,33 @@ pub extern "C" fn sv_warm_verifier_caches() -> i32 {
             (
                 "delegation",
                 std::thread::spawn(|| {
-                    delegation::warm_delegation_keys().map_err(|e| format!("{:?}", e))
+                    delegation::delegation_cached_keys()
+                        .map(|_| ())
+                        .map_err(|e| format!("{:?}", e))
                 }),
             ),
             (
                 "vote",
                 std::thread::spawn(|| {
-                    vote_proof::warm_vote_proof_keys().map_err(|e| format!("{:?}", e))
+                    vote_proof::vote_proof_cached_keys()
+                        .map(|_| ())
+                        .map_err(|e| format!("{:?}", e))
                 }),
             ),
             (
                 "share_reveal",
                 std::thread::spawn(|| {
-                    share_reveal::warm_share_reveal_keys().map_err(|e| format!("{:?}", e))
+                    share_reveal::share_reveal_cached_keys()
+                        .map(|_| ())
+                        .map_err(|e| format!("{:?}", e))
+                }),
+            ),
+            (
+                "proxy_delegation",
+                std::thread::spawn(|| {
+                    proxy_delegation::proxy_delegation_cached_keys()
+                        .map(|_| ())
+                        .map_err(|e| format!("{:?}", e))
                 }),
             ),
         ];
@@ -990,6 +1227,31 @@ pub extern "C" fn sv_warm_verifier_caches() -> i32 {
         Ok(code) => code,
         Err(_) => {
             set_ffi_error("sv_warm_verifier_caches: internal panic");
+            -6
+        }
+    }
+}
+
+/// Warm the helper's ZKP #3 prover: the share reveal keys and the prepared
+/// commitment tables a long-lived prover can use (`warm_share_reveal_keys`).
+/// Only a node that runs the helper calls it.
+///
+/// # Returns
+/// * `0` on success.
+/// * `-6` if key generation fails or panics.
+#[no_mangle]
+pub extern "C" fn sv_warm_share_reveal_prover() -> i32 {
+    match std::panic::catch_unwind(share_reveal::warm_share_reveal_keys) {
+        Ok(Ok(())) => 0,
+        Ok(Err(e)) => {
+            set_ffi_error(format!(
+                "sv_warm_share_reveal_prover: warm-up failed: {:?}",
+                e
+            ));
+            -6
+        }
+        Err(_) => {
+            set_ffi_error("sv_warm_share_reveal_prover: internal panic");
             -6
         }
     }
@@ -2467,6 +2729,156 @@ mod tests {
             last_error.contains("4 trailing unread bytes"),
             "unexpected error: {last_error}"
         );
+    }
+
+    /// A ZKP #4 wire encoding that decodes: slots 0-8 hold small field
+    /// elements, except the anchor height 7 and the points `[2]G` and `[3]G`.
+    fn valid_proxy_delegation_wire() -> [u8; PROXY_DELEGATION_INPUTS_LEN] {
+        use voting_crypto_deps::pasta_curves::group::{Curve, GroupEncoding};
+        use voting_crypto_deps::pasta_curves::pallas;
+
+        let g = voting_circuits::spend_auth_g_affine();
+        let mut wire = [0u8; PROXY_DELEGATION_INPUTS_LEN];
+        for slot in [0, 2, 3, 4, 6, 8] {
+            wire[slot * 32] = slot as u8 + 1;
+        }
+        wire[5 * 32] = 7;
+        wire[32..64].copy_from_slice(&(g * pallas::Scalar::from(2u64)).to_affine().to_bytes());
+        wire[7 * 32..8 * 32]
+            .copy_from_slice(&(g * pallas::Scalar::from(3u64)).to_affine().to_bytes());
+        wire
+    }
+
+    /// Each malformed slot fails to decode, with an error naming the slot.
+    #[test]
+    fn test_decode_proxy_delegation_instance_rejects_malformed_slots() {
+        let valid = valid_proxy_delegation_wire();
+        let instance = decode_proxy_delegation_instance(&valid).expect("valid wire decodes");
+        assert_eq!(instance.vote_comm_tree_anchor_height, Fp::from(7));
+        assert_eq!(instance.dc_slot_nullifier, Fp::from(9));
+
+        // (slot, first byte overwritten, fill byte, expected reason)
+        let cases = [
+            (0, 0, 0xff, "is not a canonical Pallas Fp element"),
+            (8, 0, 0xff, "is not a canonical Pallas Fp element"),
+            (1, 0, 0xff, "is not a valid compressed Pallas point"),
+            (7, 0, 0x00, "decompressed to the identity point"),
+            (5, 8, 0x01, "is not a zero-padded u64"),
+        ];
+        for (slot, from, fill, reason) in cases {
+            let mut wire = valid;
+            wire[slot * 32 + from..(slot + 1) * 32].fill(fill);
+            let err = decode_proxy_delegation_instance(&wire).expect_err(reason);
+            assert!(
+                err.starts_with(&format!("proxy delegation: slot {slot} ("))
+                    && err.contains(reason),
+                "slot {slot}: unexpected error {err:?}"
+            );
+        }
+    }
+
+    /// The FFI's ZKP #4 packing matches every `zkp4_instance` case of the
+    /// circuit vectors (contracts-v1 §13): each case's inputs, in wire form,
+    /// decode and pack to the case's `expected.public_inputs`.
+    #[test]
+    fn test_proxy_delegation_packing_matches_circuit_vectors() {
+        use std::collections::HashMap;
+        use voting_crypto_deps::pasta_curves::group::GroupEncoding;
+        use voting_crypto_deps::pasta_curves::{arithmetic::CurveAffine, pallas};
+
+        #[derive(serde::Deserialize)]
+        struct VectorFile {
+            zkp4_instance: Vec<InstanceCase>,
+        }
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct InstanceCase {
+            name: String,
+            inputs: HashMap<String, String>,
+            expected: InstanceExpected,
+        }
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct InstanceExpected {
+            public_inputs: Vec<String>,
+        }
+
+        let file: VectorFile = serde_json::from_str(include_str!(
+            "../../testutil/testdata/proxy_delegation_circuit_v1.json"
+        ))
+        .expect("the circuit vectors parse");
+        assert!(!file.zkp4_instance.is_empty());
+
+        for case in file.zkp4_instance {
+            let name = &case.name;
+            assert_eq!(
+                case.inputs.len(),
+                11,
+                "{name}: Instance::from_parts takes 11 inputs"
+            );
+            let field = |key: &str| -> Fp {
+                let bytes: [u8; 32] = hex::decode(&case.inputs[key])
+                    .expect("hex")
+                    .try_into()
+                    .expect("32 bytes");
+                Option::from(Fp::from_repr(bytes)).expect("canonical field element")
+            };
+            let point = |x: &str, y: &str| -> [u8; 32] {
+                Option::<pallas::Affine>::from(pallas::Affine::from_xy(field(x), field(y)))
+                    .expect("a point on the curve")
+                    .to_bytes()
+            };
+            // The chain sends the anchor height as a u64.
+            let anchor_fp = field("vote_comm_tree_anchor_height");
+            let anchor_height = u64::from_le_bytes(anchor_fp.to_repr()[..8].try_into().unwrap());
+            assert_eq!(
+                Fp::from(anchor_height),
+                anchor_fp,
+                "{name}: anchor height fits a u64"
+            );
+            let mut anchor = [0u8; 32];
+            anchor[..8].copy_from_slice(&anchor_height.to_le_bytes());
+
+            let wire: [u8; PROXY_DELEGATION_INPUTS_LEN] = [
+                field("van_nullifier").to_repr(),
+                point("r_vpk_x", "r_vpk_y"),
+                field("vote_authority_note_new").to_repr(),
+                field("delegation_commitment").to_repr(),
+                field("vote_comm_tree_root").to_repr(),
+                anchor,
+                field("voting_round_id").to_repr(),
+                point("ea_pk_x", "ea_pk_y"),
+                field("dc_slot_nullifier").to_repr(),
+            ]
+            .concat()
+            .try_into()
+            .unwrap();
+            let packed: Vec<String> = decode_proxy_delegation_instance(&wire)
+                .unwrap_or_else(|err| panic!("{name}: {err}"))
+                .to_halo2_instance()
+                .iter()
+                .map(|value| hex::encode(value.to_repr()))
+                .collect();
+            assert_eq!(packed, case.expected.public_inputs, "{name}");
+        }
+    }
+
+    /// A bad length is -1, a slot that does not decode -3 and a proof that
+    /// does not verify -2.
+    #[test]
+    fn test_verify_proxy_delegation_proof_error_codes() {
+        let wire = valid_proxy_delegation_wire();
+        let proof = [0u8; 64];
+        let verify = |proof: &[u8], wire: &[u8]| unsafe {
+            sv_verify_proxy_delegation_proof(proof.as_ptr(), proof.len(), wire.as_ptr(), wire.len())
+        };
+
+        assert_eq!(verify(&proof, &wire[..wire.len() - 1]), -1);
+        assert_eq!(verify(&[], &wire), -1);
+        let mut malformed = wire;
+        malformed[0..32].fill(0xff);
+        assert_eq!(verify(&proof, &malformed), -3);
+        assert_eq!(verify(&proof, &wire), -2, "a junk proof must not verify");
     }
 
     #[test]

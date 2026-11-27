@@ -7,6 +7,8 @@
 //!   ffi/zkp/testdata/toy_valid_input.bin      - correct public input (Fp, 32-byte LE)
 //!   ffi/zkp/testdata/toy_wrong_input.bin      - wrong public input for negative tests
 //!   ffi/zkp/testdata/vote_max_proposal.bin    - real ZKP #2 proof and public inputs for proposal 50
+//!   ffi/zkp/testdata/proxy_delegation_*.bin   - real ZKP #4 proofs and public inputs (see
+//!                                               `build_proxy_delegation_fixtures`)
 //!   ffi/redpallas/testdata/valid_rk.bin       - 32-byte RedPallas verification key
 //!   ffi/redpallas/testdata/valid_sighash.bin  - 32-byte sighash (message)
 //!   ffi/redpallas/testdata/valid_sig.bin      - 64-byte valid RedPallas signature
@@ -35,6 +37,7 @@ use shielded_vote_circuits::toy;
 fn generate_fixtures() {
     generate_halo2_fixtures();
     write_vote_max_proposal_fixture();
+    write_proxy_delegation_fixtures();
     generate_redpallas_fixtures();
     generate_share_reveal_fixtures();
     println!("\nAll fixtures generated and validated successfully.");
@@ -51,6 +54,19 @@ fn generate_vote_max_proposal_fixture() {
 #[test]
 fn vote_max_proposal_proves_and_verifies() {
     build_vote_max_proposal_fixture();
+}
+
+/// Regenerate only the ZKP #4 fixtures used by the Go FFI tests.
+#[test]
+#[ignore]
+fn generate_proxy_delegation_fixtures() {
+    write_proxy_delegation_fixtures();
+}
+
+/// Generate and verify the ZKP #4 fixture proofs in the normal CI test suite.
+#[test]
+fn proxy_delegation_fixtures_prove_and_verify() {
+    build_proxy_delegation_fixtures();
 }
 
 /// Generate Halo2 toy circuit proof fixtures.
@@ -461,4 +477,286 @@ fn generate_share_reveal_fixtures() {
     );
 
     println!("Share reveal fixtures generated.");
+}
+
+// ---------------------------------------------------------------------------
+// Proxy delegation (ZKP #4) fixtures
+// ---------------------------------------------------------------------------
+
+/// Magic prefix of the ZKP #4 fixtures.
+const PROXY_DELEGATION_MAGIC: &[u8; 8] = b"SVZKP4D1";
+
+/// Zatoshi per ballot, the weight unit of a VAN.
+const BALLOT_ZATOSHI: u64 = 12_500_000;
+
+/// The batch anchor height of the anchored and single-share fixtures.
+const PROXY_BATCH_ANCHOR_HEIGHT: u64 = 1_234;
+
+/// The inputs of one fixture delegation. The spending key, address index 1,
+/// round and election authority key are those of [`proxy_fixture_context`].
+struct DelegationSpec {
+    /// The spent VAN's weight and randomness; the VAN has full authority, as
+    /// ZKP #1 and ZKP #4 leave it.
+    van_ballots: u64,
+    van_comm_rand: u64,
+    /// Leaves around the spent VAN in the chain's vote commitment tree. With
+    /// none, the root is the chain's `SingleLeafRoot` of the VAN.
+    leaves_before: Vec<u64>,
+    leaves_after: Vec<u64>,
+    anchor_height: u64,
+    delegate_index: u32,
+    delegated_ballots: u64,
+    dc_slot: u8,
+    dc_seed: [u8; 32],
+    layout: voting_circuits::proxy_delegation::ShareLayout,
+    alpha_v: u64,
+}
+
+/// A fixture delegation, proved.
+struct ProvedDelegation {
+    bundle: voting_circuits::proxy_delegation::ProxyDelegationBundle,
+    proof: Vec<u8>,
+    anchor_height: u64,
+    ea_pk: [u8; 32],
+    spent_van: voting_crypto_deps::pasta_curves::pallas::Base,
+}
+
+/// The spending key, round and election authority key of the ZKP #4 fixtures.
+fn proxy_fixture_context() -> (
+    voting_crypto_deps::orchard::keys::SpendingKey,
+    voting_crypto_deps::pasta_curves::pallas::Base,
+    voting_crypto_deps::pasta_curves::pallas::Affine,
+) {
+    use voting_crypto_deps::pasta_curves::{group::Curve, pallas};
+
+    (
+        voting_crypto_deps::orchard::keys::SpendingKey::from_bytes([0x42; 32])
+            .expect("valid test spending key"),
+        pallas::Base::from(0xCAFE_u64),
+        (voting_circuits::spend_auth_g_affine() * pallas::Scalar::from(42u64)).to_affine(),
+    )
+}
+
+/// Builds and proves `spec`, placing the spent VAN in the chain's vote
+/// commitment tree (`vote-commitment-tree`, as the chain builds it) and
+/// checking that the circuit's root is that tree's root.
+fn prove_proxy_delegation(spec: &DelegationSpec) -> ProvedDelegation {
+    use shielded_vote_circuits::votetree;
+    use voting_circuits::proxy_delegation::{
+        build_proxy_delegation_proof, create_proxy_delegation_proof,
+    };
+    use voting_circuits::vote_proof::derive_vote_authority_transition;
+    use voting_crypto_deps::pasta_curves::{group::GroupEncoding, pallas};
+
+    let (sk, voting_round_id, ea_pk) = proxy_fixture_context();
+    let van_comm_rand = pallas::Base::from(spec.van_comm_rand);
+    // ZKP #2's VAN derivation, for any proposal, gives the full-authority VAN.
+    let spent_van = derive_vote_authority_transition(
+        &sk,
+        1,
+        spec.van_ballots * BALLOT_ZATOSHI,
+        van_comm_rand,
+        voting_round_id,
+        1,
+        voting_circuits::MAX_PROPOSAL_AUTHORITY,
+    )
+    .expect("full-authority VAN")
+    .vote_authority_note_old;
+
+    let leaves: Vec<u8> = spec
+        .leaves_before
+        .iter()
+        .map(|&leaf| pallas::Base::from(leaf))
+        .chain([spent_van])
+        .chain(
+            spec.leaves_after
+                .iter()
+                .map(|&leaf| pallas::Base::from(leaf)),
+        )
+        .flat_map(|leaf| leaf.to_repr())
+        .collect();
+    let (leaf_count, position) = (leaves.len() / 32, spec.leaves_before.len());
+    let (path_bytes, root) = unsafe {
+        (
+            votetree::compute_path_from_raw(leaves.as_ptr(), leaf_count, position as u64)
+                .expect("tree path"),
+            votetree::compute_root_from_raw(leaves.as_ptr(), leaf_count).expect("tree root"),
+        )
+    };
+    // The path is a 4-byte position, then one 32-byte sibling per level.
+    let path = core::array::from_fn(|level| {
+        let sibling = &path_bytes[4 + level * 32..4 + (level + 1) * 32];
+        Option::from(pallas::Base::from_repr(sibling.try_into().unwrap()))
+            .expect("canonical sibling")
+    });
+
+    let bundle = build_proxy_delegation_proof(
+        &sk,
+        1,
+        spec.van_ballots,
+        van_comm_rand,
+        voting_round_id,
+        path,
+        position as u32,
+        spec.anchor_height as u32,
+        ea_pk,
+        pallas::Scalar::from(spec.alpha_v),
+        spec.delegate_index,
+        spec.delegated_ballots,
+        spec.dc_slot,
+        spec.dc_seed,
+        spec.layout,
+    )
+    .expect("valid proxy delegation inputs");
+    assert_eq!(
+        bundle.instance.vote_comm_tree_root.to_repr(),
+        root,
+        "the circuit's root must be the chain tree's root"
+    );
+    let proof = create_proxy_delegation_proof(bundle.circuit.clone(), &bundle.instance)
+        .expect("proxy delegation proof");
+    ProvedDelegation {
+        bundle,
+        proof,
+        anchor_height: spec.anchor_height,
+        ea_pk: ea_pk.to_bytes(),
+        spent_van,
+    }
+}
+
+/// The 288-byte `sv_verify_proxy_delegation_proof` public inputs of `d`.
+fn proxy_delegation_wire(d: &ProvedDelegation) -> Vec<u8> {
+    let instance = &d.bundle.instance;
+    let mut anchor = [0u8; 32];
+    anchor[..8].copy_from_slice(&d.anchor_height.to_le_bytes());
+    [
+        instance.van_nullifier.to_repr(),
+        d.bundle.r_vpk_bytes,
+        instance.vote_authority_note_new.to_repr(),
+        instance.delegation_commitment.to_repr(),
+        instance.vote_comm_tree_root.to_repr(),
+        anchor,
+        instance.voting_round_id.to_repr(),
+        d.ea_pk,
+        instance.dc_slot_nullifier.to_repr(),
+    ]
+    .concat()
+}
+
+/// Checks `d` through the FFI: its proof verifies, and fails once its
+/// commitment changes.
+fn check_proxy_delegation_ffi(d: &ProvedDelegation) {
+    use shielded_vote_circuits::ffi::sv_verify_proxy_delegation_proof;
+
+    let verify = |wire: &[u8]| unsafe {
+        sv_verify_proxy_delegation_proof(d.proof.as_ptr(), d.proof.len(), wire.as_ptr(), wire.len())
+    };
+    let mut wire = proxy_delegation_wire(d);
+    assert_eq!(verify(&wire), 0, "the FFI must accept the fixture proof");
+    wire[3 * 32] ^= 1;
+    assert_eq!(verify(&wire), -2, "a changed commitment must fail");
+}
+
+/// Builds the ZKP #4 fixtures as `(file name, bytes)`, each proved and
+/// checked through `sv_verify_proxy_delegation_proof`:
+/// - `proxy_delegation_anchored.bin`: a batch's first DC, spending a VAN at
+///   position 2 of a four-leaf tree, at anchor height 1,234.
+/// - `proxy_delegation_registration.bin`: a DC after a registration, at anchor
+///   0 against `SingleLeafRoot` of the registration's VAN.
+/// - `proxy_delegation_single_share.bin`: the anchored batch's second DC, in
+///   the single-share layout, spending the first DC's successor VAN against
+///   its `SingleLeafRoot` at the batch's anchor height.
+///
+/// Binary layout, the FFI's slots with an 8-byte anchor height, then the VAN
+/// the proof spends, which is not a public input:
+///   magic[8] || proof_len(u32 LE) || proof || van_nullifier[32] ||
+///   r_vpk[32] || vote_authority_note_new[32] || proxy_delegation_commitment[32] ||
+///   vote_comm_tree_root[32] || anchor_height(u64 LE) || voting_round_id[32] ||
+///   ea_pk[32] || dc_slot_nullifier[32] || spent_van[32]
+fn build_proxy_delegation_fixtures() -> Vec<(&'static str, Vec<u8>)> {
+    use voting_circuits::proxy_delegation::ShareLayout;
+
+    let anchored = prove_proxy_delegation(&DelegationSpec {
+        van_ballots: 10_000,
+        van_comm_rand: 0xDEAD,
+        leaves_before: vec![1_001, 1_002],
+        leaves_after: vec![1_004],
+        anchor_height: PROXY_BATCH_ANCHOR_HEIGHT,
+        delegate_index: 2,
+        delegated_ballots: 4_800,
+        dc_slot: 0,
+        dc_seed: [0xA1; 32],
+        layout: ShareLayout::Standard,
+        alpha_v: 7,
+    });
+    let registration = prove_proxy_delegation(&DelegationSpec {
+        van_ballots: 25_000,
+        van_comm_rand: 0xBEEF,
+        leaves_before: vec![],
+        leaves_after: vec![],
+        anchor_height: 0,
+        delegate_index: 1,
+        delegated_ballots: 12_345,
+        dc_slot: 0,
+        dc_seed: [0xB2; 32],
+        layout: ShareLayout::Standard,
+        alpha_v: 8,
+    });
+    let single_share = prove_proxy_delegation(&DelegationSpec {
+        van_ballots: 10_000 - 4_800,
+        van_comm_rand: 0xDEAD,
+        leaves_before: vec![],
+        leaves_after: vec![],
+        anchor_height: PROXY_BATCH_ANCHOR_HEIGHT,
+        delegate_index: 5,
+        delegated_ballots: 1_000,
+        dc_slot: 1,
+        dc_seed: [0xC3; 32],
+        layout: ShareLayout::SingleShare,
+        alpha_v: 9,
+    });
+    assert_eq!(
+        single_share.spent_van, anchored.bundle.instance.vote_authority_note_new,
+        "the second DC must spend the first DC's successor VAN"
+    );
+
+    [
+        ("proxy_delegation_anchored.bin", anchored),
+        ("proxy_delegation_registration.bin", registration),
+        ("proxy_delegation_single_share.bin", single_share),
+    ]
+    .into_iter()
+    .map(|(name, d)| {
+        check_proxy_delegation_ffi(&d);
+        let wire = proxy_delegation_wire(&d);
+        let fixture = [
+            PROXY_DELEGATION_MAGIC.as_slice(),
+            &(d.proof.len() as u32).to_le_bytes(),
+            &d.proof,
+            &wire[..5 * 32],
+            &d.anchor_height.to_le_bytes(),
+            &wire[6 * 32..],
+            &d.spent_van.to_repr(),
+        ]
+        .concat();
+        (name, fixture)
+    })
+    .collect()
+}
+
+/// Write the ZKP #4 fixtures to `ffi/zkp/testdata/`.
+fn write_proxy_delegation_fixtures() {
+    let testdata_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join("ffi/zkp/testdata");
+    for (name, fixture) in build_proxy_delegation_fixtures() {
+        let path = testdata_dir.join(name);
+        fs::write(&path, &fixture).expect("failed to write proxy delegation fixture");
+        println!(
+            "Wrote proxy delegation fixture ({} bytes) to {}",
+            fixture.len(),
+            path.display()
+        );
+    }
 }

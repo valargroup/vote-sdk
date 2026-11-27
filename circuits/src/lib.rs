@@ -2,7 +2,7 @@
 //! and FFI layer for Go via CGo.
 //!
 //! This crate provides:
-//! - Circuit definitions for the Shielded-Vote chain's three ZKP types
+//! - Circuit definitions for the Shielded-Vote chain's four ZKP types
 //! - RedPallas (RedDSA over Pallas) spend-auth signature verification
 //! - C-compatible FFI functions for calling from Go via CGo
 //!
@@ -15,9 +15,12 @@
 extern crate lrz_zcash_protocol as zcash_protocol;
 
 pub mod ffi;
+pub mod fingerprints;
 pub mod nc_root;
 mod proof;
 pub mod redpallas;
+#[cfg(feature = "test-provers")]
+pub mod test_provers;
 pub mod toy;
 pub mod tx1;
 pub mod votetree;
@@ -26,7 +29,7 @@ pub mod votetree;
 pub mod delegation {
     pub use voting_circuits::delegation::{
         create_delegation_proof, delegation_cached_keys, delegation_params, delegation_proving_key,
-        warm_delegation_keys, Circuit, Instance, K,
+        Circuit, Instance, K,
     };
 
     pub mod builder {
@@ -47,8 +50,7 @@ pub mod delegation {
 /// Re-export the vote proof circuit's prove/verify API from the `voting-circuits` crate.
 pub mod vote_proof {
     pub use voting_circuits::vote_proof::{
-        vote_proof_cached_keys, vote_proof_params, vote_proof_proving_key, warm_vote_proof_keys,
-        Circuit, Instance, K,
+        vote_proof_cached_keys, vote_proof_params, vote_proof_proving_key, Circuit, Instance, K,
     };
 }
 
@@ -63,4 +65,12 @@ pub mod share_reveal {
     pub mod builder {
         pub use voting_circuits::share_reveal::{build_share_reveal, ShareRevealBundle};
     }
+}
+
+/// Re-export the proxy delegation circuit's (ZKP #4) prove/verify API from the `voting-circuits` crate.
+pub mod proxy_delegation {
+    pub use voting_circuits::proxy_delegation::{
+        proxy_delegation_cached_keys, proxy_delegation_params, proxy_delegation_proving_key,
+        Circuit, Instance, K,
+    };
 }

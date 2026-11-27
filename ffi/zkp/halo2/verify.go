@@ -41,9 +41,11 @@ func rustLastError() string {
 	return C.GoString(C.sv_last_error())
 }
 
-// WarmVerifierCaches initializes the deterministic Halo2 verifier params and
-// verifying keys without verifying a proof. Use this during process readiness
-// warm-up so the first live transaction does not pay the cold-cache cost.
+// WarmVerifierCaches initializes the deterministic Halo2 params and keys of
+// the four circuits the chain verifies, without verifying a proof. It builds
+// no proving tables, which a verifier never uses (see WarmShareRevealProver
+// for the helper's prover). Use this during process readiness warm-up so the
+// first live transaction does not pay the cold-cache cost.
 //
 // The Rust side stores these artifacts in OnceLocks, so repeated calls are
 // cheap after the first successful warm-up.
@@ -398,6 +400,81 @@ func VerifyVoteProof(proof []byte, inputs zkp.VoteCommitmentInputs) error {
 		return fmt.Errorf("vote proof halo2: internal deserialization error: %s", rustLastError())
 	default:
 		return fmt.Errorf("vote proof halo2: unknown error code %d: %s", rc, rustLastError())
+	}
+}
+
+// VerifyProxyDelegationProof verifies a real proxy delegation circuit proof
+// (ZKP #4) using the Rust verifier via CGo.
+//
+// The inputs are serialized as 9 × 32-byte chunks (288 bytes). The Rust FFI
+// (ffi.rs sv_verify_proxy_delegation_proof) decompresses r_vpk (slot 1) and
+// ea_pk (slot 7) to (x, y), converts anchor_height via Fp::from(), and builds
+// the circuit's 11 Fp elements through voting-circuits' Instance constructor:
+//
+//	[van_nullifier, r_vpk_compressed, vote_authority_note_new, delegation_commitment,
+//	 vote_comm_tree_root, anchor_height_le, voting_round_id, ea_pk_compressed, dc_slot_nullifier]
+//
+// Returns nil on success, or an error describing the failure.
+func VerifyProxyDelegationProof(proof []byte, inputs zkp.ProxyDelegationInputs) error {
+	if len(proof) == 0 {
+		return fmt.Errorf("proxy delegation proof is empty")
+	}
+	if len(proof) > types.MaxProofSize {
+		return fmt.Errorf("proxy delegation proof too large: %d bytes (max %d)", len(proof), types.MaxProofSize)
+	}
+
+	const chunkSize = 32
+	const numChunks = 9
+	buf := make([]byte, numChunks*chunkSize)
+
+	// Validate each 32-byte slot before the FFI call so the error names the
+	// field, instead of the opaque "-3" from Rust.
+	slots := []struct {
+		slot  int
+		name  string
+		value []byte
+		point bool // a compressed Pallas point rather than an Fp element
+	}{
+		{0, "van_nullifier", inputs.VanNullifier, false},
+		{1, "r_vpk", inputs.RVpk, true},
+		{2, "vote_authority_note_new", inputs.VoteAuthorityNoteNew, false},
+		{3, "delegation_commitment", inputs.ProxyDelegationCommitment, false},
+		{4, "vote_comm_tree_root", inputs.VoteCommTreeRoot, false},
+		{6, "voting_round_id", inputs.VoteRoundId, false},
+		{7, "ea_pk", inputs.EaPk, true},
+		{8, "dc_slot_nullifier", inputs.DcSlotNullifier, false},
+	}
+	for _, s := range slots {
+		if s.point {
+			if _, err := elgamal.UnmarshalPublicKey(s.value); err != nil {
+				return fmt.Errorf("%s: invalid compressed Pallas point: %w", s.name, err)
+			}
+		} else if err := validatePallasFp(s.name, s.value); err != nil {
+			return err
+		}
+		copy(buf[s.slot*chunkSize:(s.slot+1)*chunkSize], s.value)
+	}
+	// Slot 5: anchor_height (uint64 LE, zero-padded to 32 bytes)
+	binary.LittleEndian.PutUint64(buf[5*chunkSize:], inputs.AnchorHeight)
+
+	rc := C.sv_verify_proxy_delegation_proof(
+		(*C.uint8_t)(unsafe.Pointer(&proof[0])),
+		C.size_t(len(proof)),
+		(*C.uint8_t)(unsafe.Pointer(&buf[0])),
+		C.size_t(len(buf)),
+	)
+
+	switch rc {
+	case 0:
+		return nil
+	case -1:
+		return fmt.Errorf("proxy delegation halo2: invalid inputs: %s", rustLastError())
+	case -2:
+		return fmt.Errorf("proxy delegation halo2: proof verification failed: %s", rustLastError())
+	case -3:
+		return fmt.Errorf("proxy delegation halo2: internal deserialization error: %s", rustLastError())
+	default:
+		return fmt.Errorf("proxy delegation halo2: unknown error code %d: %s", rc, rustLastError())
 	}
 }
 

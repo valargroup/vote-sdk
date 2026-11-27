@@ -111,6 +111,11 @@ func (toyAsDelegationVerifier) VerifyVoteShare(proof []byte, _ zkp.VoteShareInpu
 	return nil
 }
 
+// VerifyProxyDelegation always succeeds; ZKP #4 is not under test here.
+func (toyAsDelegationVerifier) VerifyProxyDelegation(proof []byte, _ zkp.ProxyDelegationInputs) error {
+	return nil
+}
+
 // TestHalo2DelegationValidProof runs the full ante validation pipeline with a
 // real Halo2 toy proof. The MsgDelegateVote.Proof carries the real proof
 // bytes and VanCmx carries the 32-byte public input (toy circuit convention).

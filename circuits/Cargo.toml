@@ -23,6 +23,11 @@ zakura = [
     "vote-commitment-tree/zakura",
     "dep:zcash_protocol",
 ]
+# Test-only ZKP2 and ZKP4 provers and a RedPallas signer for the proxy
+# delegation end-to-end test (src/test_provers.rs). Only
+# `make circuits-test-provers` enables it, in its own target directory; never
+# enable it in a release build.
+test-provers = []
 
 [dependencies]
 voting-crypto-deps = { version = "=0.5.0", default-features = false }
