@@ -660,9 +660,9 @@ DC shares use the existing share-submission endpoint and `VoteShareWire` with `p
 
 **Registry cache.** The wallet downloads the whole registry from an RPC node through `GET /shielded-vote/v1/delegates`, 1,000 entries a page (§8), and caches it per chain. Downloading all of it means the server never learns which delegate the user looks at. The cache is not proven: it drives display and lookup, and the commit proves what it relies on (§11.11). The wallet chooses when to refresh it.
 
-**Browse.** Browse shows the rows of the wallet's verified list (§12.3), in list order, each with its reviewed status (§11.11) and the row's name, statement and picture. Without a verified list, browse is empty.
+**Browse.** Browse shows the rows of the wallet's verified list (§12.3), in list order, each with its reviewed status (§11.11) and the row's name. Without a verified list, browse is empty.
 
-**Search.** Search is exact handle search over the cached registry. The query is trimmed, loses one leading `@` and is ASCII-lowercased, then compared with the canonical handle of every live entry; each match shows, labelled X or GitHub. A result shows the handle, provider, the fingerprint of the entry's key and an identicon. If the wallet list has a row for the same index, the result also shows that row's content and reviewed status; otherwise it shows "Not reviewed" with no name, statement or picture. Lookalike warnings apply (§11.7).
+**Search.** Search is exact handle search over the cached registry. The query is trimmed, loses one leading `@` and is ASCII-lowercased, then compared with the canonical handle of every live entry; each match shows, labelled X or GitHub. A result shows the handle, provider, the fingerprint of the entry's key and an identicon. If the wallet list has a row for the same index, the result also shows that row's name and reviewed status; otherwise it shows "Not reviewed" with no name. Lookalike warnings apply (§11.7).
 
 **Paste or scan.** After trimming whitespace, the wallet accepts:
 1. a marker post's text (§11.5), whose key is looked up;
@@ -725,7 +725,7 @@ How the delegate app reads chain answers:
 
 ### 12.3 Wallet list (`<env>/wallets/<wallet_id>/list.json`)
 
-A wallet list is one long-lived signed file per wallet, per chain, holding that wallet's curated delegates with their name, statement and small picture. Delegates send their own picture and statement to the wallet. The wallet re-signs it only when its picks, a delegate's content or a delegate's entry change.
+A wallet list is one long-lived signed file per wallet, per chain, holding that wallet's curated delegates. A row carries only the curated name, which the wallet's signer chooses, and the entry's identifiers, so a wallet shows nothing a delegate wrote. The wallet re-signs the list only when its picks, a name or a delegate's entry change.
 
 **Hosting.** By default the list lives in the config repo at `<env>/wallets/<wallet_id>/list.json` (`env` is `prod` or `stage`) and is served by the existing gateway and mirrors, for example `https://voting.valargroup.dev/prod/wallets/vizor/list.json`. The URL comes from the wallet build, so a wallet can host its list elsewhere without a client change.
 
@@ -743,16 +743,14 @@ A wallet list is one long-lived signed file per wallet, per chain, holding that 
       "provider": 1,
       "handle": "alice",
       "dk": "zvdk1…",
-      "name": "Alice Example",
-      "statement": "I vote for privacy first.",
-      "picture": "<canonical base64 of the WebP bytes>"
+      "name": "Alice Example"
     }
   ],
   "signatures": [{ "key_id": "valargroup", "alg": "ed25519", "sig": "<base64>" }]
 }
 ```
 
-**Fields.** Every member is required except a row's `statement` and `picture`. Each rule's error name follows it.
+**Fields.** Every member is required. Each rule's error name follows it.
 
 | Field | Rule | Error |
 |---|---|---|
@@ -768,13 +766,9 @@ A wallet list is one long-lived signed file per wallet, per chain, holding that 
 | `handle` | The entry's handle, canonical for the provider (§2.5) | `InvalidHandle` |
 | `dk` | The reviewed key: the entry's key as its canonical `zvdk1…` string (§11.2) | `InvalidKey` |
 | `name` | 1 to 50 Unicode scalar values in NFC, with no control character (Unicode category Cc) and no bidirectional formatting character (U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069) | `InvalidName` |
-| `statement` | Optional. When present, 1 to 280 scalar values with `name`'s rules, except that a line feed (U+000A) is allowed. A list omits an absent statement; it never writes `""` | `InvalidStatement` |
-| `picture` | Optional. Canonical base64 of a WebP file of at most 12,288 bytes: a `RIFF` header whose size field plus 8 equals the file's length, with form type `WEBP` | `PictureTooLarge`, `InvalidPicture` |
 | `signatures` | 1 to 8 objects in the dynamic config's signature shape: `key_id` of 1 to 64 bytes, `alg` exactly `ed25519`, and `sig` canonical base64 of 64 bytes. Not signed | `Malformed` |
 
 The `dk` rule is the string's form only. A key that fails the key rule can never be registered, so its row is never reviewed.
-
-A wallet decodes a picture with a memory-safe WebP decoder and shows the identicon if it does not decode to 128 × 128 pixels. Config CI checks the dimensions, so a signed list should never carry another size.
 
 **Signed payload.** Every signature covers:
 
@@ -787,11 +781,9 @@ WalletListPayloadV1 = "zcash-shielded-vote:wallet-list:v1"      // 34 ASCII byte
 row                 = u32le(index) || u32le(provider)
                       || lp8(handle) || dk(32)                    // the key's 32 bytes
                       || lp8(utf8(name))
-                      || lp16(utf8(statement))                    // empty when absent
-                      || lp16(picture)                            // the WebP bytes, empty when absent
 ```
 
-- `lp8(s)` is one length byte, then the bytes; `lp16(s)` is the length as `u16le`, then the bytes. The field rules keep every length in range: a name is at most 200 bytes and a statement at most 1,120.
+- `lp8(s)` is one length byte, then the bytes. The field rules keep every length in range: a name is at most 200 bytes.
 - Lists and rows are encoded in the JSON's order, so the order of `reserved_names` is signed as written.
 - **Why this encoding.** Raw fields and little-endian integers follow the round-auth v2 payload. The JSON stays readable in a pull request diff, any JSON formatting verifies, and no JSON canonicalization is needed. The admin UI signs the payload bytes with the Keplr-derived Ed25519 flow it uses for round entries, then writes `{ key_id, alg: "ed25519", sig }`.
 - **Domain separation.** The domain is prefix-free with the config family's other signing domain, `zcash-shielded-vote:round-auth:v2`. Round-auth v1 signs exactly the 32-byte `ea_pk`, and every list payload is longer than 34 bytes. So a list signature can never pass as a round attestation, and the reverse.
@@ -806,7 +798,7 @@ Vizor pins one key per chain and accepts no other:
 1. longer than 4 MiB: `TooLarge`;
 2. not JSON, a top level that is not an object, a repeated top-level key, or a `format` that is absent or not a string: `Malformed`;
 3. a `format` other than `zcash-vote-wallet-list/v1`: `UnsupportedFormat`;
-4. at any level: an unknown member, a repeated key, a required member absent, `null` anywhere, a wrong type, a picture or signature that is not canonical base64, or a `signatures` member that breaks its rule: `Malformed`. Unknown members are refused because everything but `signatures` is signed, and a reader must never take unsigned content for part of the list;
+4. at any level: an unknown member, a repeated key, a required member absent, `null` anywhere, a wrong type, a signature that is not canonical base64, or a `signatures` member that breaks its rule: `Malformed`. Unknown members are refused because everything but `signatures` is signed, and a reader must never take unsigned content for part of the list;
 5. the field rules, in the table's order, row by row: the rule's error;
 6. a `wallet_id` other than the one the wallet pins: `WrongWallet`;
 7. a `chain_id` other than the wallet's chain: `WrongChain`;
@@ -820,7 +812,7 @@ Vizor pins one key per chain and accepts no other:
 
 **Config repo operations.** These are not wire formats, but the format relies on them:
 - **Signing.** The signer signs the list on the admin UI's Sign Wallet List page, or with `voting-config wallet-list sign`, and opens the pull request by hand.
-- **CI** checks each `<env>/wallets/<wallet_id>/list.json` with `voting-config wallet-list verify`: the format and field rules, the picture dimensions, a valid signature by the key the wallet pins for that environment, a `wallet_id` equal to its directory name, a `chain_id` equal to the environment's chain, and a `version` that rose whenever the payload changed. CI refuses a change that removes a list existing at the base revision; to withdraw a list, publish an empty one with a higher `version`. The Pages build runs the same verification before it publishes. A bad merge can only make the list fail verification, which leaves browse on the stored list or empty; it can never list someone unsigned.
+- **CI** checks each `<env>/wallets/<wallet_id>/list.json` with `voting-config wallet-list verify`: the format and field rules, a valid signature by the key the wallet pins for that environment, a `wallet_id` equal to its directory name, a `chain_id` equal to the environment's chain, and a `version` that rose whenever the payload changed. CI refuses a change that removes a list existing at the base revision; to withdraw a list, publish an empty one with a higher `version`. The Pages build runs the same verification before it publishes. A bad merge can only make the list fail verification, which leaves browse on the stored list or empty; it can never list someone unsigned.
 - **Re-review alert.** A scheduled check runs `wallet-list verify --chain-check` and alerts the wallet's team when a row is no longer reviewed (§11.11): its entry is missing, suspended or retired, or has another provider, handle or key.
 
 ### 12.4 Attester API
@@ -882,7 +874,7 @@ The vector set is three files. Each has one home repo and is copied wherever ano
 
 | File | Home | SHA-256 |
 |---|---|---|
-| `proxy_delegation_v1.json`, the client file | zcash_voting, `zcash_vote_delegate/test-vectors/` | `4371f5db2a2b830cc3bcc198473cd3b2a4d18a2b71d67167e0fd84bf4c73490f` |
+| `proxy_delegation_v1.json`, the client file | zcash_voting, `zcash_vote_delegate/test-vectors/` | `e50fb0e6978b82a114c8c26ff84648cf35e77400505bb2a3584e39b37262a918` |
 | `proxy_delegation_chain_v1.json`, the chain file | vote-sdk, `testutil/testdata/` | `fdfe5131df8bb8a37b9025567e3b6d8cd41e04a106f6d2f3102952efa5f3f244` |
 | `proxy_delegation_circuit_v1.json`, the circuit file | voting-circuits, `test-vectors/` | `6293658ba866a7738f5d34ae5364559938b8f3b3b8175bbd77ac6b3431e5b883` |
 

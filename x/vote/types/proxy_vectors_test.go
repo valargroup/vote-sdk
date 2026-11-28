@@ -124,7 +124,7 @@ func TestProxyVectorFilesAreFrozen(t *testing.T) {
 		file []byte
 		want string
 	}{
-		{"proxy_delegation_v1.json", svtest.ProxyDelegationV1Vectors(), "27c89f3c4f9aca80c403ce96738a60bc391eb971795274300eba28720f743b4b"},
+		{"proxy_delegation_v1.json", svtest.ProxyDelegationV1Vectors(), "888cf7a9e9d4842ce3beee2305bdcf4be6e807b3f4a945559620075fd62413ef"},
 		{"proxy_delegation_chain_v1.json", svtest.ProxyDelegationChainV1Vectors(), "fdfe5131df8bb8a37b9025567e3b6d8cd41e04a106f6d2f3102952efa5f3f244"},
 		{"proxy_delegation_circuit_v1.json", svtest.ProxyDelegationCircuitV1Vectors(), "9c14cd2ed3ee10e6d8381f6c11c8e5a1fb0d10bb64a6cc367fb4ba2729fc1c69"},
 	} {
