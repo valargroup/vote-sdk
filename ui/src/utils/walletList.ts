@@ -5,7 +5,7 @@
 //   || u64le(version) || u64le(issued_at) || u16le(r) || r × lp8(reserved_name)
 //   || u16le(n) || n × row
 //   row = u32le(index) || u32le(provider) || lp8(handle) || dk(32)
-//         || lp8(utf8(name)) || lp16(utf8(statement)) || lp16(picture)
+//         || lp8(utf8(name))
 //
 // Config CI verifies the result with the Go code in
 // internal/votingconfig/wallet_list.go; both follow the contract's rule order.
@@ -25,9 +25,6 @@ export interface WalletListRow {
   /** The reviewed key, zvdk1…. */
   dk: string;
   name: string;
-  statement?: string;
-  /** The WebP bytes. */
-  picture?: Uint8Array;
 }
 
 export interface WalletList {
@@ -86,8 +83,8 @@ export function isSignatureKeyId(id: string): boolean {
   return size >= 1 && size <= 64;
 }
 
-/** The name and statement rule: 1 to max scalar values in NFC, no Cc but an allowed line feed, no bidi formatting. */
-function isDisplayText(s: string, max: number, allowNewline: boolean): boolean {
+/** The name rule: 1 to max scalar values in NFC, no Cc, no bidi formatting. */
+function isDisplayText(s: string, max: number): boolean {
   const chars = [...s];
   if (chars.length < 1 || chars.length > max || s.normalize("NFC") !== s) return false;
   return chars.every((ch) => {
@@ -95,7 +92,7 @@ function isDisplayText(s: string, max: number, allowNewline: boolean): boolean {
     if (cp >= 0xd800 && cp <= 0xdfff) return false; // a lone surrogate is not a scalar value
     if (cp === 0x061c || cp === 0x200e || cp === 0x200f) return false;
     if ((cp >= 0x202a && cp <= 0x202e) || (cp >= 0x2066 && cp <= 0x2069)) return false;
-    if (cp <= 0x1f || (cp >= 0x7f && cp <= 0x9f)) return allowNewline && cp === 0x0a;
+    if (cp <= 0x1f || (cp >= 0x7f && cp <= 0x9f)) return false;
     return true;
   });
 }
@@ -126,17 +123,7 @@ function checkFields(list: WalletList): void {
     if (row.provider !== 1 && row.provider !== 2) fail("InvalidProvider", at);
     if (!isDelegateHandle(row.provider, row.handle)) fail("InvalidHandle", at);
     if (!decodeDelegateKey(row.dk)) fail("InvalidKey", `${at} ${JSON.stringify(row.dk)}`);
-    if (!isDisplayText(row.name, 50, false)) fail("InvalidName", at);
-    if (row.statement !== undefined && !isDisplayText(row.statement, 280, true)) fail("InvalidStatement", at);
-    const p = row.picture;
-    if (p !== undefined) {
-      if (p.length > 12288) fail("PictureTooLarge", `${at} picture is ${p.length} bytes`);
-      const tag = (from: number) => String.fromCharCode(...p.subarray(from, from + 4));
-      const riffSize = p.length >= 8 ? new DataView(p.buffer, p.byteOffset, p.byteLength).getUint32(4, true) : -1;
-      if (p.length < 12 || tag(0) !== "RIFF" || tag(8) !== "WEBP" || riffSize + 8 !== p.length) {
-        fail("InvalidPicture", `${at} picture is not a WebP file`);
-      }
-    }
+    if (!isDisplayText(row.name, 50)) fail("InvalidName", at);
   });
 }
 
@@ -156,10 +143,6 @@ export function walletListPayload(list: WalletList): Uint8Array {
     parts.push(b.length);
     parts.push(...b);
   };
-  const lp16 = (b: Uint8Array) => {
-    uint(b.length, 2);
-    for (const byte of b) parts.push(byte);
-  };
   lp8(utf8(list.wallet_id));
   lp8(utf8(list.chain_id));
   uint(list.version, 8);
@@ -173,8 +156,6 @@ export function walletListPayload(list: WalletList): Uint8Array {
     lp8(utf8(row.handle));
     parts.push(...decodeDelegateKey(row.dk)!);
     lp8(utf8(row.name));
-    lp16(utf8(row.statement ?? ""));
-    lp16(row.picture ?? new Uint8Array());
   }
   return new Uint8Array(parts);
 }
@@ -300,19 +281,14 @@ export function parseWalletListDraft(text: string): { list: WalletList; signatur
   const delegates = doc.delegates.map((raw, i): WalletListRow => {
     const where = `delegates[${i}]`;
     if (!isObject(raw)) return malformed(`${where} is not an object`);
-    members(raw, where, ["index", "provider", "handle", "dk", "name"], ["statement", "picture"]);
-    const row: WalletListRow = {
+    members(raw, where, ["index", "provider", "handle", "dk", "name"], []);
+    return {
       index: u32(raw.index, `${where}.index`),
       provider: u32(raw.provider, `${where}.provider`),
       handle: str(raw.handle, `${where}.handle`),
       dk: str(raw.dk, `${where}.dk`),
       name: str(raw.name, `${where}.name`),
     };
-    if ("statement" in raw) row.statement = str(raw.statement, `${where}.statement`);
-    if ("picture" in raw) {
-      row.picture = fromCanonicalBase64(str(raw.picture, `${where}.picture`)) ?? malformed(`${where}.picture is not canonical base64`);
-    }
-    return row;
   });
   const sigs = "signatures" in doc ? doc.signatures : [];
   if (!Array.isArray(sigs) || sigs.length > 8) return malformed("signatures must be an array of at most 8");
@@ -358,8 +334,6 @@ export function walletListDocument(list: WalletList, signatures: WalletListSigna
       handle: row.handle,
       dk: row.dk,
       name: row.name,
-      ...(row.statement !== undefined ? { statement: row.statement } : {}),
-      ...(row.picture !== undefined ? { picture: bytesToBase64(row.picture) } : {}),
     })),
     ...(signatures.length > 0 ? { signatures } : {}),
   };

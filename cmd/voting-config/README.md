@@ -95,7 +95,6 @@ voting-config wallet-list verify \
 ```
 
 - Only a signature carrying a pinned `key_id` that verifies under that key's public key counts. Repeat `--allowed-key` to pin more than one.
-- Every picture must decode to 128 x 128 pixels.
 - `--previous` is the list this one replaces: if anything signed changed, `version` must be higher. A previous list that does not parse sets no version, since no wallet adopted it. A `--previous` file that can't be read fails the check. For a new list, leave the flag out.
 - `--chain-check <REST endpoint>` also reads each row's registry entry (`GET /shielded-vote/v1/delegates/{index}`) from a node of the list's chain and reports, and fails on, every delegate that needs a re-review: not registered, suspended, retired, or registered with another provider, handle or key than the row's.
 - `--json` writes `{ok, wallet_id, chain_id, version, signed_by, delegates, error, findings}`, also on failure.

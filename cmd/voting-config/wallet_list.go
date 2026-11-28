@@ -158,9 +158,8 @@ type walletListResult struct {
 }
 
 // newWalletListVerifyCmd builds `wallet-list verify`, config CI's check of a
-// list: a wallet's verification under the pinned keys, the picture size, the
-// version rule against the list it replaces and, optionally, each row
-// against the chain.
+// list: a wallet's verification under the pinned keys, the version rule
+// against the list it replaces and, optionally, each row against the chain.
 func newWalletListVerifyCmd() *cobra.Command {
 	var (
 		listPath     string
@@ -237,9 +236,6 @@ func verifyWalletListFile(ctx context.Context, result *walletListResult, path st
 	}
 	list := verified.List
 	result.Version, result.SignedBy, result.Delegates = list.Version, verified.SignedBy, len(list.Delegates)
-	if err := votingconfig.CheckWalletListPictures(list); err != nil {
-		return err
-	}
 	if previousPath != "" {
 		previous, err := os.ReadFile(previousPath)
 		if err != nil {

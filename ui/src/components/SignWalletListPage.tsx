@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertCircle, ExternalLink, ListChecks, Wallet } from "lucide-react";
 import * as chainApi from "../api/chain";
 import { TOKEN_HOLDER_VOTING_CONFIG_REPO_URL, tokenHolderConfigFolder } from "../api/chain";
@@ -262,50 +262,19 @@ export function SignWalletListPage() {
                       <th className="font-normal pr-2">Index</th>
                       <th className="font-normal pr-2">Account</th>
                       <th className="font-normal pr-2">Name</th>
-                      <th className="font-normal pr-2">Picture</th>
                       <th className="font-normal">Reviewed key</th>
                     </tr>
                   </thead>
                   <tbody>
                     {list.delegates.map((row) => (
-                      <Fragment key={row.index}>
-                        <tr className="align-top">
-                          <td className="pr-2 font-mono">#{row.index}</td>
-                          <td className="pr-2">
-                            {row.provider === 1 ? "X" : "GitHub"} @{row.handle}
-                          </td>
-                          <td className="pr-2">{row.name}</td>
-                          <td className="pr-2">
-                            {row.picture ? (
-                              <span className="inline-flex items-center gap-1.5">
-                                <img
-                                  src={`data:image/webp;base64,${bytesToBase64(row.picture)}`}
-                                  alt={`Picture of @${row.handle}`}
-                                  width={32}
-                                  height={32}
-                                  className="rounded bg-surface-2"
-                                />
-                                {row.picture.length} bytes
-                              </span>
-                            ) : (
-                              "none"
-                            )}
-                          </td>
-                          <td className="font-mono break-all">{row.dk}</td>
-                        </tr>
-                        <tr className="align-top">
-                          <td />
-                          <td colSpan={4} className="pb-2 text-text-muted">
-                            {row.statement !== undefined ? (
-                              <span data-testid={`wallet-list-statement-${row.index}`} className="whitespace-pre-wrap break-words text-text-secondary">
-                                {row.statement}
-                              </span>
-                            ) : (
-                              "no statement"
-                            )}
-                          </td>
-                        </tr>
-                      </Fragment>
+                      <tr key={row.index} className="align-top">
+                        <td className="pr-2 font-mono">#{row.index}</td>
+                        <td className="pr-2">
+                          {row.provider === 1 ? "X" : "GitHub"} @{row.handle}
+                        </td>
+                        <td className="pr-2">{row.name}</td>
+                        <td className="font-mono break-all">{row.dk}</td>
+                      </tr>
                     ))}
                   </tbody>
                 </table>

@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -97,13 +96,11 @@ func TestConfigDomainsVectors(t *testing.T) {
 // document verifies to the same payload.
 func TestWalletListPayloadVectors(t *testing.T) {
 	type rowInputs struct {
-		Index     uint32  `json:"index"`
-		Provider  uint32  `json:"provider"`
-		Handle    string  `json:"handle"`
-		DK        string  `json:"dk"`
-		Name      string  `json:"name"`
-		Statement *string `json:"statement"`
-		Picture   *string `json:"picture"`
+		Index    uint32 `json:"index"`
+		Provider uint32 `json:"provider"`
+		Handle   string `json:"handle"`
+		DK       string `json:"dk"`
+		Name     string `json:"name"`
 	}
 	var cases []struct {
 		Name   string `json:"name"`
@@ -142,18 +139,7 @@ func TestWalletListPayloadVectors(t *testing.T) {
 				IssuedAt: in.IssuedAt, ReservedNames: in.ReservedNames,
 			}
 			for _, row := range in.Delegates {
-				r := WalletListRow{
-					Index: row.Index, Provider: row.Provider, Handle: row.Handle, DK: row.DK, Name: row.Name,
-					Statement: row.Statement,
-				}
-				if row.Picture != nil {
-					picture, err := hex.DecodeString(*row.Picture)
-					if err != nil {
-						t.Fatal(err)
-					}
-					r.Picture = picture
-				}
-				list.Delegates = append(list.Delegates, r)
+				list.Delegates = append(list.Delegates, WalletListRow(row))
 			}
 			payload, err := list.Payload()
 			ruleErr := errorName(t, err)
@@ -364,7 +350,7 @@ func TestWalletListRefusesWhatReadersDisagreeOn(t *testing.T) {
 		"lone low surrogate":  func(d string) string { return strings.Replace(d, "Alice Example", `Alice \ude00xample`, 1) },
 		"null member":         func(d string) string { return strings.Replace(d, `"handle": "alice"`, `"handle": null`, 1) },
 		"miscased member":     func(d string) string { return strings.Replace(d, `"handle": "alice"`, `"Handle": "alice"`, 1) },
-		"missing name":        func(d string) string { return strings.Replace(d, `"name": "Alice Example",`, "", 1) },
+		"missing name":        func(d string) string { return strings.Replace(d, ",\n      \"name\": \"Alice Example\"", "", 1) },
 		"fractional index":    func(d string) string { return strings.Replace(d, `"index": 17`, `"index": 17.0`, 1) },
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -376,105 +362,6 @@ func TestWalletListRefusesWhatReadersDisagreeOn(t *testing.T) {
 	paired := strings.Replace(string(document), "Alice Example", `Alice \ud83d\ude00`, 1)
 	if _, _, _, err := ParseWalletList([]byte(paired)); err != nil {
 		t.Fatalf("a surrogate pair was refused: %v", err)
-	}
-}
-
-// TestCheckWalletListPictures checks the 128 x 128 rule config CI applies.
-func TestCheckWalletListPictures(t *testing.T) {
-	document, _ := vizorVectorList(t)
-	list, _, _, err := ParseWalletList(document)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := CheckWalletListPictures(list); err != nil {
-		t.Fatalf("the vector picture: %v", err)
-	}
-	// A RIFF header around a truncated VP8L stream passes the field rules
-	// but does not decode.
-	broken := append([]byte(nil), list.Delegates[0].Picture[:30]...)
-	broken[4], broken[5], broken[6], broken[7] = 22, 0, 0, 0
-	list.Delegates[0].Picture = broken
-	if _, err := list.Payload(); err != nil {
-		t.Fatalf("the truncated picture should pass the field rules: %v", err)
-	}
-	if err := CheckWalletListPictures(list); err == nil {
-		t.Fatal("a picture that does not decode passed")
-	}
-}
-
-// TestCheckWalletListPicturesReadsDimensionsFirst checks that a small
-// picture whose bitstream declares a 16384 x 16384 image is refused from its
-// headers, without decoding the gigabyte of pixels it describes, also when a
-// VP8X canvas claims 128 x 128.
-func TestCheckWalletListPicturesReadsDimensionsFirst(t *testing.T) {
-	document, _ := vizorVectorList(t)
-	list, _, _, err := ParseWalletList(document)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// A VP8L stream of 16384 x 16384 with no transforms and five one-symbol
-	// Huffman codes, so every pixel decodes from zero bits.
-	stream := []byte{0x2f, 0xff, 0xff, 0xff, 0x0f, 0x88, 0x88, 0x08}
-	vp8l := append(append([]byte("VP8L"), byte(len(stream)), 0, 0, 0), stream...)
-	// A VP8X chunk with no flags and a 128 x 128 canvas.
-	vp8x := append([]byte("VP8X"), 10, 0, 0, 0, 0, 0, 0, 0, 127, 0, 0, 127, 0, 0)
-	riff := func(chunks ...[]byte) []byte {
-		body := []byte("WEBP")
-		for _, c := range chunks {
-			body = append(body, c...)
-		}
-		return append(append([]byte("RIFF"), byte(len(body)), 0, 0, 0), body...)
-	}
-	// A VP8 key frame header of 16383 x 16383 with a one-byte first partition.
-	frame := []byte{0x30, 0, 0, 0x9d, 0x01, 0x2a, 0xff, 0x3f, 0xff, 0x3f, 0, 0}
-	vp8 := append(append([]byte("VP8 "), byte(len(frame)), 0, 0, 0), frame...)
-	for name, tc := range map[string]struct {
-		picture []byte
-		size    string
-	}{
-		"VP8L":                    {riff(vp8l), "16384x16384"},
-		"VP8X canvas 128px, VP8L": {riff(vp8x, vp8l), "16384x16384"},
-		"VP8X canvas 128px, VP8":  {riff(vp8x, vp8), "16383x16383"},
-	} {
-		picture := tc.picture
-		t.Run(name, func(t *testing.T) {
-			list.Delegates[0].Picture = picture
-			if _, err := list.Payload(); err != nil {
-				t.Fatalf("the picture should pass the field rules: %v", err)
-			}
-			var before, after runtime.MemStats
-			runtime.ReadMemStats(&before)
-			err := CheckWalletListPictures(list)
-			runtime.ReadMemStats(&after)
-			if err == nil || !strings.Contains(err.Error(), tc.size) {
-				t.Fatalf("err = %v, want the declared size refused", err)
-			}
-			if grew := after.TotalAlloc - before.TotalAlloc; grew > 1<<20 {
-				t.Fatalf("checking the picture allocated %d bytes", grew)
-			}
-		})
-	}
-}
-
-// TestCheckWalletListPicturesMissingPadding checks that a file ending in an
-// odd-length chunk without its padding byte is refused rather than read past
-// its end.
-func TestCheckWalletListPicturesMissingPadding(t *testing.T) {
-	document, _ := vizorVectorList(t)
-	list, _, _, err := ParseWalletList(document)
-	if err != nil {
-		t.Fatal(err)
-	}
-	picture := []byte("RIFF\x0d\x00\x00\x00WEBPXXXX\x01\x00\x00\x00z")
-	if len(picture) != 21 {
-		t.Fatalf("the picture is %d bytes", len(picture))
-	}
-	list.Delegates[0].Picture = picture
-	if _, err := list.Payload(); err != nil {
-		t.Fatalf("the picture should pass the field rules: %v", err)
-	}
-	if err := CheckWalletListPictures(list); err == nil || !strings.Contains(err.Error(), "does not decode") {
-		t.Fatalf("err = %v, want the picture refused", err)
 	}
 }
 

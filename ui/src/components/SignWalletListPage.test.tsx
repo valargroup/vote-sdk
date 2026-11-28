@@ -95,10 +95,8 @@ it("shows every signed field before signing", async () => {
   const [alice, bob] = LIST.delegates;
   expect(text).toContain(alice.dk);
   expect(text).toContain(bob.dk);
-  expect(container.querySelector("[data-testid='wallet-list-statement-17']")!.textContent).toBe(alice.statement);
-  const picture = container.querySelector<HTMLImageElement>("img[alt='Picture of @alice']")!;
-  expect(picture.getAttribute("src")).toBe(`data:image/webp;base64,${bytesToBase64(alice.picture!)}`);
-  expect(text).toContain("no statement");
+  expect(text).toContain(alice.name);
+  expect(text).toContain(bob.name);
   expect(text).toContain("issued_at is set to the signing time");
 });
 

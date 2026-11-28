@@ -40,15 +40,7 @@ function vectorList(inputs: PayloadCase["inputs"]): WalletList {
     version: BigInt(inputs.version),
     issued_at: BigInt(inputs.issued_at),
     reserved_names: inputs.reserved_names,
-    delegates: inputs.delegates.map((row) => ({
-      index: row.index,
-      provider: row.provider,
-      handle: row.handle,
-      dk: row.dk,
-      name: row.name,
-      ...(row.statement !== null ? { statement: row.statement } : {}),
-      ...(row.picture !== null ? { picture: fromHex(row.picture) } : {}),
-    })),
+    delegates: inputs.delegates,
   };
 }
 

@@ -6,17 +6,12 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"image"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
 	voied25519 "github.com/oasisprotocol/curve25519-voi/primitives/ed25519"
-	"golang.org/x/image/vp8"
-	"golang.org/x/image/vp8l"
-	"golang.org/x/image/webp"
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -29,15 +24,11 @@ const (
 	WalletListDomainV1 = "zcash-shielded-vote:wallet-list:v1"
 	// MaxWalletListBytes is the largest document a wallet reads.
 	MaxWalletListBytes = 4 << 20
-	// WalletListPictureSide is the width and height of every picture.
-	WalletListPictureSide = 128
 
 	maxWalletListRows          = 1000
 	maxWalletListReservedNames = 1000
 	maxWalletListSignatures    = 8
 	maxWalletListNameChars     = 50
-	maxWalletListStatement     = 280
-	maxWalletListPictureBytes  = 12288
 )
 
 // WalletList is a wallet list's signed content.
@@ -51,16 +42,13 @@ type WalletList struct {
 }
 
 // WalletListRow is one curated delegate. DK is the reviewed key in its
-// zvdk1 form. Statement and Picture are nil when absent; Picture holds the
-// WebP bytes.
+// zvdk1 form.
 type WalletListRow struct {
-	Index     uint32
-	Provider  uint32
-	Handle    string
-	DK        string
-	Name      string
-	Statement *string
-	Picture   []byte
+	Index    uint32
+	Provider uint32
+	Handle   string
+	DK       string
+	Name     string
 }
 
 // WalletListError is a list's first problem. Name is the contract's bare
@@ -83,8 +71,7 @@ func listError(name, format string, args ...any) error {
 	return &WalletListError{Name: name, Detail: fmt.Sprintf(format, args...)}
 }
 
-// walletListWire is the published document. Statement and Picture are
-// pointers so an absent member stays absent; Signatures is omitted only for
+// walletListWire is the published document. Signatures is omitted only for
 // an unsigned draft.
 type walletListWire struct {
 	Format        string              `json:"format"`
@@ -97,15 +84,13 @@ type walletListWire struct {
 	Signatures    []Signature         `json:"signatures,omitempty"`
 }
 
-// walletListRowWire is one published row; Picture is canonical base64.
+// walletListRowWire is one published row.
 type walletListRowWire struct {
-	Index     uint32  `json:"index"`
-	Provider  uint32  `json:"provider"`
-	Handle    string  `json:"handle"`
-	DK        string  `json:"dk"`
-	Name      string  `json:"name"`
-	Statement *string `json:"statement,omitempty"`
-	Picture   *string `json:"picture,omitempty"`
+	Index    uint32 `json:"index"`
+	Provider uint32 `json:"provider"`
+	Handle   string `json:"handle"`
+	DK       string `json:"dk"`
+	Name     string `json:"name"`
 }
 
 // Payload checks the list's field rules, in the contract's order, and returns
@@ -117,7 +102,6 @@ func (l WalletList) Payload() ([]byte, error) {
 	}
 	out := []byte(WalletListDomainV1)
 	lp8 := func(s []byte) { out = append(append(out, byte(len(s))), s...) }
-	lp16 := func(s []byte) { out = append(binary.LittleEndian.AppendUint16(out, uint16(len(s))), s...) }
 	lp8([]byte(l.WalletID))
 	lp8([]byte(l.ChainID))
 	out = binary.LittleEndian.AppendUint64(out, l.Version)
@@ -134,12 +118,6 @@ func (l WalletList) Payload() ([]byte, error) {
 		dk, _ := DecodeDelegateKey(row.DK) // checkFields decoded it
 		out = append(out, dk[:]...)
 		lp8([]byte(row.Name))
-		var statement []byte
-		if row.Statement != nil {
-			statement = []byte(*row.Statement)
-		}
-		lp16(statement)
-		lp16(row.Picture)
 	}
 	return out, nil
 }
@@ -190,21 +168,10 @@ func (l WalletList) checkFields() error {
 		if _, ok := DecodeDelegateKey(row.DK); !ok {
 			return listError("InvalidKey", "%s %q", at("dk"), row.DK)
 		}
-		switch {
-		case !isDisplayText(row.Name, maxWalletListNameChars, false):
+		if !isDisplayText(row.Name, maxWalletListNameChars) {
 			return listError("InvalidName", "%s", at("name"))
-		case row.Statement != nil && !isDisplayText(*row.Statement, maxWalletListStatement, true):
-			return listError("InvalidStatement", "%s", at("statement"))
 		}
 		previous = row.Index
-		if p := row.Picture; p != nil {
-			if len(p) > maxWalletListPictureBytes {
-				return listError("PictureTooLarge", "%s is %d bytes", at("picture"), len(p))
-			}
-			if len(p) < 12 || string(p[:4]) != "RIFF" || string(p[8:12]) != "WEBP" || uint64(binary.LittleEndian.Uint32(p[4:8]))+8 != uint64(len(p)) {
-				return listError("InvalidPicture", "%s is not a WebP file", at("picture"))
-			}
-		}
 	}
 	return nil
 }
@@ -240,10 +207,9 @@ func IsWalletID(id string) bool {
 	return true
 }
 
-// isDisplayText applies the name and statement rule: 1 to maxChars scalar
-// values in NFC, with no control character other than a line feed where
-// allowed, and no bidirectional formatting character.
-func isDisplayText(s string, maxChars int, allowNewline bool) bool {
+// isDisplayText applies the name rule: 1 to maxChars scalar values in NFC,
+// with no control character and no bidirectional formatting character.
+func isDisplayText(s string, maxChars int) bool {
 	n := utf8.RuneCountInString(s)
 	if !utf8.ValidString(s) || n < 1 || n > maxChars || !norm.NFC.IsNormalString(s) {
 		return false
@@ -252,7 +218,7 @@ func isDisplayText(s string, maxChars int, allowNewline bool) bool {
 		switch {
 		case r == 0x061C || r == 0x200E || r == 0x200F || (r >= 0x202A && r <= 0x202E) || (r >= 0x2066 && r <= 0x2069):
 			return false
-		case unicode.Is(unicode.Cc, r) && !(allowNewline && r == '\n'):
+		case unicode.Is(unicode.Cc, r):
 			return false
 		}
 	}
@@ -342,21 +308,11 @@ func decodeWalletList(document []byte, signed bool) (WalletList, []Signature, []
 		}
 	}
 	for i, raw := range rows {
-		var (
-			row     WalletListRow
-			picture *string
-		)
+		var row WalletListRow
 		if err := decodeStrictObject(raw, map[string]any{
-			"index": &row.Index, "provider": &row.Provider, "handle": &row.Handle, "dk": &row.DK,
-			"name": &row.Name, "statement": &row.Statement, "picture": &picture,
+			"index": &row.Index, "provider": &row.Provider, "handle": &row.Handle, "dk": &row.DK, "name": &row.Name,
 		}, "index", "provider", "handle", "dk", "name"); err != nil {
 			return none, nil, nil, listError("Malformed", "delegates[%d]: %v", i, err)
-		}
-		if picture != nil {
-			var ok bool
-			if row.Picture, ok = canonicalBase64(*picture); !ok {
-				return none, nil, nil, listError("Malformed", "delegates[%d].picture is not canonical base64", i)
-			}
 		}
 		list.Delegates = append(list.Delegates, row)
 	}
@@ -429,15 +385,9 @@ func (l WalletList) MarshalDocument(sigs []Signature) ([]byte, error) {
 		Signatures:    sigs,
 	}
 	for _, row := range l.Delegates {
-		r := walletListRowWire{
+		wire.Delegates = append(wire.Delegates, walletListRowWire{
 			Index: row.Index, Provider: row.Provider, Handle: row.Handle, DK: row.DK, Name: row.Name,
-			Statement: row.Statement,
-		}
-		if row.Picture != nil {
-			picture := base64.StdEncoding.EncodeToString(row.Picture)
-			r.Picture = &picture
-		}
-		wire.Delegates = append(wire.Delegates, r)
+		})
 	}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -447,87 +397,6 @@ func (l WalletList) MarshalDocument(sigs []Signature) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
-}
-
-// CheckWalletListPictures decodes every picture and requires it to be
-// WalletListPictureSide pixels square, which config CI checks so that
-// wallets never fall back to the identicon for a signed picture.
-func CheckWalletListPictures(l WalletList) error {
-	for i, row := range l.Delegates {
-		if row.Picture == nil {
-			continue
-		}
-		// The headers' sizes come first, so a small file declaring a huge
-		// image is refused before its pixels are allocated.
-		sizes, err := webpDeclaredSizes(row.Picture)
-		if err != nil {
-			return fmt.Errorf("delegates[%d] (index %d): picture does not decode: %w", i, row.Index, err)
-		}
-		for _, size := range sizes {
-			if size != (image.Point{X: WalletListPictureSide, Y: WalletListPictureSide}) {
-				return fmt.Errorf("delegates[%d] (index %d): picture is %dx%d, not %dx%d",
-					i, row.Index, size.X, size.Y, WalletListPictureSide, WalletListPictureSide)
-			}
-		}
-		img, err := webp.Decode(bytes.NewReader(row.Picture))
-		if err != nil {
-			return fmt.Errorf("delegates[%d] (index %d): picture does not decode: %w", i, row.Index, err)
-		}
-		if b := img.Bounds(); b.Dx() != WalletListPictureSide || b.Dy() != WalletListPictureSide {
-			return fmt.Errorf("delegates[%d] (index %d): picture decodes to %dx%d, not %dx%d",
-				i, row.Index, b.Dx(), b.Dy(), WalletListPictureSide, WalletListPictureSide)
-		}
-	}
-	return nil
-}
-
-// webpDeclaredSizes returns every image size a WebP file's headers declare,
-// reading chunks as webp.Decode does: a VP8X chunk's canvas, then the frame
-// size of the first VP8 or VP8L chunk, the one Decode allocates for. The
-// canvas alone does not bound the frame.
-func webpDeclaredSizes(p []byte) ([]image.Point, error) {
-	if len(p) < 12 {
-		return nil, errors.New("no RIFF header")
-	}
-	var sizes []image.Point
-	for rest := p[12:]; ; {
-		if len(rest) < 8 {
-			return nil, errors.New("no VP8 or VP8L chunk")
-		}
-		id, n := string(rest[:4]), uint64(binary.LittleEndian.Uint32(rest[4:8]))
-		if n > uint64(len(rest)-8) {
-			return nil, fmt.Errorf("chunk %q overruns the file", id)
-		}
-		data := rest[8 : 8+n]
-		switch id {
-		case "VP8X":
-			if len(data) != 10 {
-				return nil, errors.New("VP8X chunk is not 10 bytes")
-			}
-			w := uint32(data[4]) | uint32(data[5])<<8 | uint32(data[6])<<16
-			h := uint32(data[7]) | uint32(data[8])<<8 | uint32(data[9])<<16
-			sizes = append(sizes, image.Point{X: int(w) + 1, Y: int(h) + 1})
-		case "VP8 ":
-			d := vp8.NewDecoder()
-			d.Init(bytes.NewReader(data), len(data))
-			frame, err := d.DecodeFrameHeader()
-			if err != nil {
-				return nil, err
-			}
-			return append(sizes, image.Point{X: frame.Width, Y: frame.Height}), nil
-		case "VP8L":
-			config, err := vp8l.DecodeConfig(bytes.NewReader(data))
-			if err != nil {
-				return nil, err
-			}
-			return append(sizes, image.Point{X: config.Width, Y: config.Height}), nil
-		}
-		padded := 8 + n + n%2
-		if padded > uint64(len(rest)) {
-			return nil, fmt.Errorf("chunk %q has no padding byte", id)
-		}
-		rest = rest[padded:]
-	}
 }
 
 // CheckWalletListReplaces applies the version rule to next against
