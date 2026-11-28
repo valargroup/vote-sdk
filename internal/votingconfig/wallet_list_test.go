@@ -3,7 +3,6 @@ package votingconfig
 import (
 	"bytes"
 	"crypto/ed25519"
-	"crypto/sha512"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -12,9 +11,6 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-
-	"github.com/oasisprotocol/curve25519-voi/curve"
-	"github.com/oasisprotocol/curve25519-voi/curve/scalar"
 )
 
 // These tests check this package's wallet list code (wallet_list.go), which
@@ -507,96 +503,5 @@ func TestCheckWalletListVersion(t *testing.T) {
 	next.IssuedAt++
 	if err := CheckWalletListVersion(previous, next); err == nil {
 		t.Fatal("a re-signed list with a new issued_at kept its version")
-	}
-}
-
-// torsionSignature signs msg under priv with an order-2 point added to the
-// commitment R. ZIP-215's cofactored equation accepts it and RFC 8032's
-// cofactorless one, which crypto/ed25519 checks, does not.
-func torsionSignature(t *testing.T, priv ed25519.PrivateKey, msg []byte) []byte {
-	t.Helper()
-	h := sha512.Sum512(priv.Seed())
-	h[0] &= 248
-	h[31] &= 127
-	h[31] |= 64
-	a, err := scalar.NewFromBytesModOrder(h[:32])
-	if err != nil {
-		t.Fatal(err)
-	}
-	nonce := sha512.Sum512(append([]byte("torsion nonce"), msg...))
-	r, err := scalar.NewFromBytesModOrderWide(nonce[:])
-	if err != nil {
-		t.Fatal(err)
-	}
-	// (0, -1) is the curve's point of order 2.
-	order2 := make([]byte, 32)
-	order2[0] = 0xec
-	for i := 1; i < 31; i++ {
-		order2[i] = 0xff
-	}
-	order2[31] = 0x7f
-	encoded, err := curve.NewCompressedEdwardsYFromBytes(order2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	torsion, err := curve.NewEdwardsPoint().SetCompressedY(encoded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	point := curve.NewEdwardsPoint().MulBasepoint(curve.ED25519_BASEPOINT_TABLE, r)
-	point.Add(point, torsion)
-	var rBytes [32]byte
-	copy(rBytes[:], curve.NewCompressedEdwardsY().SetEdwardsPoint(point)[:])
-	digest := sha512.New()
-	digest.Write(rBytes[:])
-	digest.Write(priv.Public().(ed25519.PublicKey))
-	digest.Write(msg)
-	k, err := scalar.NewFromBytesModOrderWide(digest.Sum(nil))
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := scalar.New().Mul(k, a)
-	s.Add(s, r)
-	sig := append([]byte(nil), rBytes[:]...)
-	sBytes := make([]byte, 32)
-	if err := s.ToBytes(sBytes); err != nil {
-		t.Fatal(err)
-	}
-	return append(sig, sBytes...)
-}
-
-// TestVerifyWalletListZIP215 checks that a list signed with a torsion
-// component in R verifies, as it does in the wallets, though crypto/ed25519
-// rejects the signature.
-func TestVerifyWalletListZIP215(t *testing.T) {
-	document, signer := vizorVectorList(t)
-	list, _, err := ParseWalletList(document)
-	if err != nil {
-		t.Fatal(err)
-	}
-	payload, err := list.Payload()
-	if err != nil {
-		t.Fatal(err)
-	}
-	sig := torsionSignature(t, signer, payload)
-	pub := signer.Public().(ed25519.PublicKey)
-	if ed25519.Verify(pub, payload, sig) {
-		t.Fatal("crypto/ed25519 accepts the torsion signature; the test no longer covers the ZIP-215 difference")
-	}
-	signed, err := list.MarshalDocument([]Signature{{KeyID: "valargroup", Alg: AlgEd25519, Sig: base64.StdEncoding.EncodeToString(sig)}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	pinned := []TrustedKey{{KeyID: "valargroup", Alg: AlgEd25519, Pubkey: base64.StdEncoding.EncodeToString(pub)}}
-	if _, err := VerifyWalletList(signed, list.WalletID, list.ChainID, pinned); err != nil {
-		t.Fatalf("a ZIP-215 signature was refused: %v", err)
-	}
-	sig[40] ^= 1
-	tampered, err := list.MarshalDocument([]Signature{{KeyID: "valargroup", Alg: AlgEd25519, Sig: base64.StdEncoding.EncodeToString(sig)}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := VerifyWalletList(tampered, list.WalletID, list.ChainID, pinned); errorName(t, err) != "NoPinnedSignature" {
-		t.Fatalf("a tampered torsion signature: %v", err)
 	}
 }

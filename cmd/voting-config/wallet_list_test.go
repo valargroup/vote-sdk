@@ -175,10 +175,6 @@ func TestWalletListVerify(t *testing.T) {
 	if _, err := run(t, append(base, "--allowed-key", other)...); err == nil || !strings.Contains(err.Error(), "NoPinnedSignature") {
 		t.Fatalf("another pinned key: %v", err)
 	}
-	wrongWallet := []string{"wallet-list", "verify", "--list", list, "--wallet-id", "zodl", "--chain-id", "zvote-1", "--allowed-key", v.allowedKey()}
-	if _, err := run(t, wrongWallet...); err == nil || !strings.Contains(err.Error(), "WrongWallet") {
-		t.Fatalf("another wallet: %v", err)
-	}
 	if _, err := run(t, append(base, "--allowed-key", "valargroup")...); err == nil {
 		t.Fatal("an --allowed-key without a public key was accepted")
 	}

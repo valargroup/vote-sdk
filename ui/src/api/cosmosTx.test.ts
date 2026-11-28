@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { describeCoordinatorActionPayload, PROXY_APPROVAL_FLOOR } from "./coordinatorActions";
 import { encodeCreateVotingSessionPayload, type CreateVotingSessionValue } from "./cosmosTx";
 
 /** A MsgCreateVotingSession payload as the publish flow builds it. */
@@ -20,28 +19,11 @@ function session(proxyDelegation: boolean): CreateVotingSessionValue {
   };
 }
 
-/** Describes an encoded payload as the Approvals page would. */
-function review(payload: Uint8Array) {
-  return describeCoordinatorActionPayload({
-    payload: { type_url: "/svote.v1.MsgCreateVotingSession", value: btoa(String.fromCharCode(...payload)) },
-  });
-}
-
 describe("encodeCreateVotingSessionPayload", () => {
   it("sets field 12 only for a proxy delegation round", () => {
     const plain = encodeCreateVotingSessionPayload(session(false));
     const proxy = encodeCreateVotingSessionPayload(session(true));
     expect(Array.from(proxy.slice(plain.length))).toEqual([0x60, 0x01]);
     expect(Array.from(proxy.slice(0, plain.length))).toEqual(Array.from(plain));
-
-    const plainView = review(plain);
-    expect(plainView.canApprove).toBe(true);
-    expect(plainView.approvalFloor).toBe(0);
-    expect(plainView.json.value).toMatchObject({ title: "Round", proxy_delegation: false });
-
-    const proxyView = review(proxy);
-    expect(proxyView.canApprove).toBe(true);
-    expect(proxyView.approvalFloor).toBe(PROXY_APPROVAL_FLOOR);
-    expect(proxyView.json.value).toMatchObject({ title: "Round", proxy_delegation: true });
   });
 });

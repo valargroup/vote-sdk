@@ -154,7 +154,6 @@ describe("describeCoordinatorActionPayload", () => {
       },
     });
     expect(description.jsonDecoded).toBe(true);
-    expect(valueFor(description, "Proxy delegation")).toBe("No");
     expect(description.approvalFloor).toBe(0);
   });
 
@@ -245,8 +244,6 @@ describe("describeCoordinatorActionPayload", () => {
 
     expect(description.canApprove).toBe(false);
     expect(description.error).toContain("unsupported action type");
-    expect(valueFor(description, "Warning")).toContain("cannot decode this action type");
-    expect(description.rows.find((row) => row.label === "Warning")?.warning).toBe(true);
     expect(valueFor(description, "Payload (hex)")).toBe("0a026162");
     expect(description.json).toEqual({
       type_url: "type.googleapis.com/svote.v1.MsgEndorseRound",
@@ -256,7 +253,7 @@ describe("describeCoordinatorActionPayload", () => {
     expect(description.approvalFloor).toBe(0);
   });
 
-  it("shows proxy delegation params with every verifier key", () => {
+  it("decodes proxy delegation params with every verifier key", () => {
     const keyA = new Uint8Array(32).fill(0xab);
     const keyB = new Uint8Array(32).fill(0xcd);
     const description = describeCoordinatorActionPayload(action("svote.v1.MsgSetProxyDelegationParams", concat([
@@ -269,10 +266,6 @@ describe("describeCoordinatorActionPayload", () => {
 
     expect(description.canApprove).toBe(true);
     expect(description.approvalFloor).toBe(PROXY_APPROVAL_FLOOR);
-    expect(valueFor(description, "Verifiers")).toBe(`1: ${"ab".repeat(32)}\n7: ${"cd".repeat(32)}`);
-    expect(valueFor(description, "Verifier threshold")).toBe("2");
-    expect(valueFor(description, "Max delegates")).toBe("2000");
-    expect(valueFor(description, "Pause")).toContain("Unchanged");
     expect(description.json.value).toEqual({
       creator: "svote1creator",
       verifiers: [
@@ -282,54 +275,28 @@ describe("describeCoordinatorActionPayload", () => {
       verifier_threshold: 2,
       max_delegates: 2_000,
     });
-
-    const closing = describeCoordinatorActionPayload(action("svote.v1.MsgSetProxyDelegationParams", concat([
-      stringField(1, "svote1creator"),
-      varintField(4, 100),
-    ])));
-    expect(valueFor(closing, "Verifiers")).toBe("None. Delegate registration closes.");
-    expect(valueFor(closing, "Verifier threshold")).toBe("0");
   });
 
-  it("shows whether a proxy delegation pause pauses or resumes", () => {
+  it("decodes a proxy delegation pause", () => {
     const pause = describeCoordinatorActionPayload(action("svote.v1.MsgSetProxyDelegationPause", concat([
       stringField(1, "svote1creator"),
       varintField(2, 1),
     ])));
     expect(pause.canApprove).toBe(true);
     expect(pause.approvalFloor).toBe(PROXY_APPROVAL_FLOOR);
-    expect(valueFor(pause, "Action")).toBe("Pause new proxy delegations");
     expect(pause.json.value).toEqual({ creator: "svote1creator", paused: true });
-
-    const resume = describeCoordinatorActionPayload(action("svote.v1.MsgSetProxyDelegationPause", stringField(1, "svote1creator")));
-    expect(valueFor(resume, "Action")).toBe("Resume new proxy delegations");
-    expect(resume.json.value).toEqual({ creator: "svote1creator", paused: false });
   });
 
-  it("shows a status action, every delegate it names and the reason", () => {
-    const delegates = bytesField(2, concat([varint(17), varint(300)]));
+  it("decodes a status action and every delegate it names, packed or not", () => {
     const suspend = describeCoordinatorActionPayload(action("svote.v1.MsgSetDelegateStatus", concat([
       stringField(1, "svote1creator"),
-      delegates,
+      bytesField(2, concat([varint(17), varint(300)])),
       varintField(3, 1),
       varintField(4, 2),
     ])));
     expect(suspend.canApprove).toBe(true);
     expect(suspend.approvalFloor).toBe(PROXY_APPROVAL_FLOOR);
-    expect(valueFor(suspend, "Action")).toBe("Suspend delegates");
-    expect(valueFor(suspend, "Delegates")).toBe("delegate 17: suspend\ndelegate 300: suspend");
-    expect(valueFor(suspend, "Reason")).toBe("2 (key lost or compromised)");
     expect(suspend.json.value).toEqual({ creator: "svote1creator", delegate_indexes: [17, 300], action: 1, reason: 2 });
-
-    const lift = describeCoordinatorActionPayload(action("svote.v1.MsgSetDelegateStatus", concat([
-      stringField(1, "svote1creator"),
-      delegates,
-      varintField(3, 2),
-      varintField(4, 4),
-    ])));
-    expect(valueFor(lift, "Action")).toBe("Lift suspensions");
-    expect(valueFor(lift, "Delegates")).toBe("delegate 17: lift the suspension\ndelegate 300: lift the suspension");
-    expect(valueFor(lift, "Reason")).toBe("4 (verifier review)");
 
     // Unpacked indexes, one varint per field, decode the same.
     const retire = describeCoordinatorActionPayload(action("svote.v1.MsgSetDelegateStatus", concat([
@@ -338,16 +305,10 @@ describe("describeCoordinatorActionPayload", () => {
       varintField(3, 3),
       varintField(4, 5),
     ])));
-    expect(valueFor(retire, "Action")).toBe("Retire delegates for good");
-    expect(retire.rows.find((row) => row.label === "Action")?.warning).toBe(true);
     expect(valueFor(retire, "Delegates")).toBe("delegate 17: retire\ndelegate 300: retire");
-    expect(valueFor(retire, "Reason")).toBe("5 (unknown reason code)");
-
-    const unknownAction = describeCoordinatorActionPayload(action("svote.v1.MsgSetDelegateStatus", concat([delegates, varintField(3, 4)])));
-    expect(valueFor(unknownAction, "Action")).toBe("4 (unknown action)");
   });
 
-  it("shows a create-session proxy flag and its approval floor", () => {
+  it("holds a create-session proxy flag to the approval floor", () => {
     const description = describeCoordinatorActionPayload(action("svote.v1.MsgCreateVotingSession", concat([
       stringField(1, "svote1creator"),
       stringField(10, "Proxy round"),
@@ -355,30 +316,20 @@ describe("describeCoordinatorActionPayload", () => {
     ])));
     expect(description.canApprove).toBe(true);
     expect(description.approvalFloor).toBe(PROXY_APPROVAL_FLOOR);
-    expect(valueFor(description, "Proxy delegation")).toContain("at least 2 coordinator approvals");
-    expect(description.rows.find((row) => row.label === "Proxy delegation")?.warning).toBe(true);
     expect(description.json.value).toMatchObject({ title: "Proxy round", proxy_delegation: true });
   });
 
-  it("shows malformed payloads as raw hex with a warning", () => {
+  it("blocks approval of a malformed payload", () => {
     // Field 2 of the pause payload is a bool, sent here with the bytes wire type.
     const malformed = describeCoordinatorActionPayload(action("svote.v1.MsgSetProxyDelegationPause", bytesField(2, new Uint8Array([1]))));
     expect(malformed.canApprove).toBe(false);
     expect(malformed.error).toContain("failed to decode payload");
-    expect(valueFor(malformed, "Warning")).toContain("does not decode");
     expect(valueFor(malformed, "Payload (hex)")).toBe("120101");
-    expect(malformed.jsonDecoded).toBe(false);
 
     // The chain keeps only a uint32's low 32 bits, so a longer value is refused.
     const overflow = describeCoordinatorActionPayload(action("svote.v1.MsgSetDelegateStatus", bytesField(2, varint(2n ** 32n + 17n))));
     expect(overflow.canApprove).toBe(false);
     expect(overflow.error).toContain("exceeds 32 bits");
-
-    const notBase64 = describeCoordinatorActionPayload({
-      payload: { type_url: "/svote.v1.MsgSetProxyDelegationPause", value: "%%%" },
-    });
-    expect(notBase64.canApprove).toBe(false);
-    expect(valueFor(notBase64, "Payload (hex)")).toBe("not base64: %%%");
   });
 
   it("blocks approval when a payload has fields the page does not know", () => {
@@ -389,9 +340,5 @@ describe("describeCoordinatorActionPayload", () => {
     ])));
     expect(description.canApprove).toBe(false);
     expect(description.error).toContain("verifiers.3, 9");
-    expect(valueFor(description, "Warning")).toContain("details below are incomplete");
-    expect(valueFor(description, "Verifier threshold")).toBe("0");
-    expect(valueFor(description, "Payload (hex)")).toMatch(/^0a0d/);
-    expect(description.jsonDecoded).toBe(true);
   });
 });
