@@ -2,6 +2,7 @@ package sentry
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"cosmossdk.io/log"
 	sentrylib "github.com/getsentry/sentry-go"
 	sentryhttp "github.com/getsentry/sentry-go/http"
+	"github.com/gorilla/mux"
 )
 
 type captureTransport struct {
@@ -137,7 +139,7 @@ func TestScrubSensitiveRequestEvent(t *testing.T) {
 		},
 	}
 
-	got := scrubSensitiveRequestEvent(event)
+	got := scrubEvent(event)
 	if got.Request.Data != "" {
 		t.Fatalf("request data was not scrubbed")
 	}
@@ -152,12 +154,96 @@ func TestScrubSensitiveRequestEvent(t *testing.T) {
 	}
 }
 
+// TestScrubEventDropsRequestBodyQueryAndCookies checks that no event keeps a
+// request body, query string or cookie, on any route.
+func TestScrubEventDropsRequestBodyQueryAndCookies(t *testing.T) {
+	for _, route := range []string{"/shielded-vote/v1/reveal-share", "/shielded-vote/v1/delegate-op", "/api/voting-config"} {
+		event := scrubEvent(&sentrylib.Event{Request: &sentrylib.Request{
+			URL:         "https://chain.example" + route,
+			Method:      "POST",
+			Data:        `{"proposal_id":2,"vote_decision":3}`,
+			QueryString: "start_after=17",
+			Cookies:     "session=1",
+		}})
+		if event.Request.Data != "" || event.Request.QueryString != "" || event.Request.Cookies != "" {
+			t.Fatalf("%s: request = %+v, want no body, query or cookies", route, event.Request)
+		}
+	}
+}
+
+// TestScrubEventRemovesLinkingKeysAndValues checks that an event keeps no
+// linking key and no number written after one, wherever it sits, and keeps
+// the other values next to them.
+func TestScrubEventRemovesLinkingKeysAndValues(t *testing.T) {
+	event := scrubEvent(&sentrylib.Event{
+		Message: "share failed: tree_position 7 out of range (tree has 5 leaves)",
+		Exception: []sentrylib.Exception{
+			{Value: "chain rejected tx (code 53): delegate 17 is not below next_index 20: delegate not found"},
+			{Value: `invalid share {"proposal_id":2,"vote_decision":3,"share_index":4}`},
+			{Value: "compute merkle path: votetree: position 9 out of range or height 12 has no checkpoint"},
+			{Value: "imported submit_at (1790000000) >= vote_end_time (1790000001)"},
+			{Value: "missing accumulator (proposal=4, decision=5), d=6"},
+		},
+		Tags:     map[string]string{"round_id": "ab", "share_index": "3", "proposal_id": "2", "d": "17"},
+		Extra:    map[string]interface{}{"tree_position": 7, "stage": "submit"},
+		Contexts: map[string]sentrylib.Context{"trace": {"data": map[string]interface{}{"submit_at": 1, "vote_decision": 3, "outcome": "ok"}}},
+		Spans: []*sentrylib.Span{{
+			Tags: map[string]string{"delegate_index": "17", "rpc.method": "tx"},
+			Data: map[string]interface{}{"proposal_id": 2, "attempt": 1},
+		}},
+		Breadcrumbs: []*sentrylib.Breadcrumb{{
+			Message: "looked up delegate 17",
+			Data: map[string]interface{}{
+				"url": "https://chain.example/shielded-vote/v1/delegates/17?start_after=16", "http.query": "start_after=16",
+				"method": "GET", "delegate_index": 17,
+			},
+		}},
+	})
+
+	if want := "share failed: tree_position [redacted] out of range (tree has 5 leaves)"; event.Message != want {
+		t.Errorf("message = %q, want %q", event.Message, want)
+	}
+	var values []string
+	for _, exception := range event.Exception {
+		values = append(values, exception.Value)
+	}
+	if want := []string{
+		"chain rejected tx (code 53): delegate [redacted] is not below next_index 20: delegate not found",
+		`invalid share {"proposal_id":[redacted],"vote_decision":[redacted],"share_index":4}`,
+		"compute merkle path: votetree: position [redacted] out of range or height 12 has no checkpoint",
+		"imported submit_at ([redacted]) >= vote_end_time (1790000001)",
+		"missing accumulator (proposal=[redacted], decision=[redacted]), d=[redacted]",
+	}; !reflect.DeepEqual(values, want) {
+		t.Errorf("exception values = %q, want %q", values, want)
+	}
+	if want := map[string]string{"round_id": "ab", "share_index": "3"}; !reflect.DeepEqual(event.Tags, want) {
+		t.Errorf("tags = %v, want %v", event.Tags, want)
+	}
+	if want := map[string]interface{}{"stage": "submit"}; !reflect.DeepEqual(event.Extra, want) {
+		t.Errorf("extra = %v, want %v", event.Extra, want)
+	}
+	if want := map[string]interface{}{"outcome": "ok"}; !reflect.DeepEqual(event.Contexts["trace"]["data"], want) {
+		t.Errorf("trace data = %v, want %v", event.Contexts["trace"]["data"], want)
+	}
+	span := event.Spans[0]
+	if !reflect.DeepEqual(span.Tags, map[string]string{"rpc.method": "tx"}) || !reflect.DeepEqual(span.Data, map[string]interface{}{"attempt": 1}) {
+		t.Errorf("span tags %v and data %v keep a linking key", span.Tags, span.Data)
+	}
+	breadcrumb := event.Breadcrumbs[0]
+	if breadcrumb.Message != "looked up delegate [redacted]" {
+		t.Errorf("breadcrumb message = %q", breadcrumb.Message)
+	}
+	if want := map[string]interface{}{"url": "https://chain.example", "method": "GET"}; !reflect.DeepEqual(breadcrumb.Data, want) {
+		t.Errorf("breadcrumb data = %v, want %v", breadcrumb.Data, want)
+	}
+}
+
 func TestScrubSensitiveRequestEventWithoutRequest(t *testing.T) {
-	if scrubSensitiveRequestEvent(nil) != nil {
+	if scrubEvent(nil) != nil {
 		t.Fatal("nil event was changed")
 	}
 	event := &sentrylib.Event{User: sentrylib.User{IPAddress: "198.51.100.1"}}
-	if got := scrubSensitiveRequestEvent(event); got.User.IPAddress != "" {
+	if got := scrubEvent(event); got.User.IPAddress != "" {
 		t.Fatal("client address was not scrubbed without a request")
 	}
 }
@@ -261,6 +347,18 @@ func TestTraceSampleRate(t *testing.T) {
 			name:            "production concrete round",
 			environment:     "production",
 			transactionName: "GET /shielded-vote/v1/round/round-1",
+			want:            reducedTraceSampleRate,
+		},
+		{
+			name:            "production share status route",
+			environment:     "production",
+			transactionName: "GET /shielded-vote/v1/share-status/{roundId}/{nullifier}",
+			want:            reducedTraceSampleRate,
+		},
+		{
+			name:            "production round route",
+			environment:     "production",
+			transactionName: "GET /shielded-vote/v1/round/{round_id}",
 			want:            reducedTraceSampleRate,
 		},
 		{
@@ -381,6 +479,123 @@ func TestStartSpanKeepsParentTransactionName(t *testing.T) {
 	}
 	if event.Spans[0].Description != "helper.generate_share_reveal_proof" {
 		t.Fatalf("child description = %q, want helper.generate_share_reveal_proof", event.Spans[0].Description)
+	}
+}
+
+// TestRootSpansKeepOffTheCurrentHub checks that root spans started from a
+// context without a hub never become the span of the shared current hub,
+// whose events other goroutines capture, and that an error captured with a
+// span's context joins that span's trace.
+func TestRootSpansKeepOffTheCurrentHub(t *testing.T) {
+	transport := initTestSentry(t)
+
+	ctx, span := StartSpan(context.Background(), "helper.dedupe", "helper.preproof_share_nullifier_check", nil, nil)
+	_, transaction := StartTransaction(context.Background(), "helper.reconcile", nil, nil)
+	for _, root := range []*TraceSpan{span, transaction} {
+		if sentrylib.CurrentHub().Scope().GetSpan() == root.span {
+			t.Fatalf("root span %q is the current hub's span", root.span.Name)
+		}
+	}
+	CaptureErrWithGroupingContext(ctx, errors.New("share nullifier lookup failed"), nil, "helper_share_failure")
+	span.Finish(nil)
+	transaction.Finish(nil)
+
+	events := transport.Events()
+	if len(events) != 3 || len(events[0].Exception) != 1 {
+		t.Fatalf("sent %d events, want the error and two transactions", len(events))
+	}
+	if got := events[0].Contexts["trace"]["trace_id"]; got != span.span.TraceID {
+		t.Fatalf("error trace_id = %v, want its span's %v", got, span.span.TraceID)
+	}
+}
+
+// TestRouteTracingNamesTransactionsByRoute checks that RouteTracing names a
+// request's transaction by its mux route template, never by the raw path,
+// and still recovers panics.
+func TestRouteTracingNamesTransactionsByRoute(t *testing.T) {
+	transport := initTestSentryWithEnvironment(t, "development")
+	router := mux.NewRouter()
+	trace := RouteTracing(false)
+	router.Handle("/shielded-vote/v1/share-status/{roundId}/{nullifier}", trace(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if mux.Vars(r)["nullifier"] == "panic" {
+			panic("synthetic handler failure")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))).Methods(http.MethodGet)
+
+	const route = "GET /shielded-vote/v1/share-status/{roundId}/{nullifier}"
+	for _, nullifier := range []string{"nullifier-1", "panic"} {
+		router.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/shielded-vote/v1/share-status/round-1/"+nullifier, nil))
+	}
+
+	var transactions []string
+	for _, event := range transport.Events() {
+		if event.Type == "transaction" {
+			transactions = append(transactions, event.Transaction)
+		}
+	}
+	if !reflect.DeepEqual(transactions, []string{route, route}) {
+		t.Fatalf("transactions = %q, want two %q", transactions, route)
+	}
+}
+
+// TestRouteTracingReducesRequestsToRoute checks that every event a traced
+// request reports, its transaction and a panic alike, carries the route
+// template as its URL and neither the raw path's values, nor the query
+// string, nor the body.
+func TestRouteTracingReducesRequestsToRoute(t *testing.T) {
+	transport := initTestSentryWithEnvironment(t, "development")
+	router := mux.NewRouter()
+	trace := RouteTracing(false)
+	handler := trace(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := io.Copy(io.Discard, r.Body); err != nil {
+			t.Error(err)
+		}
+		if r.URL.Query().Get("panic") != "" {
+			panic("synthetic handler failure")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	router.Handle("/shielded-vote/v1/delegates/{index}", handler).Methods(http.MethodGet)
+	router.Handle("/shielded-vote/v1/delegate-op", handler).Methods(http.MethodPost)
+
+	// Built, not written out, so source lines Sentry quotes from this file
+	// in the panic's stack trace never contain it.
+	index := strconv.Itoa(987654320 + 1)
+	for _, req := range []*http.Request{
+		httptest.NewRequest(http.MethodGet, "/shielded-vote/v1/delegates/"+index+"?start_after="+index, nil),
+		httptest.NewRequest(http.MethodGet, "/shielded-vote/v1/delegates/"+index+"?panic=1", nil),
+		httptest.NewRequest(http.MethodPost, "/shielded-vote/v1/delegate-op",
+			strings.NewReader(`{"ballot":{"delegate_index":`+index+`}}`)),
+	} {
+		router.ServeHTTP(httptest.NewRecorder(), req)
+	}
+
+	events := transport.Events()
+	if len(events) != 4 {
+		t.Fatalf("sent %d events, want 3 transactions and 1 panic", len(events))
+	}
+	routes := map[string]bool{
+		"http://example.com/shielded-vote/v1/delegates/{index}": true,
+		"http://example.com/shielded-vote/v1/delegate-op":       true,
+	}
+	for _, event := range events {
+		if event.Request == nil {
+			t.Fatalf("event %q has no request", event.Transaction)
+		}
+		if !routes[event.Request.URL] {
+			t.Errorf("request URL = %q, want a route template", event.Request.URL)
+		}
+		if event.Request.QueryString != "" || event.Request.Data != "" {
+			t.Errorf("request %+v keeps its query or body", event.Request)
+		}
+		encoded, err := json.Marshal(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(encoded), index) {
+			t.Errorf("event %s carries the raw index", encoded)
+		}
 	}
 }
 

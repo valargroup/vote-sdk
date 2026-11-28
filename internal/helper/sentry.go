@@ -29,10 +29,18 @@ func CaptureErrWithGrouping(err error, tags map[string]string, fingerprintParts 
 	sentry.CaptureErrWithGrouping(err, tags, fingerprintParts...)
 }
 
+// CaptureErrWithGroupingContext delegates to the shared Sentry package.
+func CaptureErrWithGroupingContext(ctx context.Context, err error, tags map[string]string, fingerprintParts ...string) {
+	sentry.CaptureErrWithGroupingContext(ctx, err, tags, fingerprintParts...)
+}
+
 // TraceSpan wraps a Sentry performance span.
 type TraceSpan = sentry.TraceSpan
 
-// StartTrace starts a Sentry performance span.
+// StartTrace starts a Sentry performance span. Its tags and data never carry
+// a share's proposal_id, tree_position, submit_at, vote_decision or delegate
+// index, which would link the share's reveal to its leaf (plan PRV-6); the
+// shared sentry package's send hooks drop them in any case.
 func StartTrace(ctx context.Context, operation, description string, tags map[string]string, data map[string]interface{}) (context.Context, *TraceSpan) {
 	return sentry.StartSpan(ctx, operation, description, tags, data)
 }

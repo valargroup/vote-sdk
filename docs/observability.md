@@ -406,14 +406,24 @@ regressions visible in the Sentry releases dashboard.
 
 ### Panic recovery
 
-- **HTTP handlers** -- all helper routes are wrapped with the `sentryhttp`
-  middleware, which recovers panics and reports them to Sentry before
-  returning a 500 response. It can also create sampled transactions for 4xx
-  responses. Ordinary 4xx responses do not create Sentry error events. The
-  Sentry hooks remove helper request bodies and client address fields from
-  both error and transaction events. Request headers are limited to `Accept`,
-  `Content-Type`, `Content-Length`, and `Host`, which also omits `X-Helper-Token`
-  and proxy forwarding headers.
+- **HTTP handlers** -- all helper and chain REST routes are wrapped with
+  `sentry.RouteTracing`, built on the `sentryhttp` middleware, which recovers
+  panics and reports them to Sentry before returning a 500 response. It can
+  also create sampled transactions for 4xx responses. Ordinary 4xx responses
+  do not create Sentry error events. Every event a request reports carries its
+  route template, such as `/shielded-vote/v1/delegates/{index}`, as both
+  transaction name and request URL, never the raw path. The Sentry hooks
+  remove request bodies, query strings, cookies and client address fields
+  from both error and transaction events. Request headers are limited to
+  `Accept`, `Content-Type`, `Content-Length`, and `Host`, which also omits
+  `X-Helper-Token` and proxy forwarding headers. The hooks also drop every
+  tag, extra, span and breadcrumb entry keyed `proposal_id`, `tree_position`,
+  `submit_at`, `vote_decision`, `delegate_index` or `d`, and redact the number
+  after any of those names, or after `proposal`, `decision`, `position` or
+  `delegate`, in messages and exception text, so an error such as
+  `tree_position 7 out of range` reaches Sentry as
+  `tree_position [redacted] out of range` (plan PRV-6). Local logs keep the
+  full text.
 - **Processor goroutines** -- each share processing goroutine has a
   `recover()` guard that captures panics to Sentry and marks the share as
   failed, preventing a single bad share from crashing the processor loop.

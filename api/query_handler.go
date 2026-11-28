@@ -12,12 +12,12 @@ import (
 
 	abci "github.com/cometbft/cometbft/abci/types"
 	"github.com/cosmos/cosmos-sdk/client"
-	sentryhttp "github.com/getsentry/sentry-go/http"
 	"github.com/gorilla/mux"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/valargroup/vote-sdk/sentry"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
@@ -45,7 +45,7 @@ import (
 //	GET /shielded-vote/v1/protocol-capabilities
 func (h *Handler) RegisterQueryRoutes(router *mux.Router, clientCtx client.Context) {
 	qh := &queryHandler{clientCtx: clientCtx}
-	trace := sentryhttp.New(sentryhttp.Options{Repanic: true}).Handle
+	trace := sentry.RouteTracing(true)
 
 	// Register "latest" and "leaves" before "{height}" to avoid gorilla/mux
 	// treating them as a height param.

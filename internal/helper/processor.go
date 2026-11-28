@@ -377,11 +377,7 @@ func (p *Processor) processQueuedShare(ctx context.Context, share QueuedShare) {
 	shareCtx, shareSpan := StartTrace(ctx, "helper.process_share", "helper.process_share", map[string]string{
 		"round_id":    share.Payload.VoteRoundID,
 		"share_index": strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
-	}, map[string]interface{}{
-		"proposal_id":   share.Payload.ProposalID,
-		"tree_position": share.Payload.TreePosition,
-		"submit_at":     share.Payload.SubmitAt,
-	})
+	}, nil)
 	var spanErr error
 	defer func() {
 		shareSpan.Finish(spanErr)
@@ -401,7 +397,7 @@ func (p *Processor) processQueuedShare(ctx context.Context, share QueuedShare) {
 			metricStage = failureStagePanic
 			err := failedShareAttemptError(failureStagePanic, fmt.Errorf("panic in processShare: %v", r))
 			spanErr = err
-			captureShareProcessingFailure(share, failureStagePanic, err)
+			captureShareProcessingFailure(shareCtx, share, failureStagePanic, err)
 			p.logger.Error("panic in share processing",
 				"round_id", share.Payload.VoteRoundID,
 				"share_index", share.Payload.EncShare.ShareIndex,
@@ -451,7 +447,7 @@ func (p *Processor) processQueuedShare(ctx context.Context, share QueuedShare) {
 				"share_index", share.Payload.EncShare.ShareIndex,
 				"error", err,
 			)
-			captureShareProcessingFailure(share, failureStageRoundStatusCheck, err)
+			captureShareProcessingFailure(shareCtx, share, failureStageRoundStatusCheck, err)
 			p.markShareFailure(share, err)
 			return
 		}
@@ -473,7 +469,7 @@ func (p *Processor) processQueuedShare(ctx context.Context, share QueuedShare) {
 			spanErr = err
 			p.logger.Warn("share commitment check failed", "round_id", share.Payload.VoteRoundID, "error", err)
 			if action == shareFailureFail {
-				captureShareProcessingFailure(share, failureStageCommitmentCheck, err)
+				captureShareProcessingFailure(shareCtx, share, failureStageCommitmentCheck, err)
 			}
 			p.markShareFailure(share, err)
 			return
@@ -551,7 +547,7 @@ func (p *Processor) processQueuedShare(ctx context.Context, share QueuedShare) {
 			"share_index", share.Payload.EncShare.ShareIndex,
 			"error", err,
 		)
-		captureShareProcessingFailure(share, stage, err)
+		captureShareProcessingFailure(shareCtx, share, stage, err)
 		p.markShareFailure(share, err)
 		return
 	}
@@ -679,13 +675,14 @@ func (p *Processor) reconcileClosedRoundSummary(summary *ExpiredRoundSummary, no
 // captureShareProcessingFailure groups repeated attempts from the local helper
 // by round, failure stage, and queue action while preserving the share index as
 // diagnostic context. A new round, stage, or action creates a separate issue.
-func captureShareProcessingFailure(share QueuedShare, stage string, err error) {
+// ctx is the share's span context, so the event joins that share's trace.
+func captureShareProcessingFailure(ctx context.Context, share QueuedShare, stage string, err error) {
 	action, _ := classifyShareFailure(err)
 	actionTag := "failed"
 	if action == shareFailureRetry {
 		actionTag = "retry"
 	}
-	CaptureErrWithGrouping(err, map[string]string{
+	CaptureErrWithGroupingContext(ctx, err, map[string]string{
 		"alert":          helperShareFailureAlert,
 		"failure_action": actionTag,
 		"round_id":       share.Payload.VoteRoundID,
@@ -876,7 +873,6 @@ func (p *Processor) processShare(ctx context.Context, share QueuedShare) error {
 		"share_index": strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
 	}, map[string]interface{}{
 		"share_index": share.Payload.EncShare.ShareIndex,
-		"proposal_id": share.Payload.ProposalID,
 	})
 	proof, nullifier, _, err := p.prover.GenerateShareRevealProof(
 		merklePath,
@@ -1079,9 +1075,7 @@ func (d *preProofShareDeduper) shareAlreadyRevealed(ctx context.Context, share Q
 	_, span := StartTrace(ctx, "helper.dedupe", "helper.preproof_share_nullifier_check", map[string]string{
 		"round_id":    share.Payload.VoteRoundID,
 		"share_index": strconv.FormatUint(uint64(share.Payload.EncShare.ShareIndex), 10),
-	}, map[string]interface{}{
-		"proposal_id": share.Payload.ProposalID,
-	})
+	}, nil)
 
 	var spanErr error
 	var already bool

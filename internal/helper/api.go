@@ -15,12 +15,12 @@ import (
 
 	"cosmossdk.io/log"
 	"github.com/cosmos/cosmos-sdk/telemetry"
-	sentryhttp "github.com/getsentry/sentry-go/http"
 	"github.com/gorilla/mux"
 	"github.com/mikelodder7/curvey/native/pasta/fp"
 
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/internal/restingress"
+	"github.com/valargroup/vote-sdk/sentry"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
@@ -156,7 +156,7 @@ func RegisterRoutesWithValidationGetters(
 		logger:                logger,
 		metrics:               defaultHelperMetrics,
 	}
-	recover := sentryhttp.New(sentryhttp.Options{Repanic: false}).Handle
+	recover := sentry.RouteTracing(false)
 	router.Handle("/shielded-vote/v1/shares", recover(http.HandlerFunc(h.handleSubmitShare))).Methods("POST")
 	router.Handle("/shielded-vote/v1/share-status/{roundId}/{nullifier}", recover(http.HandlerFunc(h.handleShareStatus))).Methods("GET")
 	router.Handle("/shielded-vote/v1/status", recover(http.HandlerFunc(h.handleStatus))).Methods("GET")
@@ -430,10 +430,7 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 		_, span := StartTrace(r.Context(), "helper.enqueue", "helper.share_enqueued", map[string]string{
 			"round_id": payload.VoteRoundID,
 		}, map[string]interface{}{
-			"share_index":   payload.EncShare.ShareIndex,
-			"proposal_id":   payload.ProposalID,
-			"tree_position": payload.TreePosition,
-			"submit_at":     payload.SubmitAt,
+			"share_index": payload.EncShare.ShareIndex,
 		})
 		span.Finish(nil)
 	}
