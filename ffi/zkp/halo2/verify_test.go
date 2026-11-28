@@ -3,13 +3,16 @@
 package halo2
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/ffi/zkp"
+	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
 // mustReadFixture reads a fixture file from ffi/zkp/testdata/.
@@ -105,4 +108,46 @@ func TestVerifyDelegationProofMalformedRk(t *testing.T) {
 	require.Error(t, err, "malformed rk should be rejected before reaching Rust FFI")
 	require.True(t, strings.Contains(err.Error(), "rk"),
 		"error should identify the rk field, got: %v", err)
+}
+
+// TestVerifyProxyDelegationProofRejectsMalformedInputs checks that
+// VerifyProxyDelegationProof rejects a bad proof length or a malformed slot
+// before verifying, with an error naming the slot.
+func TestVerifyProxyDelegationProofRejectsMalformedInputs(t *testing.T) {
+	point := elgamal.PallasGenerator().ToAffineCompressed()
+	valid := func() zkp.ProxyDelegationInputs {
+		return zkp.ProxyDelegationInputs{
+			VanNullifier:              validFp32(),
+			RVpk:                      point,
+			VoteAuthorityNoteNew:      validFp32(),
+			ProxyDelegationCommitment: validFp32(),
+			VoteCommTreeRoot:          validFp32(),
+			AnchorHeight:              7,
+			VoteRoundId:               validFp32(),
+			EaPk:                      point,
+			DcSlotNullifier:           validFp32(),
+		}
+	}
+	nonCanonical := bytes.Repeat([]byte{0xff}, 32)
+	dummyProof := make([]byte, 64)
+
+	require.ErrorContains(t, VerifyProxyDelegationProof(nil, valid()), "empty")
+	require.ErrorContains(t, VerifyProxyDelegationProof(make([]byte, types.MaxProofSize+1), valid()), "too large")
+	for _, tc := range []struct {
+		field  string
+		mutate func(*zkp.ProxyDelegationInputs)
+	}{
+		{"van_nullifier", func(in *zkp.ProxyDelegationInputs) { in.VanNullifier = nonCanonical }},
+		{"r_vpk", func(in *zkp.ProxyDelegationInputs) { in.RVpk = nonCanonical }},
+		{"delegation_commitment", func(in *zkp.ProxyDelegationInputs) { in.ProxyDelegationCommitment = nil }},
+		{"ea_pk", func(in *zkp.ProxyDelegationInputs) { in.EaPk = make([]byte, 32) }},
+	} {
+		t.Run(tc.field, func(t *testing.T) {
+			inputs := valid()
+			tc.mutate(&inputs)
+			err := VerifyProxyDelegationProof(dummyProof, inputs)
+			require.Error(t, err)
+			require.True(t, strings.Contains(err.Error(), tc.field), "error should name %s, got: %v", tc.field, err)
+		})
+	}
 }

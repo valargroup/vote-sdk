@@ -1,9 +1,11 @@
 package keeper
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"cosmossdk.io/core/store"
@@ -96,6 +98,33 @@ type Keeper struct {
 	//
 	// Concurrency: only EndBlocker (via ComputeTreeRoot) mutates this map.
 	roundTrees map[string]*roundTree
+
+	// circuitFingerprints holds capability field 5, nil until the app
+	// publishes it; see SetCircuitFingerprints. It is process state, not
+	// chain state, held by pointer so value-receiver copies share it.
+	circuitFingerprints *atomic.Pointer[[]*types.CircuitFingerprint]
+}
+
+// SetCircuitFingerprints publishes the circuit fingerprints ProtocolCapabilities
+// reports once proxy delegation is enabled (contracts-v1 §8). The app calls
+// it after verifier warm-up, so a capability query never waits on key
+// generation while holding CometBFT's ABCI lock.
+func (k *Keeper) SetCircuitFingerprints(fingerprints []*types.CircuitFingerprint) {
+	k.circuitFingerprints.Store(&fingerprints)
+}
+
+// CircuitFingerprints returns a copy of the published circuit fingerprints,
+// or nil before SetCircuitFingerprints.
+func (k *Keeper) CircuitFingerprints() []*types.CircuitFingerprint {
+	published := k.circuitFingerprints.Load()
+	if published == nil {
+		return nil
+	}
+	fingerprints := make([]*types.CircuitFingerprint, len(*published))
+	for i, f := range *published {
+		fingerprints[i] = &types.CircuitFingerprint{Name: f.GetName(), VkBlake2B: bytes.Clone(f.GetVkBlake2B())}
+	}
+	return fingerprints
 }
 
 // SetStakingKeeper replaces the staking keeper. Used by focused tests that
@@ -131,12 +160,13 @@ func NewKeeper(
 	bankKeeper BankKeeper,
 ) *Keeper {
 	return &Keeper{
-		storeService:  storeService,
-		authority:     authority,
-		logger:        logger.With("module", "x/"+types.ModuleName),
-		stakingKeeper: stakingKeeper,
-		bankKeeper:    bankKeeper,
-		roundTrees:    make(map[string]*roundTree),
+		storeService:        storeService,
+		authority:           authority,
+		logger:              logger.With("module", "x/"+types.ModuleName),
+		stakingKeeper:       stakingKeeper,
+		bankKeeper:          bankKeeper,
+		roundTrees:          make(map[string]*roundTree),
+		circuitFingerprints: new(atomic.Pointer[[]*types.CircuitFingerprint]),
 	}
 }
 

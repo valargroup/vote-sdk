@@ -119,13 +119,16 @@ func RegisterRoutesWithQueueSummaryGetters(
 		nil,
 		nil,
 		nil,
+		nil,
 		logger,
 	)
 }
 
 // RegisterRoutesWithValidationGetters registers helper routes with production
-// share consistency, exact round choice, commitment, and round status checks.
-// A configured getter that returns nil makes share submission unavailable.
+// share consistency, exact round choice, commitment, and round status checks,
+// and, once proxy delegation is enabled, the pool share checks of
+// docs/proxy-delegation/contracts-v1.md §11.8 (getNextDelegateIndex). A
+// configured getter that returns nil makes share submission unavailable.
 func RegisterRoutesWithValidationGetters(
 	router *mux.Router,
 	getStore func() *ShareStore,
@@ -139,6 +142,7 @@ func RegisterRoutesWithValidationGetters(
 	getRoundStatus func() RoundStatusChecker,
 	getPayloadValidator func() SharePayloadValidator,
 	getChoiceValidator func() ShareChoiceValidator,
+	getNextDelegateIndex func() NextDelegateIndexReader,
 	logger log.Logger,
 ) {
 	h := &apiHandler{
@@ -153,9 +157,15 @@ func RegisterRoutesWithValidationGetters(
 		getRoundStatus:        getRoundStatus,
 		getPayloadValidator:   getPayloadValidator,
 		getChoiceValidator:    getChoiceValidator,
+		getNextDelegateIndex:  getNextDelegateIndex,
 		logger:                logger,
 		metrics:               defaultHelperMetrics,
 	}
+	h.registerRoutes(router)
+}
+
+// registerRoutes mounts h's routes on router.
+func (h *apiHandler) registerRoutes(router *mux.Router) {
 	recover := sentry.RouteTracing(false)
 	router.Handle("/shielded-vote/v1/shares", recover(http.HandlerFunc(h.handleSubmitShare))).Methods("POST")
 	router.Handle("/shielded-vote/v1/share-status/{roundId}/{nullifier}", recover(http.HandlerFunc(h.handleShareStatus))).Methods("GET")
@@ -179,9 +189,22 @@ type apiHandler struct {
 	getRoundStatus        func() RoundStatusChecker
 	getPayloadValidator   func() SharePayloadValidator
 	getChoiceValidator    func() ShareChoiceValidator
+	getNextDelegateIndex  func() NextDelegateIndexReader
 	logger                log.Logger
 	metrics               *helperMetrics
 }
+
+// Pool share rejections (contracts-v1 §11.8): each is the error of a
+// {"status":"error","error":...} body.
+const (
+	poolErrProxyDelegationDisabled = "proxy_delegation_disabled"
+	poolErrLeafNotFound            = "leaf_not_found"
+	poolErrDelegateNotFound        = "delegate_not_found"
+)
+
+// leafNotFoundRetryAfter is the Retry-After, in seconds, of a pool share
+// whose DC is not yet in the helper's tree: about two blocks.
+const leafNotFoundRetryAfter = "2"
 
 type submitResponse struct {
 	Status string `json:"status"`
@@ -257,11 +280,18 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 	stageStart = time.Now()
 	if err := validatePayload(&payload); err != nil {
 		h.metrics.observeSubmissionStage("field_validation", stageStart, err)
+		if errors.Is(err, types.ErrDelegateNotFound) {
+			observation.recordOutcome("rejected", poolErrDelegateNotFound)
+			jsonError(w, poolErrDelegateNotFound, http.StatusUnprocessableEntity)
+			return
+		}
 		observation.recordOutcome("rejected", "invalid_fields")
 		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	h.metrics.observeSubmissionStage("field_validation", stageStart, nil)
+	// A pool share passed validatePayload only with the gate open.
+	poolShare := payload.ProposalID == types.PoolProposalID
 
 	stageStart = time.Now()
 	if err := h.validatePayloadConsistency(&payload); err != nil {
@@ -336,6 +366,11 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 	stageStart = time.Now()
 	if err := h.validateShareChoice(&payload); err != nil {
 		h.metrics.observeSubmissionStage("round_choice", stageStart, err)
+		if poolShare && errors.Is(err, types.ErrProxyDelegationDisabled) {
+			observation.recordOutcome("rejected", poolErrProxyDelegationDisabled)
+			jsonError(w, poolErrProxyDelegationDisabled, http.StatusUnprocessableEntity)
+			return
+		}
 		if errors.Is(err, ErrInvalidRoundChoice) || errors.Is(err, ErrUnknownRound) || errors.Is(err, types.ErrRoundNotFound) {
 			observation.recordOutcome("rejected", "invalid_round_choice")
 			jsonError(w, err.Error(), http.StatusBadRequest)
@@ -366,6 +401,12 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 	stageStart = time.Now()
 	if err := h.verifyCommitment(&payload); err != nil {
 		h.metrics.observeSubmissionStage("commitment", stageStart, err)
+		if poolShare && errors.Is(err, errLeafNotFound) {
+			observation.recordOutcome("unavailable", poolErrLeafNotFound)
+			w.Header().Set("Retry-After", leafNotFoundRetryAfter)
+			jsonError(w, poolErrLeafNotFound, http.StatusServiceUnavailable)
+			return
+		}
 		if errors.Is(err, ErrInvalidCommitment) {
 			observation.recordOutcome("rejected", "invalid_commitment")
 			jsonError(w, err.Error(), http.StatusBadRequest)
@@ -389,6 +430,37 @@ func (h *apiHandler) handleSubmitShare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.metrics.observeSubmissionStage("commitment", stageStart, nil)
+
+	// A pool share's delegate index is read only now, after its DC was found
+	// in the tree, so the registry state is at least as new as the DC.
+	if poolShare {
+		stageStart = time.Now()
+		if err := h.checkDelegateIndex(&payload); err != nil {
+			h.metrics.observeSubmissionStage("delegate_index", stageStart, err)
+			if errors.Is(err, types.ErrDelegateNotFound) {
+				observation.recordOutcome("rejected", poolErrDelegateNotFound)
+				jsonError(w, poolErrDelegateNotFound, http.StatusUnprocessableEntity)
+				return
+			}
+			if errors.Is(err, ErrShareValidationUnavailable) {
+				h.logger.Error("delegate index reader unavailable", "error", err)
+				CaptureErr(err, map[string]string{
+					"stage": "delegate_index_check",
+				})
+				observation.recordOutcome("unavailable", "delegate_index_reader")
+				jsonError(w, "helper unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			h.logger.Error("delegate index check failed", "error", err)
+			CaptureErr(err, map[string]string{
+				"stage": "delegate_index_check",
+			})
+			observation.recordOutcome("failed", "delegate_index_check")
+			jsonError(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		h.metrics.observeSubmissionStage("delegate_index", stageStart, nil)
+	}
 
 	h.logger.Info("share received",
 		"round_id", payload.VoteRoundID,
@@ -621,10 +693,17 @@ func (h *apiHandler) ensureIngressAllowed(w http.ResponseWriter) bool {
 	return false
 }
 
+// errLeafNotFound marks a commitment check that found no leaf at the share's
+// tree_position. Its text keeps a vote share's 400 message as it was.
+var errLeafNotFound = errors.New("no leaf at position")
+
 // verifyCommitment recomputes the vote commitment Poseidon hash from the
 // payload fields and compares it against the on-chain leaf at tree_position.
-// Legacy route registrations that provide neither dependency skip this check.
-// A configured getter returning nil is treated as service unavailability.
+// For a pool share the commitment is its DC, the same hash with proposal 0
+// and the delegate index (contracts-v1 §10). An absent leaf wraps
+// errLeafNotFound as well as ErrInvalidCommitment. Legacy route registrations
+// that provide neither dependency skip this check. A configured getter
+// returning nil is treated as service unavailability.
 func (h *apiHandler) verifyCommitment(p *SharePayload) error {
 	if h.getVCHash == nil && h.getTree == nil {
 		return nil
@@ -667,7 +746,7 @@ func (h *apiHandler) verifyCommitment(p *SharePayload) error {
 		return fmt.Errorf("read commitment tree leaf: %w", err)
 	}
 	if onChain == nil {
-		return fmt.Errorf("%w: no leaf at position %d", ErrInvalidCommitment, p.TreePosition)
+		return fmt.Errorf("%w: %w %d", ErrInvalidCommitment, errLeafNotFound, p.TreePosition)
 	}
 
 	if !bytes.Equal(computed[:], onChain) {
@@ -739,7 +818,31 @@ func (h *apiHandler) validateShareChoice(p *SharePayload) error {
 	return validator(p.VoteRoundID, p.ProposalID, p.VoteDecision)
 }
 
+// checkDelegateIndex refuses a pool share unless 1 <= d < next_index, with an
+// error wrapping types.ErrDelegateNotFound (contracts-v1 §11.8). Legacy route
+// registrations without a reader skip this check.
+func (h *apiHandler) checkDelegateIndex(p *SharePayload) error {
+	if h.getNextDelegateIndex == nil {
+		return nil
+	}
+	reader := h.getNextDelegateIndex()
+	if reader == nil {
+		return fmt.Errorf("%w: delegate index reader", ErrShareValidationUnavailable)
+	}
+	next, err := reader()
+	if err != nil {
+		return fmt.Errorf("read next delegate index: %w", err)
+	}
+	if p.VoteDecision == 0 || p.VoteDecision >= next {
+		return fmt.Errorf("%w: delegate index is not registered", types.ErrDelegateNotFound)
+	}
+	return nil
+}
+
 // validatePayload checks required fields and canonicalizes vote_round_id.
+// With the gate open it also accepts a pool share, proposal 0 with a
+// delegate index of at least 1 and no option bound (contracts-v1 §11.8).
+// While it is closed a pool share is malformed, as before.
 func validatePayload(p *SharePayload) error {
 	if err := validateB64Field(p.SharesHash, 32, "shares_hash"); err != nil {
 		return err
@@ -765,13 +868,16 @@ func validatePayload(p *SharePayload) error {
 	if p.EncShare.ShareIndex > types.MaxShareIndex {
 		return fmt.Errorf("enc_share.share_index must be 0..%d", types.MaxShareIndex)
 	}
-	// Protocol allows up to 8 options per proposal (indices 0-7).
-	// The chain keeper validates the exact range per-proposal.
-	if p.VoteDecision >= types.MaxVoteOptions {
-		return fmt.Errorf("vote_decision must be 0..%d", types.MaxVoteOptions-1)
-	}
-	if p.ProposalID < types.MinProposalID || p.ProposalID > types.MaxProposals {
-		return fmt.Errorf("proposal_id must be %d..%d, got %d", types.MinProposalID, types.MaxProposals, p.ProposalID)
+	poolShare := types.ProxyDelegationEnabled && p.ProposalID == types.PoolProposalID
+	if !poolShare {
+		// Protocol allows up to 8 options per proposal (indices 0-7).
+		// The chain keeper validates the exact range per-proposal.
+		if p.VoteDecision >= types.MaxVoteOptions {
+			return fmt.Errorf("vote_decision must be 0..%d", types.MaxVoteOptions-1)
+		}
+		if p.ProposalID < types.MinProposalID || p.ProposalID > types.MaxProposals {
+			return fmt.Errorf("proposal_id must be %d..%d, got %d", types.MinProposalID, types.MaxProposals, p.ProposalID)
+		}
 	}
 	if p.TreePosition > types.MaxTreePosition {
 		return fmt.Errorf("tree_position %d exceeds maximum tree capacity", p.TreePosition)
@@ -813,6 +919,11 @@ func validatePayload(p *SharePayload) error {
 		return err
 	}
 
+	// Checked last, so a malformed pool share is a 400 like any other. Index
+	// 0 is never assigned, so no chain state can make it valid.
+	if poolShare && p.VoteDecision == 0 {
+		return fmt.Errorf("%w: a pool share's delegate index must be at least 1", types.ErrDelegateNotFound)
+	}
 	return nil
 }
 

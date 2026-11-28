@@ -259,7 +259,7 @@ func (app *SvoteApp) setAnteHandler(txConfig client.TxConfig) {
 		},
 		VoteKeeper:           app.VoteKeeper,
 		SigVerifier:          cryptoOpts.SigVerifier,
-		ZKPVerifier:          cryptoOpts.ZKPVerifier,
+		ZKPVerifier:          anteZKPVerifier(),
 		LocalCommittedHeight: app.LastBlockHeight,
 	})
 	if err != nil {
@@ -383,6 +383,7 @@ func (app *SvoteApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIC
 		},
 		CryptoReadiness:          app.CryptoWarmupStatus,
 		DelegationKeyFingerprint: delegationKeyFingerprint,
+		ChainID:                  app.ChainID(),
 	})
 	voteHandler.RegisterTxRoutes(apiSvr.Router)
 	voteHandler.RegisterQueryRoutes(apiSvr.Router, apiSvr.ClientCtx)
@@ -452,6 +453,12 @@ func (app *SvoteApp) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIC
 			return nil
 		}
 		return h.ChoiceValidator
+	}, func() helper.NextDelegateIndexReader {
+		h := app.GetHelper()
+		if h == nil {
+			return nil
+		}
+		return h.NextDelegateIndex
 	}, app.Logger().With("module", "helper"))
 
 	// Register admin server routes (voting-config proxy from GitHub Pages CDN).

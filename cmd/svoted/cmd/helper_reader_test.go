@@ -84,3 +84,46 @@ func TestKeeperTreeReaderRequiresClosedStatus(t *testing.T) {
 	require.ErrorIs(t, err, helper.ErrUnknownRound)
 	require.False(t, closed)
 }
+
+// TestKeeperTreeReaderPoolShares checks the production pool share reads
+// (docs/proxy-delegation/contracts-v1.md §11.8): with the gate open, proposal
+// 0 is a valid choice only in a proxy round, whatever the delegate index,
+// which NextDelegateIndex checks after the commitment; while dormant,
+// proposal 0 is out of range as before.
+func TestKeeperTreeReaderPoolShares(t *testing.T) {
+	app := testutil.SetupTestApp(t)
+	roundID := app.SeedVotingSession(testutil.ValidCreateVotingSessionAt(app.Time))
+	roundIDHex := hex.EncodeToString(roundID)
+	reader := &keeperTreeReader{app: app.SvoteApp, logger: log.NewNopLogger()}
+
+	err := reader.ValidateShareChoice(roundIDHex, votetypes.PoolProposalID, 1)
+	if votetypes.ProxyDelegationEnabled {
+		require.ErrorIs(t, err, votetypes.ErrProxyDelegationDisabled)
+		require.NotErrorIs(t, err, helper.ErrInvalidRoundChoice)
+	} else {
+		require.ErrorIs(t, err, helper.ErrInvalidRoundChoice)
+	}
+
+	kv := app.VoteKeeper().OpenKVStore(app.NewUncachedContext(false, cmtproto.Header{}))
+	round, err := app.VoteKeeper().GetVoteRound(kv, roundID)
+	require.NoError(t, err)
+	round.ProxyDelegation = &votetypes.ProxyDelegationRoundState{Enabled: true, NextDelegateIndexAtCreation: 1}
+	require.NoError(t, app.VoteKeeper().SetVoteRound(kv, round))
+	for _, d := range []uint32{1, 9, 1 << 30} {
+		err := reader.ValidateShareChoice(roundIDHex, votetypes.PoolProposalID, d)
+		if votetypes.ProxyDelegationEnabled {
+			require.NoError(t, err)
+		} else {
+			require.ErrorIs(t, err, helper.ErrInvalidRoundChoice, "dormant, even in a proxy round")
+		}
+	}
+	require.ErrorIs(t, reader.ValidateShareChoice(roundIDHex, 1, 2), helper.ErrInvalidRoundChoice, "votes are unchanged")
+
+	next, err := reader.NextDelegateIndex()
+	require.NoError(t, err)
+	require.Equal(t, uint32(1), next, "absent reads as 1")
+	require.NoError(t, app.VoteKeeper().SetProxyNextDelegateIndex(kv, 7))
+	next, err = reader.NextDelegateIndex()
+	require.NoError(t, err)
+	require.Equal(t, uint32(7), next)
+}

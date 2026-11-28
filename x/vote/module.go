@@ -436,7 +436,9 @@ func (AppModule) AutoCLIOptions() *autocliv1.ModuleOptions {
 	}
 }
 
-// EndBlock updates commitment roots and processes round and ceremony timeouts.
+// EndBlock updates commitment roots and processes round and ceremony
+// timeouts. Only with the gate open does a proxy round leaving ACTIVE route
+// its pools (keeper.RouteProxyPools).
 func (am AppModule) EndBlock(goCtx context.Context) error {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	kvStore := am.keeper.OpenKVStore(ctx)
@@ -522,6 +524,12 @@ func (am AppModule) EndBlock(goCtx context.Context) error {
 		round.Status = types.SessionStatus_SESSION_STATUS_TALLYING
 		round.TallyPhaseStart = blockTime
 		round.TallyPhaseTimeout = types.DefaultTallyTimeout
+		// Pools are routed before the round is stored as TALLYING.
+		if types.ProxyDelegationEnabled {
+			if err := am.keeper.RouteProxyPools(ctx, round); err != nil {
+				return fmt.Errorf("EndBlocker: route proxy pools for round %x: %w", roundID, err)
+			}
+		}
 		if err := am.keeper.SetVoteRound(kvStore, round); err != nil {
 			return err
 		}

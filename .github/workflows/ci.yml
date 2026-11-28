@@ -197,6 +197,20 @@ jobs:
         run: mise run test:circuits
       - name: Run Go proof and signature verification tests
         run: mise run test:ffi
+      # The proxy delegation flow with real proofs. It links a second build
+      # of the circuits with the test-only provers, in its own target
+      # directory and cache.
+      - name: Cache Rust test-provers build
+        if: matrix.gate == 'enabled'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
+        with:
+          path: circuits/target/test-provers
+          key: ${{ runner.os }}-circuits-test-provers-${{ hashFiles('circuits/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-circuits-test-provers-
+      - name: Run proxy delegation end-to-end test
+        if: matrix.gate == 'enabled'
+        run: make test-proxy-e2e
 
   test-vc-van-deterministic:
     name: VC/VAN Deterministic Stress

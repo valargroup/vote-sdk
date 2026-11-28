@@ -81,8 +81,16 @@ type RoundStatusChecker func(roundID string) (isActive bool, err error)
 type RoundClosureChecker func(roundID string) (isClosed bool, err error)
 
 // ShareChoiceValidator checks that a proposal and vote decision exist in the
-// authenticated configuration for a voting round.
+// authenticated configuration for a voting round. Once proxy delegation is
+// enabled, proposal 0 exists only in a proxy round (otherwise the error wraps
+// types.ErrProxyDelegationDisabled), and its vote decision is a delegate
+// index, checked later (NextDelegateIndexReader, contracts-v1 §11.8).
 type ShareChoiceValidator func(roundID string, proposalID, voteDecision uint32) error
+
+// NextDelegateIndexReader returns the proxy delegate registry's next_index
+// from committed chain state, in one registry read. A pool share's delegate
+// index d is registered when 1 <= d < next_index (contracts-v1 §11.8).
+type NextDelegateIndexReader func() (uint32, error)
 
 // ShareNullifierChecker reports whether a share nullifier is recorded on-chain
 // for the given voting round (hex-encoded 32-byte round id). Used by the

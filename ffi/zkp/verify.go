@@ -1,9 +1,10 @@
 // Package zkp provides interfaces for zero-knowledge proof verification.
 //
-// The vote chain uses three distinct ZKP circuits (all based on Halo2):
+// The vote chain uses four distinct ZKP circuits (all based on Halo2):
 //   - ZKP #1 (Delegation): Proves valid delegation registration from a keystone-signed action.
 //   - ZKP #2 (Vote Commitment): Proves valid vote commitment creation.
 //   - ZKP #3 (Vote Share): Proves valid vote share reveal.
+//   - ZKP #4 (Proxy Delegation): Proves a valid delegation commitment to a public delegate.
 //
 // The current implementation is a mock that always succeeds; it will later be
 // replaced by a CGo binding to the Halo2 Rust verifier.
@@ -51,8 +52,23 @@ type VoteShareInputs struct {
 	VoteCommTreeRoot []byte // Vote commitment tree root at AnchorHeight (32 bytes)
 }
 
+// ProxyDelegationInputs contains the public inputs for ZKP #4 (proxy
+// delegation), in the circuit's order (docs/proxy-delegation/contracts-v1.md
+// §10). The FFI decompresses RVpk and EaPk to (x, y).
+type ProxyDelegationInputs struct {
+	VanNullifier              []byte // Nullifier of the spent VAN (32 bytes)
+	RVpk                      []byte // 32-byte compressed Pallas point: randomized voting key
+	VoteAuthorityNoteNew      []byte // Successor VAN commitment (32 bytes)
+	ProxyDelegationCommitment []byte // The delegation commitment, DC (32 bytes)
+	VoteCommTreeRoot          []byte // 32-byte Pallas Fp: root the spent VAN is proven against
+	AnchorHeight              uint64 // The batch's vote_comm_tree_anchor_height (0 with a registration)
+	VoteRoundId               []byte // The vote round (32 bytes)
+	EaPk                      []byte // 32-byte compressed Pallas point: election authority public key (from session)
+	DcSlotNullifier           []byte // DC slot nullifier (32 bytes)
+}
+
 // Verifier defines the interface for zero-knowledge proof verification.
-// Each method corresponds to one of the three ZKP circuits used in the voting protocol.
+// Each method corresponds to one of the four ZKP circuits used in the voting protocol.
 type Verifier interface {
 	// VerifyDelegation verifies ZKP #1: delegation registration proof.
 	VerifyDelegation(proof []byte, inputs DelegationInputs) error
@@ -62,6 +78,9 @@ type Verifier interface {
 
 	// VerifyVoteShare verifies ZKP #3: vote share reveal proof.
 	VerifyVoteShare(proof []byte, inputs VoteShareInputs) error
+
+	// VerifyProxyDelegation verifies ZKP #4: a 0x09 DC's proxy delegation proof.
+	VerifyProxyDelegation(proof []byte, inputs ProxyDelegationInputs) error
 }
 
 // MockVerifier is a mock implementation that always returns nil (success).
@@ -80,6 +99,11 @@ func (MockVerifier) VerifyVoteCommitment(proof []byte, inputs VoteCommitmentInpu
 
 // VerifyVoteShare always returns nil.
 func (MockVerifier) VerifyVoteShare(proof []byte, inputs VoteShareInputs) error {
+	return nil
+}
+
+// VerifyProxyDelegation always returns nil.
+func (MockVerifier) VerifyProxyDelegation(proof []byte, inputs ProxyDelegationInputs) error {
 	return nil
 }
 

@@ -9,17 +9,20 @@ import (
 )
 
 // ProxyDelegationBatch handles MsgProxyDelegationBatch, tag 0x09
-// (docs/proxy-delegation/contracts-v1.md §5.2). Batches are not accepted
-// yet, so it is ErrProxyDelegationDisabled whatever the gate.
-func (ms msgServer) ProxyDelegationBatch(context.Context, *types.MsgProxyDelegationBatch) (*types.MsgProxyDelegationBatchResponse, error) {
-	return nil, types.ErrProxyDelegationDisabled
+// (docs/proxy-delegation/contracts-v1.md §5.2). A closed gate is
+// ErrProxyDelegationDisabled; otherwise it applies the batch with
+// executeProxyDelegationBatch.
+func (ms msgServer) ProxyDelegationBatch(goCtx context.Context, msg *types.MsgProxyDelegationBatch) (*types.MsgProxyDelegationBatchResponse, error) {
+	if !types.ProxyDelegationEnabled {
+		return nil, types.ErrProxyDelegationDisabled
+	}
+	return ms.k.executeProxyDelegationBatch(sdk.UnwrapSDKContext(goCtx), msg)
 }
 
 // DelegateOp handles MsgDelegateOp, tag 0x0B (contracts-v1 §5.3). A closed
 // gate is ErrProxyDelegationDisabled. Otherwise it re-runs ValidateBasic and
-// every check of the op, signatures included, then applies the register or
-// retire and returns the index of the entry it touched. A ballot is not
-// accepted yet.
+// every check of the op, signatures included, then applies the register,
+// retire or ballot and returns the index of the entry it touched.
 func (ms msgServer) DelegateOp(goCtx context.Context, msg *types.MsgDelegateOp) (*types.MsgDelegateOpResponse, error) {
 	if !types.ProxyDelegationEnabled {
 		return nil, types.ErrProxyDelegationDisabled
@@ -38,7 +41,7 @@ func (ms msgServer) DelegateOp(goCtx context.Context, msg *types.MsgDelegateOp) 
 	case msg.Retire != nil:
 		delegateIndex, err = ms.k.executeDelegateRetire(ctx, msg.Retire)
 	default: // ValidateBasic leaves only the ballot.
-		err = errDelegateBallotsNotAccepted()
+		delegateIndex, err = ms.k.executeDelegateBallot(ctx, msg.Ballot)
 	}
 	if err != nil {
 		return nil, err

@@ -244,8 +244,7 @@ func (ms msgServer) currentCoordinatorApprovalCount(goCtx context.Context, appro
 // coordinator controlled actions and that it is valid before an action ID is
 // allocated. For creator based messages, the embedded creator must match the
 // proposer. While types.ProxyDelegationEnabled is false, the proxy delegation
-// payloads are unsupported (contracts-v1 §9). The proxy round flag is refused
-// whatever the gate, since proxy rounds are not supported yet.
+// payloads are unsupported and the round flag is refused (contracts-v1 §9).
 func (ms msgServer) validateCoordinatorPayload(goCtx context.Context, payload *anypb.Any, proposer string) error {
 	if !types.ProxyDelegationEnabled && isProxyDelegationPayload(payload) {
 		return errUnsupportedCoordinatorPayload(payload)
@@ -259,7 +258,7 @@ func (ms msgServer) validateCoordinatorPayload(goCtx context.Context, payload *a
 		if err := msg.ValidateBasic(); err != nil {
 			return err
 		}
-		if msg.ProxyDelegation {
+		if msg.ProxyDelegation && !types.ProxyDelegationEnabled {
 			return errProxyRoundFlag()
 		}
 		return validatePayloadCreator(msg.Creator, proposer)
@@ -354,7 +353,7 @@ func (ms msgServer) executeCoordinatorPayload(goCtx context.Context, payload *an
 		if err := unmarshalAnyPayload(payload, msg); err != nil {
 			return err
 		}
-		if msg.ProxyDelegation {
+		if msg.ProxyDelegation && !types.ProxyDelegationEnabled {
 			return errProxyRoundFlag()
 		}
 		_, err := ms.executeCreateVotingSession(goCtx, msg)
@@ -437,13 +436,24 @@ func isProxyDelegationPayload(payload *anypb.Any) bool {
 }
 
 // requiresProxyApprovalFloor reports whether payload is under the approval
-// floor of contracts-v1 §5.5: a proxy delegation payload.
+// floor of contracts-v1 §5.5: a proxy delegation payload, or a
+// MsgCreateVotingSession that sets proxy_delegation.
 func requiresProxyApprovalFloor(payload *anypb.Any) (bool, error) {
-	return isProxyDelegationPayload(payload), nil
+	if isProxyDelegationPayload(payload) {
+		return true, nil
+	}
+	if coordinatorPayloadType(payload) != coordinatorActionPayloadTypes.createVotingSession {
+		return false, nil
+	}
+	msg := &types.MsgCreateVotingSession{}
+	if err := unmarshalAnyPayload(payload, msg); err != nil {
+		return false, err
+	}
+	return msg.ProxyDelegation, nil
 }
 
 // errProxyRoundFlag refuses a MsgCreateVotingSession that sets
-// proxy_delegation, which is not supported yet.
+// proxy_delegation while proxy delegation is dormant (contracts-v1 §9).
 func errProxyRoundFlag() error {
 	return errorsmod.Wrap(types.ErrProxyDelegationDisabled, "proxy_delegation round flag")
 }

@@ -18,3 +18,9 @@ func GenerateShareRevealProof(
 ) (proof []byte, nullifier [32]byte, treeRoot [32]byte, err error) {
 	return nil, nullifier, treeRoot, fmt.Errorf("share reveal proof generation requires the 'halo2' build tag")
 }
+
+// WarmShareRevealProver is a no-op when built without the "halo2" tag, which
+// leaves the helper disabled.
+func WarmShareRevealProver() error {
+	return nil
+}

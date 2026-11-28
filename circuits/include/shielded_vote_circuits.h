@@ -411,6 +411,72 @@ int32_t sv_verify_vote_proof(
 );
 
 /* -----------------------------------------------------------------------
+ * Proxy delegation circuit (ZKP #4) — real Halo2 proof verification
+ * ----------------------------------------------------------------------- */
+
+/*
+ * Verify a real proxy delegation circuit proof (ZKP #4, 14 conditions, K=11).
+ *
+ * The caller sends 9 x 32-byte chunks (288 bytes). The FFI decompresses
+ * the compressed Pallas points and converts the integer slot, then builds
+ * the circuit's 11 Fp public inputs through voting-circuits' Instance
+ * constructor (contracts-v1 section 10):
+ *
+ *   Slot 0: van_nullifier            -> Fp (1)
+ *   Slot 1: r_vpk (compressed)       -> r_vpk_x, r_vpk_y (2)
+ *   Slot 2: vote_authority_note_new  -> Fp (1)
+ *   Slot 3: delegation_commitment    -> Fp (1)
+ *   Slot 4: vote_comm_tree_root      -> Fp (1)
+ *   Slot 5: anchor_height (u64 LE)   -> Fp::from(u64) (1); bytes 8-31 zero
+ *   Slot 6: voting_round_id          -> Fp (1)
+ *   Slot 7: ea_pk (compressed)       -> ea_pk_x, ea_pk_y (2)
+ *   Slot 8: dc_slot_nullifier        -> Fp (1)
+ *
+ * Total: 9 wire chunks -> 11 circuit public inputs.
+ *
+ * Parameters:
+ *   proof_ptr         - Pointer to serialized Halo2 proof bytes.
+ *   proof_len         - Length of the proof byte array.
+ *   public_inputs_ptr - Pointer to 288 bytes (9 x 32-byte chunks).
+ *   public_inputs_len - Length of the public inputs byte array (must be 288).
+ *
+ * Returns:
+ *    0  on successful verification.
+ *   -1  if inputs are invalid (null pointers or wrong lengths).
+ *   -2  if the proof does not verify.
+ *   -3  if a slot does not decode (non-canonical Fp, invalid or identity
+ *       point, or nonzero anchor-height padding).
+ *   -6  if key generation fails or an internal panic is caught.
+ */
+int32_t sv_verify_proxy_delegation_proof(
+    const uint8_t* proof_ptr,
+    size_t proof_len,
+    const uint8_t* public_inputs_ptr,
+    size_t public_inputs_len
+);
+
+/* -----------------------------------------------------------------------
+ * Circuit fingerprints
+ * ----------------------------------------------------------------------- */
+
+/*
+ * Write the verifying-key fingerprints of ZKP #1, #2, #3 and #4, 32 bytes
+ * each in that order: BLAKE2b-256 of the circuit's pinned verifying key, as
+ * capability field 5 publishes them (contracts-v1 sections 8 and 10). The
+ * first call generates any keys not yet cached.
+ *
+ * Parameters:
+ *   out_ptr - Pointer to a caller-owned 128-byte output buffer.
+ *   out_len - Length of the output buffer (must be 128).
+ *
+ * Returns:
+ *    0  on success.
+ *   -1  if out_ptr is null or out_len is not 128.
+ *   -6  if key generation fails or an internal panic is caught.
+ */
+int32_t sv_circuit_fingerprints(uint8_t* out_ptr, size_t out_len);
+
+/* -----------------------------------------------------------------------
  * Share Reveal circuit (ZKP #3) — real Halo2 proof verification
  * ----------------------------------------------------------------------- */
 
@@ -507,18 +573,29 @@ int32_t sv_generate_share_reveal(
  * ----------------------------------------------------------------------- */
 
 /*
- * Warm all real verifier caches used by the vote chain.
+ * Warm the verifying material of the four circuits the chain verifies.
  *
- * This initializes deterministic Halo2 params and verifying keys for the
- * delegation, vote commitment, and share reveal circuits without verifying a
- * proof. Operators can call this during readiness warm-up so the first live
- * transaction does not pay the cold-cache cost.
+ * This initializes deterministic Halo2 params and keys for the delegation,
+ * vote commitment, share reveal and proxy delegation circuits without
+ * verifying a proof, and builds no proving tables. Operators can call this
+ * during readiness warm-up so the first live transaction does not pay the
+ * cold-cache cost.
  *
  * Returns:
  *    0  on success.
- *   -6  if cache initialization panics.
+ *   -6  if key generation fails or panics.
  */
 int32_t sv_warm_verifier_caches(void);
+
+/*
+ * Warm the helper's ZKP #3 prover: the share reveal keys and the prepared
+ * commitment tables a long-lived prover can use.
+ *
+ * Returns:
+ *    0  on success.
+ *   -6  if key generation fails or panics.
+ */
+int32_t sv_warm_share_reveal_prover(void);
 
 /* -----------------------------------------------------------------------
  * Ironwood note commitment tree root extraction

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"cosmossdk.io/log"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
@@ -20,6 +21,7 @@ import (
 	"github.com/valargroup/vote-sdk/ffi/sharetracking"
 	"github.com/valargroup/vote-sdk/ffi/votecommitment"
 	"github.com/valargroup/vote-sdk/ffi/votetree"
+	"github.com/valargroup/vote-sdk/ffi/zkp/halo2"
 	"github.com/valargroup/vote-sdk/internal/helper"
 	votetypes "github.com/valargroup/vote-sdk/x/vote/types"
 )
@@ -97,7 +99,7 @@ func helperPostSetup(
 			kvStore := (*svoteApp).VoteKeeper.OpenKVStore(ctx)
 			return (*svoteApp).VoteKeeper.HasNullifier(kvStore, votetypes.NullifierTypeShare, roundBytes, shareNullifier)
 		}
-		h, err := helper.New(cfg, treeReader, prover, treeReader.GetRoundInfo, treeReader.GetRoundIsActive, treeReader.GetRoundIsClosed, (*svoteApp).HelperNodeReady, votecommitment.VoteCommitmentHash, votecommitment.ValidateSharePayload, treeReader.ValidateShareChoice, sharetracking.ShareNullifierHash, shareNullifierChecker, homeDir, logger)
+		h, err := helper.New(cfg, treeReader, prover, treeReader.GetRoundInfo, treeReader.GetRoundIsActive, treeReader.GetRoundIsClosed, (*svoteApp).HelperNodeReady, votecommitment.VoteCommitmentHash, votecommitment.ValidateSharePayload, treeReader.ValidateShareChoice, treeReader.NextDelegateIndex, sharetracking.ShareNullifierHash, shareNullifierChecker, homeDir, logger)
 		if err != nil {
 			helper.CaptureErr(err, map[string]string{"stage": "helper_new"})
 			return fmt.Errorf("helper: %w", err)
@@ -108,6 +110,19 @@ func helperPostSetup(
 
 		// Set helper on the app so RegisterAPIRoutes can register HTTP routes.
 		(*svoteApp).SetHelper(h)
+
+		// The node's verifier warm-up builds no proving tables, so this
+		// helper warms its own ZKP #3 prover. A failure only leaves the first
+		// proof on the cold path.
+		g.Go(func() error {
+			start := time.Now()
+			if err := halo2.WarmShareRevealProver(); err != nil {
+				logger.Error("share reveal prover warm-up failed", "duration_ms", time.Since(start).Milliseconds(), "error", err)
+				return nil
+			}
+			logger.Info("share reveal prover warm-up completed", "duration_ms", time.Since(start).Milliseconds())
+			return nil
+		})
 
 		// Start the background processor in the errgroup.
 		// Close the store after the processor exits to avoid
@@ -306,7 +321,12 @@ func (r *keeperTreeReader) GetRoundInfo(roundID string) (helper.RoundInfo, error
 }
 
 // ValidateShareChoice checks proposal and option membership against the
-// immutable round configuration stored by the vote keeper.
+// immutable round configuration stored by the vote keeper. With the proxy
+// delegation gate open, proposal 0 is a pool share, which exists only in a
+// proxy round (votetypes.ErrProxyDelegationDisabled otherwise); its delegate
+// index is checked after the commitment, through NextDelegateIndex
+// (docs/proxy-delegation/contracts-v1.md §11.8). While the gate is closed,
+// proposal 0 is out of range, as before.
 func (r *keeperTreeReader) ValidateShareChoice(roundID string, proposalID, voteDecision uint32) error {
 	roundBytes, err := hex.DecodeString(roundID)
 	if err != nil {
@@ -324,6 +344,12 @@ func (r *keeperTreeReader) ValidateShareChoice(roundID string, proposalID, voteD
 	if len(round.Proposals) < int(votetypes.MinProposalID) || len(round.Proposals) > votetypes.MaxProposals {
 		return fmt.Errorf("round has invalid proposal count %d", len(round.Proposals))
 	}
+	if votetypes.ProxyDelegationEnabled && proposalID == votetypes.PoolProposalID {
+		if !round.GetProxyDelegation().GetEnabled() {
+			return fmt.Errorf("%w: round %s is not a proxy round", votetypes.ErrProxyDelegationDisabled, roundID)
+		}
+		return nil
+	}
 	if proposalID < votetypes.MinProposalID || int(proposalID) > len(round.Proposals) {
 		return fmt.Errorf("%w: proposal_id %d out of range [1, %d]", helper.ErrInvalidRoundChoice, proposalID, len(round.Proposals))
 	}
@@ -338,6 +364,13 @@ func (r *keeperTreeReader) ValidateShareChoice(roundID string, proposalID, voteD
 		return fmt.Errorf("%w: %v", helper.ErrInvalidRoundChoice, err)
 	}
 	return nil
+}
+
+// NextDelegateIndex returns the proxy delegate registry's next_index from the
+// latest committed state, in one registry read.
+func (r *keeperTreeReader) NextDelegateIndex() (uint32, error) {
+	ctx := r.app.NewUncachedContext(false, cmtproto.Header{})
+	return r.app.VoteKeeper.GetProxyNextDelegateIndex(r.app.VoteKeeper.OpenKVStore(ctx))
 }
 
 // GetRoundIsActive returns true if CheckTx is ready and the round has ACTIVE status.

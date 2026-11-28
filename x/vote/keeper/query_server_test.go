@@ -237,8 +237,15 @@ func (s *QueryServerTestSuite) TestProposalTally_EmptyRoundID() {
 	s.Require().Equal(codes.InvalidArgument, status.Code(err))
 }
 
+// storeTallyRound stores a round with pdProposals' two proposals, which
+// ProposalTally needs once proxy delegation is enabled.
+func (s *QueryServerTestSuite) storeTallyRound(roundID []byte) {
+	s.Require().NoError(s.keeper.SetVoteRound(s.keeper.OpenKVStore(s.ctx), &types.VoteRound{VoteRoundId: roundID, Proposals: pdProposals()}))
+}
+
 func (s *QueryServerTestSuite) TestProposalTally_NoVotes() {
 	roundID := bytes.Repeat([]byte{0x01}, 32)
+	s.storeTallyRound(roundID)
 	resp, err := s.queryServer.ProposalTally(s.ctx, &types.QueryProposalTallyRequest{
 		VoteRoundId: roundID,
 		ProposalId:  1,
@@ -250,6 +257,7 @@ func (s *QueryServerTestSuite) TestProposalTally_NoVotes() {
 
 func (s *QueryServerTestSuite) TestProposalTally_WithVotes() {
 	roundID := bytes.Repeat([]byte{0x01}, 32)
+	s.storeTallyRound(roundID)
 	kvStore := s.keeper.OpenKVStore(s.ctx)
 
 	ct0 := validCiphertextBytes(s.T(), 1)
@@ -275,6 +283,7 @@ func (s *QueryServerTestSuite) TestProposalTally_WithVotes() {
 
 func (s *QueryServerTestSuite) TestProposalTally_AccumulatesMultipleAdds() {
 	roundID := bytes.Repeat([]byte{0x01}, 32)
+	s.storeTallyRound(roundID)
 	kvStore := s.keeper.OpenKVStore(s.ctx)
 
 	// First ciphertext stored directly; the query should return it as-is.

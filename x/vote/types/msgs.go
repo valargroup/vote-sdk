@@ -257,7 +257,10 @@ func (msg *MsgDelegateAndCastVoteBatch) validateBasic() error {
 }
 
 // ValidateBasic performs stateless validation for MsgRevealShare. With the
-// gate open it surfaces registered codes (gatedBasicError).
+// gate open it also accepts a pool share: proposal_id 0 with a delegate index
+// of at least 1 as vote_decision and no option bound
+// (docs/proxy-delegation/contracts-v1.md §5.4), and surfaces registered codes
+// (gatedBasicError).
 func (msg *MsgRevealShare) ValidateBasic() error {
 	return gatedBasicError(msg.validateBasic())
 }
@@ -270,11 +273,18 @@ func (msg *MsgRevealShare) validateBasic() error {
 	if len(msg.EncShare) != 64 {
 		return fmt.Errorf("%w: enc_share must be 64 bytes (ElGamal ciphertext), got %d", ErrInvalidField, len(msg.EncShare))
 	}
-	if msg.ProposalId < MinProposalID || msg.ProposalId > MaxProposals {
-		return fmt.Errorf("%w: proposal_id must be %d..%d, got %d", ErrInvalidField, MinProposalID, MaxProposals, msg.ProposalId)
-	}
-	if err := ValidateVoteChoiceUpperBound(msg.VoteDecision); err != nil {
-		return err
+	if ProxyDelegationEnabled && msg.ProposalId == PoolProposalID {
+		// Index 0 is never assigned (contracts-v1 §3.2).
+		if msg.VoteDecision == 0 {
+			return fmt.Errorf("%w: a pool share's vote_decision is a delegate index, at least 1", ErrInvalidField)
+		}
+	} else {
+		if msg.ProposalId < MinProposalID || msg.ProposalId > MaxProposals {
+			return fmt.Errorf("%w: proposal_id must be %d..%d, got %d", ErrInvalidField, MinProposalID, MaxProposals, msg.ProposalId)
+		}
+		if err := ValidateVoteChoiceUpperBound(msg.VoteDecision); err != nil {
+			return err
+		}
 	}
 	if len(msg.Proof) == 0 || len(msg.Proof) > MaxProofSize {
 		return fmt.Errorf("%w: proof must be 1..%d bytes, got %d", ErrInvalidField, MaxProofSize, len(msg.Proof))

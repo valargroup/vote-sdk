@@ -94,3 +94,14 @@ func GenerateShareRevealProof(
 		return nil, nullifier, treeRoot, fmt.Errorf("share reveal: unknown error code %d", rc)
 	}
 }
+
+// WarmShareRevealProver initializes the ZKP #3 keys and the prepared
+// commitment tables a long-lived prover can use, so the helper's first share
+// reveal proof does not pay for them. WarmVerifierCaches builds no proving
+// tables, so a node that runs the helper calls this as well.
+func WarmShareRevealProver() error {
+	if rc := C.sv_warm_share_reveal_prover(); rc != 0 {
+		return fmt.Errorf("halo2: warm share reveal prover failed with code %d: %s", rc, rustLastError())
+	}
+	return nil
+}

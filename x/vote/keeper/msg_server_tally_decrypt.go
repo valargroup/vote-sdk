@@ -16,10 +16,16 @@ import (
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
-// RevealShare handles MsgRevealShare (ZKP #3).
-// Records the share nullifier, accumulates the vote amount into the tally,
-// and emits an event.
+// RevealShare handles MsgRevealShare (ZKP #3). Records the share nullifier,
+// accumulates the vote amount into the tally, and emits an event. With the
+// gate open a proposal-0 reveal is a pool share and takes revealPoolShare;
+// every other reveal, and every reveal while the gate is closed, takes
+// today's path.
 func (ms msgServer) RevealShare(goCtx context.Context, msg *types.MsgRevealShare) (*types.MsgRevealShareResponse, error) {
+	if types.ProxyDelegationEnabled && msg.ProposalId == types.PoolProposalID {
+		return ms.k.revealPoolShare(sdk.UnwrapSDKContext(goCtx), msg)
+	}
+
 	// Defense-in-depth: reject shares if the round is not ACTIVE.
 	// The ante handler already enforces this, but duplicating here guards
 	// against internal callers that bypass ante validation.

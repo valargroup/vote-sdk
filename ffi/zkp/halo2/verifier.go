@@ -11,6 +11,8 @@ const IsMock = false
 // via CGo bindings to the Rust verifier. VerifyDelegation uses the real
 // 15-condition delegation circuit (K=12, 14 public inputs). VerifyVoteCommitment
 // uses the real 11-condition vote proof circuit (K=11, 9 public inputs).
+// VerifyProxyDelegation uses the real proxy delegation circuit (K=11, 11
+// public inputs).
 type Halo2Verifier struct{}
 
 // NewVerifier returns a Halo2Verifier backed by the Rust FFI library.
@@ -36,4 +38,10 @@ func (h Halo2Verifier) VerifyVoteCommitment(proof []byte, inputs zkp.VoteCommitm
 // VerifyVoteShare verifies ZKP #3 using the real share reveal circuit.
 func (h Halo2Verifier) VerifyVoteShare(proof []byte, inputs zkp.VoteShareInputs) error {
 	return VerifyShareRevealProof(proof, inputs)
+}
+
+// VerifyProxyDelegation verifies ZKP #4 using the real proxy delegation
+// circuit; see VerifyProxyDelegationProof.
+func (h Halo2Verifier) VerifyProxyDelegation(proof []byte, inputs zkp.ProxyDelegationInputs) error {
+	return VerifyProxyDelegationProof(proof, inputs)
 }

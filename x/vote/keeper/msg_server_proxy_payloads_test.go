@@ -361,21 +361,49 @@ func (s *ProxyRegistryTestSuite) TestProxyPayloadProposalErrors() {
 	s.Require().ErrorContains(result.err, "must match proposer")
 }
 
-// TestProxyPayloadExecutionRevalidates checks that execution re-runs a
-// payload's ValidateBasic, so an invalid payload stored without a proposal,
-// as a genesis import could hold, fails with its code and changes nothing.
-func (s *ProxyRegistryTestSuite) TestProxyPayloadExecutionRevalidates() {
-	s.setManagers(1, proxyManagerA, proxyManagerB)
-	createdAt := s.blockTime()
-	s.Require().NoError(s.keeper.SetCoordinatorAction(s.kv(), &types.CoordinatorAction{
-		ActionId:  7,
-		Payload:   coordinatorPayloadForMessage(s.T(), paramsPayload(3, 9, 1)),
-		Proposer:  proxyManagerA,
-		Approvals: []string{proxyManagerA},
-		Status:    types.CoordinatorActionStatus_COORDINATOR_ACTION_STATUS_PENDING,
-		CreatedAt: createdAt,
-		ExpiresAt: createdAt + proxyTestDay,
-	}))
-	proxytest.RequireCode(s.T(), s.approve(proxyManagerB, 7).err, types.ErrInvalidProxyParams, 68)
-	s.requireNoRegistryKeys()
+// TestProxyRoundFlagWritesRoundState checks the round the flag creates with
+// the gate open (§3.1, §5.5): the approval floor holds the flagged payload at
+// one approval under threshold 1 and a second manager's approval executes
+// it; field 31 records enabled, next_index at creation and pools_routed
+// false; and the round id is the one the same payload gets without the
+// flag, because field 31 is outside the round-id preimage. A round without
+// the flag executes at once and has no field 31.
+func (s *MsgServerTestSuite) TestProxyRoundFlagWritesRoundState() {
+	proxytest.SkipUnlessEnabled(s.T())
+	create := func(flag bool) *types.VoteRound {
+		s.SetupTest()
+		s.seedEligibleValidators(2)
+		manager, managerB := svtest.DefaultVoteManagerAddress, svtest.TestAccAddr(0xB2)
+		s.seedVoteManagers(manager, managerB)
+		kv := s.keeper.OpenKVStore(s.ctx)
+		s.Require().NoError(s.keeper.SetProxyNextDelegateIndex(kv, 4))
+		msg := validSetupMsg()
+		msg.ProxyDelegation = flag
+
+		resp, err := s.proposeCoordinatorAction(s.ctx, manager, msg)
+		s.Require().NoError(err)
+		s.Require().Equal(!flag, resp.Executed, "the floor holds only the flagged payload")
+		if flag {
+			approved, err := s.msgServer.ApproveCoordinatorAction(s.ctx, &types.MsgApproveCoordinatorAction{Creator: managerB, ActionId: resp.ActionId})
+			s.Require().NoError(err)
+			s.Require().True(approved.Executed)
+		}
+		var rounds []*types.VoteRound
+		s.Require().NoError(s.keeper.IterateAllRounds(kv, func(round *types.VoteRound) bool {
+			rounds = append(rounds, round)
+			return false
+		}))
+		s.Require().Len(rounds, 1)
+		return rounds[0]
+	}
+
+	flagged := create(true)
+	s.Require().True(proto.Equal(&types.ProxyDelegationRoundState{Enabled: true, NextDelegateIndexAtCreation: 4}, flagged.ProxyDelegation))
+	unflagged := create(false)
+	s.Require().Nil(unflagged.ProxyDelegation)
+	s.Require().Equal(unflagged.VoteRoundId, flagged.VoteRoundId)
+	s.Require().Equal(computeExpectedRoundID(validSetupMsg(), uint64(s.ctx.BlockHeight())), flagged.VoteRoundId)
+	// Each setup registers fresh random Pallas keys.
+	flagged.ProxyDelegation, flagged.CeremonyValidators, unflagged.CeremonyValidators = nil, nil, nil
+	s.Require().True(proto.Equal(unflagged, flagged), "the flag changes nothing else")
 }

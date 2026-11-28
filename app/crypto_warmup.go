@@ -40,9 +40,10 @@ type cryptoWarmupState struct {
 	err         string
 }
 
-// StartCryptoWarmup initializes the real Halo2 verifier caches and records the
-// readiness state. It blocks until warm-up completes or ctx is cancelled, so it
-// should be launched from the start command's errgroup.
+// StartCryptoWarmup initializes the real Halo2 verifier caches, publishes the
+// circuit fingerprints capability field 5 reports, and records the readiness
+// state. It blocks until warm-up completes or ctx is cancelled, so it should
+// be launched from the start command's errgroup.
 func (app *SvoteApp) StartCryptoWarmup(ctx context.Context, logger log.Logger) error {
 	if !app.markCryptoWarmupStarted() {
 		return nil
@@ -62,6 +63,14 @@ func (app *SvoteApp) StartCryptoWarmup(ctx context.Context, logger log.Logger) e
 		app.markCryptoWarmupFailed(err)
 		logger.Error("Halo2 verifier cache warm-up failed", "duration_ms", time.Since(start).Milliseconds(), "error", err)
 		return nil
+	}
+
+	// Fingerprinting reads the verifying keys just warmed, so it is cheap
+	// here and never runs on the query path (Keeper.SetCircuitFingerprints).
+	if fingerprints, err := halo2.CircuitFingerprints(); err != nil {
+		logger.Error("circuit fingerprints unavailable; capability field 5 stays empty", "error", err)
+	} else {
+		app.VoteKeeper.SetCircuitFingerprints(fingerprints)
 	}
 
 	app.markCryptoWarmupReady()

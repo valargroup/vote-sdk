@@ -21,15 +21,6 @@ import (
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
-// SkipUnlessDormant skips t unless the proxy delegation gate is closed, the
-// default build. Its twin SkipUnlessEnabled covers the proxyenabled build.
-func SkipUnlessDormant(t testing.TB) {
-	t.Helper()
-	if types.ProxyDelegationEnabled {
-		t.Skip("covers the dormant gate; this build sets proxyenabled")
-	}
-}
-
 // SkipUnlessEnabled skips t unless the proxy delegation gate is open, which
 // only the proxyenabled build tag does.
 func SkipUnlessEnabled(t testing.TB) {
