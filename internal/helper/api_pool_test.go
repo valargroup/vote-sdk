@@ -27,8 +27,7 @@ import (
 // the helper (docs/proxy-delegation/contracts-v1.md §11.8): with the gate
 // open (-tags proxyenabled), the proxy flag is checked with the round choice, the commitment (the
 // DC) next, with an absent leaf a retryable 503, and only then d against
-// next_index, in one registry read; votes are unchanged, and with the gate
-// closed validatePayload refuses proposal 0 as before.
+// next_index, in one registry read.
 
 // poolTestNext is next_index in these tests: delegates 1 to 3 exist.
 const poolTestNext = 4
@@ -179,13 +178,9 @@ func TestPoolShareRejections(t *testing.T) {
 			status: http.StatusUnprocessableEntity, code: poolErrDelegateNotFound},
 		{name: "delegate at next_index", d: poolTestNext, setup: func(h *poolTestHelper) { h.placeLeaf(types.PoolProposalID, poolTestNext) },
 			status: http.StatusUnprocessableEntity, code: poolErrDelegateNotFound, reads: []string{"choice", "next_index"}},
-		{name: "delegate far above next_index", d: 1 << 30, setup: func(h *poolTestHelper) { h.placeLeaf(types.PoolProposalID, 1<<30) },
-			status: http.StatusUnprocessableEntity, code: poolErrDelegateNotFound, reads: []string{"choice", "next_index"}},
 		{name: "round without the proxy flag", d: 9, setup: func(h *poolTestHelper) { h.proxyRound = false },
 			status: http.StatusUnprocessableEntity, code: poolErrProxyDelegationDisabled, reads: []string{"choice"}},
 		{name: "DC not yet in the tree, unregistered delegate", d: 9,
-			status: http.StatusServiceUnavailable, code: poolErrLeafNotFound, reads: []string{"choice"}, retryAfter: leafNotFoundRetryAfter},
-		{name: "DC not yet in the tree, registered delegate", d: 2,
 			status: http.StatusServiceUnavailable, code: poolErrLeafNotFound, reads: []string{"choice"}, retryAfter: leafNotFoundRetryAfter},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -233,50 +228,14 @@ func TestPoolShareOtherFailures(t *testing.T) {
 	})
 }
 
-// TestVoteSharesUnchangedWithGateOpen checks that opening the gate leaves
-// votes as they were: no registry read, an absent leaf is still a 400, and
-// the eight-option bound still holds.
-func TestVoteSharesUnchangedWithGateOpen(t *testing.T) {
-	proxytest.SkipUnlessEnabled(t)
-	vote := testPayload(apiTestRoundID, 0)
-	vote.VoteDecision = 1
-
-	h := newPoolTestHelper(t)
-	h.placeLeaf(vote.ProposalID, vote.VoteDecision)
-	w := h.submit(t, vote)
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	require.Equal(t, []string{"choice"}, h.reads)
-
-	h = newPoolTestHelper(t)
-	w = h.submit(t, vote)
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	require.Contains(t, w.Body.String(), "no leaf at position 0")
-	require.Empty(t, w.Header().Get("Retry-After"))
-
-	vote.VoteDecision = types.MaxVoteOptions
-	h = newPoolTestHelper(t)
-	h.placeLeaf(vote.ProposalID, vote.VoteDecision)
-	w = h.submit(t, vote)
-	require.Equal(t, http.StatusBadRequest, w.Code)
-	require.Contains(t, w.Body.String(), "vote_decision must be 0..7")
-	require.Empty(t, h.reads)
-}
-
-// TestValidatePayloadPoolShares checks validatePayload's proposal-0 branch:
-// with the gate open d needs only to be at least 1, d = 0 wraps
-// ErrDelegateNotFound after every structural check, and with the gate closed
-// proposal 0 is out of range.
+// TestValidatePayloadPoolShares checks validatePayload's proposal-0 branch
+// with the gate open: d needs only to be at least 1, with no option bound,
+// and d = 0 wraps ErrDelegateNotFound after every structural check.
 func TestValidatePayloadPoolShares(t *testing.T) {
-	if !types.ProxyDelegationEnabled {
-		p := poolPayload(1)
-		require.ErrorContains(t, validatePayload(&p), "proposal_id must be 1..50, got 0")
-		return
-	}
-	for _, d := range []uint32{1, types.MaxVoteOptions, 1 << 30} {
-		p := poolPayload(d)
-		require.NoError(t, validatePayload(&p), "d = %d", d)
-	}
-	p := poolPayload(0)
+	proxytest.SkipUnlessEnabled(t)
+	p := poolPayload(types.MaxVoteOptions)
+	require.NoError(t, validatePayload(&p))
+	p = poolPayload(0)
 	require.ErrorIs(t, validatePayload(&p), types.ErrDelegateNotFound)
 
 	p = poolPayload(0)

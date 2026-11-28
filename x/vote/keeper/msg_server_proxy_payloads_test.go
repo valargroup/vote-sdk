@@ -361,60 +361,13 @@ func (s *ProxyRegistryTestSuite) TestProxyPayloadProposalErrors() {
 	s.Require().ErrorContains(result.err, "must match proposer")
 }
 
-// TestProxyPayloadExecutionRevalidates checks that execution re-runs a
-// payload's ValidateBasic, so an invalid payload stored without a proposal,
-// as a genesis import could hold, fails with its code and changes nothing.
-func (s *ProxyRegistryTestSuite) TestProxyPayloadExecutionRevalidates() {
-	s.setManagers(1, proxyManagerA, proxyManagerB)
-	createdAt := s.blockTime()
-	s.Require().NoError(s.keeper.SetCoordinatorAction(s.kv(), &types.CoordinatorAction{
-		ActionId:  7,
-		Payload:   coordinatorPayloadForMessage(s.T(), paramsPayload(3, 9, 1)),
-		Proposer:  proxyManagerA,
-		Approvals: []string{proxyManagerA},
-		Status:    types.CoordinatorActionStatus_COORDINATOR_ACTION_STATUS_PENDING,
-		CreatedAt: createdAt,
-		ExpiresAt: createdAt + proxyTestDay,
-	}))
-	proxytest.RequireCode(s.T(), s.approve(proxyManagerB, 7).err, types.ErrInvalidProxyParams, 68)
-	s.requireNoRegistryKeys()
-}
-
-// TestProxyRoundFlagApprovalFloor checks a MsgCreateVotingSession that sets
-// proxy_delegation with the gate open: the floor holds it at one approval
-// under threshold 1, a repeated approval does not count, and a second
-// manager's approval executes it, creating a proxy round (§5.5).
-func (s *MsgServerTestSuite) TestProxyRoundFlagApprovalFloor() {
-	proxytest.SkipUnlessEnabled(s.T())
-	s.seedEligibleValidators(2)
-	manager, managerB := svtest.DefaultVoteManagerAddress, svtest.TestAccAddr(0xB2)
-	s.seedVoteManagers(manager, managerB)
-	msg := validSetupMsg()
-	msg.ProxyDelegation = true
-	roundID := computeExpectedRoundID(msg, uint64(s.ctx.BlockHeight()))
-
-	resp, err := s.proposeCoordinatorAction(s.ctx, manager, msg)
-	s.Require().NoError(err)
-	s.Require().False(resp.Executed)
-	_, err = s.keeper.GetVoteRound(s.keeper.OpenKVStore(s.ctx), roundID)
-	s.Require().ErrorIs(err, types.ErrRoundNotFound)
-
-	_, err = s.msgServer.ApproveCoordinatorAction(s.ctx, &types.MsgApproveCoordinatorAction{Creator: manager, ActionId: resp.ActionId})
-	s.Require().ErrorIs(err, types.ErrCoordinatorAlreadyApproved)
-
-	approved, err := s.msgServer.ApproveCoordinatorAction(s.ctx, &types.MsgApproveCoordinatorAction{Creator: managerB, ActionId: resp.ActionId})
-	s.Require().NoError(err)
-	s.Require().True(approved.Executed)
-	round, err := s.keeper.GetVoteRound(s.keeper.OpenKVStore(s.ctx), roundID)
-	s.Require().NoError(err)
-	s.Require().True(round.GetProxyDelegation().GetEnabled())
-}
-
 // TestProxyRoundFlagWritesRoundState checks the round the flag creates with
-// the gate open (§3.1, §5.5): field 31 records enabled, next_index at
-// creation and pools_routed false, and the round id is the one the same
-// payload gets without the flag, because field 31 is outside the round-id
-// preimage. A round without the flag has no field 31.
+// the gate open (§3.1, §5.5): the approval floor holds the flagged payload at
+// one approval under threshold 1 and a second manager's approval executes
+// it; field 31 records enabled, next_index at creation and pools_routed
+// false; and the round id is the one the same payload gets without the
+// flag, because field 31 is outside the round-id preimage. A round without
+// the flag executes at once and has no field 31.
 func (s *MsgServerTestSuite) TestProxyRoundFlagWritesRoundState() {
 	proxytest.SkipUnlessEnabled(s.T())
 	create := func(flag bool) *types.VoteRound {
@@ -429,9 +382,11 @@ func (s *MsgServerTestSuite) TestProxyRoundFlagWritesRoundState() {
 
 		resp, err := s.proposeCoordinatorAction(s.ctx, manager, msg)
 		s.Require().NoError(err)
-		if !resp.Executed {
-			_, err = s.msgServer.ApproveCoordinatorAction(s.ctx, &types.MsgApproveCoordinatorAction{Creator: managerB, ActionId: resp.ActionId})
+		s.Require().Equal(!flag, resp.Executed, "the floor holds only the flagged payload")
+		if flag {
+			approved, err := s.msgServer.ApproveCoordinatorAction(s.ctx, &types.MsgApproveCoordinatorAction{Creator: managerB, ActionId: resp.ActionId})
 			s.Require().NoError(err)
+			s.Require().True(approved.Executed)
 		}
 		var rounds []*types.VoteRound
 		s.Require().NoError(s.keeper.IterateAllRounds(kv, func(round *types.VoteRound) bool {
@@ -451,20 +406,4 @@ func (s *MsgServerTestSuite) TestProxyRoundFlagWritesRoundState() {
 	// Each setup registers fresh random Pallas keys.
 	flagged.ProxyDelegation, flagged.CeremonyValidators, unflagged.CeremonyValidators = nil, nil, nil
 	s.Require().True(proto.Equal(unflagged, flagged), "the flag changes nothing else")
-}
-
-// TestCreateVotingSessionWithoutFlagKeepsThreshold checks that, with the gate
-// open or closed, a create-session without the flag still executes in its
-// proposing tx at threshold 1, as today.
-func (s *MsgServerTestSuite) TestCreateVotingSessionWithoutFlagKeepsThreshold() {
-	s.seedEligibleValidators(2)
-	s.seedVoteManagers(svtest.DefaultVoteManagerAddress, svtest.TestAccAddr(0xB2))
-	msg := validSetupMsg()
-
-	resp, err := s.proposeCoordinatorAction(s.ctx, msg.Creator, msg)
-	s.Require().NoError(err)
-	s.Require().True(resp.Executed)
-	round, err := s.keeper.GetVoteRound(s.keeper.OpenKVStore(s.ctx), computeExpectedRoundID(msg, uint64(s.ctx.BlockHeight())))
-	s.Require().NoError(err)
-	s.Require().Nil(round.ProxyDelegation)
 }

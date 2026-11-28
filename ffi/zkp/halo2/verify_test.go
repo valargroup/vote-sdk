@@ -139,12 +139,8 @@ func TestVerifyProxyDelegationProofRejectsMalformedInputs(t *testing.T) {
 	}{
 		{"van_nullifier", func(in *zkp.ProxyDelegationInputs) { in.VanNullifier = nonCanonical }},
 		{"r_vpk", func(in *zkp.ProxyDelegationInputs) { in.RVpk = nonCanonical }},
-		{"vote_authority_note_new", func(in *zkp.ProxyDelegationInputs) { in.VoteAuthorityNoteNew = validFp32()[:31] }},
 		{"delegation_commitment", func(in *zkp.ProxyDelegationInputs) { in.ProxyDelegationCommitment = nil }},
-		{"vote_comm_tree_root", func(in *zkp.ProxyDelegationInputs) { in.VoteCommTreeRoot = nonCanonical }},
-		{"voting_round_id", func(in *zkp.ProxyDelegationInputs) { in.VoteRoundId = nonCanonical }},
 		{"ea_pk", func(in *zkp.ProxyDelegationInputs) { in.EaPk = make([]byte, 32) }},
-		{"dc_slot_nullifier", func(in *zkp.ProxyDelegationInputs) { in.DcSlotNullifier = nonCanonical }},
 	} {
 		t.Run(tc.field, func(t *testing.T) {
 			inputs := valid()

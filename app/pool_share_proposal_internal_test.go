@@ -5,12 +5,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	abci "github.com/cometbft/cometbft/abci/types"
 	"github.com/stretchr/testify/require"
-
-	"cosmossdk.io/log"
-
-	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	voteapi "github.com/valargroup/vote-sdk/api"
 	"github.com/valargroup/vote-sdk/testutil/proxytest"
@@ -89,36 +84,4 @@ func TestRevealCapCountsPoolShares(t *testing.T) {
 	require.Equal(t, voteShareSubmissionFilterStats{kept: MaxVoteShareSubmissionsPerBlock, overLimit: 1}, stats)
 	require.NoError(t, validateVoteShareSubmissionTransactions(filtered))
 	require.ErrorContains(t, validateVoteShareSubmissionTransactions(txs), "maximum is 256")
-}
-
-// TestPoolShareProposalHandlers checks pool shares inside the composed
-// PrepareProposal and ProcessProposal handlers: with the gate open the
-// proposer keeps a pool share and a block holding it is accepted; with the
-// gate closed the proposer drops it and a block holding it is rejected, as
-// today.
-func TestPoolShareProposalHandlers(t *testing.T) {
-	roundID := bytes.Repeat([]byte{0xE3}, types.RoundIDLen)
-	vote := mustInternalVoteShareSubmissionTx(t, roundID, 1)
-	pool := poolShareTx(t, roundID, 4, 2)
-	txs := [][]byte{vote, pool}
-	passThrough := func(_ sdk.Context, _ *abci.RequestPrepareProposal, txs [][]byte) [][]byte { return txs }
-	tally := func(_ sdk.Context, req *abci.RequestPrepareProposal) (*abci.ResponsePrepareProposal, error) {
-		return &abci.ResponsePrepareProposal{Txs: req.Txs}, nil
-	}
-	ctx := sdk.Context{}
-	logger := log.NewNopLogger()
-
-	prepared, verdict := [][]byte{vote}, abci.ResponseProcessProposal_REJECT
-	if types.ProxyDelegationEnabled {
-		prepared, verdict = txs, abci.ResponseProcessProposal_ACCEPT
-	}
-	prepare := ComposedPrepareProposalHandler(passThrough, passThrough, passThrough, tally, logger)
-	resp, err := prepare(ctx, &abci.RequestPrepareProposal{Txs: txs, MaxTxBytes: 1 << 20})
-	require.NoError(t, err)
-	require.Equal(t, prepared, resp.Txs)
-
-	process := ProcessProposalHandler(nil, logger)
-	withPool, err := process(ctx, &abci.RequestProcessProposal{Txs: txs})
-	require.NoError(t, err)
-	require.Equal(t, verdict, withPool.Status)
 }

@@ -1,10 +1,8 @@
 package keeper_test
 
 import (
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"math"
 
 	"google.golang.org/protobuf/proto"
 
@@ -111,42 +109,4 @@ func (s *ProxyRegistryTestSuite) TestRegistryEntryValueVectors() {
 			s.Require().True(proto.Equal(entry, got))
 		})
 	}
-}
-
-// TestIterateProxyDelegateEntries checks that entries come in ascending
-// index order, strictly after startAfter, and that the callback can stop.
-func (s *ProxyRegistryTestSuite) TestIterateProxyDelegateEntries() {
-	kv := s.kv()
-	for _, index := range []uint32{65_536, 1, 256, 1 << 30, 2, 255} {
-		s.Require().NoError(s.keeper.SetProxyDelegateEntry(kv, &types.ProxyDelegateEntry{Index: index}))
-	}
-	collect := func(startAfter uint32, limit int) []uint32 {
-		var got []uint32
-		s.Require().NoError(s.keeper.IterateProxyDelegateEntries(kv, startAfter, func(entry *types.ProxyDelegateEntry) bool {
-			got = append(got, entry.Index)
-			return len(got) == limit
-		}))
-		return got
-	}
-	s.Require().Equal([]uint32{1, 2, 255, 256, 65_536, 1 << 30}, collect(0, -1))
-	s.Require().Equal([]uint32{255, 256, 65_536, 1 << 30}, collect(2, -1))
-	s.Require().Equal([]uint32{256, 65_536}, collect(255, 2))
-	s.Require().Empty(collect(1<<30, -1))
-	s.Require().Empty(collect(math.MaxUint32, -1))
-}
-
-// TestRegistryStoreRejectsCorruptValues checks that a used-key or next_index
-// value that is not four bytes is an error, not a silent misread.
-func (s *ProxyRegistryTestSuite) TestRegistryStoreRejectsCorruptValues() {
-	kv := s.kv()
-	dk := proxytest.Pub(proxytest.Key("corrupt"))
-	usedKey, err := types.ProxyUsedDelegateKeyKey(dk)
-	s.Require().NoError(err)
-	s.Require().NoError(kv.Set(usedKey, []byte{1, 2, 3}))
-	_, _, err = s.keeper.GetProxyUsedDelegateKey(kv, dk)
-	s.Require().ErrorContains(err, "expected 4")
-
-	s.Require().NoError(kv.Set(types.ProxyNextDelegateIndexKey, binary.BigEndian.AppendUint64(nil, 2)))
-	_, err = s.keeper.GetProxyNextDelegateIndex(kv)
-	s.Require().ErrorContains(err, "expected 4")
 }

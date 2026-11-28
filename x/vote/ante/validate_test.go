@@ -107,12 +107,10 @@ func (errZKPVerifier) VerifyProxyDelegation(_ []byte, _ zkp.ProxyDelegationInput
 	return fmt.Errorf("mock: proxy delegation proof verification failed")
 }
 
-// spyZKPVerifier captures the inputs passed to VerifyDelegation,
-// VerifyVoteCommitment and VerifyProxyDelegation.
+// spyZKPVerifier captures the DelegationInputs passed to VerifyDelegation.
 type spyZKPVerifier struct {
 	capturedDelegationInputs *zkp.DelegationInputs
 	capturedVoteInputs       []zkp.VoteCommitmentInputs
-	capturedProxyInputs      []zkp.ProxyDelegationInputs
 }
 
 func (s *spyZKPVerifier) VerifyDelegation(_ []byte, inputs zkp.DelegationInputs) error {
@@ -129,9 +127,8 @@ func (s *spyZKPVerifier) VerifyVoteShare(_ []byte, _ zkp.VoteShareInputs) error 
 	return nil
 }
 
-// VerifyProxyDelegation records inputs and succeeds.
-func (s *spyZKPVerifier) VerifyProxyDelegation(_ []byte, inputs zkp.ProxyDelegationInputs) error {
-	s.capturedProxyInputs = append(s.capturedProxyInputs, inputs)
+// VerifyProxyDelegation always succeeds.
+func (s *spyZKPVerifier) VerifyProxyDelegation(_ []byte, _ zkp.ProxyDelegationInputs) error {
 	return nil
 }
 

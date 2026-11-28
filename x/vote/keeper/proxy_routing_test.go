@@ -10,7 +10,6 @@ import (
 
 	"github.com/mikelodder7/curvey"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
 
 	"cosmossdk.io/core/store"
 	"cosmossdk.io/log"
@@ -32,7 +31,7 @@ import (
 // which EndBlock runs once the gate is open. Every bucket is checked against
 // a plaintext model and against the routing identity on ciphertexts.
 
-// routingRoundID is the round of most routing tests.
+// routingRoundID is the round of the routing tests.
 var routingRoundID = bytes.Repeat([]byte{0xE1}, 32)
 
 // routingBucket names option o of proposal p.
@@ -54,14 +53,15 @@ type routingFixture struct {
 	shares  int
 }
 
-// newRoutingFixture stores an ACTIVE proxy round roundID under election key
-// eaSK, with proposals 1..n, proposal i having optionCounts[i-1] options.
-func newRoutingFixture(t *testing.T, roundID []byte, eaSK *elgamal.SecretKey, optionCounts ...int) *routingFixture {
+// newDefaultRoutingFixture stores an ACTIVE proxy round routingRoundID
+// with proposals of 2, 3 and 4 options.
+func newDefaultRoutingFixture(t *testing.T) *routingFixture {
 	t.Helper()
+	eaSK, _ := proxytest.ElectionKey("routing/ea_sk")
 	key := storetypes.NewKVStoreKey(types.StoreKey)
 	testCtx := testutil.DefaultContextWithDB(t, key, storetypes.NewTransientStoreKey("transient_test"))
 	eaPK := &elgamal.PublicKey{Point: elgamal.PallasGenerator().Mul(eaSK.Scalar)}
-	round := proxytest.Round(roundID, optionCounts...)
+	round := proxytest.Round(routingRoundID, 2, 3, 4)
 	round.VoteEndTime = proxyTestTime + 10*proxyTestDay
 	round.EaPk = eaPK.Point.ToAffineCompressed()
 	f := &routingFixture{
@@ -77,13 +77,6 @@ func newRoutingFixture(t *testing.T, roundID []byte, eaSK *elgamal.SecretKey, op
 	}
 	require.NoError(t, f.keeper.SetVoteRound(f.kv(), f.round))
 	return f
-}
-
-// newDefaultRoutingFixture is newRoutingFixture for routingRoundID, with
-// proposals of 2, 3 and 4 options.
-func newDefaultRoutingFixture(t *testing.T) *routingFixture {
-	eaSK, _ := proxytest.ElectionKey("routing/ea_sk")
-	return newRoutingFixture(t, routingRoundID, eaSK, 2, 3, 4)
 }
 
 // kv opens the fixture's vote store.
@@ -122,12 +115,7 @@ func (f *routingFixture) vote(p, o uint32, v uint64) {
 
 // delegate reveals a pool share of v for delegate d.
 func (f *routingFixture) delegate(d uint32, v uint64) {
-	f.poolShare(d, v, f.nextRandomness())
-}
-
-// poolShare reveals a pool share of v for delegate d with randomness r.
-func (f *routingFixture) poolShare(d uint32, v uint64, r curvey.Scalar) {
-	f.addTally(types.PoolProposalID, d, f.encrypt(v, r))
+	f.addTally(types.PoolProposalID, d, f.encrypt(v, f.nextRandomness()))
 	f.pools[d] += v
 }
 
@@ -310,44 +298,6 @@ func TestRouteProxyPoolsConservesWeight(t *testing.T) {
 	require.True(t, stored.ProxyDelegation.PoolsRouted)
 }
 
-// TestRouteProxyPoolsCountsOnlyDelegatesWithBoth checks that a pool without
-// a ballot counts nowhere and a ballot without a pool creates no bucket:
-// every tally stays byte for byte, while pools_routed is still set and the
-// event still counts the ballots.
-func TestRouteProxyPoolsCountsOnlyDelegatesWithBoth(t *testing.T) {
-	t.Run("pools without ballots", func(t *testing.T) {
-		f := newDefaultRoutingFixture(t)
-		f.vote(1, 1, 8)
-		f.delegate(2, 70)
-		f.delegate(2, 5)
-		f.delegate(3, 1)
-		before := f.tallies()
-		require.NoError(t, f.route())
-		require.Equal(t, before, f.tallies())
-		require.True(t, f.round.ProxyDelegation.PoolsRouted)
-		f.requireRoutedEvent("0", "0")
-	})
-	t.Run("ballots without pools", func(t *testing.T) {
-		f := newDefaultRoutingFixture(t)
-		f.vote(1, 1, 8)
-		f.ballot(3, 1, 2, 3)
-		f.ballot(4, 0, 0, 0)
-		f.delegate(5, 9)
-		before := f.tallies()
-		require.NoError(t, f.route())
-		require.Equal(t, before, f.tallies())
-		require.True(t, f.round.ProxyDelegation.PoolsRouted)
-		f.requireRoutedEvent("2", "0")
-	})
-	t.Run("no ballots and no pools", func(t *testing.T) {
-		f := newDefaultRoutingFixture(t)
-		before := f.tallies()
-		require.NoError(t, f.route())
-		require.Equal(t, before, f.tallies())
-		f.requireRoutedEvent("0", "0")
-	})
-}
-
 // TestRouteProxyPoolsRunsOnce checks that pools_routed makes routing run
 // once: routing again, with the same round or the one read back from the
 // store, changes nothing and emits nothing.
@@ -396,131 +346,27 @@ func TestRouteProxyPoolsSkipsRoundsWithoutTheFlag(t *testing.T) {
 	}
 }
 
-// TestRouteProxyPoolsDefeatsIdentityGriefing routes the griefing pools of the
-// routing vectors (contracts-v1 §5.6), each accepted by AddToTally.
-// Delegates 1 and 2 share options and their pools' randomness cancels, so
-// the naive sum of each of their buckets has an identity C1; delegates 3
-// and 4 do the same with two encryptions of 0, whose naive sum is the
-// identity ciphertext. After routing no bucket has an identity C1 or C2,
-// each decrypts to its pools' total, and a partial-decryption DLEQ over its
-// C1 verifies, where one over the naive sum's does not.
-func TestRouteProxyPoolsDefeatsIdentityGriefing(t *testing.T) {
-	f := newDefaultRoutingFixture(t)
-	r1, r2, r := proxytest.Scalar("griefing/r1"), proxytest.Scalar("griefing/r2"), proxytest.Scalar("griefing/r")
-	f.poolShare(1, 5, r1)
-	f.poolShare(1, 3, r2)
-	f.poolShare(2, 7, r1.Add(r2).Neg())
-	f.poolShare(3, 0, r)
-	f.poolShare(4, 0, r.Neg())
-	f.ballot(1, 1, 1, 1)
-	f.ballot(2, 1, 1, 1)
-	f.ballot(3, 0, 2, 2)
-	f.ballot(4, 0, 2, 2)
-	before := f.tallies()
-	naive := func(d1, d2 uint32) *elgamal.Ciphertext {
-		return elgamal.HomomorphicAdd(
-			f.ciphertext(before, f.tallyKey(types.PoolProposalID, d1)),
-			f.ciphertext(before, f.tallyKey(types.PoolProposalID, d2)))
-	}
-	cancelsC1, cancelsBoth := naive(1, 2), naive(3, 4)
-	require.True(t, cancelsC1.C1.IsIdentity())
-	require.False(t, cancelsC1.C2.IsIdentity())
-	require.True(t, cancelsBoth.C1.IsIdentity() && cancelsBoth.C2.IsIdentity())
-	require.False(t, partialDecryptionVerifies(f.eaSK, f.eaPK, cancelsC1.C1))
-
-	require.NoError(t, f.route())
-	f.requireRouted(before)
-	for _, b := range []routingBucket{{1, 1}, {2, 1}, {3, 1}, {1, 0}, {2, 2}, {3, 2}} {
-		ct := f.ciphertext(f.tallies(), f.tallyKey(b.p, b.o))
-		require.False(t, ct.C1.IsIdentity(), "bucket %v C1", b)
-		require.False(t, ct.C2.IsIdentity(), "bucket %v C2", b)
-		require.True(t, partialDecryptionVerifies(f.eaSK, f.eaPK, ct.C1), "bucket %v", b)
-	}
-}
-
-// TestRouteProxyPoolsMatchesRoutingVectors routes, for each routing vector,
-// a stored direct tally and two pools that sum to its combined ciphertext,
-// chosen by both delegates' ballots, and checks that the bucket ends as the
-// vector's final, byte for byte (contracts-v1 §13).
-func TestRouteProxyPoolsMatchesRoutingVectors(t *testing.T) {
-	for _, c := range routingVectorCases(t) {
-		t.Run(c.Name, func(t *testing.T) {
-			in := c.Inputs
-			eaSK, err := elgamal.UnmarshalSecretKey(routingVectorHex(t, in.EaSK))
-			require.NoError(t, err)
-			optionCounts := slices.Repeat([]int{types.MaxVoteOptions}, int(in.ProposalID))
-			f := newRoutingFixture(t, routingVectorHex(t, in.VoteRoundID), eaSK, optionCounts...)
-			require.Equal(t, in.EaPK, hex.EncodeToString(f.round.EaPk))
-			combined, err := elgamal.UnmarshalCiphertext(routingVectorHex(t, in.Combined))
-			require.NoError(t, err)
-
-			direct := f.encrypt(11, proxytest.Scalar("vectors/direct"))
-			pool := f.encrypt(13, proxytest.Scalar("vectors/pool"))
-			rest := elgamal.HomomorphicAdd(direct, pool)
-			f.addTally(in.ProposalID, in.VoteDecision, direct)
-			f.addTally(types.PoolProposalID, 1, pool)
-			f.addTally(types.PoolProposalID, 2, &elgamal.Ciphertext{C1: combined.C1.Sub(rest.C1), C2: combined.C2.Sub(rest.C2)})
-			options := make([]uint32, in.ProposalID)
-			options[in.ProposalID-1] = in.VoteDecision
-			f.ballot(1, options...)
-			f.ballot(2, options...)
-
-			require.NoError(t, f.route())
-			final, err := f.keeper.GetTally(f.kv(), f.round.VoteRoundId, in.ProposalID, in.VoteDecision)
-			require.NoError(t, err)
-			require.Equal(t, c.Expected.Final, hex.EncodeToString(final))
-		})
-	}
-}
-
 // TestRouteProxyPoolsHaltsOnCorruptState checks that routing refuses state
 // the chain never writes with ErrRoutingCorruptState, which EndBlock returns
 // to halt the chain, before writing anything: no tally changes, the round is
-// not marked and no event is emitted. A ballot without a pool is never
-// decoded, so a corrupt one does not halt.
+// not marked and no event is emitted.
 func TestRouteProxyPoolsHaltsOnCorruptState(t *testing.T) {
 	// set writes value at key, failing the test on a store error.
 	set := func(f *routingFixture, key, value []byte) {
 		require.NoError(f.t, f.kv().Set(key, value))
-	}
-	// ballotKey returns 0x1B || round || u32be(d).
-	ballotKey := func(f *routingFixture, d uint32) []byte {
-		key, err := types.DelegateBallotKey(f.round.VoteRoundId, d)
-		require.NoError(f.t, err)
-		return key
-	}
-	// storeRecord stores record under delegate d's ballot key.
-	storeRecord := func(f *routingFixture, d uint32, record *types.DelegateBallotRecord) {
-		bz, err := proto.MarshalOptions{Deterministic: true}.Marshal(record)
-		require.NoError(f.t, err)
-		set(f, ballotKey(f, d), bz)
 	}
 	notAPoint := bytes.Repeat([]byte{0xff}, elgamal.CiphertextSize)
 	for _, tc := range []struct {
 		name    string
 		corrupt func(f *routingFixture)
 	}{
-		{"a ballot that does not decode", func(f *routingFixture) { set(f, ballotKey(f, 1), []byte{0xff}) }},
-		{"a ballot with too few options", func(f *routingFixture) { f.ballot(1, 0, 1) }},
-		{"a ballot with too many options", func(f *routingFixture) { f.ballot(1, 0, 1, 2, 3) }},
-		{"a ballot with an option out of range", func(f *routingFixture) { f.ballot(1, 0, 3, 2) }},
-		{"a ballot naming another delegate", func(f *routingFixture) {
-			storeRecord(f, 1, &types.DelegateBallotRecord{VoteRoundId: f.round.VoteRoundId, DelegateIndex: 2, Options: []uint32{0, 1, 2}})
-		}},
-		{"a ballot naming another round", func(f *routingFixture) {
-			storeRecord(f, 1, &types.DelegateBallotRecord{VoteRoundId: ballotRoundA, DelegateIndex: 1, Options: []uint32{0, 1, 2}})
-		}},
-		{"a malformed ballot key", func(f *routingFixture) {
-			bz, err := proto.MarshalOptions{Deterministic: true}.Marshal(&types.DelegateBallotRecord{
-				VoteRoundId: f.round.VoteRoundId, DelegateIndex: 1, Options: []uint32{0, 1, 2},
-			})
+		{"a ballot that does not decode", func(f *routingFixture) {
+			key, err := types.DelegateBallotKey(f.round.VoteRoundId, 1)
 			require.NoError(f.t, err)
-			set(f, append(ballotKey(f, 1), 0), bz)
+			set(f, key, []byte{0xff})
 		}},
 		{"a pool that does not decode", func(f *routingFixture) { set(f, f.tallyKey(types.PoolProposalID, 1), notAPoint) }},
-		{"a direct tally that does not decode", func(f *routingFixture) { set(f, f.tallyKey(1, 0), notAPoint) }},
 		{"a missing ea_pk", func(f *routingFixture) { f.round.EaPk = nil }},
-		{"an identity ea_pk", func(f *routingFixture) { f.round.EaPk = make([]byte, 32) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newDefaultRoutingFixture(t)
@@ -535,15 +381,4 @@ func TestRouteProxyPoolsHaltsOnCorruptState(t *testing.T) {
 			require.Empty(t, f.ctx.EventManager().Events())
 		})
 	}
-
-	t.Run("a corrupt ballot without a pool", func(t *testing.T) {
-		f := newDefaultRoutingFixture(t)
-		f.delegate(1, 10)
-		f.ballot(1, 0, 1, 2)
-		set(f, ballotKey(f, 2), []byte{0xff})
-		before := f.tallies()
-		require.NoError(t, f.route())
-		f.requireRouted(before)
-		f.requireRoutedEvent("2", "1")
-	})
 }

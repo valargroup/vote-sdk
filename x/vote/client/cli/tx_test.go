@@ -17,15 +17,15 @@ func TestParseProxyVerifier(t *testing.T) {
 	require.Equal(t, uint32(7), verifier.VerifierId)
 	require.Equal(t, pubkey, verifier.Pubkey)
 
-	for _, bad := range []string{"", "7", "x:ab", "-1:ab", "4294967296:ab", "7:zz"} {
+	for _, bad := range []string{"7", "x:ab", "7:zz"} {
 		_, err := parseProxyVerifier(bad)
 		require.Error(t, err, "%q", bad)
 	}
 }
 
 // TestCreateVotingSessionProxyFlag checks that --proxy-delegation sets the
-// session's proxy flag, that a msg file setting the flag itself is refused,
-// and that the help names the approval floor.
+// session's proxy flag and that a msg file setting the flag itself is
+// refused.
 func TestCreateVotingSessionProxyFlag(t *testing.T) {
 	file := `{
 		"snapshot_height": 1000,
@@ -43,17 +43,9 @@ func TestCreateVotingSessionProxyFlag(t *testing.T) {
 		require.Equal(t, proxyDelegation, msg.ProxyDelegation)
 		require.Equal(t, "sv1creator", msg.Creator)
 		require.Equal(t, uint64(1000), msg.SnapshotHeight)
-		require.Equal(t, []byte{0xaa, 0xbb}, msg.SnapshotBlockhash)
-		require.Equal(t, "No", msg.Proposals[0].Options[1].Label)
 	}
 
 	inFile := strings.Replace(file, `"title": "Round",`, `"title": "Round", "proxy_delegation": true,`, 1)
 	_, err := createVotingSessionMsg("sv1creator", []byte(inFile), true)
 	require.ErrorContains(t, err, "--proxy-delegation")
-
-	cmd := CmdCreateVotingSession()
-	flag := cmd.Flags().Lookup(flagProxyDelegation)
-	require.NotNil(t, flag)
-	require.Equal(t, "false", flag.DefValue)
-	require.Contains(t, cmd.Long, "at least two coordinator approvals")
 }

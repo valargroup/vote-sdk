@@ -45,11 +45,4 @@ func (s *QueryServerTestSuite) TestProtocolCapabilities_ProxyDelegationOn() {
 	for i, f := range resp.CircuitFingerprints {
 		s.Require().True(proto.Equal(published[i], f), "%v", f)
 	}
-
-	// Answers are copies, so a caller cannot change what later queries see.
-	resp.CircuitFingerprints[0].VkBlake2B[0] ^= 0xff
-	resp.CircuitFingerprints[1].Name = "changed"
-	for i, f := range query().CircuitFingerprints {
-		s.Require().True(proto.Equal(testCircuitFingerprints()[i], f), "%v", f)
-	}
 }

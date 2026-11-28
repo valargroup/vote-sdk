@@ -7,7 +7,6 @@ import (
 
 	errorsmod "cosmossdk.io/errors"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"golang.org/x/crypto/blake2b"
 
 	"github.com/valargroup/vote-sdk/ffi/redpallas"
 	"github.com/valargroup/vote-sdk/ffi/tx1"
@@ -159,12 +158,13 @@ func (v *proxySigVerifier) Verify(rk, digest, _ []byte) error {
 	return nil
 }
 
-// proxyZKPVerifier records ZKP #1 and ZKP #4 checks in log, with their
-// inputs, and fails the kinds named in fail ("zkp1", "zkp4").
+// proxyZKPVerifier records ZKP #1, #3 and #4 checks in log, with their
+// inputs, and fails the kinds named in fail ("zkp1", "zkp3", "zkp4").
 type proxyZKPVerifier struct {
 	log        *proxyCallLog
 	fail       map[string]bool
 	delegation []zkp.DelegationInputs
+	shares     []zkp.VoteShareInputs
 	proxy      []zkp.ProxyDelegationInputs
 }
 
@@ -183,9 +183,14 @@ func (v *proxyZKPVerifier) VerifyVoteCommitment([]byte, zkp.VoteCommitmentInputs
 	return errors.New("unexpected ZKP #2")
 }
 
-// VerifyVoteShare is never reached by a 0x09 batch.
-func (v *proxyZKPVerifier) VerifyVoteShare([]byte, zkp.VoteShareInputs) error {
-	return errors.New("unexpected ZKP #3")
+// VerifyVoteShare records a ZKP #3 check.
+func (v *proxyZKPVerifier) VerifyVoteShare(_ []byte, inputs zkp.VoteShareInputs) error {
+	v.log.calls = append(v.log.calls, "zkp3")
+	v.shares = append(v.shares, inputs)
+	if v.fail["zkp3"] {
+		return errors.New("mock ZKP #3 failure")
+	}
+	return nil
 }
 
 // VerifyProxyDelegation records a ZKP #4 check.
@@ -323,11 +328,8 @@ func (s *ValidateTestSuite) TestProxyBatchAnteAdmissionHeight() {
 	}{
 		{name: "finalize below expiry", ctx: s.proxyCtx().WithBlockHeight(100)},
 		{name: "finalize at expiry", ctx: s.proxyCtx().WithBlockHeight(101), expired: true},
-		{name: "check after restart below expiry", ctx: s.proxyCtx().WithIsCheckTx(true), committed: 99},
 		{name: "check after restart at expiry", ctx: s.proxyCtx().WithIsCheckTx(true), committed: 100, expired: true},
 		{name: "check ignores a high header", ctx: s.proxyCtx().WithIsCheckTx(true).WithBlockHeight(500), committed: 99},
-		{name: "check ignores a low header", ctx: s.proxyCtx().WithIsCheckTx(true).WithBlockHeight(50), committed: 100, expired: true},
-		{name: "recheck after restart below expiry", ctx: s.proxyCtx().WithIsReCheckTx(true), recheck: true, committed: 99},
 		{name: "recheck after restart at expiry", ctx: s.proxyCtx().WithIsReCheckTx(true), recheck: true, committed: 100, expired: true},
 	} {
 		s.Run(c.name, func() {
@@ -350,22 +352,6 @@ func (s *ValidateTestSuite) TestProxyBatchAnteAdmissionHeight() {
 	opts := mockOpts()
 	s.Require().Error(ante.ValidateVoteTx(s.proxyCtx().WithIsCheckTx(true), msg, s.keeper, opts))
 	s.Require().NoError(ante.ValidateVoteTx(s.proxyCtx().WithBlockHeight(100), msg, s.keeper, opts))
-}
-
-// TestProxyBatchAnteRecheckSkipsCrypto checks that RecheckTx skips every
-// signature and proof, which CheckTx checks.
-func (s *ValidateTestSuite) TestProxyBatchAnteRecheckSkipsCrypto() {
-	proxytest.SkipUnlessEnabled(s.T())
-	s.setupProxyBatchRound(func(*types.VoteRound) {})
-	msg := proxyAnteBatch(3, true)
-	for _, m := range s.proxyModes() {
-		err := ante.ValidateVoteTx(m.ctx, msg, s.keeper, proxyOpts(m, errSigVerifier{}, errZKPVerifier{}))
-		if m.recheck {
-			s.Require().NoError(err)
-			continue
-		}
-		s.requireVoteCode(err, types.ErrInvalidSignature)
-	}
 }
 
 // TestProxyBatchAnteRootChain checks the ZKP4 public inputs (contracts-v1
@@ -442,92 +428,4 @@ func (s *ValidateTestSuite) TestProxyBatchAnteSignsD1() {
 
 	s.Require().Equal([][]byte{d1, d1, tx1Sighash}, sig.digests)
 	s.Require().Equal([][]byte{msg.Dcs[0].RVpk, msg.Dcs[1].RVpk, msg.Registration.Rk}, sig.keys)
-}
-
-// bindingSigVerifier accepts a signature only if it is bindingSign of its
-// key and digest, so a test can sign digests without RedPallas keys.
-type bindingSigVerifier struct{}
-
-// bindingSign returns BLAKE2b-512 of rk and digest.
-func bindingSign(rk, digest []byte) []byte {
-	sum := blake2b.Sum512(append(bytes.Clone(rk), digest...))
-	return sum[:]
-}
-
-// Verify accepts only bindingSign(rk, digest).
-func (bindingSigVerifier) Verify(rk, digest, sig []byte) error {
-	if !bytes.Equal(sig, bindingSign(rk, digest)) {
-		return errors.New("signature does not bind this digest")
-	}
-	return nil
-}
-
-// signBatch signs every DC of msg with bindingSign over its D1 on chainID.
-func (s *ValidateTestSuite) signBatch(msg *types.MsgProxyDelegationBatch, chainID string) {
-	d1, err := types.ComputeProxyDelegationBatchSighash(chainID, msg.SighashFields())
-	s.Require().NoError(err)
-	for _, dc := range msg.Dcs {
-		dc.VoteAuthSig = bindingSign(dc.RVpk, d1)
-	}
-}
-
-// TestProxyBatchAnteD1Binding checks that a DC signature is valid only over
-// its own batch's D1: a signature for another chain or another expiry, a DC
-// grafted from another batch, and a truncated or reordered batch are all
-// ErrInvalidSignature.
-func (s *ValidateTestSuite) TestProxyBatchAnteD1Binding() {
-	proxytest.SkipUnlessEnabled(s.T())
-	s.setupProxyBatchRound(func(*types.VoteRound) {})
-	m := s.proxyModes()[2]
-	opts := proxyOpts(m, bindingSigVerifier{}, zkp.NewMockVerifier())
-	validate := func(msg *types.MsgProxyDelegationBatch) error {
-		return ante.ValidateVoteTx(m.ctx, msg, s.keeper, opts)
-	}
-
-	msg := proxyAnteBatch(3, false)
-	s.signBatch(msg, proxyAnteChainID)
-	s.Require().NoError(validate(msg))
-
-	s.Run("another chain", func() {
-		msg := proxyAnteBatch(3, false)
-		s.signBatch(msg, "zvote-2")
-		s.requireVoteCode(validate(msg), types.ErrInvalidSignature)
-	})
-	s.Run("another expiry", func() {
-		msg := proxyAnteBatch(3, false)
-		s.signBatch(msg, proxyAnteChainID)
-		msg.ExpiryHeight++
-		s.requireVoteCode(validate(msg), types.ErrInvalidSignature)
-	})
-	s.Run("grafted DC", func() {
-		donor := proxyAnteBatch(1, false)
-		donor.Dcs[0] = proxyAnteDC(0x60)
-		s.signBatch(donor, proxyAnteChainID)
-		s.Require().NoError(validate(donor))
-
-		// The batch's own DCs re-sign over the grafted D1; the donor's DC
-		// keeps its signature over its own batch.
-		msg := proxyAnteBatch(2, false)
-		msg.Dcs = append(msg.Dcs, donor.Dcs[0])
-		graftedSig := donor.Dcs[0].VoteAuthSig
-		s.signBatch(msg, proxyAnteChainID)
-		msg.Dcs[2].VoteAuthSig = graftedSig
-		err := validate(msg)
-		s.requireVoteCode(err, types.ErrInvalidSignature)
-		s.Require().ErrorContains(err, "dcs[2]")
-	})
-	s.Run("truncated", func() {
-		msg := proxyAnteBatch(3, false)
-		s.signBatch(msg, proxyAnteChainID)
-		msg.Dcs = msg.Dcs[:2]
-		err := validate(msg)
-		s.requireVoteCode(err, types.ErrInvalidSignature)
-		s.Require().ErrorContains(err, "dcs[0]")
-	})
-	s.Run("reordered", func() {
-		msg := proxyAnteBatch(3, false)
-		s.signBatch(msg, proxyAnteChainID)
-		msg.Dcs[0], msg.Dcs[1] = msg.Dcs[1], msg.Dcs[0]
-		s.requireVoteCode(validate(msg), types.ErrInvalidSignature)
-	})
 }

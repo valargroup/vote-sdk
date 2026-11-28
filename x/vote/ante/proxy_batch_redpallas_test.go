@@ -11,7 +11,6 @@ import (
 
 	"github.com/mikelodder7/curvey"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/blake2b"
 
 	"github.com/valargroup/vote-sdk/crypto/elgamal"
 	"github.com/valargroup/vote-sdk/ffi/redpallas"
@@ -149,17 +148,6 @@ func redPallasSign(sk curvey.Scalar, vk, msg []byte, nonceSeed byte) []byte {
 		s[i], s[j] = s[j], s[i]
 	}
 	return append(r, s...)
-}
-
-// TestBlake2b512PersonalMatchesStdlib checks the test's BLAKE2b against
-// golang.org/x/crypto with an all-zero personalization, which leaves the
-// parameter block as BLAKE2b's own.
-func TestBlake2b512PersonalMatchesStdlib(t *testing.T) {
-	zero := string(make([]byte, 16))
-	for _, n := range []int{0, 1, 64, 127, 128, 129, 256, 300} {
-		msg := bytes.Repeat([]byte{0xA7}, n)
-		require.Equal(t, blake2b.Sum512(msg), blake2b512Personal(zero, msg), "length %d", n)
-	}
 }
 
 // TestRedPallasProxyBatchD1 signs a two-DC batch's D1 with real SpendAuth

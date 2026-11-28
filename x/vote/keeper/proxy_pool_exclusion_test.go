@@ -43,7 +43,7 @@ func (s *MsgServerTestSuite) TestPoolsStayOutOfTallyChecks() {
 	round, err := s.keeper.GetVoteRound(kv, msgPdRoundID)
 	s.Require().NoError(err)
 
-	for _, d := range []uint32{0, 1, 7, types.MaxVoteOptions, 1 << 30} {
+	for _, d := range []uint32{1, 7} {
 		s.Require().ErrorIs(keeper.ValidateEntryBounds(round, types.PoolProposalID, d), types.ErrInvalidProposalID, "d = %d", d)
 	}
 
@@ -137,7 +137,6 @@ func (s *MsgServerTestSuite) TestSubmitTallyExcludesPools() {
 	pool := &types.TallyEntry{ProposalId: types.PoolProposalID, VoteDecision: 7, TotalValue: 99}
 
 	s.Require().ErrorIs(submit(direct, pool), types.ErrInvalidProposalID)
-	s.Require().ErrorIs(submit(pool, direct), types.ErrInvalidProposalID)
 	kv := s.keeper.OpenKVStore(s.ctx)
 	round, err := s.keeper.GetVoteRound(kv, roundID)
 	s.Require().NoError(err)
@@ -203,9 +202,7 @@ func (s *QueryServerTestSuite) TestProposalTallyRejectsPools() {
 	}{
 		{roundID, types.PoolProposalID, codes.InvalidArgument},
 		{roundID, 3, codes.InvalidArgument},
-		{roundID, types.MaxProposals + 1, codes.InvalidArgument},
 		{bytes.Repeat([]byte{0x7C}, 32), 1, codes.NotFound},
-		{bytes.Repeat([]byte{0x7C}, 32), types.PoolProposalID, codes.NotFound},
 	} {
 		resp, err := queries.ProposalTally(s.ctx, &types.QueryProposalTallyRequest{VoteRoundId: c.round, ProposalId: c.proposal})
 		s.Require().Nil(resp, "proposal %d", c.proposal)

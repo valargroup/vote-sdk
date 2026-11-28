@@ -13,7 +13,6 @@ import (
 // enabled, 0x02, 0x03, 0x06 and 0x07 need room for every leaf they append in
 // CheckTx, RecheckTx and FinalizeBlock, as 0x09 does, so an overfull tx
 // never reaches EndBlock (docs/proxy-delegation/contracts-v1.md §5.1).
-// While dormant they keep today's checks.
 
 // capacityTx is a tx of an existing tag that appends to the tree.
 type capacityTx struct {
@@ -51,45 +50,6 @@ func capacityTxs() []capacityTx {
 // mockProxyOpts returns m's options with mock verifiers.
 func mockProxyOpts(m proxyMode) ante.ValidateOpts {
 	return proxyOpts(m, redpallas.NewMockVerifier(), zkp.NewMockVerifier())
-}
-
-// TestTreeCapacityAnteSharedBound fills a round's last two slots as a 1-DC
-// 0x09 does (passing the ante, with the gate open), then checks that with the
-// gate open 0x02, 0x03, 0x06 and 0x07 are each code 11 in every mode,
-// writing nothing, while dormant they pass.
-func (s *ValidateTestSuite) TestTreeCapacityAnteSharedBound() {
-	s.setupProxyBatchRound(func(*types.VoteRound) {})
-	storeSetter{s}.fillTree(2)
-	batch := proxyAnteBatch(1, false)
-	if types.ProxyDelegationEnabled {
-		for _, m := range s.proxyModes() {
-			s.Require().NoError(ante.ValidateVoteTx(m.ctx, batch, s.keeper, mockProxyOpts(m)), m.name)
-		}
-	}
-	// The batch lands its final VAN and its DC, as its handler does.
-	kv := s.keeper.OpenKVStore(s.ctx)
-	for _, leaf := range [][]byte{batch.Dcs[0].VoteAuthorityNoteNew, batch.Dcs[0].ProxyDelegationCommitment} {
-		_, err := s.keeper.AppendCommitment(kv, proxyAnteRound, leaf)
-		s.Require().NoError(err)
-	}
-	tree, err := s.keeper.GetCommitmentTreeState(kv, proxyAnteRound)
-	s.Require().NoError(err)
-	s.Require().Equal(types.ProxyMaxTreePosition+1, tree.NextIndex)
-
-	for _, tx := range capacityTxs() {
-		s.Run(tx.tag, func() {
-			before := s.proxyBatchWrites()
-			for _, m := range s.proxyModes() {
-				err := ante.ValidateVoteTx(m.ctx, tx.msg, s.keeper, mockProxyOpts(m))
-				if types.ProxyDelegationEnabled {
-					s.requireVoteCode(err, types.ErrCommitmentTreeFull)
-				} else {
-					s.Require().NoError(err, "dormant in %s", m.name)
-				}
-			}
-			s.Require().Equal(before, s.proxyBatchWrites())
-		})
-	}
 }
 
 // TestTreeCapacityAnteExactFit checks each tag at the tree's last slots

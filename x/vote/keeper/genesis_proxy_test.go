@@ -96,7 +96,7 @@ func (s *ProxyRegistryTestSuite) TestProxyRegistryGenesisWithoutRegistry() {
 
 // TestInitGenesisRejectsInvalidRegistry checks that the import itself, not
 // only ValidateGenesisState, refuses a registry that breaks an invariant
-// (§9), before it writes anything.
+// (§9), before it writes anything. The types tests cover each invariant.
 func (s *ProxyRegistryTestSuite) TestInitGenesisRejectsInvalidRegistry() {
 	entry := func(index uint32, handle string) *types.ProxyDelegateEntry {
 		return &types.ProxyDelegateEntry{
@@ -107,32 +107,18 @@ func (s *ProxyRegistryTestSuite) TestInitGenesisRejectsInvalidRegistry() {
 			ProofId:  "1790000000000000000",
 		}
 	}
-	valid := func() *types.GenesisState {
-		return &types.GenesisState{
-			Rounds:         []*types.VoteRound{{VoteRoundId: bytes.Repeat([]byte{0xAA}, 32), VoteEndTime: 2_000_000}},
-			ProxyDelegates: []*types.ProxyDelegateEntry{entry(1, "a"), entry(2, "b")},
-		}
+	gs := &types.GenesisState{
+		Rounds:         []*types.VoteRound{{VoteRoundId: bytes.Repeat([]byte{0xAA}, 32), VoteEndTime: 2_000_000}},
+		ProxyDelegates: []*types.ProxyDelegateEntry{entry(1, "a"), entry(2, "b")},
 	}
-	s.Require().NoError(s.keeper.InitGenesis(s.kv(), valid()))
+	s.Require().NoError(s.keeper.InitGenesis(s.kv(), gs))
 
-	for name, mutate := range map[string]func(gs *types.GenesisState){
-		"an index gap":                    func(gs *types.GenesisState) { gs.ProxyDelegates[1].Index = 3 },
-		"two entries with one key":        func(gs *types.GenesisState) { gs.ProxyDelegates[1].Dk = gs.ProxyDelegates[0].Dk },
-		"two live entries for one handle": func(gs *types.GenesisState) { gs.ProxyDelegates[1].Handle = "a" },
-		"params that fail the key rule": func(gs *types.GenesisState) {
-			gs.ProxyParams = &types.ProxyDelegationParams{Verifiers: []*types.ProxyVerifier{{VerifierId: 1, Pubkey: make([]byte, 32)}}, VerifierThreshold: 1}
-		},
-	} {
-		s.Run(name, func() {
-			s.SetupTest()
-			gs := valid()
-			mutate(gs)
-			s.Require().Error(s.keeper.InitGenesis(s.kv(), gs))
-			s.requireNoRegistryKeys()
-			_, err := s.keeper.GetVoteRound(s.kv(), gs.Rounds[0].VoteRoundId)
-			s.Require().ErrorIs(err, types.ErrRoundNotFound, "nothing is written")
-		})
-	}
+	s.SetupTest()
+	gs.ProxyDelegates[1].Handle = "a"
+	s.Require().Error(s.keeper.InitGenesis(s.kv(), gs), "two live entries for one handle")
+	s.requireNoRegistryKeys()
+	_, err := s.keeper.GetVoteRound(s.kv(), gs.Rounds[0].VoteRoundId)
+	s.Require().ErrorIs(err, types.ErrRoundNotFound, "nothing is written")
 }
 
 // ballotKV returns every raw key and value under 0x1B.
@@ -215,59 +201,22 @@ func (s *ProxyRegistryTestSuite) TestProxyBallotGenesisRoundTrip() {
 
 // TestInitGenesisRejectsInvalidProxyRounds checks that the import itself, not
 // only ValidateGenesisState, refuses rounds and ballots that break a §9 rule,
-// before it writes anything.
+// before it writes anything. The types tests cover each rule.
 func (s *ProxyRegistryTestSuite) TestInitGenesisRejectsInvalidProxyRounds() {
-	key := proxytest.Pub(proxytest.Key("a/1"))
-	valid := func() *types.GenesisState {
-		finished := proxyRound(ballotRoundB, proxyTestTime)
-		finished.Status, finished.ProxyDelegation.PoolsRouted = types.SessionStatus_SESSION_STATUS_TALLYING, true
-		return &types.GenesisState{
-			Rounds: []*types.VoteRound{proxyRound(ballotRoundA, proxyTestTime), finished},
-			ProxyDelegates: []*types.ProxyDelegateEntry{{
-				Index: 1, Dk: key, Provider: types.DelegateProviderX, Handle: "a", ProofId: "1790000000000000000",
-			}},
-			ProxyDelegateBallots: []*types.DelegateBallotRecord{
-				{VoteRoundId: ballotRoundA, DelegateIndex: 1, Options: []uint32{0, 1, 2}},
-				{VoteRoundId: ballotRoundB, DelegateIndex: 1, Options: []uint32{1, 2, 3}},
-			},
-		}
+	gs := &types.GenesisState{
+		Rounds: []*types.VoteRound{proxyRound(ballotRoundA, proxyTestTime)},
+		ProxyDelegates: []*types.ProxyDelegateEntry{{
+			Index: 1, Dk: proxytest.Pub(proxytest.Key("a/1")), Provider: types.DelegateProviderX, Handle: "a", ProofId: "1790000000000000000",
+		}},
+		ProxyDelegateBallots: []*types.DelegateBallotRecord{{VoteRoundId: ballotRoundA, DelegateIndex: 1, Options: []uint32{0, 1, 2}}},
 	}
-	s.Require().NoError(s.keeper.InitGenesis(s.kv(), valid()))
+	s.Require().NoError(s.keeper.InitGenesis(s.kv(), gs))
 
-	for name, mutate := range map[string]func(gs *types.GenesisState){
-		"a ballot in a missing round":          func(gs *types.GenesisState) { gs.Rounds = gs.Rounds[:1] },
-		"a ballot in a round without the flag": func(gs *types.GenesisState) { gs.Rounds[0].ProxyDelegation = nil },
-		"a ballot of a missing delegate":       func(gs *types.GenesisState) { gs.ProxyDelegateBallots[0].DelegateIndex = 2 },
-		"two ballots for one (round, d)":       func(gs *types.GenesisState) { gs.ProxyDelegateBallots[1].VoteRoundId = ballotRoundA },
-		"an incomplete ballot":                 func(gs *types.GenesisState) { gs.ProxyDelegateBallots[1].Options = []uint32{1, 2} },
-		"an option out of range":               func(gs *types.GenesisState) { gs.ProxyDelegateBallots[0].Options = []uint32{2, 0, 0} },
-		"pools not routed in a TALLYING round": func(gs *types.GenesisState) { gs.Rounds[1].ProxyDelegation.PoolsRouted = false },
-		"pools routed in an ACTIVE round":      func(gs *types.GenesisState) { gs.Rounds[0].ProxyDelegation.PoolsRouted = true },
-		"a proposal id out of position":        func(gs *types.GenesisState) { gs.Rounds[0].Proposals[0].Id = 7 },
-		"an option index out of position":      func(gs *types.GenesisState) { gs.Rounds[1].Proposals[2].Options[3].Index = 0 },
-	} {
-		s.Run(name, func() {
-			s.SetupTest()
-			gs := valid()
-			mutate(gs)
-			s.Require().Error(s.keeper.InitGenesis(s.kv(), gs))
-			s.requireNoRegistryKeys()
-			s.requireNoKeysUnder(types.DelegateBallotPrefix)
-			_, err := s.keeper.GetVoteRound(s.kv(), ballotRoundA)
-			s.Require().ErrorIs(err, types.ErrRoundNotFound, "nothing is written")
-		})
-	}
-}
-
-// TestInitGenesisAcceptsPlainRoundNumbering checks that the import still
-// accepts a round without the proxy flag however its proposals and options
-// are numbered; ValidateProxyRoundGenesis checks only flagged rounds.
-func (s *ProxyRegistryTestSuite) TestInitGenesisAcceptsPlainRoundNumbering() {
-	plain := proxyRound(ballotRoundA, proxyTestTime)
-	plain.ProxyDelegation = nil
-	plain.Proposals[0].Id, plain.Proposals[1].Options[2].Index = 7, 9
-	s.Require().NoError(s.keeper.InitGenesis(s.kv(), &types.GenesisState{Rounds: []*types.VoteRound{plain}}))
-	got, err := s.keeper.GetVoteRound(s.kv(), ballotRoundA)
-	s.Require().NoError(err)
-	s.Require().True(proto.Equal(plain, got))
+	s.SetupTest()
+	gs.ProxyDelegateBallots[0].DelegateIndex = 2
+	s.Require().Error(s.keeper.InitGenesis(s.kv(), gs), "a ballot of a missing delegate")
+	s.requireNoRegistryKeys()
+	s.requireNoKeysUnder(types.DelegateBallotPrefix)
+	_, err := s.keeper.GetVoteRound(s.kv(), ballotRoundA)
+	s.Require().ErrorIs(err, types.ErrRoundNotFound, "nothing is written")
 }

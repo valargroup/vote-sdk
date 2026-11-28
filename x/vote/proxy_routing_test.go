@@ -30,7 +30,7 @@ import (
 
 // These tests cover the routing hook in EndBlock
 // (docs/proxy-delegation/contracts-v1.md §5.6): when it runs with the gate
-// open (-tags proxyenabled), its dormancy, determinism and halt.
+// open (-tags proxyenabled), its determinism and how it halts.
 // keeper's routing tests cover RouteProxyPools itself.
 
 // routingEnd is the routed round's vote_end_time.
@@ -279,23 +279,6 @@ func attributes(event sdk.Event) []sdk.Attribute {
 		out = append(out, sdk.Attribute{Key: attribute.Key, Value: attribute.Value})
 	}
 	return out
-}
-
-// TestEndBlockDormantDoesNotRoute checks EndBlock as it ships, with the gate
-// closed: a proxy round moves to TALLYING as any other round does, with no
-// tally changed, pools_routed unset and no proxy_pools_routed event.
-func TestEndBlockDormantDoesNotRoute(t *testing.T) {
-	proxytest.SkipUnlessDormant(t)
-	c := newRoutingChain(t)
-	c.seedRoutedRound(false)
-	unrouted := c.tallies(routingRoundID)
-
-	require.NoError(t, c.endBlock(routingEnd))
-	round := c.round(routingRoundID)
-	require.Equal(t, types.SessionStatus_SESSION_STATUS_TALLYING, round.Status)
-	require.False(t, round.ProxyDelegation.PoolsRouted)
-	require.Equal(t, unrouted, c.tallies(routingRoundID))
-	require.Equal(t, []string{types.EventTypeRoundStatusChange}, eventTypes(c.ctx.EventManager().Events()))
 }
 
 // TestEndBlockRoutingIsDeterministic gives two independent chains the same

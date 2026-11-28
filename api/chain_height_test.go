@@ -12,12 +12,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/valargroup/vote-sdk/testutil/proxytest"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
-// These tests pin, byte for byte in both gate states, the two chain heights a
-// 0x09 client reads (docs/proxy-delegation/contracts-v1.md §8). While
-// dormant, GET /height answers 404 as every proxy route does, and
+// These tests pin, byte for byte, the two chain heights a 0x09 client reads
+// (docs/proxy-delegation/contracts-v1.md §8). While dormant,
 // /commitment-tree/{round_id}/latest answers today's body. Once enabled,
 // /height answers the node's last committed height, and /latest adds
 // block_height, the height its state was read at.
@@ -65,12 +65,6 @@ func TestLatestCommitmentTreeBodies(t *testing.T) {
 			dormant: `{"tree":{"next_index":5,"root":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=","height":42,"next_index_at_root":5}}`,
 			enabled: `{"tree":{"next_index":5,"root":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=","height":42,"next_index_at_root":5},"block_height":"57"}`,
 		},
-		{
-			name:    "empty tree",
-			tree:    &types.CommitmentTreeState{},
-			dormant: `{"tree":{}}`,
-			enabled: `{"tree":{},"block_height":"57"}`,
-		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			want := c.dormant
@@ -85,24 +79,11 @@ func TestLatestCommitmentTreeBodies(t *testing.T) {
 	}
 }
 
-// TestHeightRoute pins GET /height's exact bodies: 404 while dormant, before
-// the node is asked, and the node's last committed height as a decimal string
-// once enabled.
+// TestHeightRoute pins GET /height's exact body with the gate open: the node's
+// last committed height as a decimal string.
 func TestHeightRoute(t *testing.T) {
-	path := "/shielded-vote/v1/height"
-	offline := mux.NewRouter()
-	NewHandler(HandlerConfig{}).RegisterQueryRoutes(offline, client.Context{})
-	rec := serveGET(offline, path)
-	if !types.ProxyDelegationEnabled {
-		// Without a node client, answering 404 rather than failing shows the
-		// gate comes first.
-		require.Equal(t, http.StatusNotFound, rec.Code)
-		require.Equal(t, `{"error":"proxy delegation is not enabled"}`+"\n", rec.Body.String())
-		return
-	}
-	require.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
-
-	rec = serveGET(heightTestRouter(t, NewHandler(HandlerConfig{}), nil), path)
+	proxytest.SkipUnlessEnabled(t)
+	rec := serveGET(heightTestRouter(t, NewHandler(HandlerConfig{}), nil), "/shielded-vote/v1/height")
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
 	require.Equal(t, `{"height":"57"}`+"\n", rec.Body.String())

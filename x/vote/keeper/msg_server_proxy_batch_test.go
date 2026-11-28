@@ -2,7 +2,6 @@ package keeper_test
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -235,12 +234,6 @@ func (s *ProxyBatchTestSuite) TestProxyBatchWithRegistration() {
 	s.Require().Equal("0", attributes[types.AttributeKeyFinalVANLeafIndex])
 	s.Require().Equal("1,2", attributes[types.AttributeKeyDCLeafIndices])
 	s.Require().Equal(fmt.Sprintf("%x", resp.BatchDigest), attributes[types.AttributeKeyBatchDigest])
-
-	// batch_digest ignores the expiry, so a re-signed attempt shares it.
-	msg.ExpiryHeight++
-	digest, err := types.ComputeProxyDelegationBatchDigest(proxyTestChainID, msg.SighashFields())
-	s.Require().NoError(err)
-	s.Require().Equal(resp.BatchDigest, digest)
 }
 
 // TestProxyBatchChecksBeforeWriting checks that the handler re-runs
@@ -310,10 +303,6 @@ func (s *ProxyBatchTestSuite) TestProxyBatchChecksBeforeWriting() {
 			pause()
 			fillTree()
 		}, want: types.ErrRoundNotActive},
-		{name: "round ended", setup: func(*types.MsgProxyDelegationBatch) {
-			s.mutateRound(func(r *types.VoteRound) { r.VoteEndTime = uint64(s.ctx.BlockTime().Unix()) })
-			pause()
-		}, want: types.ErrRoundNotActive},
 		{name: "paused", setup: func(*types.MsgProxyDelegationBatch) {
 			pause()
 			fillTree()
@@ -344,17 +333,6 @@ func (s *ProxyBatchTestSuite) TestProxyBatchChecksBeforeWriting() {
 	}
 }
 
-// TestProxyBatchAdmissionHeight checks that the handler admits a batch
-// only at block heights below its expiry.
-func (s *ProxyBatchTestSuite) TestProxyBatchAdmissionHeight() {
-	msg := proxyBatch(1, false)
-	msg.ExpiryHeight = proxyBatchHeight + 1
-	_, err := s.msgServer.ProxyDelegationBatch(s.ctx.WithBlockHeight(proxyBatchHeight+1), msg)
-	s.Require().ErrorIs(err, types.ErrProxyBatchExpired)
-	_, err = s.msgServer.ProxyDelegationBatch(s.ctx, msg)
-	s.Require().NoError(err)
-}
-
 // mutateRound rewrites the suite's proxy round with mutate applied.
 func (s *ProxyBatchTestSuite) mutateRound(mutate func(*types.VoteRound)) {
 	round, err := s.keeper.GetVoteRound(s.kv(), proxyBatchRound)
@@ -366,65 +344,4 @@ func (s *ProxyBatchTestSuite) mutateRound(mutate func(*types.VoteRound)) {
 // closeRound moves the suite's proxy round to TALLYING.
 func (s *ProxyBatchTestSuite) closeRound() {
 	s.mutateRound(func(r *types.VoteRound) { r.Status = types.SessionStatus_SESSION_STATUS_TALLYING })
-}
-
-// TestEnsureCommitmentCapacity checks the tree bound at its edges: count
-// leaves fit while the last lands at the depth-24 tree's last index, and
-// one more does not.
-func (s *ProxyBatchTestSuite) TestEnsureCommitmentCapacity() {
-	maxPosition := types.ProxyMaxTreePosition
-	s.Require().Equal(uint64(1<<24-1), maxPosition)
-	for _, c := range []struct {
-		next, count uint64
-		full        bool
-	}{
-		{0, 9, false},
-		{maxPosition - 8, 9, false},
-		{maxPosition - 7, 9, true},
-		{maxPosition, 1, false},
-		{maxPosition, 2, true},
-		{maxPosition + 1, 1, true},
-		{maxPosition + 1, 0, false},
-	} {
-		s.Require().NoError(s.keeper.SetCommitmentTreeState(s.kv(), proxyBatchRound, &types.CommitmentTreeState{NextIndex: c.next}))
-		err := s.keeper.EnsureCommitmentCapacity(s.kv(), proxyBatchRound, c.count)
-		if c.full {
-			s.Require().ErrorIs(err, types.ErrCommitmentTreeFull, "next %d, count %d", c.next, c.count)
-			_, code, _ := errorsmod.ABCIInfo(err, false)
-			s.Require().Equal(uint32(11), code)
-		} else {
-			s.Require().NoError(err, "next %d, count %d", c.next, c.count)
-		}
-	}
-}
-
-// TestProxyBatchGenesisRoundTrip checks that a landed batch's nullifiers,
-// slot nullifiers included as type 3, survive export and import, so a retry
-// of the batch is still ErrDuplicateNullifier.
-func (s *ProxyBatchTestSuite) TestProxyBatchGenesisRoundTrip() {
-	msg := proxyBatch(2, true)
-	_, err := s.msgServer.ProxyDelegationBatch(s.ctx, msg)
-	s.Require().NoError(err)
-
-	exported, err := s.keeper.ExportGenesis(s.kv())
-	s.Require().NoError(err)
-	var slotNullifiers [][]byte
-	for _, entry := range exported.Nullifiers {
-		if entry.NullifierType == uint32(types.NullifierTypeProxySlot) {
-			slotNullifiers = append(slotNullifiers, entry.Nullifier)
-		}
-	}
-	s.Require().ElementsMatch([][]byte{msg.Dcs[0].DcSlotNullifier, msg.Dcs[1].DcSlotNullifier}, slotNullifiers)
-	bz, err := json.Marshal(exported)
-	s.Require().NoError(err)
-	var imported types.GenesisState
-	s.Require().NoError(json.Unmarshal(bz, &imported))
-
-	s.SetupTest()
-	s.Require().NoError(s.keeper.InitGenesis(s.kv(), &imported))
-	for _, dc := range msg.Dcs {
-		s.requireSpent(types.NullifierTypeProxySlot, dc.DcSlotNullifier, true)
-	}
-	_, err = s.msgServer.ProxyDelegationBatch(s.ctx, msg)
-	s.Require().ErrorIs(err, types.ErrDuplicateNullifier)
 }

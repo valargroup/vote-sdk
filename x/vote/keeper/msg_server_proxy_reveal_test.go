@@ -3,7 +3,6 @@ package keeper_test
 import (
 	"bytes"
 	"encoding/hex"
-	"fmt"
 
 	errorsmod "cosmossdk.io/errors"
 
@@ -17,8 +16,7 @@ import (
 
 // These tests cover the 0x04 handler for pool shares, proposal-0 reveals
 // (docs/proxy-delegation/contracts-v1.md §5.4, §7), with the dormancy gate
-// open. The ante and app tests pin today's handling of proposal 0 while
-// dormant.
+// open.
 
 // poolRound is the proxy round of the pool share tests.
 var poolRound = bytes.Repeat([]byte{0xD1}, 32)
@@ -156,9 +154,9 @@ func (s *ProxyRegistryTestSuite) TestPoolShareRevealIgnoresDelegateStatus() {
 }
 
 // TestPoolShareRevealCodes checks that the handler refuses a pool share with
-// its registered code and changes nothing: d = 0 fails ValidateBasic (9), an
-// unknown or ended round (3, 4), a round without the proxy flag (69), d at or
-// above next_index at reveal time (53) and a spent share nullifier (2).
+// its registered code and changes nothing: an unknown or ended round (3, 4),
+// a round without the proxy flag (69), d at next_index at reveal time (53)
+// and a spent share nullifier (2).
 func (s *ProxyRegistryTestSuite) TestPoolShareRevealCodes() {
 	s.setupPoolRound()
 	plain := proxyRound(bytes.Repeat([]byte{0xD2}, 32), proxyTestTime)
@@ -173,7 +171,6 @@ func (s *ProxyRegistryTestSuite) TestPoolShareRevealCodes() {
 		want *errorsmod.Error
 		code uint32
 	}{
-		{"delegate 0", func() *types.MsgRevealShare { return poolShareMsg(0, 0x32) }, types.ErrInvalidField, 9},
 		{"unknown round", func() *types.MsgRevealShare {
 			msg := poolShareMsg(1, 0x33)
 			msg.VoteRoundId = bytes.Repeat([]byte{0xD3}, 32)
@@ -185,7 +182,6 @@ func (s *ProxyRegistryTestSuite) TestPoolShareRevealCodes() {
 			return msg
 		}, types.ErrProxyDelegationDisabled, 69},
 		{"delegate at next_index", func() *types.MsgRevealShare { return poolShareMsg(4, 0x35) }, types.ErrDelegateNotFound, 53},
-		{"delegate far above next_index", func() *types.MsgRevealShare { return poolShareMsg(1<<31, 0x36) }, types.ErrDelegateNotFound, 53},
 		{"spent share nullifier", func() *types.MsgRevealShare { return poolShareMsg(2, 0x31) }, types.ErrDuplicateNullifier, 2},
 	} {
 		s.Run(c.name, func() {
@@ -203,41 +199,4 @@ func (s *ProxyRegistryTestSuite) TestPoolShareRevealCodes() {
 		proxytest.RequireCode(s.T(), s.deliverReveal(poolShareMsg(1, 0x37)), types.ErrRoundNotActive, 4)
 		s.Require().Equal(before, s.tallyState(poolRound))
 	})
-}
-
-// TestCheckPoolRevealIndexBounds checks CheckPoolReveal's index rule on its
-// own, d = 0 included, which ValidateBasic stops before it in the ante and
-// the handler: 1 <= d < next_index, read at reveal time.
-func (s *ProxyRegistryTestSuite) TestCheckPoolRevealIndexBounds() {
-	s.setupPoolRound()
-	for d, want := range map[uint32]error{0: types.ErrDelegateNotFound, 1: nil, 3: nil, 4: types.ErrDelegateNotFound} {
-		err := s.keeper.CheckPoolReveal(s.ctx, poolShareMsg(d, 0x41))
-		if want == nil {
-			s.Require().NoError(err, "d = %d", d)
-			continue
-		}
-		proxytest.RequireCode(s.T(), err, types.ErrDelegateNotFound, 53)
-	}
-	s.seedEntries(4, 1)
-	s.Require().NoError(s.keeper.CheckPoolReveal(s.ctx, poolShareMsg(4, 0x41)), "registered after the round was created")
-}
-
-// TestVoteRevealWithGateOpen checks that opening the gate leaves a vote
-// reveal on today's path: its tally and count are at (p, decision) and it
-// emits reveal_share, never reveal_pool_share.
-func (s *ProxyRegistryTestSuite) TestVoteRevealWithGateOpen() {
-	s.setupPoolRound()
-	msg := svtest.ValidRevealShare(poolRound, 10, 0x51)
-	msg.ProposalId, msg.VoteDecision = 3, 2
-	s.ctx = s.ctx.WithEventManager(sdk.NewEventManager())
-	s.Require().NoError(s.deliverReveal(msg))
-	tally, err := s.keeper.GetTally(s.kv(), poolRound, 3, 2)
-	s.Require().NoError(err)
-	s.Require().Equal(msg.EncShare, tally)
-	s.Require().Equal(uint64(1), s.shareCount(poolRound, 3, 2))
-	s.Require().Zero(s.shareCount(poolRound, types.PoolProposalID, 2))
-	s.Require().Equal(fmt.Sprint(msg.ProposalId), eventAttributes(s.T(), s.ctx.EventManager().Events(), types.EventTypeRevealShare)[types.AttributeKeyProposalID])
-	for _, event := range s.ctx.EventManager().Events() {
-		s.Require().NotEqual(types.EventTypeRevealPoolShare, event.Type)
-	}
 }

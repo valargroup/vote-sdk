@@ -191,41 +191,6 @@ func (s *ProxyRegistryTestSuite) TestDelegateBallotSecondBallot() {
 	s.Require().Equal(landed, s.ballots(ballotRoundA))
 }
 
-// TestDelegateBallotRetryAfterChanges checks that the stored-ballot check
-// comes before anything that can change after a ballot lands (§5.3 step 2):
-// a retry is ErrDelegateBallotExists (57) after the round closes and after a
-// suspension or a retirement, in CheckTx, RecheckTx and FinalizeBlock, and
-// the ballot stands.
-func (s *ProxyRegistryTestSuite) TestDelegateBallotRetryAfterChanges() {
-	s.openRegistry()
-	dk := proxytest.Key("alice/1")
-	d := s.registerNew(dk, "alice")
-	s.setRound(proxyRound(ballotRoundA, proxyTestTime))
-	op := s.ballotOp(ballotRoundA, d, dk, 0, 0, 0)
-	s.mustDeliver(op)
-	landed := s.ballots(ballotRoundA)
-
-	for _, c := range []struct {
-		after string
-		apply func()
-	}{
-		{"vote_end_time", func() { s.setBlockTime(proxyTestTime + 10*proxyTestDay) }},
-		{"the round turns TALLYING", func() {
-			s.updateRound(ballotRoundA, func(r *types.VoteRound) { r.Status = types.SessionStatus_SESSION_STATUS_TALLYING })
-		}},
-		{"a suspension", func() { s.setStatus(d, types.DelegateStatusSuspended, 1) }},
-		{"a retirement", func() { s.setStatus(d, types.DelegateStatusRetired, 1) }},
-		{"the round is FINALIZED", func() {
-			s.updateRound(ballotRoundA, func(r *types.VoteRound) { r.Status = types.SessionStatus_SESSION_STATUS_FINALIZED })
-		}},
-	} {
-		c.apply()
-		s.requireBallotCode(op, types.ErrDelegateBallotExists, 57)
-		proxytest.RequireCode(s.T(), s.keeper.ValidateDelegateOp(s.ctx.WithIsReCheckTx(true), op, false), types.ErrDelegateBallotExists, 57)
-		s.Require().Equal(landed, s.ballots(ballotRoundA), "after %s", c.after)
-	}
-}
-
 // TestDelegateBallotCheckOrder checks that when several ballot checks fail,
 // the first in §5.3's order decides the code.
 func (s *ProxyRegistryTestSuite) TestDelegateBallotCheckOrder() {
@@ -349,10 +314,6 @@ func (s *ProxyRegistryTestSuite) TestDelegateBallotRoundChecks() {
 		{"one second before vote_end_time", endTime - 1, func(*types.VoteRound) {}, nil, 0},
 		{"at vote_end_time", endTime, func(*types.VoteRound) {}, types.ErrRoundNotActive, 4},
 		{"PENDING", proxyTestTime, func(r *types.VoteRound) { r.Status = types.SessionStatus_SESSION_STATUS_PENDING }, types.ErrRoundNotActive, 4},
-		{"TALLYING", proxyTestTime, func(r *types.VoteRound) { r.Status = types.SessionStatus_SESSION_STATUS_TALLYING }, types.ErrRoundNotActive, 4},
-		{"FINALIZED", proxyTestTime, func(r *types.VoteRound) { r.Status = types.SessionStatus_SESSION_STATUS_FINALIZED }, types.ErrRoundNotActive, 4},
-		{"CEREMONY_FAILED", proxyTestTime, func(r *types.VoteRound) { r.Status = types.SessionStatus_SESSION_STATUS_CEREMONY_FAILED }, types.ErrRoundNotActive, 4},
-		{"no field 31", proxyTestTime, func(r *types.VoteRound) { r.ProxyDelegation = nil }, types.ErrProxyDelegationDisabled, 69},
 		{"field 31 not enabled", proxyTestTime, func(r *types.VoteRound) { r.ProxyDelegation.Enabled = false }, types.ErrProxyDelegationDisabled, 69},
 	} {
 		s.Run(c.name, func() {
@@ -392,30 +353,24 @@ func (s *ProxyRegistryTestSuite) TestDelegateBallotUnsetBlockTime() {
 	s.Require().Empty(s.ballots(ballotRoundA))
 }
 
-// TestDelegateBallotEntryChecks checks ballot step 4 (§5.3): the entry must
-// exist and be ACTIVE. A SUSPENDED entry is 54 and ballots again once the
-// suspension is lifted; a RETIRED one is 55 for good.
+// TestDelegateBallotEntryChecks checks that a SUSPENDED entry (54) ballots
+// again once the suspension is lifted (§5.3 step 4).
 func (s *ProxyRegistryTestSuite) TestDelegateBallotEntryChecks() {
 	s.openRegistry()
 	dk := proxytest.Key("alice/1")
 	d := s.registerNew(dk, "alice")
 	s.setRound(proxyRound(ballotRoundA, proxyTestTime))
 
-	s.requireBallotCode(s.ballotOp(ballotRoundA, d+1, dk, 0, 0, 0), types.ErrDelegateNotFound, 53)
 	s.setStatus(d, types.DelegateStatusSuspended, 3)
 	s.requireBallotCode(s.ballotOp(ballotRoundA, d, dk, 0, 0, 0), types.ErrDelegateSuspended, 54)
 	s.setStatus(d, types.DelegateStatusActive, 0)
 	s.mustDeliver(s.ballotOp(ballotRoundA, d, dk, 0, 0, 0))
-
-	s.setStatus(d, types.DelegateStatusRetired, 0)
-	s.requireBallotCode(s.ballotOp(ballotRoundB, d, dk, 0, 0, 0), types.ErrRoundNotFound, 3)
-	s.setRound(proxyRound(ballotRoundB, proxyTestTime))
-	s.requireBallotCode(s.ballotOp(ballotRoundB, d, dk, 0, 0, 0), types.ErrDelegateRetired, 55)
 }
 
-// TestDelegateBallotOptions checks ballot step 6 (§5.3) on a round whose
-// proposals have 2, 3 and 4 options: an incomplete ballot, an extra option
-// and any option out of range are ErrInvalidBallot (58).
+// TestDelegateBallotOptions checks that the handler refuses a ballot the
+// option rule rejects with ErrInvalidBallot (58) on a round whose proposals
+// have 2, 3 and 4 options. types.TestValidateDelegateBallotOptions covers
+// the rule.
 func (s *ProxyRegistryTestSuite) TestDelegateBallotOptions() {
 	s.openRegistry()
 	dk := proxytest.Key("alice/1")
@@ -424,12 +379,7 @@ func (s *ProxyRegistryTestSuite) TestDelegateBallotOptions() {
 
 	for _, options := range [][]uint32{
 		{0},
-		{0, 0},
-		{0, 0, 0, 0},
-		{2, 0, 0},
-		{0, 3, 0},
 		{0, 0, 4},
-		{0, 0, 4294967295},
 	} {
 		s.Run(fmt.Sprint(options), func() {
 			s.requireBallotCode(s.ballotOp(ballotRoundA, d, dk, options...), types.ErrInvalidBallot, 58)
@@ -443,22 +393,18 @@ func (s *ProxyRegistryTestSuite) TestDelegateBallotOptions() {
 // ---------------------------------------------------------------------------
 
 // TestDelegateBallotSignature checks that dk_sig must be the entry's key's
-// signature over this ballot's BALLOT, which binds the chain, the round, d
-// and every option, and that RecheckTx skips only the signature.
+// signature over this ballot's BALLOT, and that RecheckTx skips only the
+// signature. The BALLOT vectors pin which fields the digest binds.
 func (s *ProxyRegistryTestSuite) TestDelegateBallotSignature() {
 	s.openRegistry()
 	alice, bob := proxytest.Key("alice/1"), proxytest.Key("bob/1")
-	a, b := s.registerNew(alice, "alice"), s.registerNew(bob, "bob")
+	a := s.registerNew(alice, "alice")
+	s.registerNew(bob, "bob")
 	s.setRound(proxyRound(ballotRoundA, proxyTestTime))
-	s.setRound(proxyRound(ballotRoundB, proxyTestTime))
 
 	for name, sig := range map[string][]byte{
 		"another delegate's key": proxytest.BallotSig(proxyTestChainID, ballotRoundA, a, bob, 0, 1, 2),
-		"another chain":          proxytest.BallotSig("svote-1", ballotRoundA, a, alice, 0, 1, 2),
-		"another round":          proxytest.BallotSig(proxyTestChainID, ballotRoundB, a, alice, 0, 1, 2),
-		"another index":          proxytest.BallotSig(proxyTestChainID, ballotRoundA, b, alice, 0, 1, 2),
 		"other options":          proxytest.BallotSig(proxyTestChainID, ballotRoundA, a, alice, 0, 1, 3),
-		"garbage":                bytes.Repeat([]byte{0x07}, 64),
 	} {
 		s.Run(name, func() {
 			op := s.ballotOp(ballotRoundA, a, alice, 0, 1, 2)

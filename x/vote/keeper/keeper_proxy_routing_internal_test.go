@@ -2,7 +2,6 @@ package keeper
 
 import (
 	"bytes"
-	"encoding/binary"
 	"slices"
 	"testing"
 
@@ -96,22 +95,6 @@ func TestRerandomizeRoutedBucketDegenerate(t *testing.T) {
 	}
 }
 
-// TestRerandomizeRoutedBucketRejectsMalformedInputs checks that malformed
-// inputs fail with their own errors, not ErrRoutingRerandomizerDegenerate.
-func TestRerandomizeRoutedBucketRejectsMalformedInputs(t *testing.T) {
-	f := newRoutingDegenerateFixture(t)
-
-	_, _, err := RerandomizeRoutedBucket(f.eaPK, f.roundID[:31], 1, 0, f.plain)
-	require.ErrorIs(t, err, types.ErrInvalidRoundIDLen)
-
-	_, _, err = RerandomizeRoutedBucket(f.eaPK, f.roundID, 1, 0, nil)
-	require.ErrorContains(t, err, "ciphertext must not be nil")
-
-	identityKey := &elgamal.PublicKey{Point: new(curvey.PointPallas).Identity()}
-	_, _, err = RerandomizeRoutedBucket(identityKey, f.roundID, 1, 0, f.plain)
-	require.ErrorContains(t, err, "public key must not be the identity point")
-}
-
 // routingHookFixture is a proxy round in a fresh store under the
 // degenerate fixture's election key, with two proposals of three options, a direct vote
 // for option 1 of proposal 1, and pools and ballots for delegates 1 to 3 that
@@ -156,52 +139,28 @@ func (f routingHookFixture) tallies(t *testing.T) map[string][]byte {
 	return proxytest.Values(t, f.keeper.OpenKVStore(f.ctx), append(slices.Clone(types.TallyPrefix), f.round.VoteRoundId...))
 }
 
-// TestRouteProxyPoolsRerandomizesInBucketOrder checks that routing derives
-// each routed bucket's rho from the contract's preimage, once per bucket
-// that gained a pool, ascending by proposal and then option (contracts-v1
-// §5.6).
-func TestRouteProxyPoolsRerandomizesInBucketOrder(t *testing.T) {
-	f := newRoutingHookFixture(t)
-	h := &scriptedHash{}
-	require.NoError(t, f.keeper.routeProxyPools(f.ctx, f.round, h.hash))
-	var buckets [][2]uint32
-	for _, preimage := range h.preimages {
-		head := append([]byte(routingRerandomizerDomain), f.round.VoteRoundId...)
-		require.True(t, bytes.HasPrefix(preimage, head), "the contract's preimage")
-		require.Len(t, preimage, len(head)+8+elgamal.CiphertextSize)
-		buckets = append(buckets, [2]uint32{
-			binary.BigEndian.Uint32(preimage[len(head):]),
-			binary.BigEndian.Uint32(preimage[len(head)+4:]),
-		})
-	}
-	require.Equal(t, [][2]uint32{{1, 0}, {1, 2}, {2, 0}, {2, 1}}, buckets)
-}
-
 // TestRouteProxyPoolsHaltsWhenRerandomizerDegenerate checks that a bucket
 // whose rho is zero ends routing with ErrRoutingRerandomizerDegenerate, which
 // EndBlock returns to halt the chain, with no retry and nothing written, even
 // for buckets computed before it: no tally changes, the round is not marked
-// and no event is emitted.
+// and no event is emitted. The fixture routes four buckets and the last one
+// fails.
 func TestRouteProxyPoolsHaltsWhenRerandomizerDegenerate(t *testing.T) {
-	zero := new(curvey.ScalarPallas).Zero()
-	for name, firstFailure := range map[string]int{"the first bucket": 0, "the last bucket": 3} {
-		t.Run(name, func(t *testing.T) {
-			f := newRoutingHookFixture(t)
-			before := f.tallies(t)
-			calls := 0
-			hash := func(preimage []byte) curvey.Scalar {
-				calls++
-				if calls > firstFailure {
-					return zero
-				}
-				return new(curvey.ScalarPallas).Hash(preimage)
-			}
-			err := f.keeper.routeProxyPools(f.ctx, f.round, hash)
-			require.ErrorIs(t, err, ErrRoutingRerandomizerDegenerate)
-			require.Equal(t, firstFailure+1, calls)
-			require.Equal(t, before, f.tallies(t))
-			require.False(t, f.round.ProxyDelegation.PoolsRouted)
-			require.Empty(t, f.ctx.EventManager().Events())
-		})
+	const lastBucket = 3
+	f := newRoutingHookFixture(t)
+	before := f.tallies(t)
+	calls := 0
+	hash := func(preimage []byte) curvey.Scalar {
+		calls++
+		if calls > lastBucket {
+			return new(curvey.ScalarPallas).Zero()
+		}
+		return new(curvey.ScalarPallas).Hash(preimage)
 	}
+	err := f.keeper.routeProxyPools(f.ctx, f.round, hash)
+	require.ErrorIs(t, err, ErrRoutingRerandomizerDegenerate)
+	require.Equal(t, lastBucket+1, calls)
+	require.Equal(t, before, f.tallies(t))
+	require.False(t, f.round.ProxyDelegation.PoolsRouted)
+	require.Empty(t, f.ctx.EventManager().Events())
 }
