@@ -17,6 +17,7 @@ import {
   ClipboardCheck,
   KeyRound,
   BadgeCheck,
+  UserCheck,
   Layers,
   X,
 } from "lucide-react";
@@ -263,6 +264,18 @@ export function Sidebar({
         >
           <ShieldCheck size={15} />
           Attest round
+        </button>
+
+        <button
+          onClick={() => onNavigate("wallet-list")}
+          className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs transition-colors cursor-pointer ${
+            currentSection === "wallet-list"
+              ? "bg-surface-3 text-text-primary"
+              : "text-text-secondary hover:bg-surface-2 hover:text-text-primary"
+          }`}
+        >
+          <UserCheck size={15} />
+          Sign wallet list
         </button>
 
         <button

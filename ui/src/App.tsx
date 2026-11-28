@@ -12,6 +12,7 @@ import { PendingOperatorsPage } from "./components/PendingOperatorsPage";
 import { PirFleetStatus } from "./components/PirFleetStatus";
 import { RoundsList } from "./components/RoundsList";
 import { AttestRoundEntryPage } from "./components/AttestRoundEntryPage";
+import { SignWalletListPage } from "./components/SignWalletListPage";
 import { EndorsersPage } from "./components/EndorsersPage";
 import { ValidatorList } from "./components/ValidatorList";
 import { UpgradesPage } from "./components/UpgradesPage";
@@ -34,7 +35,7 @@ import {
 import * as chainApi from "./api/chain";
 import { TOKEN_HOLDER_VOTING_CONFIG_REPO_URL, tokenHolderConfigUrl } from "./api/chain";
 import * as cosmosTx from "./api/cosmosTx";
-import { describeCoordinatorActionPayload } from "./api/coordinatorActions";
+import { describeCoordinatorActionPayload, PROXY_APPROVAL_FLOOR } from "./api/coordinatorActions";
 import { useWallet } from "./hooks/useWallet";
 import type { UseWallet } from "./hooks/useWallet";
 import { useUIConfig } from "./store/uiConfigContext";
@@ -87,6 +88,7 @@ type Section =
   | "coordinator-actions"
   | "pir-update"
   | "attest-round"
+  | "wallet-list"
   | "endorsers"
   | "upgrades"
   | "snapshot"
@@ -107,6 +109,7 @@ const SECTION_PATHS: Record<Section, string> = {
   "validator-join": "/validator-join",
   "coordinator-actions": "/approvals",
   "attest-round": "/attest-round",
+  "wallet-list": "/sign-wallet-list",
   "pir-update": "/pir-update",
   endorsers: "/endorsements",
   upgrades: "/upgrades",
@@ -167,6 +170,10 @@ function App() {
   const [publishStatus, setPublishStatus] = useState<"idle" | "publishing" | "ok" | "error">("idle");
   const [publishResult, setPublishResult] = useState<string>("");
   const [publishError, setPublishError] = useState("");
+  // Whether the chain reports the proxy capability fields, and the proxy flag
+  // for the round being published; both reset when the modal opens.
+  const [publishProxySupported, setPublishProxySupported] = useState(false);
+  const [publishProxyDelegation, setPublishProxyDelegation] = useState(false);
   const [expectedRoundCount, setExpectedRoundCount] = useState<number | null>(null);
   const [productionVoteManagers, setProductionVoteManagers] =
     useState<VoteManagerSnapshot | null>(null);
@@ -262,6 +269,12 @@ function App() {
       setPublishStatus("idle");
       setPublishResult("");
       setPublishError("");
+      setPublishProxyDelegation(false);
+      setPublishProxySupported(false);
+      chainApi
+        .getProtocolCapabilities()
+        .then((capabilities) => setPublishProxySupported(chainApi.supportsProxyDelegation(capabilities)))
+        .catch(() => setPublishProxySupported(false));
     },
     []
   );
@@ -383,6 +396,7 @@ function App() {
         description: round.settings.description || round.name,
         title: round.name,
         discussionURL: round.settings.discussionURL || "",
+        proxyDelegation: publishProxySupported && publishProxyDelegation,
       });
       if (result.code !== 0) {
         setPublishError(result.log || `Transaction failed with code ${result.code}`);
@@ -407,7 +421,7 @@ function App() {
       setPublishError(err instanceof Error ? err.message : String(err));
       setPublishStatus("error");
     }
-  }, [precomputedBaseURL, zcashNetwork, publishModal, store, wallet.signer]);
+  }, [precomputedBaseURL, zcashNetwork, publishModal, publishProxyDelegation, publishProxySupported, store, wallet.signer]);
 
   const handleNavigate = useCallback(
     (s: string) => {
@@ -605,6 +619,7 @@ function App() {
         {section === "coordinator-actions" && <CoordinatorActionsPage wallet={wallet} />}
 
         {section === "attest-round" && <AttestRoundEntryPage />}
+        {section === "wallet-list" && <SignWalletListPage />}
         {section === "pir-update" && <PIRUpdatePage />}
 
         {section === "vote-manager-keys" && <VoteManagerKeysPage wallet={wallet} />}
@@ -673,6 +688,9 @@ function App() {
             status={publishStatus}
             result={publishResult}
             error={publishError}
+            proxySupported={publishProxySupported}
+            proxyDelegation={publishProxyDelegation}
+            onProxyDelegationChange={setPublishProxyDelegation}
             onConfirm={handlePublishConfirm}
             onClose={() => {
               const wasSuccess = publishStatus === "ok";
@@ -1184,8 +1202,8 @@ function shortCoordinatorAddress(addr: string): string {
   return `${addr.slice(0, 12)}...${addr.slice(-8)}`;
 }
 
-function coordinatorSignatureStatus(approvalCount: number, threshold: number): string {
-  const remaining = Math.max(threshold - approvalCount, 0);
+function coordinatorSignatureStatus(approvalCount: number, required: number): string {
+  const remaining = Math.max(required - approvalCount, 0);
   if (remaining === 0) return "Ready to execute";
   return `Needs ${remaining} more signature${remaining === 1 ? "" : "s"}`;
 }
@@ -1421,8 +1439,10 @@ function CoordinatorActionsPage({ wallet }: { wallet: UseWallet }) {
                     const approvalSet = currentCoordinatorApprovalSet(action, voteManagers);
                     const approvalCount = approvalSet.size;
                     const alreadyApproved = !!wallet.address && approvalSet.has(normalizeCoordinatorAddress(wallet.address));
-                    const canRecheckExecution = alreadyApproved && approvalCount >= voteManagerThreshold;
                     const payloadDetails = describeCoordinatorActionPayload(action);
+                    // The chain's approval floor can exceed the policy threshold.
+                    const requiredApprovals = Math.max(voteManagerThreshold, payloadDetails.approvalFloor);
+                    const canRecheckExecution = alreadyApproved && approvalCount >= requiredApprovals;
                     const staleApprovals = staleCoordinatorApprovals(action, voteManagers);
                     const canSubmitApproval = !!wallet.signer && walletIsCoordinator;
                     const disabled =
@@ -1441,8 +1461,13 @@ function CoordinatorActionsPage({ wallet }: { wallet: UseWallet }) {
                               <h3 className="text-sm font-semibold text-text-primary">{coordinatorActionLabel(action)}</h3>
                             </div>
                             <p className="text-[11px] text-text-secondary">
-                              {approvalCount}/{voteManagerThreshold} current approvals · {coordinatorSignatureStatus(approvalCount, voteManagerThreshold)}
+                              {approvalCount}/{requiredApprovals} current approvals · {coordinatorSignatureStatus(approvalCount, requiredApprovals)}
                             </p>
+                            {requiredApprovals > voteManagerThreshold && (
+                              <p className="text-[10px] text-warning mt-1">
+                                Proxy delegation actions need at least {payloadDetails.approvalFloor} coordinator approvals, whatever the threshold, so they never execute when proposed.
+                              </p>
+                            )}
                             <p className="text-[10px] text-text-muted mt-1">
                               Proposed by <span className="font-mono">{shortCoordinatorAddress(action.proposer || "unknown")}</span> · expires {coordinatorActionTime(action.expires_at)}
                             </p>
@@ -1482,7 +1507,7 @@ function CoordinatorActionsPage({ wallet }: { wallet: UseWallet }) {
                           <div className="flex items-center justify-between mb-2">
                             <p className="text-[11px] font-semibold text-text-primary">Coordinator signatures</p>
                             <span className="text-[10px] text-text-muted">
-                              {coordinatorSignatureStatus(approvalCount, voteManagerThreshold)}
+                              {coordinatorSignatureStatus(approvalCount, requiredApprovals)}
                             </span>
                           </div>
                           <div className="grid gap-2 md:grid-cols-2">
@@ -2389,6 +2414,9 @@ function PublishModal({
   status,
   result,
   error,
+  proxySupported,
+  proxyDelegation,
+  onProxyDelegationChange,
   onConfirm,
   onClose,
 }: {
@@ -2397,6 +2425,9 @@ function PublishModal({
   status: "idle" | "publishing" | "ok" | "error";
   result: string;
   error: string;
+  proxySupported: boolean;
+  proxyDelegation: boolean;
+  onProxyDelegationChange: (checked: boolean) => void;
   onConfirm: () => void;
   onClose: () => void;
 }) {
@@ -2451,6 +2482,25 @@ function PublishModal({
                 />
               </div>
 
+              {status !== "ok" && proxySupported && (
+                <label className="flex items-start gap-2 rounded-lg bg-surface-2 border border-border-subtle p-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={proxyDelegation}
+                    onChange={(e) => onProxyDelegationChange(e.target.checked)}
+                    className="mt-0.5 shrink-0"
+                  />
+                  <span>
+                    <span className="block text-[11px] font-semibold text-text-primary">Proxy delegation round</span>
+                    <span className="block text-[10px] text-text-muted mt-0.5">
+                      Voters can delegate their weight to public delegates in this round. The chain creates it only
+                      after at least {PROXY_APPROVAL_FLOOR} coordinator approvals, or the threshold if that is higher, so
+                      proposing alone never creates it.
+                    </span>
+                  </span>
+                </label>
+              )}
+
               {status === "ok" && (
                 <div className="bg-success/10 border border-success/30 rounded-lg p-3">
                   <p className="text-[11px] text-success font-semibold mb-1">
@@ -2459,6 +2509,11 @@ function PublishModal({
                   <p className="text-[10px] text-text-secondary font-mono break-all">
                     TX: {result}
                   </p>
+                  {proxySupported && proxyDelegation && (
+                    <p className="text-[10px] text-text-secondary mt-1">
+                      This proxy delegation round waits for at least {PROXY_APPROVAL_FLOOR} coordinator approvals. Approve it on the Approvals page.
+                    </p>
+                  )}
                 </div>
               )}
 

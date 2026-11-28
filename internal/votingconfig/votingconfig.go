@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -41,6 +42,11 @@ type SignedConfig struct {
 	PIRLayout         PIRLayout             `json:"pir_layout"`
 	SupportedVersions SupportedVersions     `json:"supported_versions"`
 	Rounds            map[string]RoundEntry `json:"rounds"`
+	// Extensions is the top-level "extensions" object (contracts-v1
+	// §12.1), kept as raw JSON so a tool that rewrites the config never drops
+	// or reorders an extension. ProxyDelegationV1 reads the proxy delegation
+	// extension inside it.
+	Extensions json.RawMessage `json:"extensions,omitempty"`
 }
 
 // PIRLayout describes how the PIR circuit depth is split across the two data

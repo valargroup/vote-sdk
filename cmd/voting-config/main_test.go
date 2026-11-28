@@ -178,3 +178,118 @@ func writeJSON(t *testing.T, path string, v any) {
 		t.Fatalf("write %s: %v", path, err)
 	}
 }
+
+// extensionsFixture is votingconfig's canonical config with extensions and
+// unknown top-level members.
+const extensionsFixture = "../../internal/votingconfig/testdata/dynamic-config-extensions.json"
+
+// fixtureSigner is a test signing key.
+var fixtureSigner = ed25519.NewKeyFromSeed(bytes.Repeat([]byte{7}, ed25519.SeedSize))
+
+// topLevelMembers returns a config file's top-level members, each with its
+// exact bytes.
+func topLevelMembers(t *testing.T, raw []byte) map[string]json.RawMessage {
+	t.Helper()
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &members); err != nil {
+		t.Fatal(err)
+	}
+	return members
+}
+
+// copyFixture copies the extensions fixture into dir and returns its path and
+// bytes.
+func copyFixture(t *testing.T, dir string) (string, []byte) {
+	t.Helper()
+	raw, err := os.ReadFile(extensionsFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "dynamic-voting-config.json")
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path, raw
+}
+
+// run executes the CLI with args and returns its stdout.
+func run(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	cmd := newRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs(args)
+	err := cmd.Execute()
+	return out.String(), err
+}
+
+// seedB64 is priv's seed as VOTING_CONFIG_PRIVKEY takes it.
+func seedB64(priv ed25519.PrivateKey) string {
+	return base64.StdEncoding.EncodeToString(priv.Seed())
+}
+
+// TestSignMergeKeepsExtensions signs a round entry into the fixture with
+// --merge and checks that the extensions keep every byte.
+func TestSignMergeKeepsExtensions(t *testing.T) {
+	const roundID = "c0ffee0000000000000000000000000000000000000000000000000000000002"
+	dir := t.TempDir()
+	configPath, before := copyFixture(t, dir)
+	t.Setenv("VOTING_CONFIG_PRIVKEY", seedB64(fixtureSigner))
+	if _, err := run(t, "sign",
+		"--round-id", roundID,
+		"--ea-pk", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{3}, 32)),
+		"--signer-id", "valar-test",
+		"--pir-depth", "19", "--tier0-layers", "12", "--tier1-layers", "7", "--poly-len", "4096",
+		"--merge", configPath,
+	); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, out := topLevelMembers(t, before), topLevelMembers(t, after)
+	if !bytes.Equal(in["extensions"], out["extensions"]) {
+		t.Fatalf("extensions changed\n got: %s\nwant: %s", out["extensions"], in["extensions"])
+	}
+	if !strings.Contains(string(out["rounds"]), roundID) {
+		t.Fatalf("merged config misses the new round: %s", out["rounds"])
+	}
+}
+
+// TestVerifyChecksProxyExtension checks that verify refuses a proxy
+// extension with a bad URL list or v1's removed members.
+func TestVerifyChecksProxyExtension(t *testing.T) {
+	dir := t.TempDir()
+	configPath, raw := copyFixture(t, dir)
+	staticPath := filepath.Join(dir, "static-voting-config.json")
+	writeJSON(t, staticPath, votingconfig.StaticConfig{
+		StaticConfigVersion: votingconfig.StaticConfigVersionV1,
+		DynamicConfigURL:    "https://example.com/dynamic-voting-config.json",
+		TrustedKeys: []votingconfig.TrustedKey{{
+			KeyID: "valar-test", Alg: votingconfig.AlgEd25519,
+			Pubkey: base64.StdEncoding.EncodeToString(fixtureSigner.Public().(ed25519.PublicKey)),
+		}},
+	})
+	if _, err := run(t, "verify", "--config", configPath, "--static-config", staticPath); err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+	for name, edit := range map[string][2]string{
+		"v1 rounds":         {`"proof_rpc_urls": [`, `"rounds": {}, "proof_rpc_urls": [`},
+		"one proof RPC URL": {`"https://rpc-a.example",`, ``},
+	} {
+		t.Run(name, func(t *testing.T) {
+			edited := strings.Replace(string(raw), edit[0], edit[1], 1)
+			if edited == string(raw) {
+				t.Fatal("the edit did not apply")
+			}
+			if err := os.WriteFile(configPath, []byte(edited), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := run(t, "verify", "--config", configPath, "--static-config", staticPath); err == nil {
+				t.Fatal("accepted")
+			}
+		})
+	}
+}

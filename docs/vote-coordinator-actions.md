@@ -116,6 +116,12 @@ coordinators to approve it with `approve-coordinator-action`. The proxy flag is
 set only with `--proxy-delegation`; a session file that names
 `proxy_delegation` is refused.
 
+In the admin UI, the round publish dialog shows a "Proxy delegation round"
+checkbox once the chain reports proxy delegation in its protocol
+capabilities. The Approvals page decodes each payload in full, including every
+verifier key and every delegate a status action names, and counts approvals
+against the floor.
+
 ## Actions Outside Coordinator Multisig
 
 These remain outside the coordinator action flow:
@@ -140,7 +146,11 @@ one round's attestation cannot be reused for another round, and the published
 The admin UI shows the current coordinator policy and pending coordinator
 actions. A coordinator can propose supported actions from the existing admin
 screens. Pending actions can be reviewed and approved from the coordinator
-actions list.
+actions list. An approval signs the exact payload, so the list decodes every
+field of it. A payload the page cannot decode in full, whether of an unknown
+type, malformed, or carrying a field the page does not know, shows a warning,
+its type and its raw bytes as hex, and cannot be approved from the page; check
+those bytes before approving it from the CLI.
 
 The CLI commands for coordinator-owned actions create coordinator proposals:
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CoordinatorAction } from "./chain";
-import { describeCoordinatorActionPayload } from "./coordinatorActions";
+import { describeCoordinatorActionPayload, PROXY_APPROVAL_FLOOR } from "./coordinatorActions";
 
 const encoder = new TextEncoder();
 
@@ -150,9 +150,11 @@ describe("describeCoordinatorActionPayload", () => {
         snapshot_blockhash: "aabb",
         nullifier_imt_root: "0102",
         nc_root: "0304",
+        proxy_delegation: false,
       },
     });
     expect(description.jsonDecoded).toBe(true);
+    expect(description.approvalFloor).toBe(0);
   });
 
   it("preserves exact 64-bit values above Number.MAX_SAFE_INTEGER", () => {
@@ -237,15 +239,106 @@ describe("describeCoordinatorActionPayload", () => {
     });
   });
 
-  it("blocks approval for unsupported action payloads", () => {
-    const description = describeCoordinatorActionPayload(action("svote.v1.MsgEndorseRound", stringField(1, "svote1creator")));
+  it("blocks approval for unsupported action payloads and shows their raw hex", () => {
+    const description = describeCoordinatorActionPayload(action("svote.v1.MsgEndorseRound", stringField(1, "ab")));
 
     expect(description.canApprove).toBe(false);
     expect(description.error).toContain("unsupported action type");
+    expect(valueFor(description, "Payload (hex)")).toBe("0a026162");
     expect(description.json).toEqual({
       type_url: "type.googleapis.com/svote.v1.MsgEndorseRound",
       value: expect.any(String),
     });
     expect(description.jsonDecoded).toBe(false);
+    expect(description.approvalFloor).toBe(0);
+  });
+
+  it("decodes proxy delegation params with every verifier key", () => {
+    const keyA = new Uint8Array(32).fill(0xab);
+    const keyB = new Uint8Array(32).fill(0xcd);
+    const description = describeCoordinatorActionPayload(action("svote.v1.MsgSetProxyDelegationParams", concat([
+      stringField(1, "svote1creator"),
+      bytesField(2, concat([varintField(1, 1), bytesField(2, keyA)])),
+      bytesField(2, concat([varintField(1, 7), bytesField(2, keyB)])),
+      varintField(3, 2),
+      varintField(4, 2_000),
+    ])));
+
+    expect(description.canApprove).toBe(true);
+    expect(description.approvalFloor).toBe(PROXY_APPROVAL_FLOOR);
+    expect(description.json.value).toEqual({
+      creator: "svote1creator",
+      verifiers: [
+        { verifier_id: 1, pubkey: "ab".repeat(32) },
+        { verifier_id: 7, pubkey: "cd".repeat(32) },
+      ],
+      verifier_threshold: 2,
+      max_delegates: 2_000,
+    });
+  });
+
+  it("decodes a proxy delegation pause", () => {
+    const pause = describeCoordinatorActionPayload(action("svote.v1.MsgSetProxyDelegationPause", concat([
+      stringField(1, "svote1creator"),
+      varintField(2, 1),
+    ])));
+    expect(pause.canApprove).toBe(true);
+    expect(pause.approvalFloor).toBe(PROXY_APPROVAL_FLOOR);
+    expect(pause.json.value).toEqual({ creator: "svote1creator", paused: true });
+  });
+
+  it("decodes a status action and every delegate it names, packed or not", () => {
+    const suspend = describeCoordinatorActionPayload(action("svote.v1.MsgSetDelegateStatus", concat([
+      stringField(1, "svote1creator"),
+      bytesField(2, concat([varint(17), varint(300)])),
+      varintField(3, 1),
+      varintField(4, 2),
+    ])));
+    expect(suspend.canApprove).toBe(true);
+    expect(suspend.approvalFloor).toBe(PROXY_APPROVAL_FLOOR);
+    expect(suspend.json.value).toEqual({ creator: "svote1creator", delegate_indexes: [17, 300], action: 1, reason: 2 });
+
+    // Unpacked indexes, one varint per field, decode the same.
+    const retire = describeCoordinatorActionPayload(action("svote.v1.MsgSetDelegateStatus", concat([
+      varintField(2, 17),
+      varintField(2, 300),
+      varintField(3, 3),
+      varintField(4, 5),
+    ])));
+    expect(valueFor(retire, "Delegates")).toBe("delegate 17: retire\ndelegate 300: retire");
+  });
+
+  it("holds a create-session proxy flag to the approval floor", () => {
+    const description = describeCoordinatorActionPayload(action("svote.v1.MsgCreateVotingSession", concat([
+      stringField(1, "svote1creator"),
+      stringField(10, "Proxy round"),
+      varintField(12, 1),
+    ])));
+    expect(description.canApprove).toBe(true);
+    expect(description.approvalFloor).toBe(PROXY_APPROVAL_FLOOR);
+    expect(description.json.value).toMatchObject({ title: "Proxy round", proxy_delegation: true });
+  });
+
+  it("blocks approval of a malformed payload", () => {
+    // Field 2 of the pause payload is a bool, sent here with the bytes wire type.
+    const malformed = describeCoordinatorActionPayload(action("svote.v1.MsgSetProxyDelegationPause", bytesField(2, new Uint8Array([1]))));
+    expect(malformed.canApprove).toBe(false);
+    expect(malformed.error).toContain("failed to decode payload");
+    expect(valueFor(malformed, "Payload (hex)")).toBe("120101");
+
+    // The chain keeps only a uint32's low 32 bits, so a longer value is refused.
+    const overflow = describeCoordinatorActionPayload(action("svote.v1.MsgSetDelegateStatus", bytesField(2, varint(2n ** 32n + 17n))));
+    expect(overflow.canApprove).toBe(false);
+    expect(overflow.error).toContain("exceeds 32 bits");
+  });
+
+  it("blocks approval when a payload has fields the page does not know", () => {
+    const description = describeCoordinatorActionPayload(action("svote.v1.MsgSetProxyDelegationParams", concat([
+      stringField(1, "svote1creator"),
+      bytesField(2, concat([varintField(1, 1), varintField(3, 9)])),
+      varintField(9, 1),
+    ])));
+    expect(description.canApprove).toBe(false);
+    expect(description.error).toContain("verifiers.3, 9");
   });
 });

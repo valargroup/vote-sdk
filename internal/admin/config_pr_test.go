@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -873,5 +874,49 @@ func TestBatchBranchNameDeterministic(t *testing.T) {
 	other := automation.batchBranchName([]string{roundA})
 	if got == other {
 		t.Fatalf("different round sets produced the same branch name: %q", got)
+	}
+}
+
+// extensionsFixture is votingconfig's canonical dynamic config with an
+// "extensions" object that a typed rewrite would change; its pir_layout
+// matches testConfigPIRLayout.
+const extensionsFixture = "../votingconfig/testdata/dynamic-config-extensions.json"
+
+// assertSameMembers fails unless each named top-level member of got has
+// exactly the bytes it has in want.
+func assertSameMembers(t *testing.T, want, got []byte, keys ...string) {
+	t.Helper()
+	var in, out map[string]json.RawMessage
+	if err := json.Unmarshal(want, &in); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(got, &out); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range keys {
+		if in[key] == nil || !bytes.Equal(in[key], out[key]) {
+			t.Fatalf("%s changed\n got: %s\nwant: %s", key, out[key], in[key])
+		}
+	}
+}
+
+// TestMergeConfigPREntryKeepsExtensions merges a round entry into a config
+// with extensions and expects every extension byte back.
+func TestMergeConfigPREntryKeepsExtensions(t *testing.T) {
+	t.Parallel()
+
+	fixture, err := os.ReadFile(extensionsFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := validCreateConfigPRRequest(t)
+	_, staticConfig := configDocuments(t, nil)
+	merged, _, _, err := mergeConfigPREntry(fixture, staticConfig, body.RoundID, body.Entry, body.PIRLayout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSameMembers(t, fixture, merged, "extensions")
+	if !bytes.Contains(merged, []byte(body.RoundID)) {
+		t.Fatalf("merged config misses round %s", body.RoundID)
 	}
 }

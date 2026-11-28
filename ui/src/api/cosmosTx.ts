@@ -406,6 +406,8 @@ export interface CreateVotingSessionValue {
   description: string;
   title: string;
   discussionURL: string;
+  /** Field 12: a proxy delegation round, which raises the approval floor (contracts-v1 §2.3, §5.5). */
+  proxyDelegation: boolean;
 }
 
 // message MsgCreateVotingSession { ... } — see sdk/proto/svote/v1/tx.proto
@@ -427,6 +429,7 @@ const MsgCreateVotingSessionProto = {
     if (m.description !== "")          writer.uint32(74).string(m.description);          // 9 string
     if (m.title !== "")                writer.uint32(82).string(m.title);                // 10 string
     if (m.discussionURL !== "")        writer.uint32(90).string(m.discussionURL);        // 11 string
+    if (m.proxyDelegation)             writer.uint32(96).uint32(1);                      // 12 bool
     return writer;
   },
   decode(): CreateVotingSessionValue {
@@ -445,9 +448,15 @@ const MsgCreateVotingSessionProto = {
       description: object.description ?? "",
       title: object.title ?? "",
       discussionURL: object.discussionURL ?? "",
+      proxyDelegation: object.proxyDelegation ?? false,
     };
   },
 };
+
+/** Encodes a MsgCreateVotingSession coordinator payload. */
+export function encodeCreateVotingSessionPayload(value: CreateVotingSessionValue): Uint8Array {
+  return encodePayload(MsgCreateVotingSessionProto, value);
+}
 
 // ── Protobuf type: MsgUnjail (cosmos.slashing.v1beta1) ──────────
 
@@ -955,6 +964,8 @@ export async function createVotingSession(
       zipNumber?: string;
       forumURL?: string;
     }>;
+    /** Creates a proxy delegation round; see CreateVotingSessionValue.proxyDelegation. */
+    proxyDelegation?: boolean;
   },
 ): Promise<BroadcastResult> {
   params.proposals.forEach((proposal, index) => {
@@ -973,7 +984,7 @@ export async function createVotingSession(
     apiBase,
     signer,
     "/svote.v1.MsgCreateVotingSession",
-    encodePayload(MsgCreateVotingSessionProto, {
+    encodeCreateVotingSessionPayload({
       creator: account.address,
       snapshotHeight: params.snapshotHeight,
       snapshotBlockhash: snapshot.snapshotBlockhash,
@@ -985,7 +996,8 @@ export async function createVotingSession(
       description: params.description,
       title: params.title,
       discussionURL: params.discussionURL,
-    } satisfies CreateVotingSessionValue),
+      proxyDelegation: params.proxyDelegation ?? false,
+    }),
   );
 }
 

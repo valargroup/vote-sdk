@@ -60,11 +60,13 @@ export function CoordinatorActionPayloadView({
         <div className="rounded-md bg-surface-1 border border-border-subtle p-3 space-y-1.5">
           {description.rows.map((row) => (
             <div key={row.label} className="grid gap-1 sm:grid-cols-[132px_minmax(0,1fr)]">
-              <span className="text-[10px] text-text-muted">{row.label}</span>
+              <span className={`text-[10px] ${row.warning ? "text-warning font-semibold" : "text-text-muted"}`}>
+                {row.label}
+              </span>
               <span
-                className={`text-[10px] text-text-primary whitespace-pre-wrap break-all ${
-                  row.mono ? "font-mono" : ""
-                }`}
+                className={`text-[10px] whitespace-pre-wrap break-all ${
+                  row.warning ? "text-warning" : "text-text-primary"
+                } ${row.mono ? "font-mono" : ""}`}
               >
                 {row.value}
               </span>

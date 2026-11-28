@@ -1,0 +1,53 @@
+{
+  "config_version": 1,
+  "vote_servers": [
+    {
+      "url": "https://vote.example",
+      "label": "vote"
+    }
+  ],
+  "pir_endpoints": [
+    {
+      "url": "https://pir.example",
+      "label": "pir"
+    }
+  ],
+  "pir_layout": {
+    "pir_depth": 19,
+    "tier0_layers": 12,
+    "tier1_layers": 7,
+    "poly_len": 4096
+  },
+  "supported_versions": {
+    "pir": [
+      "v0"
+    ],
+    "vote_protocol": "v0",
+    "tally": "v0",
+    "vote_server": "v1"
+  },
+  "rounds": {},
+  "extensions": {
+    "zz_future_v1": {
+      "weight": 1.50,
+      "limit": 1e3,
+      "note": "caf\u00e9 \u0026 \/ more",
+      "empty": {},
+      "nested": [
+        {
+          "b": 2,
+          "a": 1
+        }
+      ]
+    },
+    "proxy_delegation_v1": {
+      "verifier_api_urls": [
+        "https://verifier.example"
+      ],
+      "proof_rpc_urls": [
+        "https://rpc-a.example",
+        "https://rpc-b.example"
+      ]
+    }
+  }
+}
