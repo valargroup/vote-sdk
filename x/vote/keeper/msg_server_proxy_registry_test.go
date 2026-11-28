@@ -90,7 +90,7 @@ func (s *ProxyRegistryTestSuite) TestRegisterOneLiveEntryPerHandle() {
 	proxytest.RequireCode(s.T(), err, types.ErrHandleTaken, 62)
 
 	github := proxytest.Registration(proxytest.Key("alice/github"), "alice")
-	github.Provider, github.ProofID = types.DelegateProviderGitHub, "0123abcd"
+	github.Provider, github.ProofId = types.DelegateProviderGitHub, "0123abcd"
 	s.Require().Equal(uint32(2), s.mustDeliver(proxytest.RegisterOp(s.ctx.ChainID(), github, proxytest.Key("alice/github"), s.blockTime()-60, s.blockTime()+60, 1)))
 
 	s.setStatus(d, types.DelegateStatusRetired, 2)
@@ -278,7 +278,7 @@ func (s *ProxyRegistryTestSuite) TestRegisterRejectsInvalidDelegateKey() {
 		sig := routingVectorHex(s.T(), c.Inputs.Signature)
 		r := newEntryRegistration(proxytest.Key("alice/1"), "alice")
 		fields := r.fields()
-		fields.DK = identity
+		fields.Dk = identity
 		digest, err := types.ComputeDelegateRegisterDigest(s.ctx.ChainID(), fields)
 		s.Require().NoError(err)
 		s.Require().NoError(types.VerifyEd25519ZIP215(identity, digest, sig), "ZIP-215 accepts the forgery")
@@ -296,7 +296,7 @@ func (s *ProxyRegistryTestSuite) TestRegisterRejectsInvalidDelegateKey() {
 // op's REGISTER.
 func (s *ProxyRegistryTestSuite) TestRegisterRejectsInvalidDkSig() {
 	r := newEntryRegistration(proxytest.Key("alice/1"), "alice")
-	signOther := func(chainID string, f types.DelegateRegistrationFields, key ed25519.PrivateKey) []byte {
+	signOther := func(chainID string, f *types.DelegateRegister, key ed25519.PrivateKey) []byte {
 		digest, err := types.ComputeDelegateRegisterDigest(chainID, f)
 		s.Require().NoError(err)
 		return ed25519.Sign(key, digest)

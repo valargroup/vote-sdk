@@ -77,11 +77,11 @@ func (h *Handler) RegisterQueryRoutes(router *mux.Router, clientCtx client.Conte
 	router.Handle("/shielded-vote/v1/endorsed-rounds/{id}", trace(http.HandlerFunc(qh.handleEndorsedRounds))).Methods("GET")
 	router.Handle("/shielded-vote/v1/genesis", trace(http.HandlerFunc(qh.handleGenesis))).Methods("GET")
 	router.Handle("/shielded-vote/v1/protocol-capabilities", trace(http.HandlerFunc(qh.handleProtocolCapabilities))).Methods("GET")
-	router.Handle("/shielded-vote/v1/delegates", trace(http.HandlerFunc(qh.handleProxyDelegates))).Methods("GET")
-	router.Handle("/shielded-vote/v1/delegates/by-key/{hex}", trace(http.HandlerFunc(qh.handleProxyDelegateByKey))).Methods("GET")
-	router.Handle("/shielded-vote/v1/delegates/by-handle/{provider}/{handle}", trace(http.HandlerFunc(qh.handleProxyDelegateByHandle))).Methods("GET")
-	router.Handle("/shielded-vote/v1/delegates/{index}", trace(http.HandlerFunc(qh.handleProxyDelegate))).Methods("GET")
-	router.Handle("/shielded-vote/v1/proxy-delegation-params", trace(http.HandlerFunc(qh.handleProxyDelegationParams))).Methods("GET")
+	router.Handle("/shielded-vote/v1/delegates", trace(requireProxyEnabled(qh.handleProxyDelegates))).Methods("GET")
+	router.Handle("/shielded-vote/v1/delegates/by-key/{hex}", trace(requireProxyEnabled(qh.handleProxyDelegateByKey))).Methods("GET")
+	router.Handle("/shielded-vote/v1/delegates/by-handle/{provider}/{handle}", trace(requireProxyEnabled(qh.handleProxyDelegateByHandle))).Methods("GET")
+	router.Handle("/shielded-vote/v1/delegates/{index}", trace(requireProxyEnabled(qh.handleProxyDelegate))).Methods("GET")
+	router.Handle("/shielded-vote/v1/proxy-delegation-params", trace(requireProxyEnabled(qh.handleProxyDelegationParams))).Methods("GET")
 }
 
 // queryHandler handles query REST endpoints by delegating to the gRPC query
@@ -383,9 +383,6 @@ func (qh *queryHandler) handleProtocolCapabilities(w http.ResponseWriter, _ *htt
 // handleProxyDelegates serves a page of the delegate registry
 // (ProxyDelegates, contracts-v1 §8).
 func (qh *queryHandler) handleProxyDelegates(w http.ResponseWriter, r *http.Request) {
-	if !ensureProxyDelegationEnabled(w) {
-		return
-	}
 	startAfter, ok := parseOptionalUint32QueryParam(w, r, "start_after")
 	if !ok {
 		return
@@ -394,89 +391,53 @@ func (qh *queryHandler) handleProxyDelegates(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-
-	req := &types.QueryProxyDelegatesRequest{StartAfter: startAfter, Limit: limit}
-	resp := &types.QueryProxyDelegatesResponse{}
-	if err := qh.abciQuery("/svote.v1.Query/ProxyDelegates", req, resp); err != nil {
-		writeQueryError(w, err)
-		return
-	}
-	writeProtoJSON(w, resp)
+	qh.serveQuery(w, "/svote.v1.Query/ProxyDelegates", &types.QueryProxyDelegatesRequest{StartAfter: startAfter, Limit: limit}, &types.QueryProxyDelegatesResponse{})
 }
 
 // handleProxyDelegate serves one registry entry by index (ProxyDelegate,
 // contracts-v1 §8).
 func (qh *queryHandler) handleProxyDelegate(w http.ResponseWriter, r *http.Request) {
-	if !ensureProxyDelegationEnabled(w) {
-		return
-	}
 	index, err := strconv.ParseUint(mux.Vars(r)["index"], 10, 32)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid index: %v", err))
 		return
 	}
-
-	req := &types.QueryProxyDelegateRequest{DelegateIndex: uint32(index)}
-	resp := &types.QueryProxyDelegateResponse{}
-	if err := qh.abciQuery("/svote.v1.Query/ProxyDelegate", req, resp); err != nil {
-		writeQueryError(w, err)
-		return
-	}
-	writeProtoJSON(w, resp)
+	qh.serveQuery(w, "/svote.v1.Query/ProxyDelegate", &types.QueryProxyDelegateRequest{DelegateIndex: uint32(index)}, &types.QueryProxyDelegateResponse{})
 }
 
 // handleProxyDelegateByKey serves the registry entry a hex delegate key was
 // registered to (ProxyDelegateByKey, contracts-v1 §8).
 func (qh *queryHandler) handleProxyDelegateByKey(w http.ResponseWriter, r *http.Request) {
-	if !ensureProxyDelegationEnabled(w) {
-		return
-	}
 	dk, err := hex.DecodeString(mux.Vars(r)["hex"])
 	if err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid delegate key (expected hex): %v", err))
 		return
 	}
-
-	req := &types.QueryProxyDelegateByKeyRequest{Dk: dk}
-	resp := &types.QueryProxyDelegateByKeyResponse{}
-	if err := qh.abciQuery("/svote.v1.Query/ProxyDelegateByKey", req, resp); err != nil {
-		writeQueryError(w, err)
-		return
-	}
-	writeProtoJSON(w, resp)
+	qh.serveQuery(w, "/svote.v1.Query/ProxyDelegateByKey", &types.QueryProxyDelegateByKeyRequest{Dk: dk}, &types.QueryProxyDelegateByKeyResponse{})
 }
 
 // handleProxyDelegateByHandle serves the live registry entry of a canonical
 // handle at a provider (ProxyDelegateByHandle, contracts-v1 §8).
 func (qh *queryHandler) handleProxyDelegateByHandle(w http.ResponseWriter, r *http.Request) {
-	if !ensureProxyDelegationEnabled(w) {
-		return
-	}
 	provider, err := strconv.ParseUint(mux.Vars(r)["provider"], 10, 32)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid provider: %v", err))
 		return
 	}
-
 	req := &types.QueryProxyDelegateByHandleRequest{Provider: uint32(provider), Handle: mux.Vars(r)["handle"]}
-	resp := &types.QueryProxyDelegateByHandleResponse{}
-	if err := qh.abciQuery("/svote.v1.Query/ProxyDelegateByHandle", req, resp); err != nil {
-		writeQueryError(w, err)
-		return
-	}
-	writeProtoJSON(w, resp)
+	qh.serveQuery(w, "/svote.v1.Query/ProxyDelegateByHandle", req, &types.QueryProxyDelegateByHandleResponse{})
 }
 
 // handleProxyDelegationParams serves the registry params and the next
 // delegate index (ProxyDelegationParams, contracts-v1 §8).
 func (qh *queryHandler) handleProxyDelegationParams(w http.ResponseWriter, _ *http.Request) {
-	if !ensureProxyDelegationEnabled(w) {
-		return
-	}
+	qh.serveQuery(w, "/svote.v1.Query/ProxyDelegationParams", &types.QueryProxyDelegationParamsRequest{}, &types.QueryProxyDelegationParamsResponse{})
+}
 
-	req := &types.QueryProxyDelegationParamsRequest{}
-	resp := &types.QueryProxyDelegationParamsResponse{}
-	if err := qh.abciQuery("/svote.v1.Query/ProxyDelegationParams", req, resp); err != nil {
+// serveQuery answers with resp once the ABCI query at path fills it from
+// req, or with the query's error (writeQueryError).
+func (qh *queryHandler) serveQuery(w http.ResponseWriter, path string, req, resp proto.Message) {
+	if err := qh.abciQuery(path, req, resp); err != nil {
 		writeQueryError(w, err)
 		return
 	}

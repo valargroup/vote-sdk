@@ -18,59 +18,6 @@ const (
 	ProxyDelegateBallotDomain         = "SVOTE_PROXY_DELEGATE_BALLOT_V1"
 )
 
-// ProxyDCSighashFields are the public fields of one 0x09 DC action that D1
-// binds. Its proof and signature are not bound.
-type ProxyDCSighashFields struct {
-	RVpk                      []byte
-	VanNullifier              []byte
-	VoteAuthorityNoteNew      []byte
-	ProxyDelegationCommitment []byte
-	DCSlotNullifier           []byte
-}
-
-// ProxyBatchSighashFields are the fields of a 0x09 batch that D1 binds.
-type ProxyBatchSighashFields struct {
-	VoteRoundID              []byte
-	VoteCommTreeAnchorHeight uint64
-	ExpiryHeight             uint64
-	// HasRegistration says whether the batch carries a ZKP1 registration.
-	// RegistrationVanCmx is bound only when it does.
-	HasRegistration    bool
-	RegistrationVanCmx []byte
-	DCs                []ProxyDCSighashFields
-}
-
-// DelegateRegistrationFields are the fields that REGISTER and ATTEST both
-// bind.
-type DelegateRegistrationFields struct {
-	DK       []byte
-	Provider uint32
-	Handle   string
-	ProofID  string
-}
-
-// SighashFields returns the fields of msg that D1 binds (contracts-v1 §4.1).
-func (msg *MsgProxyDelegationBatch) SighashFields() ProxyBatchSighashFields {
-	f := ProxyBatchSighashFields{
-		VoteRoundID:              msg.GetVoteRoundId(),
-		VoteCommTreeAnchorHeight: msg.GetVoteCommTreeAnchorHeight(),
-		ExpiryHeight:             msg.GetExpiryHeight(),
-		HasRegistration:          msg.GetRegistration() != nil,
-		RegistrationVanCmx:       msg.GetRegistration().GetVanCmx(),
-		DCs:                      make([]ProxyDCSighashFields, len(msg.GetDcs())),
-	}
-	for i, dc := range msg.GetDcs() {
-		f.DCs[i] = ProxyDCSighashFields{
-			RVpk:                      dc.GetRVpk(),
-			VanNullifier:              dc.GetVanNullifier(),
-			VoteAuthorityNoteNew:      dc.GetVoteAuthorityNoteNew(),
-			ProxyDelegationCommitment: dc.GetProxyDelegationCommitment(),
-			DCSlotNullifier:           dc.GetDcSlotNullifier(),
-		}
-	}
-	return f
-}
-
 // ComputeProxyDelegationBatchSighash returns D1, which every DC's
 // vote_auth_sig signs (contracts-v1 §4.1):
 //
@@ -81,37 +28,51 @@ func (msg *MsgProxyDelegationBatch) SighashFields() ProxyBatchSighashFields {
 //	     || vote_authority_note_new || DC || dc_slot_nullifier)
 //
 // Integers are little-endian in zeroed 32-byte slots. Every byte field must
-// be exactly 32 bytes; any other length is ErrInvalidField.
-func ComputeProxyDelegationBatchSighash(chainID string, f ProxyBatchSighashFields) ([]byte, error) {
+// be exactly 32 bytes; any other length is ErrInvalidField. A DC's proof and
+// signature are not bound.
+func ComputeProxyDelegationBatchSighash(chainID string, msg *MsgProxyDelegationBatch) ([]byte, error) {
+	return computeProxyDelegationBatchSighash(chainID, msg, msg.GetExpiryHeight())
+}
+
+// ComputeProxyDelegationBatchDigest returns batch_digest, D1 computed with
+// expiry_height = 0 (contracts-v1 §4.1). It identifies the batch, so every
+// re-signed attempt of one batch shares it.
+func ComputeProxyDelegationBatchDigest(chainID string, msg *MsgProxyDelegationBatch) ([]byte, error) {
+	return computeProxyDelegationBatchSighash(chainID, msg, 0)
+}
+
+// computeProxyDelegationBatchSighash returns D1 of msg with expiryHeight in
+// place of msg's own; see ComputeProxyDelegationBatchSighash.
+func computeProxyDelegationBatchSighash(chainID string, msg *MsgProxyDelegationBatch, expiryHeight uint64) ([]byte, error) {
 	h, err := newProxyDigest(ProxyDelegationBatchSighashDomain, chainID)
 	if err != nil {
 		return nil, err
 	}
-	if err := writeExact32(h, "vote_round_id", f.VoteRoundID); err != nil {
+	if err := writeExact32(h, "vote_round_id", msg.GetVoteRoundId()); err != nil {
 		return nil, err
 	}
-	writeU64As32(h, f.VoteCommTreeAnchorHeight)
-	writeU64As32(h, f.ExpiryHeight)
-	if f.HasRegistration {
+	writeU64As32(h, msg.GetVoteCommTreeAnchorHeight())
+	writeU64As32(h, expiryHeight)
+	if registration := msg.GetRegistration(); registration != nil {
 		writeU8(h, 1)
-		if err := writeExact32(h, "registration.van_cmx", f.RegistrationVanCmx); err != nil {
+		if err := writeExact32(h, "registration.van_cmx", registration.GetVanCmx()); err != nil {
 			return nil, err
 		}
 	} else {
 		writeU8(h, 0)
 	}
-	writeU32As32(h, uint32(len(f.DCs)))
-	for i, dc := range f.DCs {
+	writeU32As32(h, uint32(len(msg.GetDcs())))
+	for i, dc := range msg.GetDcs() {
 		writeU32As32(h, uint32(i))
 		for _, field := range [...]struct {
 			name  string
 			value []byte
 		}{
-			{"r_vpk", dc.RVpk},
-			{"van_nullifier", dc.VanNullifier},
-			{"vote_authority_note_new", dc.VoteAuthorityNoteNew},
-			{"proxy_delegation_commitment", dc.ProxyDelegationCommitment},
-			{"dc_slot_nullifier", dc.DCSlotNullifier},
+			{"r_vpk", dc.GetRVpk()},
+			{"van_nullifier", dc.GetVanNullifier()},
+			{"vote_authority_note_new", dc.GetVoteAuthorityNoteNew()},
+			{"proxy_delegation_commitment", dc.GetProxyDelegationCommitment()},
+			{"dc_slot_nullifier", dc.GetDcSlotNullifier()},
 		} {
 			if err := writeExact32(h, field.name, field.value); err != nil {
 				return nil, errorsmod.Wrapf(err, "dcs[%d]", i)
@@ -121,35 +82,27 @@ func ComputeProxyDelegationBatchSighash(chainID string, f ProxyBatchSighashField
 	return h.Sum(nil), nil
 }
 
-// ComputeProxyDelegationBatchDigest returns batch_digest, D1 computed with
-// expiry_height = 0 (contracts-v1 §4.1). It identifies the batch, so every
-// re-signed attempt of one batch shares it.
-func ComputeProxyDelegationBatchDigest(chainID string, f ProxyBatchSighashFields) ([]byte, error) {
-	f.ExpiryHeight = 0
-	return ComputeProxyDelegationBatchSighash(chainID, f)
-}
-
-// ComputeDelegateRegisterDigest returns REGISTER (contracts-v1 §4.2), which
-// the delegate key DK signs as dk_sig.
-func ComputeDelegateRegisterDigest(chainID string, f DelegateRegistrationFields) ([]byte, error) {
+// ComputeDelegateRegisterDigest returns REGISTER (contracts-v1 §4.2) over
+// op's dk, provider, handle and proof_id, which dk signs as dk_sig.
+func ComputeDelegateRegisterDigest(chainID string, op *DelegateRegister) ([]byte, error) {
 	h, err := newProxyDigest(ProxyDelegateRegisterDomain, chainID)
 	if err != nil {
 		return nil, err
 	}
-	if err := f.write(h); err != nil {
+	if err := writeRegistration(h, op); err != nil {
 		return nil, err
 	}
 	return h.Sum(nil), nil
 }
 
 // ComputeDelegateAttestDigest returns ATTEST (contracts-v1 §4.2), which a
-// verifier signs: the REGISTER fields plus the attestation's validity window.
-func ComputeDelegateAttestDigest(chainID string, f DelegateRegistrationFields, notBefore, expiresAt uint64) ([]byte, error) {
+// verifier signs: op's REGISTER fields plus the attestation's validity window.
+func ComputeDelegateAttestDigest(chainID string, op *DelegateRegister, notBefore, expiresAt uint64) ([]byte, error) {
 	h, err := newProxyDigest(ProxyDelegateAttestDomain, chainID)
 	if err != nil {
 		return nil, err
 	}
-	if err := f.write(h); err != nil {
+	if err := writeRegistration(h, op); err != nil {
 		return nil, err
 	}
 	writeU64As32(h, notBefore)
@@ -201,14 +154,15 @@ func newProxyDigest(domain, chainID string) (hash.Hash, error) {
 	return h, nil
 }
 
-// write appends the fields REGISTER and ATTEST share, in their digest order.
-func (f DelegateRegistrationFields) write(h hash.Hash) error {
-	if err := writeExact32(h, "dk", f.DK); err != nil {
+// writeRegistration appends the fields of op that REGISTER and ATTEST
+// share, in their digest order.
+func writeRegistration(h hash.Hash, op *DelegateRegister) error {
+	if err := writeExact32(h, "dk", op.GetDk()); err != nil {
 		return err
 	}
-	writeU32As32(h, f.Provider)
-	if err := writeLP8(h, "handle", []byte(f.Handle)); err != nil {
+	writeU32As32(h, op.GetProvider())
+	if err := writeLP8(h, "handle", []byte(op.GetHandle())); err != nil {
 		return err
 	}
-	return writeLP8(h, "proof_id", []byte(f.ProofID))
+	return writeLP8(h, "proof_id", []byte(op.GetProofId()))
 }

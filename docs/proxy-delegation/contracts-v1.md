@@ -903,7 +903,7 @@ The vector set is three files. Each has one home repo and is copied wherever ano
 - `wallet_list_document`: a fetched document with the pinned wallet, chain and keys, giving the verified payload and signer or the error, including a signature that only ZIP-215 accepts (§12.3).
 - `errors`: name, code and codespace (§6).
 
-**The chain file** is written by `make proxy-chain-vectors` (`scripts/proxy-chain-vectors/`). `entry_value` holds `ProxyDelegateEntry` values as the chain stores them. `routing` holds ρ derivations and the identity-C1 case they block (§5.6).
+**The chain file** is committed, and vote-sdk's tests recompute every expected value from its inputs, so changing its format means editing the file. `entry_value` holds `ProxyDelegateEntry` values as the chain stores them. `routing` holds ρ derivations and the identity-C1 case they block (§5.6).
 
 **The circuit file** holds `zkp4_instance`, the public-input packing with and without a registration (anchor 0), and `share_secrets`: for given `dc_seed`, `w` and layout, the PRF outputs, the 16 shares, their El Gamal randomness and blinds (§10).
 

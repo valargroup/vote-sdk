@@ -177,7 +177,7 @@ func (h *Handler) RegisterTxRoutes(router *mux.Router) {
 	router.Handle("/shielded-vote/v1/cast-vote-batch", trace(http.HandlerFunc(h.handleCastVoteBatch))).Methods("POST")
 	router.Handle("/shielded-vote/v1/delegate-and-cast-vote-batch", trace(http.HandlerFunc(h.handleDelegateAndCastVoteBatch))).Methods("POST")
 	router.Handle("/shielded-vote/v1/reveal-share", trace(http.HandlerFunc(h.handleRevealShare))).Methods("POST")
-	router.Handle("/shielded-vote/v1/delegate-op", trace(http.HandlerFunc(h.handleDelegateOp))).Methods("POST")
+	router.Handle("/shielded-vote/v1/delegate-op", trace(requireProxyEnabled(h.handleDelegateOp))).Methods("POST")
 
 	router.Handle("/shielded-vote/v1/snapshot-data/{height}", trace(http.HandlerFunc(h.handleSnapshotData))).Methods("GET")
 
@@ -253,7 +253,7 @@ func (h *Handler) handleRevealShare(w http.ResponseWriter, r *http.Request) {
 // handleDelegateOp submits a 0x0B delegate op (contracts-v1 §8). Its body
 // always carries codespace.
 func (h *Handler) handleDelegateOp(w http.ResponseWriter, r *http.Request) {
-	if !ensureProxyDelegationEnabled(w) || !h.ensureCryptoReady(w) {
+	if !h.ensureCryptoReady(w) {
 		return
 	}
 	msg := &types.MsgDelegateOp{}
@@ -263,15 +263,18 @@ func (h *Handler) handleDelegateOp(w http.ResponseWriter, r *http.Request) {
 	h.broadcastVoteTx(r.Context(), w, msg, clientDelegationKeyNotApplicable, true)
 }
 
-// ensureProxyDelegationEnabled answers 404 and returns false unless
+// requireProxyEnabled answers 404 instead of calling next unless
 // types.ProxyDelegationEnabled is set, so while dormant every proxy
 // delegation route answers as if it did not exist (contracts-v1 §9). The
 // routes are mounted anyway, so the UI's catch-all never answers them.
-func ensureProxyDelegationEnabled(w http.ResponseWriter) bool {
-	if !types.ProxyDelegationEnabled {
-		writeError(w, http.StatusNotFound, "proxy delegation is not enabled")
+func requireProxyEnabled(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !types.ProxyDelegationEnabled {
+			writeError(w, http.StatusNotFound, "proxy delegation is not enabled")
+			return
+		}
+		next(w, r)
 	}
-	return types.ProxyDelegationEnabled
 }
 
 // wantsCodespace reports whether r opts into codespace on an existing

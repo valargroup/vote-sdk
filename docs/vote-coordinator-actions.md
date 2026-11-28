@@ -92,21 +92,10 @@ upgrade, the chain rejects all three payloads as unsupported.
 transaction, even at threshold 1, so proxy delegation needs at least two vote
 managers in the coordinator policy. Other actions keep their threshold.
 
-| Payload | Fields | Effect |
-|---|---|---|
-| `MsgSetProxyDelegationParams` | `verifiers`: 0 to 16 `{verifier_id, pubkey}`, with unique ids and unique 32-byte Ed25519 keys; `verifier_threshold`: 1 to the number of verifiers, or 0 with none; `max_delegates`: at most 2,000 | Replaces the verifier set, the threshold and `max_delegates`. An empty verifier set closes delegate registration. Never changes the pause. A bad key fails with code 66, any other bad field with code 68. |
-| `MsgSetProxyDelegationPause` | `paused` | Sets only the pause. While paused, new delegation batches (0x09) fail with code 51 and can retry later. Delegate registrations and ballots are not affected. |
-| `MsgSetDelegateStatus` | `delegate_indexes`: 1 to 64 distinct indexes, each at least 1; `action`: 1 suspend, 2 lift, 3 retire; `reason`: 1 impersonation, 2 key lost or compromised, 3 legal, 4 verifier review, 99 other | Suspend bars the delegates from balloting and from retiring themselves, and stores `reason`. Lift ends a suspension. Retire ends the entries for good, stores `reason`, and frees their handles, so each account can register again under a new index. Every delegate is updated or none is: an unknown delegate fails with code 53, suspending or lifting a retired one with code 55, a bad field with code 9. Lifting an active delegate and retiring a retired one change nothing. It never voids a ballot already accepted. |
-
-Each payload emits its own event (`proxy_delegation_params`,
-`proxy_delegation_pause`, or one `delegate_status` per delegate) inside the
-usual coordinator events.
-
-**A lost delegate key.** An entry has one key for life, and its handle cannot
-register again while the entry is live. A delegate who lost the key with no
-copy asks the coordinators to retire the entry (action 3, reason 2) after an
-out-of-band check that the request comes from the account's owner, and then
-registers again.
+`MsgSetProxyDelegationParams` replaces the verifier set, its threshold and
+`max_delegates`, `MsgSetProxyDelegationPause` pauses new delegation batches,
+and `MsgSetDelegateStatus` suspends, lifts or retires delegates. Their fields,
+bounds, error codes and events are in contracts-v1 sections 2.4 and 5.5.
 
 From the CLI:
 

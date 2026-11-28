@@ -56,13 +56,13 @@ func Verifier(id uint32) ed25519.PrivateKey {
 }
 
 // Registration returns the registration fields of dk for the X account
-// handle, with a fixed proof post.
-func Registration(dk ed25519.PrivateKey, handle string) types.DelegateRegistrationFields {
-	return types.DelegateRegistrationFields{
-		DK:       Pub(dk),
+// handle, with a fixed proof post, and no signatures.
+func Registration(dk ed25519.PrivateKey, handle string) *types.DelegateRegister {
+	return &types.DelegateRegister{
+		Dk:       Pub(dk),
 		Provider: types.DelegateProviderX,
 		Handle:   handle,
-		ProofID:  "1790000000000000000",
+		ProofId:  "1790000000000000000",
 	}
 }
 
@@ -104,7 +104,7 @@ func Round(roundID []byte, optionCounts ...int) *types.VoteRound {
 
 // Attestation signs verifier id's attestation of fields on chainID, valid on
 // [notBefore, expiresAt).
-func Attestation(chainID string, id uint32, fields types.DelegateRegistrationFields, notBefore, expiresAt uint64) *types.DelegateAttestation {
+func Attestation(chainID string, id uint32, fields *types.DelegateRegister, notBefore, expiresAt uint64) *types.DelegateAttestation {
 	digest, err := types.ComputeDelegateAttestDigest(chainID, fields, notBefore, expiresAt)
 	if err != nil {
 		panic(err)
@@ -119,16 +119,16 @@ func Attestation(chainID string, id uint32, fields types.DelegateRegistrationFie
 
 // RegisterOp builds the register op for fields on chainID, with dk_sig by dk
 // and one Attestation per verifier id over [notBefore, expiresAt).
-func RegisterOp(chainID string, fields types.DelegateRegistrationFields, dk ed25519.PrivateKey, notBefore, expiresAt uint64, verifierIDs ...uint32) *types.MsgDelegateOp {
+func RegisterOp(chainID string, fields *types.DelegateRegister, dk ed25519.PrivateKey, notBefore, expiresAt uint64, verifierIDs ...uint32) *types.MsgDelegateOp {
 	digest, err := types.ComputeDelegateRegisterDigest(chainID, fields)
 	if err != nil {
 		panic(err)
 	}
 	op := &types.DelegateRegister{
-		Dk:       fields.DK,
+		Dk:       fields.Dk,
 		Provider: fields.Provider,
 		Handle:   fields.Handle,
-		ProofId:  fields.ProofID,
+		ProofId:  fields.ProofId,
 		DkSig:    ed25519.Sign(dk, digest),
 	}
 	for _, id := range verifierIDs {

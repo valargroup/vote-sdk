@@ -111,7 +111,7 @@ func newEntryRegistration(dk ed25519.PrivateKey, handle string) proxyRegistratio
 }
 
 // fields returns the REGISTER and ATTEST fields of r.
-func (r proxyRegistration) fields() types.DelegateRegistrationFields {
+func (r proxyRegistration) fields() *types.DelegateRegister {
 	return proxytest.Registration(r.dk, r.handle)
 }
 

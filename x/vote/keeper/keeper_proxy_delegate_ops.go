@@ -64,14 +64,8 @@ func (k *Keeper) checkDelegateRegister(ctx sdk.Context, kvStore store.KVStore, o
 		return 0, errorsmod.Wrapf(types.ErrHandleTaken, "provider %d handle %q is delegate %d", op.GetProvider(), op.GetHandle(), live)
 	}
 
-	fields := types.DelegateRegistrationFields{
-		DK:       op.GetDk(),
-		Provider: op.GetProvider(),
-		Handle:   op.GetHandle(),
-		ProofID:  op.GetProofId(),
-	}
 	if verifySignatures {
-		digest, err := types.ComputeDelegateRegisterDigest(ctx.ChainID(), fields)
+		digest, err := types.ComputeDelegateRegisterDigest(ctx.ChainID(), op)
 		if err != nil {
 			return 0, err
 		}
@@ -79,7 +73,7 @@ func (k *Keeper) checkDelegateRegister(ctx sdk.Context, kvStore store.KVStore, o
 			return 0, errorsmod.Wrapf(types.ErrInvalidSignature, "dk_sig: ed25519 over REGISTER: %v", err)
 		}
 	}
-	if err := checkDelegateAttestations(ctx, params, fields, op.GetAttestations(), verifySignatures); err != nil {
+	if err := checkDelegateAttestations(ctx, params, op, verifySignatures); err != nil {
 		return 0, err
 	}
 
@@ -93,11 +87,11 @@ func (k *Keeper) checkDelegateRegister(ctx sdk.Context, kvStore store.KVStore, o
 	return next, nil
 }
 
-// checkDelegateAttestations runs register step 5 of contracts-v1 §5.3: each
-// attestation's verifier, window and, when verifySignatures is set,
-// signature (ErrInvalidAttestation), then the distinct verifier threshold
-// (ErrInsufficientAttestations).
-func checkDelegateAttestations(ctx sdk.Context, params *types.ProxyDelegationParams, fields types.DelegateRegistrationFields, attestations []*types.DelegateAttestation, verifySignatures bool) error {
+// checkDelegateAttestations runs register step 5 of contracts-v1 §5.3 on
+// op's attestations: each attestation's verifier, window and, when
+// verifySignatures is set, signature (ErrInvalidAttestation), then the
+// distinct verifier threshold (ErrInsufficientAttestations).
+func checkDelegateAttestations(ctx sdk.Context, params *types.ProxyDelegationParams, op *types.DelegateRegister, verifySignatures bool) error {
 	blockTime, checkWindows, err := delegateOpBlockTime(ctx)
 	if err != nil {
 		return err
@@ -108,8 +102,8 @@ func checkDelegateAttestations(ctx sdk.Context, params *types.ProxyDelegationPar
 	}
 	// An id names one key, so counting distinct keys dedupes by id and by
 	// pubkey: a repeated attestation, or two ids sharing a key, count once.
-	attested := make(map[string]struct{}, len(attestations))
-	for i, attestation := range attestations {
+	attested := make(map[string]struct{}, len(op.GetAttestations()))
+	for i, attestation := range op.GetAttestations() {
 		pubkey, ok := verifierKeys[attestation.GetVerifierId()]
 		if !ok {
 			return errorsmod.Wrapf(types.ErrInvalidAttestation, "attestations[%d]: verifier %d is not in the params verifier set", i, attestation.GetVerifierId())
@@ -119,7 +113,7 @@ func checkDelegateAttestations(ctx sdk.Context, params *types.ProxyDelegationPar
 				i, blockTime, attestation.GetNotBefore(), attestation.GetExpiresAt())
 		}
 		if verifySignatures {
-			digest, err := types.ComputeDelegateAttestDigest(ctx.ChainID(), fields, attestation.GetNotBefore(), attestation.GetExpiresAt())
+			digest, err := types.ComputeDelegateAttestDigest(ctx.ChainID(), op, attestation.GetNotBefore(), attestation.GetExpiresAt())
 			if err != nil {
 				return err
 			}

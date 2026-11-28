@@ -116,7 +116,7 @@ func TestProxyVectorSectionsAreAllHandled(t *testing.T) {
 }
 
 // TestProxyVectorFilesAreFrozen pins the vector files vote-sdk holds: its
-// copy of the client file, the chain file it generates, and the
+// copy of the client file, its own chain file, and the
 // zkp4_instance section of voting-circuits' circuit file.
 func TestProxyVectorFilesAreFrozen(t *testing.T) {
 	for _, f := range []struct {
@@ -161,33 +161,6 @@ func TestProxyVectorsD1(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.Name, func(t *testing.T) {
 			in := c.Inputs
-			fields := types.ProxyBatchSighashFields{
-				VoteRoundID:              in.VoteRoundID,
-				VoteCommTreeAnchorHeight: in.VoteCommTreeAnchorHeight,
-				ExpiryHeight:             in.ExpiryHeight,
-				HasRegistration:          in.RegistrationVanCmx != nil,
-			}
-			if in.RegistrationVanCmx != nil {
-				fields.RegistrationVanCmx = *in.RegistrationVanCmx
-			}
-			for _, d := range in.DCs {
-				fields.DCs = append(fields.DCs, types.ProxyDCSighashFields{
-					RVpk:                      d.RVpk,
-					VanNullifier:              d.VanNullifier,
-					VoteAuthorityNoteNew:      d.VoteAuthorityNoteNew,
-					ProxyDelegationCommitment: d.ProxyDelegationCommitment,
-					DCSlotNullifier:           d.DCSlotNullifier,
-				})
-			}
-
-			d1, err := types.ComputeProxyDelegationBatchSighash(in.ChainID, fields)
-			require.NoError(t, err)
-			requireHex(t, c.Expected.D1, d1, "d1")
-			batchDigest, err := types.ComputeProxyDelegationBatchDigest(in.ChainID, fields)
-			require.NoError(t, err)
-			requireHex(t, c.Expected.BatchDigest, batchDigest, "batch_digest")
-
-			// The chain binds a message's fields through SighashFields.
 			msg := &types.MsgProxyDelegationBatch{
 				VoteRoundId:              in.VoteRoundID,
 				VoteCommTreeAnchorHeight: in.VoteCommTreeAnchorHeight,
@@ -205,12 +178,12 @@ func TestProxyVectorsD1(t *testing.T) {
 					DcSlotNullifier:           d.DCSlotNullifier,
 				})
 			}
-			d1, err = types.ComputeProxyDelegationBatchSighash(in.ChainID, msg.SighashFields())
+			d1, err := types.ComputeProxyDelegationBatchSighash(in.ChainID, msg)
 			require.NoError(t, err)
-			requireHex(t, c.Expected.D1, d1, "d1 of the message")
-			batchDigest, err = types.ComputeProxyDelegationBatchDigest(in.ChainID, msg.SighashFields())
+			requireHex(t, c.Expected.D1, d1, "d1")
+			batchDigest, err := types.ComputeProxyDelegationBatchDigest(in.ChainID, msg)
 			require.NoError(t, err)
-			requireHex(t, c.Expected.BatchDigest, batchDigest, "batch_digest of the message")
+			requireHex(t, c.Expected.BatchDigest, batchDigest, "batch_digest")
 		})
 	}
 }
@@ -279,8 +252,8 @@ func TestProxyVectorsRegister(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.Name, func(t *testing.T) {
 			in, want := c.Inputs, c.Expected
-			digest, err := types.ComputeDelegateRegisterDigest(in.ChainID, types.DelegateRegistrationFields{
-				DK: want.DK, Provider: in.Provider, Handle: in.Handle, ProofID: in.ProofID,
+			digest, err := types.ComputeDelegateRegisterDigest(in.ChainID, &types.DelegateRegister{
+				Dk: want.DK, Provider: in.Provider, Handle: in.Handle, ProofId: in.ProofID,
 			})
 			require.NoError(t, err)
 			requireHex(t, want.Digest, digest)
@@ -313,8 +286,8 @@ func TestProxyVectorsAttest(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.Name, func(t *testing.T) {
 			in, want := c.Inputs, c.Expected
-			digest, err := types.ComputeDelegateAttestDigest(in.ChainID, types.DelegateRegistrationFields{
-				DK: in.DK, Provider: in.Provider, Handle: in.Handle, ProofID: in.ProofID,
+			digest, err := types.ComputeDelegateAttestDigest(in.ChainID, &types.DelegateRegister{
+				Dk: in.DK, Provider: in.Provider, Handle: in.Handle, ProofId: in.ProofID,
 			}, in.NotBefore, in.ExpiresAt)
 			require.NoError(t, err)
 			requireHex(t, want.Digest, digest)
@@ -440,38 +413,19 @@ func TestProxyVectorsKVKeys(t *testing.T) {
 	}
 }
 
-// keyRuleVectorErrors and zip215VectorErrors map the vector file's Ed25519
-// failure names to the Go errors.
-var (
-	keyRuleVectorErrors = map[string]error{
-		"NotOnCurve":     types.ErrEd25519KeyNotOnCurve,
-		"NonCanonical":   types.ErrEd25519KeyNonCanonical,
-		"SmallOrder":     types.ErrEd25519KeySmallOrder,
-		"NotTorsionFree": types.ErrEd25519KeyNotTorsionFree,
-	}
-	zip215VectorErrors = map[string]error{
-		"PublicKeyNotOnCurve":  types.ErrEd25519KeyNotOnCurve,
-		"ScalarNotCanonical":   types.ErrEd25519ScalarNotCanonical,
-		"CommitmentNotOnCurve": types.ErrEd25519CommitmentNotOnCurve,
-		"EquationMismatch":     types.ErrEd25519EquationMismatch,
-	}
-)
-
-// requireVectorError fails unless got is the error that want names in
-// names, or nil when want is nil.
-func requireVectorError(t *testing.T, names map[string]error, want *string, got error) {
+// requireVectorVerdict fails unless got passes exactly when the vector
+// expects no error. The Go errors do not name the vector's failure kinds.
+func requireVectorVerdict(t *testing.T, want *string, got error) {
 	t.Helper()
 	if want == nil {
 		require.NoError(t, got)
-		return
+	} else {
+		require.Errorf(t, got, "want %s", *want)
 	}
-	wantErr, ok := names[*want]
-	require.Truef(t, ok, "unknown vector error %q", *want)
-	require.ErrorIs(t, got, wantErr)
 }
 
-// TestProxyVectorsEd25519Keys checks the key rule and ZIP-215 verification,
-// including which check fails (contracts-v1 §0).
+// TestProxyVectorsEd25519Keys checks which keys pass the key rule and which
+// signatures ZIP-215 verification accepts (contracts-v1 §0).
 func TestProxyVectorsEd25519Keys(t *testing.T) {
 	type keyRuleInputs struct {
 		Key hexBytes `json:"key"`
@@ -498,14 +452,14 @@ func TestProxyVectorsEd25519Keys(t *testing.T) {
 
 	for _, c := range sections.KeyRule {
 		t.Run("key_rule/"+c.Name, func(t *testing.T) {
-			requireVectorError(t, keyRuleVectorErrors, c.Expected.Error, types.ValidateEd25519Key(c.Inputs.Key))
+			requireVectorVerdict(t, c.Expected.Error, types.ValidateEd25519Key(c.Inputs.Key))
 		})
 	}
 	for _, c := range sections.ZIP215 {
 		t.Run("zip215/"+c.Name, func(t *testing.T) {
 			in := c.Inputs
-			requireVectorError(t, zip215VectorErrors, c.Expected.Error, types.VerifyEd25519ZIP215(in.PublicKey, in.Message, in.Signature))
-			requireVectorError(t, keyRuleVectorErrors, c.Expected.KeyRuleError, types.ValidateEd25519Key(in.PublicKey))
+			requireVectorVerdict(t, c.Expected.Error, types.VerifyEd25519ZIP215(in.PublicKey, in.Message, in.Signature))
+			requireVectorVerdict(t, c.Expected.KeyRuleError, types.ValidateEd25519Key(in.PublicKey))
 		})
 	}
 }

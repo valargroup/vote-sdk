@@ -45,9 +45,8 @@ func ProxyDelegationV1Vectors() []byte {
 //go:embed testdata/proxy_delegation_chain_v1.json
 var proxyDelegationChainV1VectorsJSON []byte
 
-// ProxyDelegationChainV1Vectors returns a copy of the proxy delegation vectors
-// that vote-sdk generates (contracts-v1 §13), written by
-// scripts/proxy-chain-vectors.
+// ProxyDelegationChainV1Vectors returns a copy of the chain's proxy
+// delegation vector file, whose home is vote-sdk (contracts-v1 §13).
 func ProxyDelegationChainV1Vectors() []byte {
 	return bytes.Clone(proxyDelegationChainV1VectorsJSON)
 }
