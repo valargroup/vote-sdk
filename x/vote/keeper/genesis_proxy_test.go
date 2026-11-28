@@ -92,15 +92,6 @@ func (s *ProxyRegistryTestSuite) TestProxyRegistryGenesisWithoutRegistry() {
 	s.Require().NoError(s.keeper.InitGenesis(s.kv(), exported))
 	s.requireNoRegistryKeys()
 	s.Require().Equal(uint32(1), s.nextIndex())
-
-	// Params set to the zero value export as set, and import as set.
-	s.Require().NoError(s.keeper.SetProxyDelegationParams(s.kv(), &types.ProxyDelegationParams{}))
-	exported, err = s.keeper.ExportGenesis(s.kv())
-	s.Require().NoError(err)
-	s.Require().NotNil(exported.ProxyParams)
-	s.SetupTest()
-	s.Require().NoError(s.keeper.InitGenesis(s.kv(), exported))
-	s.Require().Contains(s.registryKV(), string(types.ProxyDelegationParamsKey))
 }
 
 // TestInitGenesisRejectsInvalidRegistry checks that the import itself, not

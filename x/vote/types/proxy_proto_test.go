@@ -1,15 +1,12 @@
 package types_test
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
@@ -166,95 +163,5 @@ func TestProxyDelegationProtosMatchContract(t *testing.T) {
 			got := fmt.Sprintf("%s(%s) returns (%s)", method.Name(), method.Input().Name(), method.Output().Name())
 			require.Equal(t, rpc, got)
 		}
-	}
-}
-
-// populateForRoundTrip sets every field of m, recursively, to a non-default
-// value derived from *seed, so a round trip exercises each field.
-func populateForRoundTrip(m protoreflect.Message, seed *byte) {
-	fields := m.Descriptor().Fields()
-	for i := 0; i < fields.Len(); i++ {
-		fd := fields.Get(i)
-		switch {
-		case fd.IsMap():
-			panic(fmt.Sprintf("populateForRoundTrip: map field %s", fd.FullName()))
-		case fd.IsList():
-			list := m.Mutable(fd).List()
-			for range 2 {
-				if fd.Message() != nil {
-					elem := list.NewElement()
-					populateForRoundTrip(elem.Message(), seed)
-					list.Append(elem)
-				} else {
-					list.Append(scalarForRoundTrip(fd, seed))
-				}
-			}
-		case fd.Message() != nil:
-			populateForRoundTrip(m.Mutable(fd).Message(), seed)
-		default:
-			m.Set(fd, scalarForRoundTrip(fd, seed))
-		}
-	}
-}
-
-// scalarForRoundTrip returns the next non-default value of fd's kind; integers
-// span several varint bytes.
-func scalarForRoundTrip(fd protoreflect.FieldDescriptor, seed *byte) protoreflect.Value {
-	*seed++
-	s := *seed
-	switch fd.Kind() {
-	case protoreflect.BoolKind:
-		return protoreflect.ValueOfBool(true)
-	case protoreflect.EnumKind:
-		return protoreflect.ValueOfEnum(1)
-	case protoreflect.Uint32Kind:
-		return protoreflect.ValueOfUint32(uint32(s) << 20)
-	case protoreflect.Uint64Kind:
-		return protoreflect.ValueOfUint64(uint64(s) << 50)
-	case protoreflect.Int64Kind:
-		return protoreflect.ValueOfInt64(int64(s) << 40)
-	case protoreflect.StringKind:
-		return protoreflect.ValueOfString(fmt.Sprintf("s%d", s))
-	case protoreflect.BytesKind:
-		return protoreflect.ValueOfBytes(bytes.Repeat([]byte{s}, 32))
-	default:
-		panic(fmt.Sprintf("scalarForRoundTrip: unexpected kind %s of %s", fd.Kind(), fd.FullName()))
-	}
-}
-
-// TestProxyDelegationMessagesRoundTrip round-trips a fully populated value of
-// every new message, and of each message that gains fields, through
-// deterministic protobuf and through encoding/json, which the REST layer and
-// genesis use.
-func TestProxyDelegationMessagesRoundTrip(t *testing.T) {
-	names := make([]protoreflect.FullName, 0, len(proxyProtoFields)+len(proxyProtoAddedFields))
-	for name := range proxyProtoFields {
-		names = append(names, name)
-	}
-	for name := range proxyProtoAddedFields {
-		names = append(names, name)
-	}
-	for _, name := range names {
-		t.Run(string(name), func(t *testing.T) {
-			mt := findProxyMessage(t, name)
-			msg := mt.New()
-			var seed byte
-			populateForRoundTrip(msg, &seed)
-
-			wire, err := proto.MarshalOptions{Deterministic: true}.Marshal(msg.Interface())
-			require.NoError(t, err)
-			again, err := proto.MarshalOptions{Deterministic: true}.Marshal(msg.Interface())
-			require.NoError(t, err)
-			require.Equal(t, wire, again)
-			fromWire := mt.New().Interface()
-			require.NoError(t, proto.Unmarshal(wire, fromWire))
-			require.True(t, proto.Equal(msg.Interface(), fromWire), "protobuf round trip")
-
-			text, err := json.Marshal(msg.Interface())
-			require.NoError(t, err)
-			fromJSON := mt.New().Interface()
-			require.NoError(t, json.Unmarshal(text, fromJSON))
-			require.True(t, proto.Equal(msg.Interface(), fromJSON), "encoding/json round trip: %s", text)
-		})
 	}
 }

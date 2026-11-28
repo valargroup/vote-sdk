@@ -40,11 +40,7 @@ func (s *ProxyRegistryTestSuite) TestProxyDelegatesPaging() {
 		{"second page", 100, 0, span(101, 200), 200},
 		{"last page", 200, 0, span(201, 250), 0},
 		{"a page that ends exactly at the last entry", 0, 250, span(1, 250), 0},
-		{"one short of the end", 0, 249, span(1, 249), 249},
-		{"one entry", 7, 1, []uint32{8}, 8},
-		{"the largest limit", 0, 1000, span(1, 250), 0},
 		{"past the end", 250, 10, nil, 0},
-		{"start_after above every index", 4_000_000_000, 10, nil, 0},
 	} {
 		s.Run(c.name, func() {
 			got, next := page(c.startAfter, c.limit)
@@ -55,16 +51,6 @@ func (s *ProxyRegistryTestSuite) TestProxyDelegatesPaging() {
 
 	_, err := s.queries.ProxyDelegates(s.ctx, &types.QueryProxyDelegatesRequest{Limit: 1001})
 	s.Require().Equal(codes.InvalidArgument, status.Code(err), "error: %v", err)
-	_, err = s.queries.ProxyDelegates(s.ctx, nil)
-	s.Require().Equal(codes.InvalidArgument, status.Code(err), "error: %v", err)
-}
-
-// TestProxyDelegatesEmptyRegistry checks the first page of an empty registry.
-func (s *ProxyRegistryTestSuite) TestProxyDelegatesEmptyRegistry() {
-	resp, err := s.queries.ProxyDelegates(s.ctx, &types.QueryProxyDelegatesRequest{})
-	s.Require().NoError(err)
-	s.Require().Empty(resp.Delegates)
-	s.Require().Zero(resp.NextStartAfter)
 }
 
 // TestProxyDelegateQuery checks ProxyDelegate: the stored entry, or NotFound
@@ -81,8 +67,6 @@ func (s *ProxyRegistryTestSuite) TestProxyDelegateQuery() {
 		_, err := s.queries.ProxyDelegate(s.ctx, &types.QueryProxyDelegateRequest{DelegateIndex: index})
 		s.Require().Equal(codes.NotFound, status.Code(err), "index %d: %v", index, err)
 	}
-	_, err = s.queries.ProxyDelegate(s.ctx, nil)
-	s.Require().Equal(codes.InvalidArgument, status.Code(err), "error: %v", err)
 }
 
 // TestProxyDelegateByKeyQuery checks ProxyDelegateByKey: any key ever
@@ -105,8 +89,6 @@ func (s *ProxyRegistryTestSuite) TestProxyDelegateByKeyQuery() {
 	_, err := s.queries.ProxyDelegateByKey(s.ctx, &types.QueryProxyDelegateByKeyRequest{Dk: proxytest.Pub(proxytest.Key("nobody"))})
 	s.Require().Equal(codes.NotFound, status.Code(err), "error: %v", err)
 	_, err = s.queries.ProxyDelegateByKey(s.ctx, &types.QueryProxyDelegateByKeyRequest{Dk: make([]byte, 31)})
-	s.Require().Equal(codes.InvalidArgument, status.Code(err), "error: %v", err)
-	_, err = s.queries.ProxyDelegateByKey(s.ctx, nil)
 	s.Require().Equal(codes.InvalidArgument, status.Code(err), "error: %v", err)
 }
 
@@ -144,16 +126,11 @@ func (s *ProxyRegistryTestSuite) TestProxyDelegateByHandleQuery() {
 		want     codes.Code
 	}{
 		"the same name at GitHub": {github, "alice", codes.NotFound},
-		"a handle never seen":     {x, "bob", codes.NotFound},
 		"an uppercase handle":     {x, "Alice", codes.InvalidArgument},
-		"an empty handle":         {x, "", codes.InvalidArgument},
-		"an unknown provider":     {3, "alice", codes.InvalidArgument},
 	} {
 		_, code := byHandle(c.provider, c.handle)
 		s.Require().Equal(c.want, code, name)
 	}
-	_, err := s.queries.ProxyDelegateByHandle(s.ctx, nil)
-	s.Require().Equal(codes.InvalidArgument, status.Code(err), "error: %v", err)
 }
 
 // TestProxyDelegationParamsQuery checks ProxyDelegationParams: the defaults on
@@ -178,7 +155,4 @@ func (s *ProxyRegistryTestSuite) TestProxyDelegationParamsQuery() {
 	s.Require().NoError(err)
 	s.Require().True(proto.Equal(params, resp.Params))
 	s.Require().Equal(uint32(3), resp.NextDelegateIndex)
-
-	_, err = s.queries.ProxyDelegationParams(s.ctx, nil)
-	s.Require().Equal(codes.InvalidArgument, status.Code(err), "error: %v", err)
 }

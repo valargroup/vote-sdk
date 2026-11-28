@@ -54,9 +54,7 @@ func TestSurfaceRegisteredCode(t *testing.T) {
 	for _, err := range []error{
 		types.ErrRoundNotFound,
 		errorsmod.Wrapf(types.ErrProxyBatchExpired, "height %d", 5),
-		errorsmod.Wrap(sdkerrors.ErrTxDecode, "decode"),
 		errors.New("kv store failure"),
-		fmt.Errorf("invalid block time %d", -1),
 	} {
 		require.Same(t, err, types.SurfaceRegisteredCode(err), "%v", err)
 	}

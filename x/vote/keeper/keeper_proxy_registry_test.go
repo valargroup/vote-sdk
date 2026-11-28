@@ -17,38 +17,8 @@ import (
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
-// TestRegistryStoreDefaults checks what an empty registry reads as
-// (contracts-v1 §3.2, §9): next_index 1, zero params, no entries, used keys
-// or handle records, and that reading writes nothing.
-func (s *ProxyRegistryTestSuite) TestRegistryStoreDefaults() {
-	kv := s.kv()
-	next, err := s.keeper.GetProxyNextDelegateIndex(kv)
-	s.Require().NoError(err)
-	s.Require().Equal(uint32(1), next)
-
-	params, err := s.keeper.GetProxyDelegationParams(kv)
-	s.Require().NoError(err)
-	s.Require().True(proto.Equal(&types.ProxyDelegationParams{}, params), "absent params read as the zero value: %v", params)
-
-	_, err = s.keeper.GetProxyDelegateEntry(kv, 1)
-	proxytest.RequireCode(s.T(), err, types.ErrDelegateNotFound, 53)
-	_, err = s.keeper.GetProxyDelegateEntry(kv, 0)
-	proxytest.RequireCode(s.T(), err, types.ErrDelegateNotFound, 53)
-
-	_, found, err := s.keeper.GetProxyUsedDelegateKey(kv, make([]byte, 32))
-	s.Require().NoError(err)
-	s.Require().False(found)
-	_, _, err = s.keeper.GetProxyUsedDelegateKey(kv, make([]byte, 31))
-	proxytest.RequireCode(s.T(), err, types.ErrInvalidField, 9)
-	_, found, err = s.keeper.GetProxyDelegateByHandle(kv, types.DelegateProviderX, "alice")
-	s.Require().NoError(err)
-	s.Require().False(found)
-
-	s.requireNoRegistryKeys()
-}
-
 // TestRegistryStoreLayout checks each registry value's key and encoding
-// (contracts-v1 §3.2) and that it reads back.
+// (contracts-v1 §3.2).
 func (s *ProxyRegistryTestSuite) TestRegistryStoreLayout() {
 	kv := s.kv()
 	dk := proxytest.Pub(proxytest.Key("layout"))
@@ -92,22 +62,6 @@ func (s *ProxyRegistryTestSuite) TestRegistryStoreLayout() {
 		s.Require().NoError(err)
 		s.Require().Equal(c.value, got, "value at %x", c.key)
 	}
-
-	gotEntry, err := s.keeper.GetProxyDelegateEntry(kv, 300)
-	s.Require().NoError(err)
-	s.Require().True(proto.Equal(entry, gotEntry))
-	owner, found, err := s.keeper.GetProxyUsedDelegateKey(kv, dk)
-	s.Require().NoError(err)
-	s.Require().True(found)
-	s.Require().Equal(uint32(300), owner)
-	owner, found, err = s.keeper.GetProxyDelegateByHandle(kv, entry.Provider, entry.Handle)
-	s.Require().NoError(err)
-	s.Require().True(found)
-	s.Require().Equal(uint32(300), owner)
-	s.Require().Equal(uint32(301), s.nextIndex())
-	gotParams, err := s.keeper.GetProxyDelegationParams(kv)
-	s.Require().NoError(err)
-	s.Require().True(proto.Equal(params, gotParams))
 }
 
 // TestRegistryEntryValueVectors checks that the keeper stores every

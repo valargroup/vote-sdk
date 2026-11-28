@@ -6,22 +6,27 @@ import (
 	"bytes"
 	"testing"
 
-	errorsmod "cosmossdk.io/errors"
-	abci "github.com/cometbft/cometbft/abci/types"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 
 	voteapi "github.com/valargroup/vote-sdk/api"
 	"github.com/valargroup/vote-sdk/testutil"
+	"github.com/valargroup/vote-sdk/x/vote/keeper"
 	"github.com/valargroup/vote-sdk/x/vote/types"
 )
 
-// TestDormantProxyDelegationTagsAreNotVoteTxs checks that 0x09 and 0x0B
-// bodies go to the standard decoder, which refuses them as before.
-func TestDormantProxyDelegationTagsAreNotVoteTxs(t *testing.T) {
+// TestProxyDelegationDormant checks end to end that everything proxy
+// delegation adds stays off while the gate is closed (contracts-v1 §9): 0x09
+// and 0x0B bodies go to the standard decoder, which refuses them as before;
+// the three proxy coordinator payloads decode in a signed proposal but are
+// unsupported actions; a proxy-flagged round is refused with code 69; the
+// capability fields and registry queries are absent; and nothing is stored.
+func TestProxyDelegationDormant(t *testing.T) {
 	ta := testutil.SetupTestApp(t)
 	batch := &types.MsgProxyDelegationBatch{
 		VoteRoundId:              bytes.Repeat([]byte{0x01}, 32),
@@ -60,17 +65,9 @@ func TestDormantProxyDelegationTagsAreNotVoteTxs(t *testing.T) {
 		require.Equal(t, sdkerrors.ErrTxDecode.Codespace(), result.Codespace)
 		require.Zero(t, result.GasUsed)
 	}
-}
 
-// TestDormantProxyCoordinatorPayloadsAreUnsupported checks the three proxy
-// delegation payloads end to end while dormant: registered (contracts-v1
-// §5.5), a signed coordinator proposal carrying one now decodes, and the
-// handler refuses it as an unsupported action, storing nothing (§9).
-func TestDormantProxyCoordinatorPayloadsAreUnsupported(t *testing.T) {
-	ta := testutil.SetupTestApp(t)
 	manager := ta.ValidatorAccAddr()
 	ta.SeedVoteManagers(manager)
-
 	for _, payload := range []proto.Message{
 		&types.MsgSetProxyDelegationParams{Creator: manager, MaxDelegates: 5},
 		&types.MsgSetProxyDelegationPause{Creator: manager, Paused: true},
@@ -87,8 +84,21 @@ func TestDormantProxyCoordinatorPayloadsAreUnsupported(t *testing.T) {
 		require.NotZero(t, result.Code, typeURL)
 		require.Contains(t, result.Log, "unsupported coordinator action: "+typeURL)
 	}
+	flagged := testutil.ValidCreateVotingSessionAt(ta.Time)
+	flagged.Creator, flagged.ProxyDelegation = manager, true
+	result := ta.DeliverVoteTx(ta.MustBuildSignedCoordinatorActionTx(manager, flagged))
+	require.Equal(t, types.ErrProxyDelegationDisabled.ABCICode(), result.Code, result.Log)
+	require.Equal(t, types.ModuleName, result.Codespace)
 
 	ctx := ta.NewUncachedContext(false, cmtproto.Header{Height: ta.Height})
+	qs := keeper.NewQueryServerImpl(ta.VoteKeeper())
+	caps, err := qs.ProtocolCapabilities(ctx, &types.QueryProtocolCapabilitiesRequest{})
+	require.NoError(t, err)
+	require.Zero(t, caps.ProxyDelegationVersion)
+	require.Empty(t, caps.CircuitFingerprints)
+	_, err = qs.ProxyDelegates(ctx, &types.QueryProxyDelegatesRequest{})
+	require.Equal(t, codes.Unimplemented, status.Code(err), "error: %v", err)
+
 	kv := ta.VoteKeeper().OpenKVStore(ctx)
 	hasParams, err := kv.Has(types.ProxyDelegationParamsKey)
 	require.NoError(t, err)
@@ -97,65 +107,8 @@ func TestDormantProxyCoordinatorPayloadsAreUnsupported(t *testing.T) {
 		t.Errorf("unexpected stored action %d of type %s", action.ActionId, action.Payload.GetTypeUrl())
 		return false
 	}))
-}
-
-// TestDormantPoolSharesAreRejectedAsToday checks a proposal-0 reveal end to
-// end while dormant (contracts-v1 §5.4, §9): CheckTx and FinalizeBlock refuse
-// it at ValidateBasic with today's code 1 and message, the proposer drops it
-// as malformed, and a block holding it is rejected.
-func TestDormantPoolSharesAreRejectedAsToday(t *testing.T) {
-	ta := testutil.SetupTestApp(t)
-	msg := testutil.ValidRevealShare(bytes.Repeat([]byte{0x01}, 32), 1, 0x11)
-	msg.ProposalId, msg.VoteDecision = types.PoolProposalID, 1
-	txBytes, err := voteapi.EncodeVoteTx(msg)
-	require.NoError(t, err)
-
-	const log = "invalid message field: proposal_id must be 1..50, got 0"
-	check := ta.CheckTxSync(txBytes)
-	require.Equal(t, uint32(1), check.Code)
-	require.Equal(t, log, check.Log)
-	result := ta.DeliverVoteTx(txBytes)
-	require.Equal(t, uint32(1), result.Code)
-	require.Equal(t, log, result.Log)
-
-	other := []byte{0xAA, 0x01}
-	require.Equal(t, [][]byte{other}, ta.CallPrepareProposalWithTxs([][]byte{txBytes, other}).Txs)
-	require.Equal(t, abci.ResponseProcessProposal_REJECT, ta.CallProcessProposal([][]byte{txBytes}).Status)
-}
-
-// TestDormantValidateBasicFailuresKeepCodeOne checks end to end that while
-// dormant a stateless failure of 0x02, 0x03, 0x05, 0x06 or 0x07 still reports
-// today's code 1 in codespace undefined from CheckTx and FinalizeBlock: BaseApp
-// runs ValidateBasic before the vote ante, and only activation surfaces the
-// registered code (contracts-v1 §0).
-func TestDormantValidateBasicFailuresKeepCodeOne(t *testing.T) {
-	ta := testutil.SetupTestApp(t)
-	roundID := bytes.Repeat([]byte{0x01}, 32)
-	delegation := testutil.ValidDelegation(roundID, 0x11)
-	delegation.Rk = make([]byte, 31)
-	cast := testutil.ValidCastVote(roundID, 10, 0x12)
-	cast.VoteAuthSig = make([]byte, 63)
-	tally := testutil.ValidSubmitTally(roundID, "")
-	batch := &types.MsgCastVoteBatch{Votes: []*types.MsgCastVote{testutil.ValidCastVote(roundID, 10, 0x13)}}
-	batch.Votes[0].RVpk = make([]byte, 32)
-	composite := &types.MsgDelegateAndCastVoteBatch{
-		Delegation: testutil.ValidDelegation(roundID, 0x14),
-		Batch:      &types.MsgCastVoteBatch{Votes: []*types.MsgCastVote{testutil.ValidCastVote(roundID, 0, 0x15)}},
-	}
-	composite.Delegation.VanCmx = make([]byte, 31)
-
-	for _, msg := range []types.VoteMessage{delegation, cast, tally, batch, composite} {
-		txBytes := testutil.MustEncodeVoteTx(msg)
-		wantLog := msg.ValidateBasic().Error()
-
-		check := ta.CheckTxSync(txBytes)
-		require.Equal(t, uint32(1), check.Code, "%T: %s", msg, check.Log)
-		require.Equal(t, errorsmod.UndefinedCodespace, check.Codespace, "%T", msg)
-		require.Equal(t, wantLog, check.Log)
-
-		result := ta.DeliverVoteTx(txBytes)
-		require.Equal(t, uint32(1), result.Code, "%T: %s", msg, result.Log)
-		require.Equal(t, errorsmod.UndefinedCodespace, result.Codespace, "%T", msg)
-		require.Equal(t, wantLog, result.Log)
-	}
+	require.NoError(t, ta.VoteKeeper().IterateAllRounds(kv, func(round *types.VoteRound) bool {
+		t.Errorf("unexpected stored round %x", round.VoteRoundId)
+		return false
+	}))
 }

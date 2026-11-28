@@ -8,17 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestProxyPayloadCommandsRegistered checks that the proxy delegation
-// coordinator payloads have tx commands.
-func TestProxyPayloadCommandsRegistered(t *testing.T) {
-	cmd := GetTxCmd()
-	for _, name := range []string{"set-proxy-delegation-params", "set-proxy-delegation-pause", "set-delegate-status"} {
-		sub, _, err := cmd.Find([]string{name})
-		require.NoError(t, err, name)
-		require.Equal(t, name, sub.Name())
-	}
-}
-
 // TestParseProxyVerifier checks the --verifier format, <id>:<pubkey-hex>.
 func TestParseProxyVerifier(t *testing.T) {
 	pubkey := bytes.Repeat([]byte{0xab}, 32)

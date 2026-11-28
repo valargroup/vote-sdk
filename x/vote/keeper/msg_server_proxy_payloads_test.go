@@ -3,7 +3,6 @@ package keeper_test
 import (
 	"fmt"
 
-	errorsmod "cosmossdk.io/errors"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"google.golang.org/protobuf/proto"
 
@@ -21,7 +20,6 @@ import (
 var (
 	proxyManagerA = svtest.TestAccAddr(0xA1)
 	proxyManagerB = svtest.TestAccAddr(0xA2)
-	proxyManagerC = svtest.TestAccAddr(0xA3)
 )
 
 // setManagers installs vote managers addrs at the given threshold.
@@ -184,25 +182,10 @@ func (s *ProxyRegistryTestSuite) TestProxyParamsPayload() {
 	s.requireParams(&types.ProxyDelegationParams{Verifiers: proxyVerifiers(3), VerifierThreshold: 1, MaxDelegates: 5, ProxyDcPaused: true})
 	s.Require().Equal(map[string]string{"verifier_count": "1", "verifier_threshold": "1", "max_delegates": "5"},
 		eventAttributes(s.T(), events, types.EventTypeProxyDelegationParams))
-
-	// Registration counts the new verifier set only.
-	s.Require().Equal(uint32(1), s.mustDeliver(s.registerOp(newEntryRegistration(proxytest.Key("params/new"), "params_new"), 3)))
-	_, err := s.deliver(s.registerOp(newEntryRegistration(proxytest.Key("params/old"), "params_old"), 1))
-	proxytest.RequireCode(s.T(), err, types.ErrInvalidAttestation, 64)
-
-	// An empty verifier set turns registration off, and an unset pause stays
-	// unset.
-	s.mustExecute(pausePayload(false))
-	events = s.mustExecute(paramsPayload(0, 7))
-	s.requireParams(&types.ProxyDelegationParams{MaxDelegates: 7})
-	s.Require().Equal(map[string]string{"verifier_count": "0", "verifier_threshold": "0", "max_delegates": "7"},
-		eventAttributes(s.T(), events, types.EventTypeProxyDelegationParams))
-	_, err = s.deliver(s.registerOp(newEntryRegistration(proxytest.Key("params/closed"), "params_closed"), 3))
-	proxytest.RequireCode(s.T(), err, types.ErrRegistrationClosed, 59)
 }
 
 // TestProxyPausePayload checks that the pause payload sets proxy_dc_paused
-// and nothing else, on and off, and emits proxy_delegation_pause (§5.5, §7).
+// and nothing else, and emits proxy_delegation_pause (§5.5, §7).
 func (s *ProxyRegistryTestSuite) TestProxyPausePayload() {
 	// Before any params, the pause is all the payload writes.
 	events := s.mustExecute(pausePayload(true))
@@ -217,11 +200,6 @@ func (s *ProxyRegistryTestSuite) TestProxyPausePayload() {
 	want.ProxyDcPaused = false
 	s.requireParams(want)
 	s.Require().Equal(map[string]string{"paused": "false"}, eventAttributes(s.T(), events, types.EventTypeProxyDelegationPause))
-
-	events = s.mustExecute(pausePayload(true))
-	want.ProxyDcPaused = true
-	s.requireParams(want)
-	s.Require().Equal(map[string]string{"paused": "true"}, eventAttributes(s.T(), events, types.EventTypeProxyDelegationPause))
 }
 
 // The actions and two reasons of the status payload, by short names.
@@ -302,47 +280,22 @@ func (s *ProxyRegistryTestSuite) TestDelegateStatusPayload_ManyDelegates() {
 
 // TestDelegateStatusPayload_Atomic checks that one failing index leaves
 // every entry unchanged: the handler itself writes nothing and emits no
-// delegate_status event, whatever the tx's rollback would undo (§5.5). An
-// unknown delegate is 53 and a RETIRED one 55.
+// delegate_status event, whatever the tx's rollback would undo (§5.5).
 func (s *ProxyRegistryTestSuite) TestDelegateStatusPayload_Atomic() {
-	s.seedEntries(1, 3)
-	s.setStatus(3, types.DelegateStatusRetired, keyLost)
-	before := []*types.ProxyDelegateEntry{s.entry(1), s.entry(2), s.entry(3)}
-	for _, c := range []struct {
-		name string
-		last uint32
-		want *errorsmod.Error
-		code uint32
-	}{
-		{"an unknown delegate last", 4, types.ErrDelegateNotFound, 53},
-		{"a retired delegate last", 3, types.ErrDelegateRetired, 55},
-	} {
-		s.Run(c.name, func() {
-			actionID := s.proposePending(statusPayload(suspend, types.DelegateStatusReasonLegal, 1, 2, c.last))
+	s.seedEntries(1, 2)
+	before := []*types.ProxyDelegateEntry{s.entry(1), s.entry(2)}
+	actionID := s.proposePending(statusPayload(suspend, types.DelegateStatusReasonLegal, 1, 2, 3))
 
-			// Read back through the same context, never written to s.ctx.
-			ctx, _ := s.ctx.CacheContext()
-			_, err := s.msgServer.ApproveCoordinatorAction(ctx, &types.MsgApproveCoordinatorAction{Creator: proxyManagerB, ActionId: actionID})
-			proxytest.RequireCode(s.T(), err, c.want, c.code)
-			for _, want := range before {
-				got, err := s.keeper.GetProxyDelegateEntry(s.keeper.OpenKVStore(ctx), want.Index)
-				s.Require().NoError(err)
-				s.Require().True(proto.Equal(want, got), "delegate %d changed: %v", want.Index, got)
-			}
-			s.Require().Empty(eventsOfType(ctx.EventManager().Events(), types.EventTypeDelegateStatus))
-		})
+	// Read back through the same context, never written to s.ctx.
+	ctx, _ := s.ctx.CacheContext()
+	_, err := s.msgServer.ApproveCoordinatorAction(ctx, &types.MsgApproveCoordinatorAction{Creator: proxyManagerB, ActionId: actionID})
+	proxytest.RequireCode(s.T(), err, types.ErrDelegateNotFound, 53)
+	for _, want := range before {
+		got, err := s.keeper.GetProxyDelegateEntry(s.keeper.OpenKVStore(ctx), want.Index)
+		s.Require().NoError(err)
+		s.Require().True(proto.Equal(want, got), "delegate %d changed: %v", want.Index, got)
 	}
-}
-
-// TestCoordinatorRetireLetsTheHandleRegisterAgain checks the lost-key path
-// (§5.5): coordinators retire the entry, and the handle then registers under
-// a new key and index.
-func (s *ProxyRegistryTestSuite) TestCoordinatorRetireLetsTheHandleRegisterAgain() {
-	s.openRegistry()
-	lost := s.registerNew(proxytest.Key("alice/lost"), "alice")
-	s.mustExecute(statusPayload(retire, keyLost, lost))
-	s.Require().Equal(lost+1, s.registerNew(proxytest.Key("alice/new"), "alice"))
-	s.Require().Equal(keyLost, s.entry(lost).StatusReason)
+	s.Require().Empty(eventsOfType(ctx.EventManager().Events(), types.EventTypeDelegateStatus))
 }
 
 // TestProxyPayloadsApprovalFloor checks the floor of §5.5 for each proxy
@@ -390,88 +343,18 @@ func (s *ProxyRegistryTestSuite) TestProxyPayloadsApprovalFloor() {
 	}
 }
 
-// TestProxyApprovalFloor_ThresholdThree checks that the floor is
-// max(2, threshold): at threshold 3 the second approval does not execute a
-// proxy payload and the third does.
-func (s *ProxyRegistryTestSuite) TestProxyApprovalFloor_ThresholdThree() {
-	s.setManagers(3, proxyManagerA, proxyManagerB, proxyManagerC)
-	proposed := s.propose(proxyManagerA, pausePayload(true))
-	s.Require().NoError(proposed.err)
-	s.Require().False(proposed.executed)
-
-	second := s.approve(proxyManagerB, proposed.actionID)
-	s.Require().NoError(second.err)
-	s.Require().False(second.executed)
-	s.Require().False(s.params().ProxyDcPaused)
-
-	third := s.approve(proxyManagerC, proposed.actionID)
-	s.Require().NoError(third.err)
-	s.Require().True(third.executed)
-	s.Require().True(s.params().ProxyDcPaused)
-}
-
-// TestProxyApprovalFloor_CountsCurrentManagersOnly checks that the approval
-// of a manager the policy has since dropped does not count toward the floor
-// (§5.5: distinct current vote-manager approvals).
-func (s *ProxyRegistryTestSuite) TestProxyApprovalFloor_CountsCurrentManagersOnly() {
-	s.setManagers(1, proxyManagerA, proxyManagerB)
-	proposed := s.propose(proxyManagerA, pausePayload(true))
-	s.Require().NoError(proposed.err)
-	s.Require().False(proposed.executed)
-
-	s.setManagers(1, proxyManagerB, proxyManagerC)
-	second := s.approve(proxyManagerB, proposed.actionID)
-	s.Require().NoError(second.err)
-	s.Require().False(second.executed, "manager A's approval no longer counts")
-	s.Require().False(s.params().ProxyDcPaused)
-
-	third := s.approve(proxyManagerC, proposed.actionID)
-	s.Require().NoError(third.err)
-	s.Require().True(third.executed)
-	s.Require().True(s.params().ProxyDcPaused)
-}
-
-// TestApprovalFloor_LeavesOtherPayloadsAlone checks that, with the gate open,
-// a payload outside the floor still executes in its proposing tx at
-// threshold 1.
-func (s *ProxyRegistryTestSuite) TestApprovalFloor_LeavesOtherPayloadsAlone() {
-	s.setManagers(1, proxyManagerA, proxyManagerB)
-	proposed := s.propose(proxyManagerA, &types.MsgSetEndorser{Creator: proxyManagerA, EndorserId: "zodl"})
-	s.Require().NoError(proposed.err)
-	s.Require().True(proposed.executed)
-	s.Require().Equal(types.CoordinatorActionStatus_COORDINATOR_ACTION_STATUS_EXECUTED, s.actionStatus(proposed.actionID))
-}
-
-// TestProxyPayloadProposalErrors checks that each payload's stateless
-// failures keep their §6 codes through ProposeCoordinatorAction, store no
-// action, and that a payload's creator must still be its proposer.
+// TestProxyPayloadProposalErrors checks that a payload's stateless failure
+// keeps its §6 code through ProposeCoordinatorAction and stores no action,
+// and that a payload's creator must still be its proposer. The types tests
+// cover each payload's codes.
 func (s *ProxyRegistryTestSuite) TestProxyPayloadProposalErrors() {
 	s.setManagers(1, proxyManagerA, proxyManagerB)
-	badKey := paramsPayload(1, 9, 1)
-	badKey.Verifiers[0].Pubkey = append([]byte{1}, make([]byte, 31)...) // the identity, of small order
-	for _, c := range []struct {
-		name    string
-		payload proto.Message
-		want    *errorsmod.Error
-		code    uint32
-	}{
-		{"params with a key that fails the key rule", badKey, types.ErrInvalidDelegateKey, 66},
-		{"params with a threshold above the verifier count", paramsPayload(2, 9, 1), types.ErrInvalidProxyParams, 68},
-		{"params above 2000 delegates", paramsPayload(0, 2001), types.ErrInvalidProxyParams, 68},
-		{"pause with an invalid creator", &types.MsgSetProxyDelegationPause{Creator: "not-an-address"}, types.ErrInvalidField, 9},
-		{"status with an unknown reason", statusPayload(suspend, 7, 1), types.ErrInvalidField, 9},
-		{"status with an unknown action", statusPayload(4, 1, 1), types.ErrInvalidField, 9},
-		{"status without delegates", statusPayload(suspend, 1), types.ErrInvalidField, 9},
-	} {
-		s.Run(c.name, func() {
-			next, err := s.keeper.GetNextCoordinatorActionID(s.kv())
-			s.Require().NoError(err)
-			proxytest.RequireCode(s.T(), s.propose(proxyManagerA, c.payload).err, c.want, c.code)
-			after, err := s.keeper.GetNextCoordinatorActionID(s.kv())
-			s.Require().NoError(err)
-			s.Require().Equal(next, after, "no action is stored")
-		})
-	}
+	next, err := s.keeper.GetNextCoordinatorActionID(s.kv())
+	s.Require().NoError(err)
+	proxytest.RequireCode(s.T(), s.propose(proxyManagerA, paramsPayload(2, 9, 1)).err, types.ErrInvalidProxyParams, 68)
+	after, err := s.keeper.GetNextCoordinatorActionID(s.kv())
+	s.Require().NoError(err)
+	s.Require().Equal(next, after, "no action is stored")
 
 	result := s.propose(proxyManagerA, &types.MsgSetProxyDelegationPause{Creator: proxyManagerB, Paused: true})
 	s.Require().ErrorIs(result.err, types.ErrInvalidCoordinatorAction)

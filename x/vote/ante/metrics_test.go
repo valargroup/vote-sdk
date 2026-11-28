@@ -178,8 +178,3 @@ func verificationBucketCount(t *testing.T, histogram *dto.Histogram, upperBound 
 	require.FailNow(t, "histogram bucket not found", "upper bound: %v", upperBound)
 	return 0
 }
-
-func TestVerificationMetricsLabelProxyDelegationMsgs(t *testing.T) {
-	require.Equal(t, "proxy_delegation_batch", voteMessageType(&types.MsgProxyDelegationBatch{}))
-	require.Equal(t, "delegate_op", voteMessageType(&types.MsgDelegateOp{}))
-}

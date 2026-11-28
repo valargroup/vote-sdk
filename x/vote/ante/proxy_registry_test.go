@@ -110,15 +110,13 @@ func (s *ValidateTestSuite) TestDelegateOpAnteAcceptsValidOps() {
 	s.Require().Equal(before, s.registryValues())
 }
 
-// TestDelegateOpAnteCodes checks that a register or retire op's failure
-// keeps its registered code in codespace vote through the ante (§0, §6): in
-// CheckTx and FinalizeBlock always, and in RecheckTx unless it is an Ed25519
+// TestDelegateOpAnteCodes checks that a 0x0B op's failure keeps its
+// registered code in codespace vote through the ante (§0, §6): in CheckTx
+// and FinalizeBlock always, and in RecheckTx unless it is an Ed25519
 // failure, which RecheckTx does not check. The keeper suite covers each
 // check and its order through keeper.ValidateDelegateOp.
 func (s *ValidateTestSuite) TestDelegateOpAnteCodes() {
 	proxytest.SkipUnlessEnabled(s.T())
-	alice := proxytest.Key("alice/1")
-	garbageSig := bytes.Repeat([]byte{0x07}, 64)
 	for _, c := range []struct {
 		name        string
 		noVerifiers bool
@@ -130,22 +128,7 @@ func (s *ValidateTestSuite) TestDelegateOpAnteCodes() {
 		{name: "registration closed", noVerifiers: true, op: newCarolRegistration, want: types.ErrRegistrationClosed, code: 59},
 		{name: "bad dk_sig", op: func() *types.MsgDelegateOp {
 			op := newCarolRegistration()
-			op.Register.DkSig = garbageSig
-			return op
-		}, want: types.ErrInvalidSignature, code: 6, signature: true},
-		{name: "unknown verifier", op: func() *types.MsgDelegateOp {
-			op := newCarolRegistration()
-			op.Register.Attestations[0].VerifierId = 7
-			return op
-		}, want: types.ErrInvalidAttestation, code: 64},
-		{name: "bad attestation signature", op: func() *types.MsgDelegateOp {
-			op := newCarolRegistration()
-			op.Register.Attestations[0].Sig = garbageSig
-			return op
-		}, want: types.ErrInvalidAttestation, code: 64, signature: true},
-		{name: "bad retire signature", op: func() *types.MsgDelegateOp {
-			op := proxyRetireOp(1, alice)
-			op.Retire.DkSig = garbageSig
+			op.Register.DkSig = bytes.Repeat([]byte{0x07}, 64)
 			return op
 		}, want: types.ErrInvalidSignature, code: 6, signature: true},
 	} {

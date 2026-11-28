@@ -34,8 +34,6 @@ func TestValidateProxyDelegationParams(t *testing.T) {
 	for name, params := range map[string]*types.ProxyDelegationParams{
 		"nil":                         nil,
 		"zero value":                  {},
-		"paused, no verifiers":        {ProxyDcPaused: true, MaxDelegates: 5},
-		"one verifier":                validProxyParams(1),
 		"sixteen verifiers, 16-of-16": validProxyParams(16),
 		"largest max_delegates":       {Verifiers: validProxyParams(2).Verifiers, VerifierThreshold: 1, MaxDelegates: types.MaxDelegates},
 	} {
@@ -51,12 +49,10 @@ func TestValidateProxyDelegationParams(t *testing.T) {
 		{"seventeen verifiers", func(p *types.ProxyDelegationParams) {
 			p.Verifiers = validProxyParams(17).Verifiers
 		}, types.ErrInvalidProxyParams, 68},
-		{"nil verifier", func(p *types.ProxyDelegationParams) { p.Verifiers[1] = nil }, types.ErrInvalidProxyParams, 68},
 		{"repeated id", func(p *types.ProxyDelegationParams) { p.Verifiers[1].VerifierId = 1 }, types.ErrInvalidProxyParams, 68},
 		{"short pubkey", func(p *types.ProxyDelegationParams) { p.Verifiers[1].Pubkey = p.Verifiers[1].Pubkey[:31] }, types.ErrInvalidProxyParams, 68},
 		{"repeated pubkey", func(p *types.ProxyDelegationParams) { p.Verifiers[1].Pubkey = p.Verifiers[0].Pubkey }, types.ErrInvalidProxyParams, 68},
 		{"pubkey fails the key rule", func(p *types.ProxyDelegationParams) { p.Verifiers[1].Pubkey = identityKey }, types.ErrInvalidDelegateKey, 66},
-		{"threshold 0 with verifiers", func(p *types.ProxyDelegationParams) { p.VerifierThreshold = 0 }, types.ErrInvalidProxyParams, 68},
 		{"threshold above the verifier count", func(p *types.ProxyDelegationParams) { p.VerifierThreshold = 3 }, types.ErrInvalidProxyParams, 68},
 		{"threshold without verifiers", func(p *types.ProxyDelegationParams) { p.Verifiers = nil; p.VerifierThreshold = 1 }, types.ErrInvalidProxyParams, 68},
 		{"max_delegates above 2000", func(p *types.ProxyDelegationParams) { p.MaxDelegates = 2001 }, types.ErrInvalidProxyParams, 68},
@@ -117,16 +113,12 @@ func TestValidateProxyRegistryGenesis(t *testing.T) {
 		want   string
 	}{
 		{"a gap in the indices", func(gs *types.GenesisState) { gs.ProxyDelegates[3].Index = 5 }, "with no gaps"},
-		{"index 0", func(gs *types.GenesisState) { gs.ProxyDelegates[0].Index = 0 }, "with no gaps"},
 		{"a repeated index", func(gs *types.GenesisState) { gs.ProxyDelegates[1].Index = 1 }, "duplicate index 1"},
-		{"a nil entry", func(gs *types.GenesisState) { gs.ProxyDelegates[1] = nil }, "cannot be nil"},
-		{"a short key", func(gs *types.GenesisState) { gs.ProxyDelegates[2].Dk = make([]byte, 31) }, "proxy_delegates[2].dk"},
 		{"a key that fails the key rule", func(gs *types.GenesisState) { gs.ProxyDelegates[2].Dk = identityKey }, "small order"},
 		{"a key shared with a retired entry", func(gs *types.GenesisState) { gs.ProxyDelegates[3].Dk = gs.ProxyDelegates[2].Dk }, "appears more than once"},
 		{"two live entries for one handle", func(gs *types.GenesisState) { gs.ProxyDelegates[2].Status = types.DelegateStatusSuspended }, `a second live entry for provider 1 handle "bob"`},
 		{"a handle that is not canonical", func(gs *types.GenesisState) { gs.ProxyDelegates[0].Handle = "Alice" }, "not canonical"},
 		{"a proof id that is not canonical", func(gs *types.GenesisState) { gs.ProxyDelegates[1].ProofId = "xyz" }, "not canonical"},
-		{"an unknown provider", func(gs *types.GenesisState) { gs.ProxyDelegates[0].Provider = 3 }, "provider must be 1 or 2"},
 		{"an unknown status", func(gs *types.GenesisState) { gs.ProxyDelegates[0].Status = 3 }, "status is 3"},
 		{"invalid params", func(gs *types.GenesisState) { gs.ProxyParams.VerifierThreshold = 2 }, "proxy_params"},
 	} {

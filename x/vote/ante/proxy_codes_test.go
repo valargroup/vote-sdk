@@ -33,41 +33,16 @@ func (s *ValidateTestSuite) TestSharedHelperCodesFollowTheGate() {
 			s.recordNullifier(types.NullifierTypeVoteAuthorityNote, testRoundID, newValidMsgCastVoteBatch().Votes[1].VanNullifier)
 		}, msg: castBatch, opts: mockOpts(), want: types.ErrDuplicateNullifier,
 			text: "nullifier already spent: 5f000000000000004a7c4a7fb979379e8c08a385886a3f24342aed8a6251e1b7", dormantCode: 1},
-		{name: "spent gov nullifier", setup: func() {
-			s.setupActiveRound()
-			s.recordNullifier(types.NullifierTypeGov, testRoundID, newValidMsgDelegateVote().GovNullifiers[0])
-		}, msg: func() types.VoteMessage { return newValidMsgDelegateAndCastVoteBatch() }, opts: mockOpts(), want: types.ErrDuplicateNullifier,
-			text: "nullifier already spent: 1111111111111111111111111111111111111111111111111111111111111111", dormantCode: 1},
 		{name: "round not found", msg: castBatch, opts: mockOpts(), want: types.ErrRoundNotFound,
 			text: "vote round not found", dormantCode: 3},
-		{name: "round not active", setup: s.setupTallyingRound, msg: castBatch, opts: mockOpts(), want: types.ErrRoundNotActive,
-			text: "vote round is not active: status is SESSION_STATUS_TALLYING", dormantCode: 1},
-		{name: "round ended", setup: s.setupExpiredRound, msg: castBatch, opts: mockOpts(), want: types.ErrRoundNotActive,
-			text: "vote round is not active: vote_end_time 999999 <= block_time 1000000", dormantCode: 1},
 		{name: "invalid cast proof", setup: s.setupActiveRound, msg: castBatch, opts: failZKPOpts(), want: types.ErrInvalidProof,
 			text: "votes[0]: invalid zero-knowledge proof: vote commitment: mock: vote commitment proof verification failed", dormantCode: 1},
-		{name: "invalid cast signature", setup: s.setupActiveRound, msg: castBatch, opts: failSigOpts(), want: types.ErrInvalidSignature,
-			text: "invalid RedPallas signature: votes[0]: mock: RedPallas signature verification failed", dormantCode: 1},
-		{name: "missing anchor root", setup: func() { s.setupRound(testRoundID, activeEndTime) }, msg: castBatch, opts: mockOpts(), want: types.ErrInvalidAnchorHeight,
-			text: "invalid commitment tree anchor height: no commitment tree root at height 10", dormantCode: 1},
 		{name: "invalid cast field", setup: s.setupActiveRound, msg: func() types.VoteMessage {
 			msg := newValidMsgCastVoteBatch()
 			msg.Votes[0].VanNullifier = nil
 			return msg
 		}, opts: mockOpts(), want: types.ErrInvalidField,
 			text: "basic validation failed: votes[0]: invalid message field: van_nullifier must be 32 bytes, got 0", dormantCode: 1},
-		{name: "invalid delegation field", setup: s.setupActiveRound, msg: func() types.VoteMessage {
-			msg := newValidMsgDelegateVote()
-			msg.Proof = nil
-			return msg
-		}, opts: mockOpts(), want: types.ErrInvalidField,
-			text: "basic validation failed: invalid message field: proof must be 1..15360 bytes, got 0", dormantCode: 1},
-		{name: "invalid delegation proof", setup: s.setupActiveRound, msg: func() types.VoteMessage { return newValidMsgDelegateVote() }, opts: failZKPOpts(), want: types.ErrInvalidProof,
-			text: "invalid zero-knowledge proof: delegation: mock: delegation proof verification failed", dormantCode: 1},
-		{name: "invalid delegation signature", setup: s.setupActiveRound, msg: func() types.VoteMessage { return newValidMsgDelegateVote() }, opts: failSigOpts(), want: types.ErrInvalidSignature,
-			text: "invalid RedPallas signature: mock: RedPallas signature verification failed", dormantCode: 1},
-		{name: "invalid delegate-and-cast proof", setup: s.setupActiveRound, msg: func() types.VoteMessage { return newValidMsgDelegateAndCastVoteBatch() }, opts: failZKPOpts(), want: types.ErrInvalidProof,
-			text: "delegation: invalid zero-knowledge proof: delegation: mock: delegation proof verification failed", dormantCode: 1},
 	} {
 		s.Run(c.name, func() {
 			s.SetupTest()

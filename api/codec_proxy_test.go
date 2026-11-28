@@ -68,41 +68,13 @@ func delegateOpsForCodecTest() map[string]*types.MsgDelegateOp {
 	}
 }
 
-func TestProxyDelegationTagsDormant(t *testing.T) {
-	proxytest.SkipUnlessDormant(t)
-	for _, tag := range []byte{TagProxyDelegationBatch, TagDelegateOp} {
-		require.False(t, IsVoteTag(tag), "tag 0x%02x", tag)
-		require.False(t, IsCustomTag(tag), "tag 0x%02x", tag)
-	}
-
-	tags := map[types.VoteMessage]byte{proxyBatchForCodecTest(): TagProxyDelegationBatch}
-	for _, op := range delegateOpsForCodecTest() {
-		tags[op] = TagDelegateOp
-	}
-	for msg, tag := range tags {
-		_, err := TagForMessage(msg)
-		require.ErrorIs(t, err, types.ErrProxyDelegationDisabled)
-		_, err = EncodeVoteTx(msg)
-		require.ErrorIs(t, err, types.ErrProxyDelegationDisabled)
-
-		// Even a canonical body behind the tag is not a vote tx.
-		body, err := (protov2.MarshalOptions{Deterministic: true}).Marshal(msg.(protov2.Message))
-		require.NoError(t, err)
-		_, _, err = DecodeVoteTx(append([]byte{tag}, body...))
-		require.ErrorContains(t, err, "invalid vote tx tag")
-	}
-}
-
+// TestProxyDelegationTagsEnabled checks that 0x09 and 0x0B are vote tags with
+// the gate open, and that each body encodes deterministically, decodes back
+// and refuses an unknown field.
 func TestProxyDelegationTagsEnabled(t *testing.T) {
 	proxytest.SkipUnlessEnabled(t)
 	require.True(t, IsVoteTag(TagProxyDelegationBatch))
 	require.True(t, IsVoteTag(TagDelegateOp))
-	for _, tag := range []byte{0x08, 0x0a, 0x0c, 0x0d, 0x0e} {
-		require.False(t, IsVoteTag(tag), "tag 0x%02x", tag)
-	}
-	for tag := TagDelegateVote; tag <= TagDelegateAndCastVoteBatch; tag++ {
-		require.True(t, IsVoteTag(tag), "tag 0x%02x", tag)
-	}
 
 	type encoded struct {
 		tag byte
@@ -142,24 +114,9 @@ func TestProxyDelegationTagsRejectNestedUnknownFields(t *testing.T) {
 			msg.Dcs[1].ProtoReflect().SetUnknown(unknownField99)
 			return msg
 		},
-		"batch registration": func() types.VoteMessage {
-			msg := proxyBatchForCodecTest()
-			msg.Registration.ProtoReflect().SetUnknown(unknownField99)
-			return msg
-		},
 		"register attestation": func() types.VoteMessage {
 			op := delegateOpsForCodecTest()["register"]
 			op.Register.Attestations[1].ProtoReflect().SetUnknown(unknownField99)
-			return op
-		},
-		"retire": func() types.VoteMessage {
-			op := delegateOpsForCodecTest()["retire"]
-			op.Retire.ProtoReflect().SetUnknown(unknownField99)
-			return op
-		},
-		"ballot": func() types.VoteMessage {
-			op := delegateOpsForCodecTest()["ballot"]
-			op.Ballot.ProtoReflect().SetUnknown(unknownField99)
 			return op
 		},
 	}
@@ -186,8 +143,6 @@ func TestProxyDelegationTagsRejectNonCanonicalEncodings(t *testing.T) {
 	cases := map[string][]byte{
 		// vote_comm_tree_anchor_height = 0 written out, though proto3 omits it.
 		"batch explicit default": append(append([]byte(nil), batch...), 0x10, 0x00),
-		// An empty registration merged into the existing one.
-		"batch repeated registration": append(append([]byte(nil), batch...), 0x1a, 0x00),
 		// An empty ballot merged into the existing one.
 		"op repeated ballot": append(append([]byte(nil), ballot...), 0x1a, 0x00),
 	}

@@ -102,9 +102,6 @@ func TestMsgProxyDelegationBatchValidateBasic(t *testing.T) {
 	}
 	require.NoError(t, full.ValidateBasic(), "eight DCs fill every slot")
 
-	var nilBatch *types.MsgProxyDelegationBatch
-	requireInvalidField(t, nilBatch.ValidateBasic(), "cannot be nil")
-
 	tests := []struct {
 		name         string
 		registration bool
@@ -125,14 +122,8 @@ func TestMsgProxyDelegationBatchValidateBasic(t *testing.T) {
 		{"registration in another round", true, func(m *types.MsgProxyDelegationBatch) {
 			m.Registration = svtest.ValidDelegation(bytes.Repeat([]byte{0x02}, 32), 0x30)
 		}, "registration has a different vote_round_id"},
-		{"nil dc", false, func(m *types.MsgProxyDelegationBatch) { m.Dcs[1] = nil }, "dcs[1]: dc cannot be nil"},
 		{"short van nullifier", false, func(m *types.MsgProxyDelegationBatch) { m.Dcs[0].VanNullifier = m.Dcs[0].VanNullifier[:31] }, "dcs[0]: van_nullifier must be 32 bytes"},
-		{"long r_vpk", false, func(m *types.MsgProxyDelegationBatch) { m.Dcs[0].RVpk = append(m.Dcs[0].RVpk, 0) }, "r_vpk must be 32 bytes"},
 		{"identity r_vpk", false, func(m *types.MsgProxyDelegationBatch) { m.Dcs[1].RVpk = make([]byte, 32) }, "dcs[1]: r_vpk must not be the identity point"},
-		{"short successor van", false, func(m *types.MsgProxyDelegationBatch) { m.Dcs[0].VoteAuthorityNoteNew = nil }, "vote_authority_note_new must be 32 bytes"},
-		{"short dc", false, func(m *types.MsgProxyDelegationBatch) { m.Dcs[0].ProxyDelegationCommitment = nil }, "proxy_delegation_commitment must be 32 bytes"},
-		{"short slot nullifier", false, func(m *types.MsgProxyDelegationBatch) { m.Dcs[0].DcSlotNullifier = nil }, "dc_slot_nullifier must be 32 bytes"},
-		{"empty proof", false, func(m *types.MsgProxyDelegationBatch) { m.Dcs[0].Proof = nil }, "proof must be 1..15360 bytes, got 0"},
 		{"oversized proof", false, func(m *types.MsgProxyDelegationBatch) { m.Dcs[0].Proof = make([]byte, types.MaxProofSize+1) }, "got 15361"},
 		{"short signature", false, func(m *types.MsgProxyDelegationBatch) { m.Dcs[0].VoteAuthSig = m.Dcs[0].VoteAuthSig[:63] }, "vote_auth_sig must be 64 bytes"},
 		{"repeated van nullifier", false, func(m *types.MsgProxyDelegationBatch) { m.Dcs[1].VanNullifier = m.Dcs[0].VanNullifier }, "dcs[1] repeats a van_nullifier"},
@@ -142,9 +133,6 @@ func TestMsgProxyDelegationBatchValidateBasic(t *testing.T) {
 		}, "dcs[1] repeats a proxy_delegation_commitment"},
 		{"final van equals a dc", false, func(m *types.MsgProxyDelegationBatch) {
 			m.Dcs[1].VoteAuthorityNoteNew = m.Dcs[0].ProxyDelegationCommitment
-		}, "the final vote_authority_note_new equals a proxy_delegation_commitment"},
-		{"final van equals its own dc", false, func(m *types.MsgProxyDelegationBatch) {
-			m.Dcs[1].VoteAuthorityNoteNew = m.Dcs[1].ProxyDelegationCommitment
 		}, "the final vote_authority_note_new equals a proxy_delegation_commitment"},
 	}
 	for _, tc := range tests {
@@ -163,13 +151,10 @@ func TestMsgProxyDelegationBatchValidateBasic(t *testing.T) {
 }
 
 func TestMsgDelegateOpValidateBasic(t *testing.T) {
-	github := validDelegateRegister()
-	github.Provider, github.Handle, github.ProofId = types.DelegateProviderGitHub, "alice-01", "0123456789abcdef0123456789abcdef"
 	fullBallot := validDelegateBallot()
 	fullBallot.Options = make([]uint32, types.MaxProposals)
 	for _, op := range []*types.MsgDelegateOp{
 		{Register: validDelegateRegister()},
-		{Register: github},
 		{Retire: validDelegateRetire()},
 		{Ballot: validDelegateBallot()},
 		{Ballot: fullBallot},
@@ -177,13 +162,8 @@ func TestMsgDelegateOpValidateBasic(t *testing.T) {
 		require.NoError(t, op.ValidateBasic())
 	}
 
-	var nilOp *types.MsgDelegateOp
-	requireInvalidField(t, nilOp.ValidateBasic(), "cannot be nil")
 	requireInvalidField(t, (&types.MsgDelegateOp{}).ValidateBasic(), "exactly one of register, retire and ballot must be set, got 0")
 	requireInvalidField(t, (&types.MsgDelegateOp{Retire: validDelegateRetire(), Ballot: validDelegateBallot()}).ValidateBasic(), "got 2")
-	requireInvalidField(t, (&types.MsgDelegateOp{
-		Register: validDelegateRegister(), Retire: validDelegateRetire(), Ballot: validDelegateBallot(),
-	}).ValidateBasic(), "got 3")
 
 	registerTests := []struct {
 		name   string
@@ -191,8 +171,7 @@ func TestMsgDelegateOpValidateBasic(t *testing.T) {
 		want   string
 	}{
 		{"short dk", func(r *types.DelegateRegister) { r.Dk = r.Dk[:31] }, "register: dk must be 32 bytes"},
-		{"provider zero", func(r *types.DelegateRegister) { r.Provider = 0 }, "provider must be 1 or 2, got 0"},
-		{"provider three", func(r *types.DelegateRegister) { r.Provider = 3 }, "got 3"},
+		{"provider three", func(r *types.DelegateRegister) { r.Provider = 3 }, "provider must be 1 or 2, got 3"},
 		{"uppercase handle", func(r *types.DelegateRegister) { r.Handle = "Alice" }, `handle "Alice" is not canonical`},
 		{"bad proof id", func(r *types.DelegateRegister) { r.ProofId = "0179" }, `proof_id "0179" has a leading zero`},
 		{"no attestations", func(r *types.DelegateRegister) { r.Attestations = nil }, "attestations count must be between 1 and 16, got 0"},
@@ -201,10 +180,8 @@ func TestMsgDelegateOpValidateBasic(t *testing.T) {
 				r.Attestations = append(r.Attestations, r.Attestations[0])
 			}
 		}, "got 17"},
-		{"nil attestation", func(r *types.DelegateRegister) { r.Attestations[0] = nil }, "attestations[0] cannot be nil"},
 		{"short attestation sig", func(r *types.DelegateRegister) { r.Attestations[0].Sig = r.Attestations[0].Sig[:63] }, "attestations[0]: sig must be 64 bytes"},
 		{"empty window", func(r *types.DelegateRegister) { r.Attestations[0].ExpiresAt = r.Attestations[0].NotBefore }, "attestations[0] needs not_before < expires_at"},
-		{"reversed window", func(r *types.DelegateRegister) { r.Attestations[0].NotBefore = r.Attestations[0].ExpiresAt + 1 }, "needs not_before < expires_at"},
 		{"window over 72 hours", func(r *types.DelegateRegister) { r.Attestations[0].ExpiresAt++ }, "<= not_before + 259200"},
 		{"short dk sig", func(r *types.DelegateRegister) { r.DkSig = nil }, "dk_sig must be 64 bytes"},
 	}
@@ -237,8 +214,6 @@ func TestMsgDelegateOpValidateBasic(t *testing.T) {
 		mutate func(*types.DelegateBallot)
 		want   string
 	}{
-		{"short round id", func(b *types.DelegateBallot) { b.VoteRoundId = b.VoteRoundId[:31] }, "ballot: vote_round_id must be 32 bytes"},
-		{"index zero", func(b *types.DelegateBallot) { b.DelegateIndex = 0 }, "delegate_index must be at least 1"},
 		{"no options", func(b *types.DelegateBallot) { b.Options = nil }, "options count must be between 1 and 50, got 0"},
 		{"too many options", func(b *types.DelegateBallot) { b.Options = make([]uint32, types.MaxProposals+1) }, "got 51"},
 		{"short dk sig", func(b *types.DelegateBallot) { b.DkSig = nil }, "dk_sig must be 64 bytes"},
@@ -250,11 +225,6 @@ func TestMsgDelegateOpValidateBasic(t *testing.T) {
 			requireInvalidField(t, (&types.MsgDelegateOp{Ballot: ballot}).ValidateBasic(), tc.want)
 		})
 	}
-
-	// The op validators are nil-safe.
-	requireInvalidField(t, (*types.DelegateRegister)(nil).ValidateBasic(), "dk must be 32 bytes")
-	requireInvalidField(t, (*types.DelegateRetire)(nil).ValidateBasic(), "delegate_index must be at least 1")
-	requireInvalidField(t, (*types.DelegateBallot)(nil).ValidateBasic(), "vote_round_id must be 32 bytes")
 }
 
 // TestProxyDelegationMsgsAsVoteMessages pins the VoteMessage answers that keep

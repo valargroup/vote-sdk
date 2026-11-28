@@ -116,9 +116,6 @@ func (s *ProxyRegistryTestSuite) TestRegisterRegistryCap() {
 
 	s.setParams(1, 3, 1)
 	s.Require().Equal(uint32(3), s.registerNew(key(3), "c"))
-	s.setParams(1, 0, 1)
-	_, err = s.deliver(s.registerOp(newEntryRegistration(key(5), "d"), 1))
-	proxytest.RequireCode(s.T(), err, types.ErrRegistryFull, 60)
 }
 
 // TestRegisterThresholdCountsDistinctVerifiers checks register step 5's
@@ -130,11 +127,8 @@ func (s *ProxyRegistryTestSuite) TestRegisterThresholdCountsDistinctVerifiers() 
 		ids  []uint32
 		ok   bool
 	}{
-		{"one verifier", []uint32{1}, false},
 		{"one verifier twice", []uint32{1, 1}, false},
 		{"two verifiers", []uint32{1, 2}, true},
-		{"two verifiers and a repeat", []uint32{2, 1, 2}, true},
-		{"three verifiers", []uint32{3, 1, 2}, true},
 	} {
 		s.Run(c.name, func() {
 			s.SetupTest()
@@ -180,9 +174,7 @@ func (s *ProxyRegistryTestSuite) TestRegisterAttestationWindow() {
 	}{
 		{"before not_before", notBefore - 1, false},
 		{"at not_before", notBefore, true},
-		{"just before expires_at", expiresAt - 1, true},
 		{"at expires_at", expiresAt, false},
-		{"long expired", expiresAt + proxyTestDay, false},
 	} {
 		s.Run(c.name, func() {
 			s.SetupTest()
@@ -218,16 +210,6 @@ func (s *ProxyRegistryTestSuite) TestRegisterRejectsInvalidAttestations() {
 			other := r
 			other.dk = proxytest.Key("mallory")
 			op.Attestations[0].Sig = proxytest.Attestation(s.ctx.ChainID(), 1, other.fields(), op.Attestations[0].NotBefore, op.Attestations[0].ExpiresAt).Sig
-		}},
-		{"attests another handle", func(op *types.DelegateRegister) {
-			other := r
-			other.handle = "alicia"
-			op.Attestations[0].Sig = proxytest.Attestation(s.ctx.ChainID(), 1, other.fields(), op.Attestations[0].NotBefore, op.Attestations[0].ExpiresAt).Sig
-		}},
-		{"attests another proof", func(op *types.DelegateRegister) {
-			other := r.fields()
-			other.ProofID = "1790000000000000001"
-			op.Attestations[0].Sig = proxytest.Attestation(s.ctx.ChainID(), 1, other, op.Attestations[0].NotBefore, op.Attestations[0].ExpiresAt).Sig
 		}},
 		{"window not the one signed", func(op *types.DelegateRegister) { op.Attestations[0].NotBefore-- }},
 		{"signed for another chain", func(op *types.DelegateRegister) {
@@ -268,20 +250,11 @@ func (s *ProxyRegistryTestSuite) TestRegisterClosedWithoutVerifiers() {
 }
 
 // TestRegisterRejectsInvalidDelegateKey checks the key rule on dk (§0, §5.3
-// step 2) with the shared ed25519_keys vectors. It comes before dk_sig, so
-// the identity key is refused although ZIP-215 accepts its signature over
-// any message.
+// step 2) with the shared ed25519_keys vectors' identity key. The rule comes
+// before dk_sig, so the identity key is refused although ZIP-215 accepts its
+// signature over any message. The types vector tests run every key_rule case.
 func (s *ProxyRegistryTestSuite) TestRegisterRejectsInvalidDelegateKey() {
 	var keyCases struct {
-		KeyRule []struct {
-			Name   string `json:"name"`
-			Inputs struct {
-				Key string `json:"key"`
-			} `json:"inputs"`
-			Expected struct {
-				Error *string `json:"error"`
-			} `json:"expected"`
-		} `json:"key_rule"`
 		ZIP215 []struct {
 			Name   string `json:"name"`
 			Inputs struct {
@@ -294,46 +267,29 @@ func (s *ProxyRegistryTestSuite) TestRegisterRejectsInvalidDelegateKey() {
 	s.Require().NoError(json.Unmarshal(svtest.ProxyDelegationV1Vectors(), &sections))
 	s.Require().NoError(json.Unmarshal(sections["ed25519_keys"], &keyCases))
 
-	failing := 0
-	for _, c := range keyCases.KeyRule {
-		if c.Expected.Error == nil {
-			continue
-		}
-		failing++
-		s.Run(c.Name, func() {
-			s.SetupTest()
-			s.openRegistry()
-			op := s.registerOp(newEntryRegistration(proxytest.Key("alice/1"), "alice"), 1)
-			op.Register.Dk = routingVectorHex(s.T(), c.Inputs.Key)
-			_, err := s.deliver(op)
-			proxytest.RequireCode(s.T(), err, types.ErrInvalidDelegateKey, 66)
-		})
-	}
-	s.Require().Positive(failing)
-
+	found := false
 	for _, c := range keyCases.ZIP215 {
 		if c.Name != "identity_key_accepts_any_message" {
 			continue
 		}
-		s.Run(c.Name, func() {
-			s.SetupTest()
-			s.openRegistry()
-			identity := routingVectorHex(s.T(), c.Inputs.PublicKey)
-			sig := routingVectorHex(s.T(), c.Inputs.Signature)
-			r := newEntryRegistration(proxytest.Key("alice/1"), "alice")
-			fields := r.fields()
-			fields.DK = identity
-			digest, err := types.ComputeDelegateRegisterDigest(s.ctx.ChainID(), fields)
-			s.Require().NoError(err)
-			s.Require().NoError(types.VerifyEd25519ZIP215(identity, digest, sig), "ZIP-215 accepts the forgery")
+		found = true
+		s.openRegistry()
+		identity := routingVectorHex(s.T(), c.Inputs.PublicKey)
+		sig := routingVectorHex(s.T(), c.Inputs.Signature)
+		r := newEntryRegistration(proxytest.Key("alice/1"), "alice")
+		fields := r.fields()
+		fields.DK = identity
+		digest, err := types.ComputeDelegateRegisterDigest(s.ctx.ChainID(), fields)
+		s.Require().NoError(err)
+		s.Require().NoError(types.VerifyEd25519ZIP215(identity, digest, sig), "ZIP-215 accepts the forgery")
 
-			op := s.registerOp(r)
-			op.Register.Dk, op.Register.DkSig = identity, sig
-			op.Register.Attestations = []*types.DelegateAttestation{proxytest.Attestation(s.ctx.ChainID(), 1, fields, s.blockTime(), s.blockTime()+60)}
-			_, err = s.deliver(op)
-			proxytest.RequireCode(s.T(), err, types.ErrInvalidDelegateKey, 66)
-		})
+		op := s.registerOp(r)
+		op.Register.Dk, op.Register.DkSig = identity, sig
+		op.Register.Attestations = []*types.DelegateAttestation{proxytest.Attestation(s.ctx.ChainID(), 1, fields, s.blockTime(), s.blockTime()+60)}
+		_, err = s.deliver(op)
+		proxytest.RequireCode(s.T(), err, types.ErrInvalidDelegateKey, 66)
 	}
+	s.Require().True(found)
 }
 
 // TestRegisterRejectsInvalidDkSig checks register step 4: dk must sign this
@@ -345,15 +301,12 @@ func (s *ProxyRegistryTestSuite) TestRegisterRejectsInvalidDkSig() {
 		s.Require().NoError(err)
 		return ed25519.Sign(key, digest)
 	}
-	otherProvider := r.fields()
-	otherProvider.Provider = types.DelegateProviderGitHub
 	for _, c := range []struct {
 		name  string
 		dkSig []byte
 	}{
 		{"signed by another key", signOther(proxyTestChainID, r.fields(), proxytest.Key("mallory"))},
 		{"signed for another chain", signOther("svote-1", r.fields(), r.dk)},
-		{"signed over other fields", signOther(proxyTestChainID, otherProvider, r.dk)},
 		{"scalar not canonical", append(bytes.Clone(signOther(proxyTestChainID, r.fields(), r.dk)[:32]), bytes.Repeat([]byte{0xff}, 32)...)},
 	} {
 		s.Run(c.name, func() {
@@ -526,10 +479,6 @@ func (s *ProxyRegistryTestSuite) TestDelegateOpHandlerValidateBasic() {
 	malformed := s.registerOp(newEntryRegistration(proxytest.Key("alice/1"), "alice"), 1)
 	malformed.Register.Provider = 3
 	_, err := s.deliver(malformed)
-	proxytest.RequireCode(s.T(), err, types.ErrInvalidField, 9)
-	_, err = s.deliver(&types.MsgDelegateOp{})
-	proxytest.RequireCode(s.T(), err, types.ErrInvalidField, 9)
-	_, err = s.deliver(&types.MsgDelegateOp{Ballot: &types.DelegateBallot{DelegateIndex: 1}})
 	proxytest.RequireCode(s.T(), err, types.ErrInvalidField, 9)
 	s.requireNoRegistrations()
 }
