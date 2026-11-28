@@ -37,9 +37,10 @@ type MsgCreateVotingSession struct {
 	NullifierImtRoot  []byte                 `protobuf:"bytes,6,opt,name=nullifier_imt_root,json=nullifierImtRoot,proto3" json:"nullifier_imt_root,omitempty"`
 	NcRoot            []byte                 `protobuf:"bytes,7,opt,name=nc_root,json=ncRoot,proto3" json:"nc_root,omitempty"`
 	Proposals         []*Proposal            `protobuf:"bytes,8,rep,name=proposals,proto3" json:"proposals,omitempty"`
-	Description       string                 `protobuf:"bytes,9,opt,name=description,proto3" json:"description,omitempty"`                           // Human-readable round description
-	Title             string                 `protobuf:"bytes,10,opt,name=title,proto3" json:"title,omitempty"`                                      // Short human-readable round title
-	DiscussionUrl     string                 `protobuf:"bytes,11,opt,name=discussion_url,json=discussionUrl,proto3" json:"discussion_url,omitempty"` // Overall forum discussion link for the vote round
+	Description       string                 `protobuf:"bytes,9,opt,name=description,proto3" json:"description,omitempty"`                                  // Human-readable round description
+	Title             string                 `protobuf:"bytes,10,opt,name=title,proto3" json:"title,omitempty"`                                             // Short human-readable round title
+	DiscussionUrl     string                 `protobuf:"bytes,11,opt,name=discussion_url,json=discussionUrl,proto3" json:"discussion_url,omitempty"`        // Overall forum discussion link for the vote round
+	ProxyDelegation   bool                   `protobuf:"varint,12,opt,name=proxy_delegation,json=proxyDelegation,proto3" json:"proxy_delegation,omitempty"` // Proxy delegation round (contracts-v1 §2.3); raises the approval floor
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -149,6 +150,13 @@ func (x *MsgCreateVotingSession) GetDiscussionUrl() string {
 		return x.DiscussionUrl
 	}
 	return ""
+}
+
+func (x *MsgCreateVotingSession) GetProxyDelegation() bool {
+	if x != nil {
+		return x.ProxyDelegation
+	}
+	return false
 }
 
 type MsgCreateVotingSessionResponse struct {
@@ -2571,11 +2579,799 @@ func (x *MsgApproveCoordinatorActionResponse) GetExecuted() bool {
 	return false
 }
 
+// ProxyDelegationAction is one DC of a 0x09 batch.
+type ProxyDelegationAction struct {
+	state                     protoimpl.MessageState `protogen:"open.v1"`
+	VanNullifier              []byte                 `protobuf:"bytes,1,opt,name=van_nullifier,json=vanNullifier,proto3" json:"van_nullifier,omitempty"`                                          // 32
+	RVpk                      []byte                 `protobuf:"bytes,2,opt,name=r_vpk,json=rVpk,proto3" json:"r_vpk,omitempty"`                                                                  // 32, compressed, non-identity
+	VoteAuthorityNoteNew      []byte                 `protobuf:"bytes,3,opt,name=vote_authority_note_new,json=voteAuthorityNoteNew,proto3" json:"vote_authority_note_new,omitempty"`              // 32, successor VAN (W - w, MAX authority)
+	ProxyDelegationCommitment []byte                 `protobuf:"bytes,4,opt,name=proxy_delegation_commitment,json=proxyDelegationCommitment,proto3" json:"proxy_delegation_commitment,omitempty"` // 32, the DC
+	DcSlotNullifier           []byte                 `protobuf:"bytes,5,opt,name=dc_slot_nullifier,json=dcSlotNullifier,proto3" json:"dc_slot_nullifier,omitempty"`                               // 32
+	Proof                     []byte                 `protobuf:"bytes,6,opt,name=proof,proto3" json:"proof,omitempty"`                                                                            // ZKP4, 1..MaxProofSize bytes
+	VoteAuthSig               []byte                 `protobuf:"bytes,7,opt,name=vote_auth_sig,json=voteAuthSig,proto3" json:"vote_auth_sig,omitempty"`                                           // 64, RedPallas under r_vpk over D1
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
+}
+
+func (x *ProxyDelegationAction) Reset() {
+	*x = ProxyDelegationAction{}
+	mi := &file_svote_v1_tx_proto_msgTypes[46]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProxyDelegationAction) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProxyDelegationAction) ProtoMessage() {}
+
+func (x *ProxyDelegationAction) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_tx_proto_msgTypes[46]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProxyDelegationAction.ProtoReflect.Descriptor instead.
+func (*ProxyDelegationAction) Descriptor() ([]byte, []int) {
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{46}
+}
+
+func (x *ProxyDelegationAction) GetVanNullifier() []byte {
+	if x != nil {
+		return x.VanNullifier
+	}
+	return nil
+}
+
+func (x *ProxyDelegationAction) GetRVpk() []byte {
+	if x != nil {
+		return x.RVpk
+	}
+	return nil
+}
+
+func (x *ProxyDelegationAction) GetVoteAuthorityNoteNew() []byte {
+	if x != nil {
+		return x.VoteAuthorityNoteNew
+	}
+	return nil
+}
+
+func (x *ProxyDelegationAction) GetProxyDelegationCommitment() []byte {
+	if x != nil {
+		return x.ProxyDelegationCommitment
+	}
+	return nil
+}
+
+func (x *ProxyDelegationAction) GetDcSlotNullifier() []byte {
+	if x != nil {
+		return x.DcSlotNullifier
+	}
+	return nil
+}
+
+func (x *ProxyDelegationAction) GetProof() []byte {
+	if x != nil {
+		return x.Proof
+	}
+	return nil
+}
+
+func (x *ProxyDelegationAction) GetVoteAuthSig() []byte {
+	if x != nil {
+		return x.VoteAuthSig
+	}
+	return nil
+}
+
+// MsgProxyDelegationBatch, tag 0x09, carries DC batches (§2.1).
+type MsgProxyDelegationBatch struct {
+	state                    protoimpl.MessageState   `protogen:"open.v1"`
+	VoteRoundId              []byte                   `protobuf:"bytes,1,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"`                                             // 32
+	VoteCommTreeAnchorHeight uint64                   `protobuf:"varint,2,opt,name=vote_comm_tree_anchor_height,json=voteCommTreeAnchorHeight,proto3" json:"vote_comm_tree_anchor_height,omitempty"` // 0 if and only if registration is set
+	Registration             *MsgDelegateVote         `protobuf:"bytes,3,opt,name=registration,proto3" json:"registration,omitempty"`                                                                // optional ZKP1, today's message unchanged
+	Dcs                      []*ProxyDelegationAction `protobuf:"bytes,4,rep,name=dcs,proto3" json:"dcs,omitempty"`                                                                                  // 1..8
+	ExpiryHeight             uint64                   `protobuf:"varint,5,opt,name=expiry_height,json=expiryHeight,proto3" json:"expiry_height,omitempty"`                                           // rejected at or after this height
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
+}
+
+func (x *MsgProxyDelegationBatch) Reset() {
+	*x = MsgProxyDelegationBatch{}
+	mi := &file_svote_v1_tx_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgProxyDelegationBatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgProxyDelegationBatch) ProtoMessage() {}
+
+func (x *MsgProxyDelegationBatch) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_tx_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgProxyDelegationBatch.ProtoReflect.Descriptor instead.
+func (*MsgProxyDelegationBatch) Descriptor() ([]byte, []int) {
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{47}
+}
+
+func (x *MsgProxyDelegationBatch) GetVoteRoundId() []byte {
+	if x != nil {
+		return x.VoteRoundId
+	}
+	return nil
+}
+
+func (x *MsgProxyDelegationBatch) GetVoteCommTreeAnchorHeight() uint64 {
+	if x != nil {
+		return x.VoteCommTreeAnchorHeight
+	}
+	return 0
+}
+
+func (x *MsgProxyDelegationBatch) GetRegistration() *MsgDelegateVote {
+	if x != nil {
+		return x.Registration
+	}
+	return nil
+}
+
+func (x *MsgProxyDelegationBatch) GetDcs() []*ProxyDelegationAction {
+	if x != nil {
+		return x.Dcs
+	}
+	return nil
+}
+
+func (x *MsgProxyDelegationBatch) GetExpiryHeight() uint64 {
+	if x != nil {
+		return x.ExpiryHeight
+	}
+	return 0
+}
+
+type MsgProxyDelegationBatchResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	BatchDigest   []byte                 `protobuf:"bytes,1,opt,name=batch_digest,json=batchDigest,proto3" json:"batch_digest,omitempty"` // D1 with expiry_height = 0 (§4.1)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgProxyDelegationBatchResponse) Reset() {
+	*x = MsgProxyDelegationBatchResponse{}
+	mi := &file_svote_v1_tx_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgProxyDelegationBatchResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgProxyDelegationBatchResponse) ProtoMessage() {}
+
+func (x *MsgProxyDelegationBatchResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_tx_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgProxyDelegationBatchResponse.ProtoReflect.Descriptor instead.
+func (*MsgProxyDelegationBatchResponse) Descriptor() ([]byte, []int) {
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *MsgProxyDelegationBatchResponse) GetBatchDigest() []byte {
+	if x != nil {
+		return x.BatchDigest
+	}
+	return nil
+}
+
+// DelegateAttestation is one verifier's attestation of a delegate registration.
+type DelegateAttestation struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	VerifierId    uint32                 `protobuf:"varint,1,opt,name=verifier_id,json=verifierId,proto3" json:"verifier_id,omitempty"`
+	NotBefore     uint64                 `protobuf:"varint,2,opt,name=not_before,json=notBefore,proto3" json:"not_before,omitempty"` // unix seconds
+	ExpiresAt     uint64                 `protobuf:"varint,3,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"` // unix seconds, at most 72 h after not_before
+	Sig           []byte                 `protobuf:"bytes,4,opt,name=sig,proto3" json:"sig,omitempty"`                               // 64, Ed25519 over ATTEST by the verifier's params key
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DelegateAttestation) Reset() {
+	*x = DelegateAttestation{}
+	mi := &file_svote_v1_tx_proto_msgTypes[49]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DelegateAttestation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DelegateAttestation) ProtoMessage() {}
+
+func (x *DelegateAttestation) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_tx_proto_msgTypes[49]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DelegateAttestation.ProtoReflect.Descriptor instead.
+func (*DelegateAttestation) Descriptor() ([]byte, []int) {
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{49}
+}
+
+func (x *DelegateAttestation) GetVerifierId() uint32 {
+	if x != nil {
+		return x.VerifierId
+	}
+	return 0
+}
+
+func (x *DelegateAttestation) GetNotBefore() uint64 {
+	if x != nil {
+		return x.NotBefore
+	}
+	return 0
+}
+
+func (x *DelegateAttestation) GetExpiresAt() uint64 {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return 0
+}
+
+func (x *DelegateAttestation) GetSig() []byte {
+	if x != nil {
+		return x.Sig
+	}
+	return nil
+}
+
+// DelegateRegister registers a new delegate entry (§2.2).
+type DelegateRegister struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Dk            []byte                 `protobuf:"bytes,1,opt,name=dk,proto3" json:"dk,omitempty"`                          // 32, the Ed25519 delegate key
+	Provider      uint32                 `protobuf:"varint,2,opt,name=provider,proto3" json:"provider,omitempty"`             // 1 = X, 2 = GitHub
+	Handle        string                 `protobuf:"bytes,3,opt,name=handle,proto3" json:"handle,omitempty"`                  // canonical (§2.5)
+	ProofId       string                 `protobuf:"bytes,4,opt,name=proof_id,json=proofId,proto3" json:"proof_id,omitempty"` // canonical: the X post id or the gist id (§2.5)
+	Attestations  []*DelegateAttestation `protobuf:"bytes,5,rep,name=attestations,proto3" json:"attestations,omitempty"`      // 1..16
+	DkSig         []byte                 `protobuf:"bytes,6,opt,name=dk_sig,json=dkSig,proto3" json:"dk_sig,omitempty"`       // 64, Ed25519 over REGISTER by dk
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DelegateRegister) Reset() {
+	*x = DelegateRegister{}
+	mi := &file_svote_v1_tx_proto_msgTypes[50]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DelegateRegister) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DelegateRegister) ProtoMessage() {}
+
+func (x *DelegateRegister) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_tx_proto_msgTypes[50]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DelegateRegister.ProtoReflect.Descriptor instead.
+func (*DelegateRegister) Descriptor() ([]byte, []int) {
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{50}
+}
+
+func (x *DelegateRegister) GetDk() []byte {
+	if x != nil {
+		return x.Dk
+	}
+	return nil
+}
+
+func (x *DelegateRegister) GetProvider() uint32 {
+	if x != nil {
+		return x.Provider
+	}
+	return 0
+}
+
+func (x *DelegateRegister) GetHandle() string {
+	if x != nil {
+		return x.Handle
+	}
+	return ""
+}
+
+func (x *DelegateRegister) GetProofId() string {
+	if x != nil {
+		return x.ProofId
+	}
+	return ""
+}
+
+func (x *DelegateRegister) GetAttestations() []*DelegateAttestation {
+	if x != nil {
+		return x.Attestations
+	}
+	return nil
+}
+
+func (x *DelegateRegister) GetDkSig() []byte {
+	if x != nil {
+		return x.DkSig
+	}
+	return nil
+}
+
+// DelegateRetire retires a delegate entry with its own key.
+type DelegateRetire struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DelegateIndex uint32                 `protobuf:"varint,1,opt,name=delegate_index,json=delegateIndex,proto3" json:"delegate_index,omitempty"`
+	DkSig         []byte                 `protobuf:"bytes,2,opt,name=dk_sig,json=dkSig,proto3" json:"dk_sig,omitempty"` // 64, Ed25519 over RETIRE by the entry's dk
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DelegateRetire) Reset() {
+	*x = DelegateRetire{}
+	mi := &file_svote_v1_tx_proto_msgTypes[51]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DelegateRetire) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DelegateRetire) ProtoMessage() {}
+
+func (x *DelegateRetire) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_tx_proto_msgTypes[51]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DelegateRetire.ProtoReflect.Descriptor instead.
+func (*DelegateRetire) Descriptor() ([]byte, []int) {
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{51}
+}
+
+func (x *DelegateRetire) GetDelegateIndex() uint32 {
+	if x != nil {
+		return x.DelegateIndex
+	}
+	return 0
+}
+
+func (x *DelegateRetire) GetDkSig() []byte {
+	if x != nil {
+		return x.DkSig
+	}
+	return nil
+}
+
+// DelegateBallot is a delegate's one public, complete vote for a round.
+type DelegateBallot struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	VoteRoundId   []byte                 `protobuf:"bytes,1,opt,name=vote_round_id,json=voteRoundId,proto3" json:"vote_round_id,omitempty"` // 32
+	DelegateIndex uint32                 `protobuf:"varint,2,opt,name=delegate_index,json=delegateIndex,proto3" json:"delegate_index,omitempty"`
+	Options       []uint32               `protobuf:"varint,3,rep,packed,name=options,proto3" json:"options,omitempty"`  // options[i] is the choice on proposal i + 1
+	DkSig         []byte                 `protobuf:"bytes,4,opt,name=dk_sig,json=dkSig,proto3" json:"dk_sig,omitempty"` // 64, Ed25519 over BALLOT by the entry's dk
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DelegateBallot) Reset() {
+	*x = DelegateBallot{}
+	mi := &file_svote_v1_tx_proto_msgTypes[52]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DelegateBallot) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DelegateBallot) ProtoMessage() {}
+
+func (x *DelegateBallot) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_tx_proto_msgTypes[52]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DelegateBallot.ProtoReflect.Descriptor instead.
+func (*DelegateBallot) Descriptor() ([]byte, []int) {
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{52}
+}
+
+func (x *DelegateBallot) GetVoteRoundId() []byte {
+	if x != nil {
+		return x.VoteRoundId
+	}
+	return nil
+}
+
+func (x *DelegateBallot) GetDelegateIndex() uint32 {
+	if x != nil {
+		return x.DelegateIndex
+	}
+	return 0
+}
+
+func (x *DelegateBallot) GetOptions() []uint32 {
+	if x != nil {
+		return x.Options
+	}
+	return nil
+}
+
+func (x *DelegateBallot) GetDkSig() []byte {
+	if x != nil {
+		return x.DkSig
+	}
+	return nil
+}
+
+// MsgDelegateOp, tag 0x0B, carries a delegate register, retire or ballot (§2.2).
+// Exactly one of register, retire and ballot is set.
+type MsgDelegateOp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Register      *DelegateRegister      `protobuf:"bytes,1,opt,name=register,proto3" json:"register,omitempty"`
+	Retire        *DelegateRetire        `protobuf:"bytes,2,opt,name=retire,proto3" json:"retire,omitempty"`
+	Ballot        *DelegateBallot        `protobuf:"bytes,3,opt,name=ballot,proto3" json:"ballot,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgDelegateOp) Reset() {
+	*x = MsgDelegateOp{}
+	mi := &file_svote_v1_tx_proto_msgTypes[53]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgDelegateOp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgDelegateOp) ProtoMessage() {}
+
+func (x *MsgDelegateOp) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_tx_proto_msgTypes[53]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgDelegateOp.ProtoReflect.Descriptor instead.
+func (*MsgDelegateOp) Descriptor() ([]byte, []int) {
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{53}
+}
+
+func (x *MsgDelegateOp) GetRegister() *DelegateRegister {
+	if x != nil {
+		return x.Register
+	}
+	return nil
+}
+
+func (x *MsgDelegateOp) GetRetire() *DelegateRetire {
+	if x != nil {
+		return x.Retire
+	}
+	return nil
+}
+
+func (x *MsgDelegateOp) GetBallot() *DelegateBallot {
+	if x != nil {
+		return x.Ballot
+	}
+	return nil
+}
+
+type MsgDelegateOpResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DelegateIndex uint32                 `protobuf:"varint,1,opt,name=delegate_index,json=delegateIndex,proto3" json:"delegate_index,omitempty"` // the entry the op touched; for a new entry, its assigned index
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgDelegateOpResponse) Reset() {
+	*x = MsgDelegateOpResponse{}
+	mi := &file_svote_v1_tx_proto_msgTypes[54]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgDelegateOpResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgDelegateOpResponse) ProtoMessage() {}
+
+func (x *MsgDelegateOpResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_tx_proto_msgTypes[54]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgDelegateOpResponse.ProtoReflect.Descriptor instead.
+func (*MsgDelegateOpResponse) Descriptor() ([]byte, []int) {
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{54}
+}
+
+func (x *MsgDelegateOpResponse) GetDelegateIndex() uint32 {
+	if x != nil {
+		return x.DelegateIndex
+	}
+	return 0
+}
+
+// MsgSetProxyDelegationParams is a coordinator payload (§2.4). ProxyVerifier
+// is defined in types.proto.
+type MsgSetProxyDelegationParams struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Creator           string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`
+	Verifiers         []*ProxyVerifier       `protobuf:"bytes,2,rep,name=verifiers,proto3" json:"verifiers,omitempty"`                                           // 0..16; empty turns registration off
+	VerifierThreshold uint32                 `protobuf:"varint,3,opt,name=verifier_threshold,json=verifierThreshold,proto3" json:"verifier_threshold,omitempty"` // 1..len(verifiers); 0 only when verifiers is empty
+	MaxDelegates      uint32                 `protobuf:"varint,4,opt,name=max_delegates,json=maxDelegates,proto3" json:"max_delegates,omitempty"`                // 0..2000
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *MsgSetProxyDelegationParams) Reset() {
+	*x = MsgSetProxyDelegationParams{}
+	mi := &file_svote_v1_tx_proto_msgTypes[55]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgSetProxyDelegationParams) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgSetProxyDelegationParams) ProtoMessage() {}
+
+func (x *MsgSetProxyDelegationParams) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_tx_proto_msgTypes[55]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgSetProxyDelegationParams.ProtoReflect.Descriptor instead.
+func (*MsgSetProxyDelegationParams) Descriptor() ([]byte, []int) {
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{55}
+}
+
+func (x *MsgSetProxyDelegationParams) GetCreator() string {
+	if x != nil {
+		return x.Creator
+	}
+	return ""
+}
+
+func (x *MsgSetProxyDelegationParams) GetVerifiers() []*ProxyVerifier {
+	if x != nil {
+		return x.Verifiers
+	}
+	return nil
+}
+
+func (x *MsgSetProxyDelegationParams) GetVerifierThreshold() uint32 {
+	if x != nil {
+		return x.VerifierThreshold
+	}
+	return 0
+}
+
+func (x *MsgSetProxyDelegationParams) GetMaxDelegates() uint32 {
+	if x != nil {
+		return x.MaxDelegates
+	}
+	return 0
+}
+
+// MsgSetProxyDelegationPause is a coordinator payload (§2.4).
+type MsgSetProxyDelegationPause struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Creator       string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`
+	Paused        bool                   `protobuf:"varint,2,opt,name=paused,proto3" json:"paused,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgSetProxyDelegationPause) Reset() {
+	*x = MsgSetProxyDelegationPause{}
+	mi := &file_svote_v1_tx_proto_msgTypes[56]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgSetProxyDelegationPause) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgSetProxyDelegationPause) ProtoMessage() {}
+
+func (x *MsgSetProxyDelegationPause) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_tx_proto_msgTypes[56]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgSetProxyDelegationPause.ProtoReflect.Descriptor instead.
+func (*MsgSetProxyDelegationPause) Descriptor() ([]byte, []int) {
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{56}
+}
+
+func (x *MsgSetProxyDelegationPause) GetCreator() string {
+	if x != nil {
+		return x.Creator
+	}
+	return ""
+}
+
+func (x *MsgSetProxyDelegationPause) GetPaused() bool {
+	if x != nil {
+		return x.Paused
+	}
+	return false
+}
+
+// MsgSetDelegateStatus is a coordinator payload (§2.4).
+type MsgSetDelegateStatus struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Creator         string                 `protobuf:"bytes,1,opt,name=creator,proto3" json:"creator,omitempty"`
+	DelegateIndexes []uint32               `protobuf:"varint,2,rep,packed,name=delegate_indexes,json=delegateIndexes,proto3" json:"delegate_indexes,omitempty"` // 1..64, each >= 1, unique
+	Action          uint32                 `protobuf:"varint,3,opt,name=action,proto3" json:"action,omitempty"`                                                 // 1 suspend, 2 lift, 3 retire
+	Reason          uint32                 `protobuf:"varint,4,opt,name=reason,proto3" json:"reason,omitempty"`                                                 // 1 impersonation, 2 key lost or compromised, 3 legal, 4 verifier review, 99 other
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *MsgSetDelegateStatus) Reset() {
+	*x = MsgSetDelegateStatus{}
+	mi := &file_svote_v1_tx_proto_msgTypes[57]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgSetDelegateStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgSetDelegateStatus) ProtoMessage() {}
+
+func (x *MsgSetDelegateStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_svote_v1_tx_proto_msgTypes[57]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgSetDelegateStatus.ProtoReflect.Descriptor instead.
+func (*MsgSetDelegateStatus) Descriptor() ([]byte, []int) {
+	return file_svote_v1_tx_proto_rawDescGZIP(), []int{57}
+}
+
+func (x *MsgSetDelegateStatus) GetCreator() string {
+	if x != nil {
+		return x.Creator
+	}
+	return ""
+}
+
+func (x *MsgSetDelegateStatus) GetDelegateIndexes() []uint32 {
+	if x != nil {
+		return x.DelegateIndexes
+	}
+	return nil
+}
+
+func (x *MsgSetDelegateStatus) GetAction() uint32 {
+	if x != nil {
+		return x.Action
+	}
+	return 0
+}
+
+func (x *MsgSetDelegateStatus) GetReason() uint32 {
+	if x != nil {
+		return x.Reason
+	}
+	return 0
+}
+
 var File_svote_v1_tx_proto protoreflect.FileDescriptor
 
 const file_svote_v1_tx_proto_rawDesc = "" +
 	"\n" +
-	"\x11svote/v1/tx.proto\x12\bsvote.v1\x1a\x17cosmos/msg/v1/msg.proto\x1a\x19google/protobuf/any.proto\x1a\x14svote/v1/types.proto\"\xad\x03\n" +
+	"\x11svote/v1/tx.proto\x12\bsvote.v1\x1a\x17cosmos/msg/v1/msg.proto\x1a\x19google/protobuf/any.proto\x1a\x14svote/v1/types.proto\"\xd8\x03\n" +
 	"\x16MsgCreateVotingSession\x12\x18\n" +
 	"\acreator\x18\x01 \x01(\tR\acreator\x12'\n" +
 	"\x0fsnapshot_height\x18\x02 \x01(\x04R\x0esnapshotHeight\x12-\n" +
@@ -2588,7 +3384,8 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"\vdescription\x18\t \x01(\tR\vdescription\x12\x14\n" +
 	"\x05title\x18\n" +
 	" \x01(\tR\x05title\x12%\n" +
-	"\x0ediscussion_url\x18\v \x01(\tR\rdiscussionUrl\"D\n" +
+	"\x0ediscussion_url\x18\v \x01(\tR\rdiscussionUrl\x12)\n" +
+	"\x10proxy_delegation\x18\f \x01(\bR\x0fproxyDelegation\"D\n" +
 	"\x1eMsgCreateVotingSessionResponse\x12\"\n" +
 	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\"\xb5\x02\n" +
 	"\x0fMsgDelegateVote\x12\x0e\n" +
@@ -2741,7 +3538,65 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"\taction_id\x18\x02 \x01(\x04R\bactionId:\f\x82\xe7\xb0*\acreator\"^\n" +
 	"#MsgApproveCoordinatorActionResponse\x12\x1b\n" +
 	"\taction_id\x18\x01 \x01(\x04R\bactionId\x12\x1a\n" +
-	"\bexecuted\x18\x02 \x01(\bR\bexecuted2\xf4\v\n" +
+	"\bexecuted\x18\x02 \x01(\bR\bexecuted\"\xae\x02\n" +
+	"\x15ProxyDelegationAction\x12#\n" +
+	"\rvan_nullifier\x18\x01 \x01(\fR\fvanNullifier\x12\x13\n" +
+	"\x05r_vpk\x18\x02 \x01(\fR\x04rVpk\x125\n" +
+	"\x17vote_authority_note_new\x18\x03 \x01(\fR\x14voteAuthorityNoteNew\x12>\n" +
+	"\x1bproxy_delegation_commitment\x18\x04 \x01(\fR\x19proxyDelegationCommitment\x12*\n" +
+	"\x11dc_slot_nullifier\x18\x05 \x01(\fR\x0fdcSlotNullifier\x12\x14\n" +
+	"\x05proof\x18\x06 \x01(\fR\x05proof\x12\"\n" +
+	"\rvote_auth_sig\x18\a \x01(\fR\vvoteAuthSig\"\x94\x02\n" +
+	"\x17MsgProxyDelegationBatch\x12\"\n" +
+	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\x12>\n" +
+	"\x1cvote_comm_tree_anchor_height\x18\x02 \x01(\x04R\x18voteCommTreeAnchorHeight\x12=\n" +
+	"\fregistration\x18\x03 \x01(\v2\x19.svote.v1.MsgDelegateVoteR\fregistration\x121\n" +
+	"\x03dcs\x18\x04 \x03(\v2\x1f.svote.v1.ProxyDelegationActionR\x03dcs\x12#\n" +
+	"\rexpiry_height\x18\x05 \x01(\x04R\fexpiryHeight\"D\n" +
+	"\x1fMsgProxyDelegationBatchResponse\x12!\n" +
+	"\fbatch_digest\x18\x01 \x01(\fR\vbatchDigest\"\x86\x01\n" +
+	"\x13DelegateAttestation\x12\x1f\n" +
+	"\vverifier_id\x18\x01 \x01(\rR\n" +
+	"verifierId\x12\x1d\n" +
+	"\n" +
+	"not_before\x18\x02 \x01(\x04R\tnotBefore\x12\x1d\n" +
+	"\n" +
+	"expires_at\x18\x03 \x01(\x04R\texpiresAt\x12\x10\n" +
+	"\x03sig\x18\x04 \x01(\fR\x03sig\"\xcb\x01\n" +
+	"\x10DelegateRegister\x12\x0e\n" +
+	"\x02dk\x18\x01 \x01(\fR\x02dk\x12\x1a\n" +
+	"\bprovider\x18\x02 \x01(\rR\bprovider\x12\x16\n" +
+	"\x06handle\x18\x03 \x01(\tR\x06handle\x12\x19\n" +
+	"\bproof_id\x18\x04 \x01(\tR\aproofId\x12A\n" +
+	"\fattestations\x18\x05 \x03(\v2\x1d.svote.v1.DelegateAttestationR\fattestations\x12\x15\n" +
+	"\x06dk_sig\x18\x06 \x01(\fR\x05dkSig\"N\n" +
+	"\x0eDelegateRetire\x12%\n" +
+	"\x0edelegate_index\x18\x01 \x01(\rR\rdelegateIndex\x12\x15\n" +
+	"\x06dk_sig\x18\x02 \x01(\fR\x05dkSig\"\x8c\x01\n" +
+	"\x0eDelegateBallot\x12\"\n" +
+	"\rvote_round_id\x18\x01 \x01(\fR\vvoteRoundId\x12%\n" +
+	"\x0edelegate_index\x18\x02 \x01(\rR\rdelegateIndex\x12\x18\n" +
+	"\aoptions\x18\x03 \x03(\rR\aoptions\x12\x15\n" +
+	"\x06dk_sig\x18\x04 \x01(\fR\x05dkSig\"\xab\x01\n" +
+	"\rMsgDelegateOp\x126\n" +
+	"\bregister\x18\x01 \x01(\v2\x1a.svote.v1.DelegateRegisterR\bregister\x120\n" +
+	"\x06retire\x18\x02 \x01(\v2\x18.svote.v1.DelegateRetireR\x06retire\x120\n" +
+	"\x06ballot\x18\x03 \x01(\v2\x18.svote.v1.DelegateBallotR\x06ballot\">\n" +
+	"\x15MsgDelegateOpResponse\x12%\n" +
+	"\x0edelegate_index\x18\x01 \x01(\rR\rdelegateIndex\"\xc2\x01\n" +
+	"\x1bMsgSetProxyDelegationParams\x12\x18\n" +
+	"\acreator\x18\x01 \x01(\tR\acreator\x125\n" +
+	"\tverifiers\x18\x02 \x03(\v2\x17.svote.v1.ProxyVerifierR\tverifiers\x12-\n" +
+	"\x12verifier_threshold\x18\x03 \x01(\rR\x11verifierThreshold\x12#\n" +
+	"\rmax_delegates\x18\x04 \x01(\rR\fmaxDelegates\"N\n" +
+	"\x1aMsgSetProxyDelegationPause\x12\x18\n" +
+	"\acreator\x18\x01 \x01(\tR\acreator\x12\x16\n" +
+	"\x06paused\x18\x02 \x01(\bR\x06paused\"\x8b\x01\n" +
+	"\x14MsgSetDelegateStatus\x12\x18\n" +
+	"\acreator\x18\x01 \x01(\tR\acreator\x12)\n" +
+	"\x10delegate_indexes\x18\x02 \x03(\rR\x0fdelegateIndexes\x12\x16\n" +
+	"\x06action\x18\x03 \x01(\rR\x06action\x12\x16\n" +
+	"\x06reason\x18\x04 \x01(\rR\x06reason2\xa2\r\n" +
 	"\x03Msg\x12L\n" +
 	"\fDelegateVote\x12\x19.svote.v1.MsgDelegateVote\x1a!.svote.v1.MsgDelegateVoteResponse\x12@\n" +
 	"\bCastVote\x12\x15.svote.v1.MsgCastVote\x1a\x1d.svote.v1.MsgCastVoteResponse\x12O\n" +
@@ -2758,7 +3613,10 @@ const file_svote_v1_tx_proto_rawDesc = "" +
 	"\fEndorseRound\x12\x19.svote.v1.MsgEndorseRound\x1a!.svote.v1.MsgEndorseRoundResponse\x12g\n" +
 	"\x15ClearRoundEndorsement\x12\".svote.v1.MsgClearRoundEndorsement\x1a*.svote.v1.MsgClearRoundEndorsementResponse\x12p\n" +
 	"\x18ProposeCoordinatorAction\x12%.svote.v1.MsgProposeCoordinatorAction\x1a-.svote.v1.MsgProposeCoordinatorActionResponse\x12p\n" +
-	"\x18ApproveCoordinatorAction\x12%.svote.v1.MsgApproveCoordinatorAction\x1a-.svote.v1.MsgApproveCoordinatorActionResponse\x1a\x05\x80\xe7\xb0*\x01B-Z+github.com/valargroup/vote-sdk/x/vote/typesb\x06proto3"
+	"\x18ApproveCoordinatorAction\x12%.svote.v1.MsgApproveCoordinatorAction\x1a-.svote.v1.MsgApproveCoordinatorActionResponse\x12d\n" +
+	"\x14ProxyDelegationBatch\x12!.svote.v1.MsgProxyDelegationBatch\x1a).svote.v1.MsgProxyDelegationBatchResponse\x12F\n" +
+	"\n" +
+	"DelegateOp\x12\x17.svote.v1.MsgDelegateOp\x1a\x1f.svote.v1.MsgDelegateOpResponse\x1a\x05\x80\xe7\xb0*\x01B-Z+github.com/valargroup/vote-sdk/x/vote/typesb\x06proto3"
 
 var (
 	file_svote_v1_tx_proto_rawDescOnce sync.Once
@@ -2772,7 +3630,7 @@ func file_svote_v1_tx_proto_rawDescGZIP() []byte {
 	return file_svote_v1_tx_proto_rawDescData
 }
 
-var file_svote_v1_tx_proto_msgTypes = make([]protoimpl.MessageInfo, 46)
+var file_svote_v1_tx_proto_msgTypes = make([]protoimpl.MessageInfo, 58)
 var file_svote_v1_tx_proto_goTypes = []any{
 	(*MsgCreateVotingSession)(nil),                  // 0: svote.v1.MsgCreateVotingSession
 	(*MsgCreateVotingSessionResponse)(nil),          // 1: svote.v1.MsgCreateVotingSessionResponse
@@ -2820,56 +3678,80 @@ var file_svote_v1_tx_proto_goTypes = []any{
 	(*MsgProposeCoordinatorActionResponse)(nil),     // 43: svote.v1.MsgProposeCoordinatorActionResponse
 	(*MsgApproveCoordinatorAction)(nil),             // 44: svote.v1.MsgApproveCoordinatorAction
 	(*MsgApproveCoordinatorActionResponse)(nil),     // 45: svote.v1.MsgApproveCoordinatorActionResponse
-	(*Proposal)(nil),                                // 46: svote.v1.Proposal
-	(*DealerPayload)(nil),                           // 47: svote.v1.DealerPayload
-	(*anypb.Any)(nil),                               // 48: google.protobuf.Any
+	(*ProxyDelegationAction)(nil),                   // 46: svote.v1.ProxyDelegationAction
+	(*MsgProxyDelegationBatch)(nil),                 // 47: svote.v1.MsgProxyDelegationBatch
+	(*MsgProxyDelegationBatchResponse)(nil),         // 48: svote.v1.MsgProxyDelegationBatchResponse
+	(*DelegateAttestation)(nil),                     // 49: svote.v1.DelegateAttestation
+	(*DelegateRegister)(nil),                        // 50: svote.v1.DelegateRegister
+	(*DelegateRetire)(nil),                          // 51: svote.v1.DelegateRetire
+	(*DelegateBallot)(nil),                          // 52: svote.v1.DelegateBallot
+	(*MsgDelegateOp)(nil),                           // 53: svote.v1.MsgDelegateOp
+	(*MsgDelegateOpResponse)(nil),                   // 54: svote.v1.MsgDelegateOpResponse
+	(*MsgSetProxyDelegationParams)(nil),             // 55: svote.v1.MsgSetProxyDelegationParams
+	(*MsgSetProxyDelegationPause)(nil),              // 56: svote.v1.MsgSetProxyDelegationPause
+	(*MsgSetDelegateStatus)(nil),                    // 57: svote.v1.MsgSetDelegateStatus
+	(*Proposal)(nil),                                // 58: svote.v1.Proposal
+	(*DealerPayload)(nil),                           // 59: svote.v1.DealerPayload
+	(*anypb.Any)(nil),                               // 60: google.protobuf.Any
+	(*ProxyVerifier)(nil),                           // 61: svote.v1.ProxyVerifier
 }
 var file_svote_v1_tx_proto_depIdxs = []int32{
-	46, // 0: svote.v1.MsgCreateVotingSession.proposals:type_name -> svote.v1.Proposal
+	58, // 0: svote.v1.MsgCreateVotingSession.proposals:type_name -> svote.v1.Proposal
 	4,  // 1: svote.v1.MsgCastVoteBatch.votes:type_name -> svote.v1.MsgCastVote
 	2,  // 2: svote.v1.MsgDelegateAndCastVoteBatch.delegation:type_name -> svote.v1.MsgDelegateVote
 	6,  // 3: svote.v1.MsgDelegateAndCastVoteBatch.batch:type_name -> svote.v1.MsgCastVoteBatch
 	13, // 4: svote.v1.MsgSubmitTally.entries:type_name -> svote.v1.TallyEntry
-	47, // 5: svote.v1.MsgContributeDKG.payloads:type_name -> svote.v1.DealerPayload
+	59, // 5: svote.v1.MsgContributeDKG.payloads:type_name -> svote.v1.DealerPayload
 	26, // 6: svote.v1.MsgSubmitPartialDecryption.entries:type_name -> svote.v1.PartialDecryptionEntry
-	48, // 7: svote.v1.MsgProposeCoordinatorAction.payload:type_name -> google.protobuf.Any
-	2,  // 8: svote.v1.Msg.DelegateVote:input_type -> svote.v1.MsgDelegateVote
-	4,  // 9: svote.v1.Msg.CastVote:input_type -> svote.v1.MsgCastVote
-	6,  // 10: svote.v1.Msg.CastVoteBatch:input_type -> svote.v1.MsgCastVoteBatch
-	8,  // 11: svote.v1.Msg.DelegateAndCastVoteBatch:input_type -> svote.v1.MsgDelegateAndCastVoteBatch
-	10, // 12: svote.v1.Msg.RevealShare:input_type -> svote.v1.MsgRevealShare
-	12, // 13: svote.v1.Msg.SubmitTally:input_type -> svote.v1.MsgSubmitTally
-	25, // 14: svote.v1.Msg.SubmitPartialDecryption:input_type -> svote.v1.MsgSubmitPartialDecryption
-	15, // 15: svote.v1.Msg.RegisterPallasKey:input_type -> svote.v1.MsgRegisterPallasKey
-	17, // 16: svote.v1.Msg.RotatePallasKey:input_type -> svote.v1.MsgRotatePallasKey
-	19, // 17: svote.v1.Msg.ContributeDKG:input_type -> svote.v1.MsgContributeDKG
-	21, // 18: svote.v1.Msg.AckExecutiveAuthorityKey:input_type -> svote.v1.MsgAckExecutiveAuthorityKey
-	23, // 19: svote.v1.Msg.CreateValidatorWithPallasKey:input_type -> svote.v1.MsgCreateValidatorWithPallasKey
-	38, // 20: svote.v1.Msg.EndorseRound:input_type -> svote.v1.MsgEndorseRound
-	40, // 21: svote.v1.Msg.ClearRoundEndorsement:input_type -> svote.v1.MsgClearRoundEndorsement
-	42, // 22: svote.v1.Msg.ProposeCoordinatorAction:input_type -> svote.v1.MsgProposeCoordinatorAction
-	44, // 23: svote.v1.Msg.ApproveCoordinatorAction:input_type -> svote.v1.MsgApproveCoordinatorAction
-	3,  // 24: svote.v1.Msg.DelegateVote:output_type -> svote.v1.MsgDelegateVoteResponse
-	5,  // 25: svote.v1.Msg.CastVote:output_type -> svote.v1.MsgCastVoteResponse
-	7,  // 26: svote.v1.Msg.CastVoteBatch:output_type -> svote.v1.MsgCastVoteBatchResponse
-	9,  // 27: svote.v1.Msg.DelegateAndCastVoteBatch:output_type -> svote.v1.MsgDelegateAndCastVoteBatchResponse
-	11, // 28: svote.v1.Msg.RevealShare:output_type -> svote.v1.MsgRevealShareResponse
-	14, // 29: svote.v1.Msg.SubmitTally:output_type -> svote.v1.MsgSubmitTallyResponse
-	27, // 30: svote.v1.Msg.SubmitPartialDecryption:output_type -> svote.v1.MsgSubmitPartialDecryptionResponse
-	16, // 31: svote.v1.Msg.RegisterPallasKey:output_type -> svote.v1.MsgRegisterPallasKeyResponse
-	18, // 32: svote.v1.Msg.RotatePallasKey:output_type -> svote.v1.MsgRotatePallasKeyResponse
-	20, // 33: svote.v1.Msg.ContributeDKG:output_type -> svote.v1.MsgContributeDKGResponse
-	22, // 34: svote.v1.Msg.AckExecutiveAuthorityKey:output_type -> svote.v1.MsgAckExecutiveAuthorityKeyResponse
-	24, // 35: svote.v1.Msg.CreateValidatorWithPallasKey:output_type -> svote.v1.MsgCreateValidatorWithPallasKeyResponse
-	39, // 36: svote.v1.Msg.EndorseRound:output_type -> svote.v1.MsgEndorseRoundResponse
-	41, // 37: svote.v1.Msg.ClearRoundEndorsement:output_type -> svote.v1.MsgClearRoundEndorsementResponse
-	43, // 38: svote.v1.Msg.ProposeCoordinatorAction:output_type -> svote.v1.MsgProposeCoordinatorActionResponse
-	45, // 39: svote.v1.Msg.ApproveCoordinatorAction:output_type -> svote.v1.MsgApproveCoordinatorActionResponse
-	24, // [24:40] is the sub-list for method output_type
-	8,  // [8:24] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	60, // 7: svote.v1.MsgProposeCoordinatorAction.payload:type_name -> google.protobuf.Any
+	2,  // 8: svote.v1.MsgProxyDelegationBatch.registration:type_name -> svote.v1.MsgDelegateVote
+	46, // 9: svote.v1.MsgProxyDelegationBatch.dcs:type_name -> svote.v1.ProxyDelegationAction
+	49, // 10: svote.v1.DelegateRegister.attestations:type_name -> svote.v1.DelegateAttestation
+	50, // 11: svote.v1.MsgDelegateOp.register:type_name -> svote.v1.DelegateRegister
+	51, // 12: svote.v1.MsgDelegateOp.retire:type_name -> svote.v1.DelegateRetire
+	52, // 13: svote.v1.MsgDelegateOp.ballot:type_name -> svote.v1.DelegateBallot
+	61, // 14: svote.v1.MsgSetProxyDelegationParams.verifiers:type_name -> svote.v1.ProxyVerifier
+	2,  // 15: svote.v1.Msg.DelegateVote:input_type -> svote.v1.MsgDelegateVote
+	4,  // 16: svote.v1.Msg.CastVote:input_type -> svote.v1.MsgCastVote
+	6,  // 17: svote.v1.Msg.CastVoteBatch:input_type -> svote.v1.MsgCastVoteBatch
+	8,  // 18: svote.v1.Msg.DelegateAndCastVoteBatch:input_type -> svote.v1.MsgDelegateAndCastVoteBatch
+	10, // 19: svote.v1.Msg.RevealShare:input_type -> svote.v1.MsgRevealShare
+	12, // 20: svote.v1.Msg.SubmitTally:input_type -> svote.v1.MsgSubmitTally
+	25, // 21: svote.v1.Msg.SubmitPartialDecryption:input_type -> svote.v1.MsgSubmitPartialDecryption
+	15, // 22: svote.v1.Msg.RegisterPallasKey:input_type -> svote.v1.MsgRegisterPallasKey
+	17, // 23: svote.v1.Msg.RotatePallasKey:input_type -> svote.v1.MsgRotatePallasKey
+	19, // 24: svote.v1.Msg.ContributeDKG:input_type -> svote.v1.MsgContributeDKG
+	21, // 25: svote.v1.Msg.AckExecutiveAuthorityKey:input_type -> svote.v1.MsgAckExecutiveAuthorityKey
+	23, // 26: svote.v1.Msg.CreateValidatorWithPallasKey:input_type -> svote.v1.MsgCreateValidatorWithPallasKey
+	38, // 27: svote.v1.Msg.EndorseRound:input_type -> svote.v1.MsgEndorseRound
+	40, // 28: svote.v1.Msg.ClearRoundEndorsement:input_type -> svote.v1.MsgClearRoundEndorsement
+	42, // 29: svote.v1.Msg.ProposeCoordinatorAction:input_type -> svote.v1.MsgProposeCoordinatorAction
+	44, // 30: svote.v1.Msg.ApproveCoordinatorAction:input_type -> svote.v1.MsgApproveCoordinatorAction
+	47, // 31: svote.v1.Msg.ProxyDelegationBatch:input_type -> svote.v1.MsgProxyDelegationBatch
+	53, // 32: svote.v1.Msg.DelegateOp:input_type -> svote.v1.MsgDelegateOp
+	3,  // 33: svote.v1.Msg.DelegateVote:output_type -> svote.v1.MsgDelegateVoteResponse
+	5,  // 34: svote.v1.Msg.CastVote:output_type -> svote.v1.MsgCastVoteResponse
+	7,  // 35: svote.v1.Msg.CastVoteBatch:output_type -> svote.v1.MsgCastVoteBatchResponse
+	9,  // 36: svote.v1.Msg.DelegateAndCastVoteBatch:output_type -> svote.v1.MsgDelegateAndCastVoteBatchResponse
+	11, // 37: svote.v1.Msg.RevealShare:output_type -> svote.v1.MsgRevealShareResponse
+	14, // 38: svote.v1.Msg.SubmitTally:output_type -> svote.v1.MsgSubmitTallyResponse
+	27, // 39: svote.v1.Msg.SubmitPartialDecryption:output_type -> svote.v1.MsgSubmitPartialDecryptionResponse
+	16, // 40: svote.v1.Msg.RegisterPallasKey:output_type -> svote.v1.MsgRegisterPallasKeyResponse
+	18, // 41: svote.v1.Msg.RotatePallasKey:output_type -> svote.v1.MsgRotatePallasKeyResponse
+	20, // 42: svote.v1.Msg.ContributeDKG:output_type -> svote.v1.MsgContributeDKGResponse
+	22, // 43: svote.v1.Msg.AckExecutiveAuthorityKey:output_type -> svote.v1.MsgAckExecutiveAuthorityKeyResponse
+	24, // 44: svote.v1.Msg.CreateValidatorWithPallasKey:output_type -> svote.v1.MsgCreateValidatorWithPallasKeyResponse
+	39, // 45: svote.v1.Msg.EndorseRound:output_type -> svote.v1.MsgEndorseRoundResponse
+	41, // 46: svote.v1.Msg.ClearRoundEndorsement:output_type -> svote.v1.MsgClearRoundEndorsementResponse
+	43, // 47: svote.v1.Msg.ProposeCoordinatorAction:output_type -> svote.v1.MsgProposeCoordinatorActionResponse
+	45, // 48: svote.v1.Msg.ApproveCoordinatorAction:output_type -> svote.v1.MsgApproveCoordinatorActionResponse
+	48, // 49: svote.v1.Msg.ProxyDelegationBatch:output_type -> svote.v1.MsgProxyDelegationBatchResponse
+	54, // 50: svote.v1.Msg.DelegateOp:output_type -> svote.v1.MsgDelegateOpResponse
+	33, // [33:51] is the sub-list for method output_type
+	15, // [15:33] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_svote_v1_tx_proto_init() }
@@ -2884,7 +3766,7 @@ func file_svote_v1_tx_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_svote_v1_tx_proto_rawDesc), len(file_svote_v1_tx_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   46,
+			NumMessages:   58,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

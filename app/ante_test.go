@@ -99,8 +99,13 @@ func TestFutureCommitmentRootCheckTxRemainsRejected(t *testing.T) {
 
 	resp := ta.CheckTxSync(testutil.MustEncodeVoteTx(msg))
 
-	legacyErr := fmt.Errorf("%w: no commitment tree root at height %d", votetypes.ErrInvalidProof, futureAnchor)
-	expectedCodespace, expectedCode, _ := sdkerrors.ABCIInfo(legacyErr, false)
+	wantErr := fmt.Errorf("%w: no commitment tree root at height %d", votetypes.ErrInvalidProof, futureAnchor)
+	if votetypes.ProxyDelegationEnabled {
+		// With the gate open the ante surfaces the registered code
+		// (docs/proxy-delegation/contracts-v1.md §0).
+		wantErr = votetypes.ErrInvalidProof
+	}
+	expectedCodespace, expectedCode, _ := sdkerrors.ABCIInfo(wantErr, false)
 	require.Equal(t, expectedCode, resp.Code)
 	require.Equal(t, expectedCodespace, resp.Codespace)
 	require.Contains(t, resp.Log, fmt.Sprintf("no commitment tree root at height %d", futureAnchor))

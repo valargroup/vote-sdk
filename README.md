@@ -83,6 +83,11 @@ make test-halo2
 # All FFI-backed tests (Halo2 + RedPallas)
 make test-all-ffi
 
+# The same suites with the proxy delegation gate open (-tags proxyenabled),
+# which CI runs beside the default build
+make test-proxyenabled
+make test-all-ffi GO_TEST_TAGS=proxyenabled
+
 # Rust circuit unit tests
 make circuits-test
 ```

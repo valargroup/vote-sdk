@@ -8,6 +8,16 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 
 ## Unreleased
 
+- Add the proxy delegation wire types and delegate registry, dormant behind
+  `types.ProxyDelegationEnabled`, which stays false in production builds
+  (`-tags proxyenabled` opens it for tests). The contract is
+  [docs/proxy-delegation/contracts-v1.md](docs/proxy-delegation/contracts-v1.md).
+  With the gate closed every new tag, payload, query and REST route answers as
+  if it did not exist, and existing failures keep their codes. Clients may now
+  send `X-Svote-Codespace: 1` on the existing submission endpoints and
+  `/tx/{hash}` to get `codespace` in the answer; without the header the bodies
+  are unchanged.
+
 - Send less to Sentry. Helper and chain REST events are named by their route
   template, such as `/shielded-vote/v1/share-status/{roundId}/{nullifier}`,
   never the raw path, and every event drops request bodies, query strings and

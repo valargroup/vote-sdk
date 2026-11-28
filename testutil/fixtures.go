@@ -31,6 +31,37 @@ var DummyPallasPoint = elgamal.PallasGenerator().ToAffineCompressed()
 //go:embed testdata/delegation_tx1_effects_v1.json
 var delegationTX1FixtureJSON []byte
 
+//go:embed testdata/proxy_delegation_v1.json
+var proxyDelegationV1VectorsJSON []byte
+
+// ProxyDelegationV1Vectors returns a copy of vote-sdk's subset of the proxy
+// delegation client vector file (docs/proxy-delegation/contracts-v1.md §13):
+// the sections vote-sdk reads, byte for byte as zcash_voting's
+// zcash_vote_delegate/test-vectors/proxy_delegation_v1.json holds them.
+func ProxyDelegationV1Vectors() []byte {
+	return bytes.Clone(proxyDelegationV1VectorsJSON)
+}
+
+//go:embed testdata/proxy_delegation_chain_v1.json
+var proxyDelegationChainV1VectorsJSON []byte
+
+// ProxyDelegationChainV1Vectors returns a copy of the chain's proxy
+// delegation vector file, whose home is vote-sdk (contracts-v1 §13).
+func ProxyDelegationChainV1Vectors() []byte {
+	return bytes.Clone(proxyDelegationChainV1VectorsJSON)
+}
+
+//go:embed testdata/proxy_delegation_circuit_v1.json
+var proxyDelegationCircuitV1VectorsJSON []byte
+
+// ProxyDelegationCircuitV1Vectors returns a copy of vote-sdk's subset of the
+// proxy delegation circuit vectors (contracts-v1 §13): the zkp4_instance
+// section the FFI's packing test reads, byte for byte as voting-circuits'
+// test-vectors/proxy_delegation_circuit_v1.json holds it.
+func ProxyDelegationCircuitV1Vectors() []byte {
+	return bytes.Clone(proxyDelegationCircuitV1VectorsJSON)
+}
+
 var delegationTX1EffectsTemplate = func() []byte {
 	var fixture struct {
 		TX1Effects string `json:"tx1_effects"`

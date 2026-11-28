@@ -27,7 +27,9 @@ The policy is only valid when:
 - `threshold` is less than or equal to the number of coordinator addresses.
 
 With `threshold = 1`, the same action flow is still used. The proposal simply
-executes immediately because the proposer counts as the first approval.
+executes immediately because the proposer counts as the first approval. The
+proxy delegation actions are the exception: they have an approval floor (see
+[Proxy Delegation Actions](#proxy-delegation-actions)).
 
 ## How An Action Works
 
@@ -43,7 +45,8 @@ executes immediately because the proposer counts as the first approval.
 3. The proposer is counted as the first approval.
 4. Other current coordinators approve the action by action ID.
 5. When enough distinct current coordinator approvals exist, the chain executes
-   the action automatically.
+   the action automatically. That is `threshold` approvals, or
+   `max(2, threshold)` for an action under the proxy delegation approval floor.
 
 Approvals are checked against the current coordinator policy when the action is
 ready to execute. If membership changed after the action was proposed, only
@@ -63,7 +66,9 @@ These actions must go through the coordinator action flow:
 - cancel a software upgrade,
 - set, rotate, or clear an endorser mapping,
 - send funds from the shared `vote_funding` module account, including funding
-  validator setup.
+  validator setup,
+- set the proxy delegation params, pause or resume proxy delegation, and
+  suspend, reinstate or retire delegates.
 
 These coordinator-owned actions are payloads, not public `Msg` RPCs. The
 external transaction path is `propose coordinator action` and `approve
@@ -75,6 +80,35 @@ coordinator action`.
 chosen source account or denom. The payload creator must match the coordinator
 who proposes the action, and once the coordinator threshold is met the native
 `usvote` funds are sent from the `vote_funding` module account to the recipient.
+
+## Proxy Delegation Actions
+
+Three payloads manage proxy delegation (`docs/proxy-delegation/contracts-v1.md`
+sections 2.4 and 5.5). Until proxy delegation is enabled at the v1.7.0
+upgrade, the chain rejects all three payloads as unsupported.
+
+**Approval floor.** The three payloads execute only with at least
+`max(2, threshold)` distinct current coordinator approvals. They never execute inside the proposing
+transaction, even at threshold 1, so proxy delegation needs at least two vote
+managers in the coordinator policy. Other actions keep their threshold.
+
+`MsgSetProxyDelegationParams` replaces the verifier set, its threshold and
+`max_delegates`, `MsgSetProxyDelegationPause` pauses new delegation batches,
+and `MsgSetDelegateStatus` suspends, lifts or retires delegates. Their fields,
+bounds, error codes and events are in contracts-v1 sections 2.4 and 5.5.
+
+From the CLI:
+
+```bash
+svoted tx vote set-proxy-delegation-params --verifier 1:<pubkey-hex> --verifier-threshold 1 --max-delegates 2000 --from <key>
+svoted tx vote set-proxy-delegation-pause true --from <key>
+svoted tx vote set-delegate-status suspend --delegate 17 --delegate 18 --reason 1 --from <key>
+svoted tx vote set-delegate-status lift --delegate 17 --reason 4 --from <key>
+svoted tx vote set-delegate-status retire --delegate 18 --reason 2 --from <key>
+```
+
+Each command only proposes the action, which then waits for other
+coordinators to approve it with `approve-coordinator-action`.
 
 ## Actions Outside Coordinator Multisig
 
@@ -109,6 +143,9 @@ The CLI commands for coordinator-owned actions create coordinator proposals:
 - `svoted tx vote schedule-upgrade ...`
 - `svoted tx vote cancel-upgrade`
 - `svoted tx vote set-endorser ...`
+- `svoted tx vote set-proxy-delegation-params ...`
+- `svoted tx vote set-proxy-delegation-pause <true|false>`
+- `svoted tx vote set-delegate-status <suspend|lift|retire> ...`
 
 To approve a pending action from the CLI:
 

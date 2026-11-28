@@ -66,6 +66,24 @@ service Query {
 
   // ProtocolCapabilities advertises transaction features supported by this binary.
   rpc ProtocolCapabilities(QueryProtocolCapabilitiesRequest) returns (QueryProtocolCapabilitiesResponse);
+
+  // ProxyDelegates pages through the proxy delegate registry by index.
+  rpc ProxyDelegates(QueryProxyDelegatesRequest) returns (QueryProxyDelegatesResponse);
+
+  // ProxyDelegate returns one proxy delegate entry by index.
+  rpc ProxyDelegate(QueryProxyDelegateRequest) returns (QueryProxyDelegateResponse);
+
+  // ProxyDelegateByKey returns the entry a delegate key was registered to.
+  rpc ProxyDelegateByKey(QueryProxyDelegateByKeyRequest) returns (QueryProxyDelegateByKeyResponse);
+
+  // ProxyDelegateByHandle returns the live entry registered to a handle.
+  rpc ProxyDelegateByHandle(QueryProxyDelegateByHandleRequest) returns (QueryProxyDelegateByHandleResponse);
+
+  // DelegateBallots pages through a round's delegate ballots by delegate index.
+  rpc DelegateBallots(QueryDelegateBallotsRequest) returns (QueryDelegateBallotsResponse);
+
+  // ProxyDelegationParams returns the registry params and the next delegate index.
+  rpc ProxyDelegationParams(QueryProxyDelegationParamsRequest) returns (QueryProxyDelegationParamsResponse);
 }
 
 message QueryProtocolCapabilitiesRequest {}
@@ -74,6 +92,10 @@ message QueryProtocolCapabilitiesResponse {
   bool atomic_cast_vote_batch = 1;
   bool atomic_delegate_and_cast_vote_batch = 2;
   uint32 atomic_delegate_and_cast_vote_batch_wire_tag = 3;
+  // 0 = off, 1 = tags 0x09 and 0x0B with 8 DC slots per registration.
+  uint32 proxy_delegation_version = 4;
+  // Names zkp1 to zkp4.
+  repeated CircuitFingerprint circuit_fingerprints = 5;
 }
 
 message QueryCommitmentTreeRequest {
@@ -223,4 +245,70 @@ message QueryRoundOverviewRequest {}
 message QueryRoundOverviewResponse {
   repeated VoteRound current_rounds = 1;
   uint64 completed_round_count = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Proxy delegation queries (docs/proxy-delegation/contracts-v1.md §8). Pages
+// return entries or ballots with index above start_after, in ascending order;
+// next_start_after is 0 when done. limit 0 means 100; above 1000 is invalid.
+// ---------------------------------------------------------------------------
+
+// CircuitFingerprint is a circuit's verifying-key fingerprint: vk_blake2b is
+// BLAKE2b-256 of the circuit's pinned verifying key (§10).
+message CircuitFingerprint {
+  string name = 1;
+  bytes vk_blake2b = 2;
+}
+
+message QueryProxyDelegatesRequest {
+  uint32 start_after = 1;
+  uint32 limit = 2;
+}
+
+message QueryProxyDelegatesResponse {
+  repeated ProxyDelegateEntry delegates = 1;
+  uint32 next_start_after = 2;
+}
+
+message QueryProxyDelegateRequest {
+  uint32 delegate_index = 1;
+}
+
+message QueryProxyDelegateResponse {
+  ProxyDelegateEntry delegate = 1;
+}
+
+message QueryProxyDelegateByKeyRequest {
+  bytes dk = 1;
+}
+
+message QueryProxyDelegateByKeyResponse {
+  ProxyDelegateEntry delegate = 1;
+}
+
+message QueryDelegateBallotsRequest {
+  bytes vote_round_id = 1;
+  uint32 start_after = 2;
+  uint32 limit = 3;
+}
+
+message QueryDelegateBallotsResponse {
+  repeated DelegateBallotRecord ballots = 1;
+  uint32 next_start_after = 2;
+}
+
+message QueryProxyDelegationParamsRequest {}
+
+message QueryProxyDelegationParamsResponse {
+  ProxyDelegationParams params = 1;
+  uint32 next_delegate_index = 2;
+}
+
+message QueryProxyDelegateByHandleRequest {
+  uint32 provider = 1;
+  string handle = 2;
+}
+
+message QueryProxyDelegateByHandleResponse {
+  ProxyDelegateEntry delegate = 1;
 }

@@ -226,7 +226,8 @@ func buildStandardAnteHandler(options ante.HandlerOptions, voteKeeper *votekeepe
 
 // isVoteModuleMsg returns true for messages that must only be submitted via
 // the custom vote tx wire format (VoteTxWrapper). This includes:
-//   - Vote messages: authenticated by ZKP/RedPallas, not Cosmos signatures.
+//   - Vote messages: authenticated by ZKP, RedPallas or delegate-key Ed25519
+//     signatures, not Cosmos signatures.
 //   - Ceremony messages: auto-injected by PrepareProposal, authenticated by
 //     proposer identity check (ValidateProposerIsCreator).
 //
@@ -240,6 +241,8 @@ func buildStandardAnteHandler(options ante.HandlerOptions, voteKeeper *votekeepe
 func isVoteModuleMsg(msg sdk.Msg) bool {
 	switch msg.(type) {
 	case *types.MsgDelegateVote, *types.MsgCastVote, *types.MsgCastVoteBatch, *types.MsgDelegateAndCastVoteBatch, *types.MsgRevealShare:
+		return true
+	case *types.MsgProxyDelegationBatch, *types.MsgDelegateOp:
 		return true
 	case *types.MsgContributeDKG, *types.MsgAckExecutiveAuthorityKey, *types.MsgSubmitPartialDecryption, *types.MsgSubmitTally:
 		return true

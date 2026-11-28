@@ -3,7 +3,9 @@ package types
 import (
 	"encoding/binary"
 	"hash"
+	"math"
 
+	errorsmod "cosmossdk.io/errors"
 	"golang.org/x/crypto/blake2b"
 )
 
@@ -151,4 +153,30 @@ func writeU64As32(h hash.Hash, value uint64) {
 	var buf [32]byte
 	binary.LittleEndian.PutUint64(buf[:8], value)
 	h.Write(buf[:])
+}
+
+// writeExact32 writes b, which must be exactly 32 bytes. Unlike write32 it
+// never pads or truncates; any other length is ErrInvalidField naming field.
+func writeExact32(h hash.Hash, field string, b []byte) error {
+	if len(b) != 32 {
+		return errorsmod.Wrapf(ErrInvalidField, "%s must be 32 bytes, got %d", field, len(b))
+	}
+	h.Write(b)
+	return nil
+}
+
+// writeU8 writes value as one raw byte.
+func writeU8(h hash.Hash, value uint8) {
+	h.Write([]byte{value})
+}
+
+// writeLP8 writes len(b) as one byte, then b. A b longer than 255 bytes is
+// ErrInvalidField naming field.
+func writeLP8(h hash.Hash, field string, b []byte) error {
+	if len(b) > math.MaxUint8 {
+		return errorsmod.Wrapf(ErrInvalidField, "%s must be at most 255 bytes, got %d", field, len(b))
+	}
+	writeU8(h, uint8(len(b)))
+	h.Write(b)
+	return nil
 }

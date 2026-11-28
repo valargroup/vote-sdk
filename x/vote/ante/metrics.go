@@ -144,6 +144,10 @@ func voteMessageType(msg types.VoteMessage) string {
 		return "reveal_share"
 	case *types.MsgSubmitTally:
 		return "submit_tally"
+	case *types.MsgProxyDelegationBatch:
+		return "proxy_delegation_batch"
+	case *types.MsgDelegateOp:
+		return "delegate_op"
 	default:
 		return "unknown"
 	}

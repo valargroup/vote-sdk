@@ -13,7 +13,8 @@ import (
 //
 //	[1 byte: msg_type_tag] [N bytes: protobuf message]
 //
-// Tags 0x02–0x07 are vote-round messages; ceremony tags are explicitly listed.
+// Tags 0x02–0x07, and 0x09 and 0x0B once proxy delegation is enabled, are
+// vote-round messages; ceremony tags are explicitly listed.
 // These tag bytes do not collide with valid Cosmos Tx protobuf encodings,
 // which start with a field tag byte (typically 0x0a for field 1,
 // length-delimited).

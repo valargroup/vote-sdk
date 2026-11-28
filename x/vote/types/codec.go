@@ -23,6 +23,14 @@ func init() {
 	gogoproto.RegisterType((*MsgCastVote)(nil), "svote.v1.MsgCastVote")
 	gogoproto.RegisterType((*MsgDelegateVote)(nil), "svote.v1.MsgDelegateVote")
 	gogoproto.RegisterType((*MsgCastVoteBatch)(nil), "svote.v1.MsgCastVoteBatch")
+
+	// Proxy delegation (docs/proxy-delegation/contracts-v1.md §1).
+	gogoproto.RegisterType((*ProxyDelegationAction)(nil), "svote.v1.ProxyDelegationAction")
+	gogoproto.RegisterType((*DelegateAttestation)(nil), "svote.v1.DelegateAttestation")
+	gogoproto.RegisterType((*DelegateRegister)(nil), "svote.v1.DelegateRegister")
+	gogoproto.RegisterType((*DelegateRetire)(nil), "svote.v1.DelegateRetire")
+	gogoproto.RegisterType((*DelegateBallot)(nil), "svote.v1.DelegateBallot")
+	gogoproto.RegisterType((*ProxyVerifier)(nil), "svote.v1.ProxyVerifier")
 }
 
 // RegisterInterfaces registers public vote transaction messages and coordinator
@@ -55,5 +63,10 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgClearRoundEndorsement{},
 		&MsgProposeCoordinatorAction{},
 		&MsgApproveCoordinatorAction{},
+		&MsgProxyDelegationBatch{},
+		&MsgDelegateOp{},
+		&MsgSetProxyDelegationParams{},
+		&MsgSetProxyDelegationPause{},
+		&MsgSetDelegateStatus{},
 	)
 }

@@ -80,10 +80,17 @@ jobs:
         run: npm run build
 
   test-unit:
-    name: Unit Tests
+    name: Unit Tests (${{ matrix.gate }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The proxy delegation gate is a build tag; run each suite with it
+        # closed (production) and open (-tags proxyenabled).
+        gate: [dormant, enabled]
     env:
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      GO_TEST_TAGS: ${{ matrix.gate == 'enabled' && 'proxyenabled' || '' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
@@ -105,11 +112,19 @@ jobs:
       - name: Run unit tests
         run: mise run test:unit
       - name: Run svoted command tests
-        run: go test -count=1 -race ./cmd/svoted/cmd/...
+        run: make test-svoted-cmd
 
   test-helper:
-    name: Helper Server Tests
+    name: Helper Server Tests (${{ matrix.gate }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The proxy delegation gate is a build tag; run each suite with it
+        # closed (production) and open (-tags proxyenabled).
+        gate: [dormant, enabled]
+    env:
+      GO_TEST_TAGS: ${{ matrix.gate == 'enabled' && 'proxyenabled' || '' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
@@ -119,10 +134,17 @@ jobs:
         run: mise run test:helper
 
   test-integration:
-    name: Integration Tests
+    name: Integration Tests (${{ matrix.gate }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The proxy delegation gate is a build tag; run each suite with it
+        # closed (production) and open (-tags proxyenabled).
+        gate: [dormant, enabled]
     env:
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      GO_TEST_TAGS: ${{ matrix.gate == 'enabled' && 'proxyenabled' || '' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
@@ -143,10 +165,17 @@ jobs:
         run: mise run test:integration
 
   test-halo2:
-    name: Halo2 ZKP Verification Tests
+    name: Halo2 ZKP Verification Tests (${{ matrix.gate }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The proxy delegation gate is a build tag; run each suite with it
+        # closed (production) and open (-tags proxyenabled).
+        gate: [dormant, enabled]
     env:
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      GO_TEST_TAGS: ${{ matrix.gate == 'enabled' && 'proxyenabled' || '' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
@@ -164,6 +193,7 @@ jobs:
       - name: Build circuits
         run: mise run build:circuits
       - name: Run Rust circuit tests
+        if: matrix.gate == 'dormant'
         run: mise run test:circuits
       - name: Run Go proof and signature verification tests
         run: mise run test:ffi

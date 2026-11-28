@@ -62,8 +62,25 @@ func (msg *MsgCreateVotingSession) ValidateBasic() error {
 	return nil
 }
 
+// gatedBasicError returns err, a failed stateless check of an existing vote
+// message. With the gate open it surfaces the registered code, since BaseApp
+// runs ValidateBasic before the vote ante, which surfaces every other code
+// (docs/proxy-delegation/contracts-v1.md §0). While dormant err is
+// unchanged and reports code 1.
+func gatedBasicError(err error) error {
+	if ProxyDelegationEnabled {
+		return SurfaceRegisteredCode(err)
+	}
+	return err
+}
+
 // ValidateBasic performs stateless validation for MsgDelegateVote.
 func (msg *MsgDelegateVote) ValidateBasic() error {
+	return gatedBasicError(msg.validateBasic())
+}
+
+// validateBasic runs MsgDelegateVote's stateless checks.
+func (msg *MsgDelegateVote) validateBasic() error {
 	if len(msg.Rk) != 32 {
 		return fmt.Errorf("%w: rk must be 32 bytes, got %d", ErrInvalidField, len(msg.Rk))
 	}
@@ -118,7 +135,7 @@ func (msg *MsgDelegateVote) ValidateBasic() error {
 
 // ValidateBasic performs stateless validation for MsgCastVote.
 func (msg *MsgCastVote) ValidateBasic() error {
-	return msg.validateBasic(false)
+	return gatedBasicError(msg.validateBasic(false))
 }
 
 // validateBasic permits the zero anchor only for a cast nested in
@@ -161,7 +178,7 @@ func (msg *MsgCastVote) validateBasic(allowSyntheticAnchor bool) error {
 
 // ValidateBasic performs stateless validation for MsgCastVoteBatch.
 func (msg *MsgCastVoteBatch) ValidateBasic() error {
-	return msg.validateBasic(false)
+	return gatedBasicError(msg.validateBasic(false))
 }
 
 func (msg *MsgCastVoteBatch) validateBasic(allowSyntheticAnchor bool) error {
@@ -211,13 +228,18 @@ func (msg *MsgCastVoteBatch) validateBasic(allowSyntheticAnchor bool) error {
 // Every nested cast must use anchor height zero, the protocol marker meaning
 // that its first proof is anchored to SingleLeafRoot(delegation.van_cmx).
 func (msg *MsgDelegateAndCastVoteBatch) ValidateBasic() error {
+	return gatedBasicError(msg.validateBasic())
+}
+
+// validateBasic runs MsgDelegateAndCastVoteBatch's stateless checks.
+func (msg *MsgDelegateAndCastVoteBatch) validateBasic() error {
 	if msg == nil || msg.Delegation == nil {
 		return fmt.Errorf("%w: delegation cannot be nil", ErrInvalidField)
 	}
 	if msg.Batch == nil {
 		return fmt.Errorf("%w: batch cannot be nil", ErrInvalidField)
 	}
-	if err := msg.Delegation.ValidateBasic(); err != nil {
+	if err := msg.Delegation.validateBasic(); err != nil {
 		return fmt.Errorf("delegation: %w", err)
 	}
 	if err := msg.Batch.validateBasic(true); err != nil {
@@ -234,8 +256,14 @@ func (msg *MsgDelegateAndCastVoteBatch) ValidateBasic() error {
 	return nil
 }
 
-// ValidateBasic performs stateless validation for MsgRevealShare.
+// ValidateBasic performs stateless validation for MsgRevealShare. With the
+// gate open it surfaces registered codes (gatedBasicError).
 func (msg *MsgRevealShare) ValidateBasic() error {
+	return gatedBasicError(msg.validateBasic())
+}
+
+// validateBasic runs ValidateBasic's checks without surfacing codes.
+func (msg *MsgRevealShare) validateBasic() error {
 	if len(msg.ShareNullifier) != 32 {
 		return fmt.Errorf("%w: share_nullifier must be 32 bytes, got %d", ErrInvalidField, len(msg.ShareNullifier))
 	}
@@ -288,6 +316,11 @@ type VoteMessage interface {
 
 // ValidateBasic performs stateless validation for MsgSubmitTally.
 func (msg *MsgSubmitTally) ValidateBasic() error {
+	return gatedBasicError(msg.validateBasic())
+}
+
+// validateBasic runs MsgSubmitTally's stateless checks.
+func (msg *MsgSubmitTally) validateBasic() error {
 	if len(msg.VoteRoundId) != RoundIDLen {
 		return fmt.Errorf("%w: vote_round_id must be exactly %d bytes, got %d", ErrInvalidField, RoundIDLen, len(msg.VoteRoundId))
 	}

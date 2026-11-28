@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	errorsmod "cosmossdk.io/errors"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -16,25 +17,32 @@ import (
 const coordinatorActionTTLSeconds uint64 = 7 * 24 * 60 * 60
 
 var coordinatorActionPayloadTypes = struct {
-	createVotingSession string
-	updateVoteManagers  string
-	scheduleUpgrade     string
-	cancelUpgrade       string
-	setEndorser         string
-	authorizedSend      string
+	createVotingSession      string
+	updateVoteManagers       string
+	scheduleUpgrade          string
+	cancelUpgrade            string
+	setEndorser              string
+	authorizedSend           string
+	setProxyDelegationParams string
+	setProxyDelegationPause  string
+	setDelegateStatus        string
 }{
-	createVotingSession: payloadMessageTypeName(&types.MsgCreateVotingSession{}),
-	updateVoteManagers:  payloadMessageTypeName(&types.MsgUpdateVoteManagers{}),
-	scheduleUpgrade:     payloadMessageTypeName(&types.MsgScheduleUpgrade{}),
-	cancelUpgrade:       payloadMessageTypeName(&types.MsgCancelUpgrade{}),
-	setEndorser:         payloadMessageTypeName(&types.MsgSetEndorser{}),
-	authorizedSend:      payloadMessageTypeName(&types.MsgAuthorizedSend{}),
+	createVotingSession:      payloadMessageTypeName(&types.MsgCreateVotingSession{}),
+	updateVoteManagers:       payloadMessageTypeName(&types.MsgUpdateVoteManagers{}),
+	scheduleUpgrade:          payloadMessageTypeName(&types.MsgScheduleUpgrade{}),
+	cancelUpgrade:            payloadMessageTypeName(&types.MsgCancelUpgrade{}),
+	setEndorser:              payloadMessageTypeName(&types.MsgSetEndorser{}),
+	authorizedSend:           payloadMessageTypeName(&types.MsgAuthorizedSend{}),
+	setProxyDelegationParams: payloadMessageTypeName(&types.MsgSetProxyDelegationParams{}),
+	setProxyDelegationPause:  payloadMessageTypeName(&types.MsgSetProxyDelegationPause{}),
+	setDelegateStatus:        payloadMessageTypeName(&types.MsgSetDelegateStatus{}),
 }
 
 // ProposeCoordinatorAction validates and stores a coordinator action. The
 // proposer is recorded as the first approval, so threshold 1 actions execute in
-// this transaction. The response Executed field is true only when execution
-// happened before this method returned.
+// this transaction, except under the proxy approval floor (see
+// maybeExecuteCoordinatorAction). The response Executed field is true only when
+// execution happened before this method returned.
 func (ms msgServer) ProposeCoordinatorAction(goCtx context.Context, msg *types.MsgProposeCoordinatorAction) (*types.MsgProposeCoordinatorActionResponse, error) {
 	if err := msg.ValidateBasic(); err != nil {
 		return nil, err
@@ -157,9 +165,11 @@ func (ms msgServer) ApproveCoordinatorAction(goCtx context.Context, msg *types.M
 }
 
 // maybeExecuteCoordinatorAction executes action.Payload when the action has
-// enough current coordinator approvals. It mutates action in place. The return
-// value is true only when this call executed the payload and marked the action
-// executed.
+// enough current coordinator approvals: the policy threshold, raised to
+// types.MinProxyCoordinatorApprovals for the payloads requiresProxyApprovalFloor
+// names while proxy delegation is enabled. It mutates action in place. The
+// return value is true only when this call executed the payload and marked the
+// action executed.
 func (ms msgServer) maybeExecuteCoordinatorAction(goCtx context.Context, action *types.CoordinatorAction) (bool, error) {
 	ctx := sdk.UnwrapSDKContext(goCtx)
 	if coordinatorActionExpired(ctx, action) {
@@ -173,6 +183,15 @@ func (ms msgServer) maybeExecuteCoordinatorAction(goCtx context.Context, action 
 	}
 	if count < threshold {
 		return false, nil
+	}
+	if types.ProxyDelegationEnabled && count < types.MinProxyCoordinatorApprovals {
+		floored, err := requiresProxyApprovalFloor(action.Payload)
+		if err != nil {
+			return false, err
+		}
+		if floored {
+			return false, nil
+		}
 	}
 
 	if err := ms.executeCoordinatorPayload(goCtx, action.Payload, currentApprovals); err != nil {
@@ -224,8 +243,13 @@ func (ms msgServer) currentCoordinatorApprovalCount(goCtx context.Context, appro
 // validateCoordinatorPayload checks that the proposed payload is one of the
 // coordinator controlled actions and that it is valid before an action ID is
 // allocated. For creator based messages, the embedded creator must match the
-// proposer.
+// proposer. While types.ProxyDelegationEnabled is false, the proxy delegation
+// payloads are unsupported (contracts-v1 §9). The proxy round flag is refused
+// whatever the gate, since proxy rounds are not supported yet.
 func (ms msgServer) validateCoordinatorPayload(goCtx context.Context, payload *anypb.Any, proposer string) error {
+	if !types.ProxyDelegationEnabled && isProxyDelegationPayload(payload) {
+		return errUnsupportedCoordinatorPayload(payload)
+	}
 	switch coordinatorPayloadType(payload) {
 	case coordinatorActionPayloadTypes.createVotingSession:
 		msg := &types.MsgCreateVotingSession{}
@@ -234,6 +258,9 @@ func (ms msgServer) validateCoordinatorPayload(goCtx context.Context, payload *a
 		}
 		if err := msg.ValidateBasic(); err != nil {
 			return err
+		}
+		if msg.ProxyDelegation {
+			return errProxyRoundFlag()
 		}
 		return validatePayloadCreator(msg.Creator, proposer)
 	case coordinatorActionPayloadTypes.updateVoteManagers:
@@ -281,19 +308,54 @@ func (ms msgServer) validateCoordinatorPayload(goCtx context.Context, payload *a
 			return err
 		}
 		return validatePayloadCreator(msg.Creator, proposer)
+	case coordinatorActionPayloadTypes.setProxyDelegationParams:
+		msg := &types.MsgSetProxyDelegationParams{}
+		if err := unmarshalAnyPayload(payload, msg); err != nil {
+			return err
+		}
+		if err := msg.ValidateBasic(); err != nil {
+			return err
+		}
+		return validatePayloadCreator(msg.Creator, proposer)
+	case coordinatorActionPayloadTypes.setProxyDelegationPause:
+		msg := &types.MsgSetProxyDelegationPause{}
+		if err := unmarshalAnyPayload(payload, msg); err != nil {
+			return err
+		}
+		if err := msg.ValidateBasic(); err != nil {
+			return err
+		}
+		return validatePayloadCreator(msg.Creator, proposer)
+	case coordinatorActionPayloadTypes.setDelegateStatus:
+		msg := &types.MsgSetDelegateStatus{}
+		if err := unmarshalAnyPayload(payload, msg); err != nil {
+			return err
+		}
+		if err := msg.ValidateBasic(); err != nil {
+			return err
+		}
+		return validatePayloadCreator(msg.Creator, proposer)
 	default:
-		return fmt.Errorf("%w: %s", types.ErrUnsupportedCoordinatorAction, payload.GetTypeUrl())
+		return errUnsupportedCoordinatorPayload(payload)
 	}
 }
 
 // executeCoordinatorPayload runs the already approved payload. Callers must
 // perform proposer, expiry, and threshold checks before reaching this helper.
+// While types.ProxyDelegationEnabled is false, the proxy delegation payloads
+// are unsupported and the round flag is refused, as at proposal.
 func (ms msgServer) executeCoordinatorPayload(goCtx context.Context, payload *anypb.Any, _ []string) error {
+	if !types.ProxyDelegationEnabled && isProxyDelegationPayload(payload) {
+		return errUnsupportedCoordinatorPayload(payload)
+	}
 	switch coordinatorPayloadType(payload) {
 	case coordinatorActionPayloadTypes.createVotingSession:
 		msg := &types.MsgCreateVotingSession{}
 		if err := unmarshalAnyPayload(payload, msg); err != nil {
 			return err
+		}
+		if msg.ProxyDelegation {
+			return errProxyRoundFlag()
 		}
 		_, err := ms.executeCreateVotingSession(goCtx, msg)
 		return err
@@ -332,9 +394,58 @@ func (ms msgServer) executeCoordinatorPayload(goCtx context.Context, payload *an
 		}
 		_, err := ms.executeAuthorizedSend(goCtx, msg)
 		return err
+	case coordinatorActionPayloadTypes.setProxyDelegationParams:
+		msg := &types.MsgSetProxyDelegationParams{}
+		if err := unmarshalAnyPayload(payload, msg); err != nil {
+			return err
+		}
+		return ms.executeSetProxyDelegationParams(goCtx, msg)
+	case coordinatorActionPayloadTypes.setProxyDelegationPause:
+		msg := &types.MsgSetProxyDelegationPause{}
+		if err := unmarshalAnyPayload(payload, msg); err != nil {
+			return err
+		}
+		return ms.executeSetProxyDelegationPause(goCtx, msg)
+	case coordinatorActionPayloadTypes.setDelegateStatus:
+		msg := &types.MsgSetDelegateStatus{}
+		if err := unmarshalAnyPayload(payload, msg); err != nil {
+			return err
+		}
+		return ms.executeSetDelegateStatus(goCtx, msg)
 	default:
-		return fmt.Errorf("%w: %s", types.ErrUnsupportedCoordinatorAction, payload.GetTypeUrl())
+		return errUnsupportedCoordinatorPayload(payload)
 	}
+}
+
+// errUnsupportedCoordinatorPayload is the answer to a payload type the
+// coordinator flow does not support.
+func errUnsupportedCoordinatorPayload(payload *anypb.Any) error {
+	return fmt.Errorf("%w: %s", types.ErrUnsupportedCoordinatorAction, payload.GetTypeUrl())
+}
+
+// isProxyDelegationPayload reports whether payload is one of the proxy
+// delegation coordinator payloads (contracts-v1 §2.4).
+func isProxyDelegationPayload(payload *anypb.Any) bool {
+	switch coordinatorPayloadType(payload) {
+	case coordinatorActionPayloadTypes.setProxyDelegationParams,
+		coordinatorActionPayloadTypes.setProxyDelegationPause,
+		coordinatorActionPayloadTypes.setDelegateStatus:
+		return true
+	default:
+		return false
+	}
+}
+
+// requiresProxyApprovalFloor reports whether payload is under the approval
+// floor of contracts-v1 §5.5: a proxy delegation payload.
+func requiresProxyApprovalFloor(payload *anypb.Any) (bool, error) {
+	return isProxyDelegationPayload(payload), nil
+}
+
+// errProxyRoundFlag refuses a MsgCreateVotingSession that sets
+// proxy_delegation, which is not supported yet.
+func errProxyRoundFlag() error {
+	return errorsmod.Wrap(types.ErrProxyDelegationDisabled, "proxy_delegation round flag")
 }
 
 // validatePayloadCreator binds a coordinator proposal to the signer that

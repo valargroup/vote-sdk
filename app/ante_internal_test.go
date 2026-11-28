@@ -98,3 +98,11 @@ func TestShouldCaptureVoteAnteError(t *testing.T) {
 		})
 	}
 }
+
+// TestIsVoteModuleMsg_ProxyDelegation keeps the proxy delegation Msgs out of
+// standard Cosmos transactions, which decode them (contracts-v1 §1, §9).
+func TestIsVoteModuleMsg_ProxyDelegation(t *testing.T) {
+	require.True(t, isVoteModuleMsg(&types.MsgProxyDelegationBatch{}))
+	require.True(t, isVoteModuleMsg(&types.MsgDelegateOp{}))
+	require.False(t, isVoteModuleMsg(&types.MsgProposeCoordinatorAction{}))
+}

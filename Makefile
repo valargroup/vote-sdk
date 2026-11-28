@@ -18,7 +18,7 @@ LDFLAGS := -X $(VERSION_PKG).Name=shielded-vote \
            -X $(VERSION_PKG).Commit=$(COMMIT) \
            -X "$(VERSION_PKG).BuildTags=$(BUILD_TAGS_LIST)"
 
-.PHONY: install install-ffi init init-multi init-benchmark start start-multi clean clean-all build build-ffi build-create-val-tx install-create-val-tx build-voting-config install-voting-config test-voting-config fmt lint test test-unit test-integration test-helper ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi caddy docker-build docker-testnet docker-testnet-down ui-build start-admin
+.PHONY: install install-ffi init init-multi init-benchmark start start-multi clean clean-all build build-ffi build-create-val-tx install-create-val-tx build-voting-config install-voting-config test-voting-config fmt lint test test-unit test-integration test-helper test-svoted-cmd test-proxyenabled ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi caddy docker-build docker-testnet docker-testnet-down ui-build start-admin
 
 ## install: Build and install the svoted binary to $GOPATH/bin
 install:
@@ -98,24 +98,38 @@ clean-all:
 fmt:
 	go fmt ./...
 
-## lint: Run Go vet
+# GO_TEST_TAGS adds build tags to the Go test targets below. proxyenabled
+# opens the proxy delegation gate (x/vote/types/proxy_delegation_gate*.go);
+# CI runs the suites once without it and once with it.
+GO_TEST_TAGS ?=
+
+## lint: Run Go vet with the proxy delegation gate closed and open
 lint:
 	go vet ./...
+	go vet -tags proxyenabled ./...
 
 ## test-unit: ElGamal, keeper, validation, codec, module unit tests (fast, parallel)
 test-unit:
-	go test -count=1 -race -parallel=4 ./crypto/elgamal/... ./x/vote/... ./api/...
+	go test -tags "$(GO_TEST_TAGS)" -count=1 -race -parallel=4 ./crypto/elgamal/... ./x/vote/... ./api/...
 
 ## test-integration: Full ABCI pipeline integration tests (in-process chain)
 test-integration:
-	go test -count=1 -race -timeout 5m ./app/...
+	go test -tags "$(GO_TEST_TAGS)" -count=1 -race -timeout 5m ./app/...
 
 ## test-helper: Helper server unit tests (SQLite store, API, processor)
 test-helper:
-	go test -count=1 -race ./internal/helper/... ./sentry/...
+	go test -tags "$(GO_TEST_TAGS)" -count=1 -race ./internal/helper/... ./sentry/...
+
+## test-svoted-cmd: svoted command tests
+test-svoted-cmd:
+	go test -tags "$(GO_TEST_TAGS)" -count=1 -race ./cmd/svoted/cmd/...
 
 ## test: Run all tests (Go only, no Rust dependency)
 test: test-unit test-integration test-helper test-voting-config
+
+## test-proxyenabled: Run the Go suites and svoted command tests with the proxy delegation gate open (FFI suites: make test-all-ffi GO_TEST_TAGS=proxyenabled)
+test-proxyenabled:
+	$(MAKE) test test-svoted-cmd GO_TEST_TAGS=proxyenabled
 
 ## ceremony: Register Pallas key + create round + wait for ACTIVE (per-round auto-ceremony)
 ceremony:
@@ -178,7 +192,7 @@ test-redpallas-ante: circuits
 
 ## test-all-ffi: Run all FFI-backed tests (Halo2 + RedPallas) (requires circuits)
 test-all-ffi: circuits
-	go test -tags "halo2 redpallas" -count=1 -v ./ffi/zkp/halo2/... ./ffi/redpallas/... ./ffi/tx1/... ./x/vote/ante/...
+	go test -tags "halo2 redpallas $(GO_TEST_TAGS)" -count=1 -v ./ffi/zkp/halo2/... ./ffi/redpallas/... ./ffi/tx1/... ./x/vote/ante/...
 
 # ---------------------------------------------------------------------------
 # Deployment targets

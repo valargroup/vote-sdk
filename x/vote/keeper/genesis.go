@@ -13,6 +13,12 @@ func (k *Keeper) InitGenesis(kvStore store.KVStore, genesis *types.GenesisState)
 	if genesis == nil {
 		return nil
 	}
+	// The import itself refuses proxy delegation state that breaks an
+	// invariant (docs/proxy-delegation/contracts-v1.md §9), before writing
+	// anything.
+	if err := types.ValidateProxyRegistryGenesis(genesis); err != nil {
+		return err
+	}
 
 	// Restore vote rounds.
 	for _, round := range genesis.Rounds {
@@ -161,6 +167,40 @@ func (k *Keeper) InitGenesis(kvStore store.KVStore, genesis *types.GenesisState)
 		}
 	}
 
+	return k.initProxyDelegationGenesis(kvStore, genesis)
+}
+
+// initProxyDelegationGenesis writes the validated delegate registry, which is
+// the entries and the params when set. It rebuilds
+// each entry's used-key record, each live entry's handle record, and
+// next_index as one more than the highest entry index, which stays absent,
+// reading as 1, without entries (contracts-v1 §9).
+func (k *Keeper) initProxyDelegationGenesis(kvStore store.KVStore, genesis *types.GenesisState) error {
+	next := uint32(1)
+	for _, entry := range genesis.ProxyDelegates {
+		if err := k.SetProxyDelegateEntry(kvStore, entry); err != nil {
+			return fmt.Errorf("proxy delegate %d: %w", entry.Index, err)
+		}
+		if err := k.SetProxyUsedDelegateKey(kvStore, entry.Dk, entry.Index); err != nil {
+			return fmt.Errorf("proxy delegate %d: %w", entry.Index, err)
+		}
+		if entry.Status != types.DelegateStatusRetired {
+			if err := k.SetProxyDelegateByHandle(kvStore, entry.Provider, entry.Handle, entry.Index); err != nil {
+				return fmt.Errorf("proxy delegate %d: %w", entry.Index, err)
+			}
+		}
+		next = max(next, entry.Index+1)
+	}
+	if len(genesis.ProxyDelegates) > 0 {
+		if err := k.SetProxyNextDelegateIndex(kvStore, next); err != nil {
+			return err
+		}
+	}
+	if genesis.ProxyParams != nil {
+		if err := k.SetProxyDelegationParams(kvStore, genesis.ProxyParams); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -284,7 +324,33 @@ func (k *Keeper) ExportGenesis(kvStore store.KVStore) (*types.GenesisState, erro
 	}
 	gs.PartialDecryptions = partials
 
+	if err := k.exportProxyDelegationGenesis(kvStore, gs); err != nil {
+		return nil, err
+	}
 	return gs, nil
+}
+
+// exportProxyDelegationGenesis adds the delegate registry (0x1A) to gs, which
+// is every entry and the params when set (contracts-v1 §9). The used-key and
+// handle records and next_index are not exported; import rebuilds them from
+// the entries.
+func (k *Keeper) exportProxyDelegationGenesis(kvStore store.KVStore, gs *types.GenesisState) error {
+	if err := k.IterateProxyDelegateEntries(kvStore, 0, func(entry *types.ProxyDelegateEntry) bool {
+		gs.ProxyDelegates = append(gs.ProxyDelegates, entry)
+		return false
+	}); err != nil {
+		return fmt.Errorf("export proxy delegates: %w", err)
+	}
+	hasParams, err := kvStore.Has(types.ProxyDelegationParamsKey)
+	if err != nil {
+		return fmt.Errorf("export proxy delegation params: %w", err)
+	}
+	if hasParams {
+		if gs.ProxyParams, err = k.GetProxyDelegationParams(kvStore); err != nil {
+			return fmt.Errorf("export proxy delegation params: %w", err)
+		}
+	}
+	return nil
 }
 
 // exportRoundTree exports the commitment tree data for a single round.

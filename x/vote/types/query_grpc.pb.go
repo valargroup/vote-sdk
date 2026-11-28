@@ -38,6 +38,12 @@ const (
 	Query_PendingCoordinatorActions_FullMethodName = "/svote.v1.Query/PendingCoordinatorActions"
 	Query_RoundOverview_FullMethodName             = "/svote.v1.Query/RoundOverview"
 	Query_ProtocolCapabilities_FullMethodName      = "/svote.v1.Query/ProtocolCapabilities"
+	Query_ProxyDelegates_FullMethodName            = "/svote.v1.Query/ProxyDelegates"
+	Query_ProxyDelegate_FullMethodName             = "/svote.v1.Query/ProxyDelegate"
+	Query_ProxyDelegateByKey_FullMethodName        = "/svote.v1.Query/ProxyDelegateByKey"
+	Query_ProxyDelegateByHandle_FullMethodName     = "/svote.v1.Query/ProxyDelegateByHandle"
+	Query_DelegateBallots_FullMethodName           = "/svote.v1.Query/DelegateBallots"
+	Query_ProxyDelegationParams_FullMethodName     = "/svote.v1.Query/ProxyDelegationParams"
 )
 
 // QueryClient is the client API for Query service.
@@ -87,6 +93,18 @@ type QueryClient interface {
 	RoundOverview(ctx context.Context, in *QueryRoundOverviewRequest, opts ...grpc.CallOption) (*QueryRoundOverviewResponse, error)
 	// ProtocolCapabilities advertises transaction features supported by this binary.
 	ProtocolCapabilities(ctx context.Context, in *QueryProtocolCapabilitiesRequest, opts ...grpc.CallOption) (*QueryProtocolCapabilitiesResponse, error)
+	// ProxyDelegates pages through the proxy delegate registry by index.
+	ProxyDelegates(ctx context.Context, in *QueryProxyDelegatesRequest, opts ...grpc.CallOption) (*QueryProxyDelegatesResponse, error)
+	// ProxyDelegate returns one proxy delegate entry by index.
+	ProxyDelegate(ctx context.Context, in *QueryProxyDelegateRequest, opts ...grpc.CallOption) (*QueryProxyDelegateResponse, error)
+	// ProxyDelegateByKey returns the entry a delegate key was registered to.
+	ProxyDelegateByKey(ctx context.Context, in *QueryProxyDelegateByKeyRequest, opts ...grpc.CallOption) (*QueryProxyDelegateByKeyResponse, error)
+	// ProxyDelegateByHandle returns the live entry registered to a handle.
+	ProxyDelegateByHandle(ctx context.Context, in *QueryProxyDelegateByHandleRequest, opts ...grpc.CallOption) (*QueryProxyDelegateByHandleResponse, error)
+	// DelegateBallots pages through a round's delegate ballots by delegate index.
+	DelegateBallots(ctx context.Context, in *QueryDelegateBallotsRequest, opts ...grpc.CallOption) (*QueryDelegateBallotsResponse, error)
+	// ProxyDelegationParams returns the registry params and the next delegate index.
+	ProxyDelegationParams(ctx context.Context, in *QueryProxyDelegationParamsRequest, opts ...grpc.CallOption) (*QueryProxyDelegationParamsResponse, error)
 }
 
 type queryClient struct {
@@ -287,6 +305,66 @@ func (c *queryClient) ProtocolCapabilities(ctx context.Context, in *QueryProtoco
 	return out, nil
 }
 
+func (c *queryClient) ProxyDelegates(ctx context.Context, in *QueryProxyDelegatesRequest, opts ...grpc.CallOption) (*QueryProxyDelegatesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(QueryProxyDelegatesResponse)
+	err := c.cc.Invoke(ctx, Query_ProxyDelegates_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryClient) ProxyDelegate(ctx context.Context, in *QueryProxyDelegateRequest, opts ...grpc.CallOption) (*QueryProxyDelegateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(QueryProxyDelegateResponse)
+	err := c.cc.Invoke(ctx, Query_ProxyDelegate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryClient) ProxyDelegateByKey(ctx context.Context, in *QueryProxyDelegateByKeyRequest, opts ...grpc.CallOption) (*QueryProxyDelegateByKeyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(QueryProxyDelegateByKeyResponse)
+	err := c.cc.Invoke(ctx, Query_ProxyDelegateByKey_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryClient) ProxyDelegateByHandle(ctx context.Context, in *QueryProxyDelegateByHandleRequest, opts ...grpc.CallOption) (*QueryProxyDelegateByHandleResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(QueryProxyDelegateByHandleResponse)
+	err := c.cc.Invoke(ctx, Query_ProxyDelegateByHandle_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryClient) DelegateBallots(ctx context.Context, in *QueryDelegateBallotsRequest, opts ...grpc.CallOption) (*QueryDelegateBallotsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(QueryDelegateBallotsResponse)
+	err := c.cc.Invoke(ctx, Query_DelegateBallots_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryClient) ProxyDelegationParams(ctx context.Context, in *QueryProxyDelegationParamsRequest, opts ...grpc.CallOption) (*QueryProxyDelegationParamsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(QueryProxyDelegationParamsResponse)
+	err := c.cc.Invoke(ctx, Query_ProxyDelegationParams_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // QueryServer is the server API for Query service.
 // All implementations must embed UnimplementedQueryServer
 // for forward compatibility.
@@ -334,6 +412,18 @@ type QueryServer interface {
 	RoundOverview(context.Context, *QueryRoundOverviewRequest) (*QueryRoundOverviewResponse, error)
 	// ProtocolCapabilities advertises transaction features supported by this binary.
 	ProtocolCapabilities(context.Context, *QueryProtocolCapabilitiesRequest) (*QueryProtocolCapabilitiesResponse, error)
+	// ProxyDelegates pages through the proxy delegate registry by index.
+	ProxyDelegates(context.Context, *QueryProxyDelegatesRequest) (*QueryProxyDelegatesResponse, error)
+	// ProxyDelegate returns one proxy delegate entry by index.
+	ProxyDelegate(context.Context, *QueryProxyDelegateRequest) (*QueryProxyDelegateResponse, error)
+	// ProxyDelegateByKey returns the entry a delegate key was registered to.
+	ProxyDelegateByKey(context.Context, *QueryProxyDelegateByKeyRequest) (*QueryProxyDelegateByKeyResponse, error)
+	// ProxyDelegateByHandle returns the live entry registered to a handle.
+	ProxyDelegateByHandle(context.Context, *QueryProxyDelegateByHandleRequest) (*QueryProxyDelegateByHandleResponse, error)
+	// DelegateBallots pages through a round's delegate ballots by delegate index.
+	DelegateBallots(context.Context, *QueryDelegateBallotsRequest) (*QueryDelegateBallotsResponse, error)
+	// ProxyDelegationParams returns the registry params and the next delegate index.
+	ProxyDelegationParams(context.Context, *QueryProxyDelegationParamsRequest) (*QueryProxyDelegationParamsResponse, error)
 	mustEmbedUnimplementedQueryServer()
 }
 
@@ -400,6 +490,24 @@ func (UnimplementedQueryServer) RoundOverview(context.Context, *QueryRoundOvervi
 }
 func (UnimplementedQueryServer) ProtocolCapabilities(context.Context, *QueryProtocolCapabilitiesRequest) (*QueryProtocolCapabilitiesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ProtocolCapabilities not implemented")
+}
+func (UnimplementedQueryServer) ProxyDelegates(context.Context, *QueryProxyDelegatesRequest) (*QueryProxyDelegatesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ProxyDelegates not implemented")
+}
+func (UnimplementedQueryServer) ProxyDelegate(context.Context, *QueryProxyDelegateRequest) (*QueryProxyDelegateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ProxyDelegate not implemented")
+}
+func (UnimplementedQueryServer) ProxyDelegateByKey(context.Context, *QueryProxyDelegateByKeyRequest) (*QueryProxyDelegateByKeyResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ProxyDelegateByKey not implemented")
+}
+func (UnimplementedQueryServer) ProxyDelegateByHandle(context.Context, *QueryProxyDelegateByHandleRequest) (*QueryProxyDelegateByHandleResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ProxyDelegateByHandle not implemented")
+}
+func (UnimplementedQueryServer) DelegateBallots(context.Context, *QueryDelegateBallotsRequest) (*QueryDelegateBallotsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DelegateBallots not implemented")
+}
+func (UnimplementedQueryServer) ProxyDelegationParams(context.Context, *QueryProxyDelegationParamsRequest) (*QueryProxyDelegationParamsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ProxyDelegationParams not implemented")
 }
 func (UnimplementedQueryServer) mustEmbedUnimplementedQueryServer() {}
 func (UnimplementedQueryServer) testEmbeddedByValue()               {}
@@ -764,6 +872,114 @@ func _Query_ProtocolCapabilities_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Query_ProxyDelegates_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryProxyDelegatesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).ProxyDelegates(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Query_ProxyDelegates_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).ProxyDelegates(ctx, req.(*QueryProxyDelegatesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Query_ProxyDelegate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryProxyDelegateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).ProxyDelegate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Query_ProxyDelegate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).ProxyDelegate(ctx, req.(*QueryProxyDelegateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Query_ProxyDelegateByKey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryProxyDelegateByKeyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).ProxyDelegateByKey(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Query_ProxyDelegateByKey_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).ProxyDelegateByKey(ctx, req.(*QueryProxyDelegateByKeyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Query_ProxyDelegateByHandle_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryProxyDelegateByHandleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).ProxyDelegateByHandle(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Query_ProxyDelegateByHandle_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).ProxyDelegateByHandle(ctx, req.(*QueryProxyDelegateByHandleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Query_DelegateBallots_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryDelegateBallotsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).DelegateBallots(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Query_DelegateBallots_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).DelegateBallots(ctx, req.(*QueryDelegateBallotsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Query_ProxyDelegationParams_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryProxyDelegationParamsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).ProxyDelegationParams(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Query_ProxyDelegationParams_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).ProxyDelegationParams(ctx, req.(*QueryProxyDelegationParamsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Query_ServiceDesc is the grpc.ServiceDesc for Query service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -846,6 +1062,30 @@ var Query_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ProtocolCapabilities",
 			Handler:    _Query_ProtocolCapabilities_Handler,
+		},
+		{
+			MethodName: "ProxyDelegates",
+			Handler:    _Query_ProxyDelegates_Handler,
+		},
+		{
+			MethodName: "ProxyDelegate",
+			Handler:    _Query_ProxyDelegate_Handler,
+		},
+		{
+			MethodName: "ProxyDelegateByKey",
+			Handler:    _Query_ProxyDelegateByKey_Handler,
+		},
+		{
+			MethodName: "ProxyDelegateByHandle",
+			Handler:    _Query_ProxyDelegateByHandle_Handler,
+		},
+		{
+			MethodName: "DelegateBallots",
+			Handler:    _Query_DelegateBallots_Handler,
+		},
+		{
+			MethodName: "ProxyDelegationParams",
+			Handler:    _Query_ProxyDelegationParams_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -82,7 +82,9 @@ know.
 Code 50 is `ErrClientCircuitKeyMismatch` in the `vote` module
 (`x/vote/types/errors.go`). The response has no codespace field, so a client
 tells this answer apart from a chain rejection by the code together with the
-empty `tx_hash`.
+empty `tx_hash`. A request that opts into codespace with `X-Svote-Codespace: 1`
+(proxy delegation contract §0) also gets `"codespace":"vote"`, as on every
+other answer from these routes.
 
 ## The check is API-only
 

@@ -60,6 +60,10 @@ const (
 	// cometRPCIdleConnTimeout retires pooled connections before CometBFT's
 	// default 10-second server timeout can close them underneath a new request.
 	cometRPCIdleConnTimeout = 5 * time.Second
+
+	// codespaceHeader opts a request into codespace on the existing submission
+	// endpoints and /tx/{hash} when set to "1" (contracts-v1 §0).
+	codespaceHeader = "X-Svote-Codespace"
 )
 
 // HandlerConfig configures the REST API handler.
@@ -150,6 +154,9 @@ func (s CryptoReadinessStatus) ready() bool {
 //	POST /shielded-vote/v1/cast-vote-batch        → MsgCastVoteBatch
 //	POST /shielded-vote/v1/delegate-and-cast-vote-batch → MsgDelegateAndCastVoteBatch
 //	POST /shielded-vote/v1/reveal-share           → MsgRevealShare
+//	POST /shielded-vote/v1/delegate-op            → MsgDelegateOp
+//
+// The last answers 404 while proxy delegation is dormant.
 //
 // MsgSubmitTally is proposer-only (auto-injected via PrepareProposal) and
 // has no REST endpoint.
@@ -170,6 +177,7 @@ func (h *Handler) RegisterTxRoutes(router *mux.Router) {
 	router.Handle("/shielded-vote/v1/cast-vote-batch", trace(http.HandlerFunc(h.handleCastVoteBatch))).Methods("POST")
 	router.Handle("/shielded-vote/v1/delegate-and-cast-vote-batch", trace(http.HandlerFunc(h.handleDelegateAndCastVoteBatch))).Methods("POST")
 	router.Handle("/shielded-vote/v1/reveal-share", trace(http.HandlerFunc(h.handleRevealShare))).Methods("POST")
+	router.Handle("/shielded-vote/v1/delegate-op", trace(requireProxyEnabled(h.handleDelegateOp))).Methods("POST")
 
 	router.Handle("/shielded-vote/v1/snapshot-data/{height}", trace(http.HandlerFunc(h.handleSnapshotData))).Methods("GET")
 
@@ -191,7 +199,7 @@ func (h *Handler) handleDelegateVote(w http.ResponseWriter, r *http.Request) {
 	if !proceed {
 		return
 	}
-	h.broadcastVoteTx(r.Context(), w, msg, clientKey)
+	h.broadcastVoteTx(r.Context(), w, msg, clientKey, wantsCodespace(r))
 }
 
 func (h *Handler) handleCastVote(w http.ResponseWriter, r *http.Request) {
@@ -202,7 +210,7 @@ func (h *Handler) handleCastVote(w http.ResponseWriter, r *http.Request) {
 	if !h.decodeAndValidate(w, r, msg) {
 		return
 	}
-	h.broadcastVoteTx(r.Context(), w, msg, clientDelegationKeyNotApplicable)
+	h.broadcastVoteTx(r.Context(), w, msg, clientDelegationKeyNotApplicable, wantsCodespace(r))
 }
 
 func (h *Handler) handleCastVoteBatch(w http.ResponseWriter, r *http.Request) {
@@ -213,7 +221,7 @@ func (h *Handler) handleCastVoteBatch(w http.ResponseWriter, r *http.Request) {
 	if !h.decodeAndValidateCanonicalJSON(w, r, msg) {
 		return
 	}
-	h.broadcastVoteTx(r.Context(), w, msg, clientDelegationKeyNotApplicable)
+	h.broadcastVoteTx(r.Context(), w, msg, clientDelegationKeyNotApplicable, wantsCodespace(r))
 }
 
 func (h *Handler) handleDelegateAndCastVoteBatch(w http.ResponseWriter, r *http.Request) {
@@ -228,7 +236,7 @@ func (h *Handler) handleDelegateAndCastVoteBatch(w http.ResponseWriter, r *http.
 	if !proceed {
 		return
 	}
-	h.broadcastVoteTx(r.Context(), w, msg, clientKey)
+	h.broadcastVoteTx(r.Context(), w, msg, clientKey, wantsCodespace(r))
 }
 
 func (h *Handler) handleRevealShare(w http.ResponseWriter, r *http.Request) {
@@ -239,7 +247,41 @@ func (h *Handler) handleRevealShare(w http.ResponseWriter, r *http.Request) {
 	if !h.decodeAndValidate(w, r, msg) {
 		return
 	}
-	h.broadcastVoteTx(r.Context(), w, msg, clientDelegationKeyNotApplicable)
+	h.broadcastVoteTx(r.Context(), w, msg, clientDelegationKeyNotApplicable, wantsCodespace(r))
+}
+
+// handleDelegateOp submits a 0x0B delegate op (contracts-v1 §8). Its body
+// always carries codespace.
+func (h *Handler) handleDelegateOp(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureCryptoReady(w) {
+		return
+	}
+	msg := &types.MsgDelegateOp{}
+	if !h.decodeAndValidateCanonicalJSON(w, r, msg) {
+		return
+	}
+	h.broadcastVoteTx(r.Context(), w, msg, clientDelegationKeyNotApplicable, true)
+}
+
+// requireProxyEnabled answers 404 instead of calling next unless
+// types.ProxyDelegationEnabled is set, so while dormant every proxy
+// delegation route answers as if it did not exist (contracts-v1 §9). The
+// routes are mounted anyway, so the UI's catch-all never answers them.
+func requireProxyEnabled(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !types.ProxyDelegationEnabled {
+			writeError(w, http.StatusNotFound, "proxy delegation is not enabled")
+			return
+		}
+		next(w, r)
+	}
+}
+
+// wantsCodespace reports whether r opts into codespace on an existing
+// endpoint's body (contracts-v1 §0). Deployed clients never send the
+// header, so they keep today's exact bodies.
+func wantsCodespace(r *http.Request) bool {
+	return r.Header.Get(codespaceHeader) == "1"
 }
 
 // handleReadiness exposes the process-local crypto warm-up state for operators
@@ -423,9 +465,10 @@ func (h *Handler) queryTxByHash(ctx context.Context, txHash string) (*txStatusRe
 }
 
 // handleTxStatus queries CometBFT for a confirmed transaction by hash.
-// Returns { "height": "...", "code": 0, "log": "" } if the TX is in a block,
-// or 404 if not yet included. Returns HTTP 422 if the TX was included but
-// failed during execution (code != 0).
+// Returns { "height": "...", "code": 0, "log": "", "events": [...] } if the
+// TX is in a block, with "codespace" too when the request opts in
+// (wantsCodespace), or 404 if not yet included. Returns HTTP 422 if the TX
+// was included but failed during execution (code != 0).
 func (h *Handler) handleTxStatus(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	txHash := vars["hash"]
@@ -452,6 +495,9 @@ func (h *Handler) handleTxStatus(w http.ResponseWriter, r *http.Request) {
 		"log":    result.Log,
 		"events": result.Events,
 	}
+	if wantsCodespace(r) {
+		resp["codespace"] = result.Codespace
+	}
 	if result.Code != 0 {
 		writeJSON(w, http.StatusUnprocessableEntity, resp)
 		return
@@ -461,30 +507,49 @@ func (h *Handler) handleTxStatus(w http.ResponseWriter, r *http.Request) {
 
 // --- Broadcast ---
 
-// BroadcastResult is the JSON response returned to clients after tx submission.
+// BroadcastResult is the JSON response returned to clients after tx
+// submission. Codespace is Code's ABCI codespace; clients key every rule on
+// the pair (contracts-v1 §0). A body carries it only as broadcastVoteTx says.
 type BroadcastResult struct {
+	TxHash      string `json:"tx_hash"`
+	Code        uint32 `json:"code"`
+	Codespace   string `json:"codespace"`
+	Log         string `json:"log,omitempty"`
+	BatchDigest string `json:"batch_digest,omitempty"`
+}
+
+// legacyBroadcastResult is BroadcastResult without codespace: today's exact
+// body, which deployed zcash_voting clients decode with deny_unknown_fields
+// (contracts-v1 §0).
+type legacyBroadcastResult struct {
 	TxHash      string `json:"tx_hash"`
 	Code        uint32 `json:"code"`
 	Log         string `json:"log,omitempty"`
 	BatchDigest string `json:"batch_digest,omitempty"`
+}
 
-	// codespace names the module that owns Code. It is kept for the server's
-	// own failure classification and is deliberately not part of the JSON:
-	// clients reject unknown fields in this response.
-	codespace string
+// body returns r as a response body, with codespace only when withCodespace
+// is set.
+func (r *BroadcastResult) body(withCodespace bool) any {
+	if withCodespace {
+		return r
+	}
+	return legacyBroadcastResult{TxHash: r.TxHash, Code: r.Code, Log: r.Log, BatchDigest: r.BatchDigest}
 }
 
 // broadcastVoteTx encodes a vote message, broadcasts it to the local CometBFT
 // node, and translates the result into the REST response contract. Ambiguous
 // transport failures are reconciled by cometBroadcastTxSyncWithRetry before an
-// HTTP 502 is returned to the client.
+// HTTP 502 is returned to the client. The body carries codespace only when
+// withCodespace is set: always on the proxy delegation endpoints, and on the
+// existing ones only when the request opts in (contracts-v1 §0).
 //
 // clientKey labels the delegation circuit key the client reported on a
 // delegation route (clientDelegationKeyNotApplicable elsewhere). When such a
 // request is rejected for an invalid zero-knowledge proof, the rejection is
 // logged and reported to Sentry with that label, so an outdated client can be
 // told apart from a genuinely bad proof.
-func (h *Handler) broadcastVoteTx(ctx context.Context, w http.ResponseWriter, msg types.VoteMessage, clientKey clientDelegationKey) {
+func (h *Handler) broadcastVoteTx(ctx context.Context, w http.ResponseWriter, msg types.VoteMessage, clientKey clientDelegationKey, withCodespace bool) {
 	raw, err := EncodeVoteTx(msg)
 	if err != nil {
 		sentry.CaptureErr(err, map[string]string{
@@ -526,10 +591,10 @@ func (h *Handler) broadcastVoteTx(ctx context.Context, w http.ResponseWriter, ms
 				cause:     types.ErrInvalidProof.Wrap("delegation rejected by the chain"),
 			})
 		}
-		writeJSON(w, http.StatusUnprocessableEntity, result)
+		writeJSON(w, http.StatusUnprocessableEntity, result.body(withCodespace))
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	writeJSON(w, http.StatusOK, result.body(withCodespace))
 }
 
 // cometBroadcastTxSyncWithRetry broadcasts txBytes with bounded retries for
@@ -674,8 +739,8 @@ func (h *Handler) cometBroadcastTxSync(ctx context.Context, txBytes []byte, txHa
 	return &BroadcastResult{
 		TxHash:    rpcResp.Result.Hash,
 		Code:      rpcResp.Result.Code,
+		Codespace: rpcResp.Result.Codespace,
 		Log:       rpcResp.Result.Log,
-		codespace: rpcResp.Result.Codespace,
 	}, nil
 }
 
@@ -785,8 +850,8 @@ func broadcastResultFromTxStatus(txHash string, status *txStatusResult) *Broadca
 	return &BroadcastResult{
 		TxHash:    txHash,
 		Code:      status.Code,
+		Codespace: status.Codespace,
 		Log:       status.Log,
-		codespace: status.Codespace,
 	}
 }
 

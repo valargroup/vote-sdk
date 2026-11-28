@@ -314,7 +314,10 @@ func TestDecodeVoteTx_InvalidTag(t *testing.T) {
 
 	_, _, err = DecodeVoteTx([]byte{0x09, 0x00})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "invalid vote tx tag")
+	if !types.ProxyDelegationEnabled {
+		// 0x09 is a vote tag only once proxy delegation is enabled.
+		require.Contains(t, err.Error(), "invalid vote tx tag")
+	}
 }
 
 func TestTagForMessage(t *testing.T) {

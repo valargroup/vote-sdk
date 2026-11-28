@@ -4,9 +4,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -49,6 +51,10 @@ func GetTxCmd() *cobra.Command {
 		CmdClearRoundEndorsement(),
 		// Token transfer — proposed as a coordinator action.
 		CmdAuthorizedSend(),
+		// Proxy delegation coordinator payloads (docs/proxy-delegation/contracts-v1.md §2.4).
+		CmdSetProxyDelegationParams(),
+		CmdSetProxyDelegationPause(),
+		CmdSetDelegateStatus(),
 	)
 
 	return cmd
@@ -512,6 +518,207 @@ Example:
 
 	flags.AddTxFlagsToCmd(cmd)
 	return cmd
+}
+
+// CmdSetProxyDelegationParams proposes a MsgSetProxyDelegationParams
+// coordinator action.
+func CmdSetProxyDelegationParams() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "set-proxy-delegation-params --max-delegates <n> [--verifier <id>:<pubkey-hex> ...] [--verifier-threshold <n>]",
+		Short: "Replace the proxy delegation verifier set and registry size",
+		Long: `Propose a MsgSetProxyDelegationParams coordinator action.
+
+Flags:
+  --verifier            Repeatable, up to 16 times. A verifier as
+                        <id>:<pubkey-hex>, the pubkey a 32-byte Ed25519 key.
+                        The list replaces the verifier set; with no
+                        --verifier, delegate registration closes.
+  --verifier-threshold  How many distinct verifiers must attest a
+                        registration: 1 to the number of verifiers, or 0
+                        with none.
+  --max-delegates       The most delegate entries the registry admits, at
+                        most 2000.
+
+The pause stays as it is; change it with set-proxy-delegation-pause. The
+action executes only with at least two coordinator approvals. Until proxy
+delegation is enabled, the chain rejects it as unsupported.
+
+Example:
+  svoted tx vote set-proxy-delegation-params --verifier 1:<pubkey-hex> \
+    --verifier-threshold 1 --max-delegates 2000 --from mykey`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			clientCtx, err := client.GetClientTxContext(cmd)
+			if err != nil {
+				return err
+			}
+			verifierValues, err := cmd.Flags().GetStringArray("verifier")
+			if err != nil {
+				return err
+			}
+			threshold, err := cmd.Flags().GetUint32("verifier-threshold")
+			if err != nil {
+				return err
+			}
+			maxDelegates, err := cmd.Flags().GetUint32("max-delegates")
+			if err != nil {
+				return err
+			}
+
+			msg := &types.MsgSetProxyDelegationParams{
+				Creator:           clientCtx.GetFromAddress().String(),
+				VerifierThreshold: threshold,
+				MaxDelegates:      maxDelegates,
+			}
+			for _, value := range verifierValues {
+				verifier, err := parseProxyVerifier(value)
+				if err != nil {
+					return err
+				}
+				msg.Verifiers = append(msg.Verifiers, verifier)
+			}
+			if err := msg.ValidateBasic(); err != nil {
+				return err
+			}
+
+			return broadcastCoordinatorProposal(clientCtx, cmd.Flags(), msg)
+		},
+	}
+
+	cmd.Flags().StringArray("verifier", nil, "Verifier as <id>:<pubkey-hex> (repeatable; the list replaces the verifier set)")
+	cmd.Flags().Uint32("verifier-threshold", 0, "Distinct verifiers that must attest a registration")
+	cmd.Flags().Uint32("max-delegates", 0, "Most delegate entries the registry admits (at most 2000)")
+	_ = cmd.MarkFlagRequired("max-delegates")
+	flags.AddTxFlagsToCmd(cmd)
+	return cmd
+}
+
+// CmdSetProxyDelegationPause proposes a MsgSetProxyDelegationPause
+// coordinator action.
+func CmdSetProxyDelegationPause() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "set-proxy-delegation-pause [true|false]",
+		Short: "Pause or resume new proxy delegations",
+		Long: `Propose a MsgSetProxyDelegationPause coordinator action.
+
+true pauses new proxy delegation batches and false resumes them. The rest of
+the params stays as it is, and delegate registrations and ballots are not
+affected. The action executes only with at least two coordinator approvals.
+Until proxy delegation is enabled, the chain rejects it as unsupported.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			clientCtx, err := client.GetClientTxContext(cmd)
+			if err != nil {
+				return err
+			}
+			paused, err := strconv.ParseBool(args[0])
+			if err != nil {
+				return fmt.Errorf("paused must be true or false: %w", err)
+			}
+
+			msg := &types.MsgSetProxyDelegationPause{
+				Creator: clientCtx.GetFromAddress().String(),
+				Paused:  paused,
+			}
+			if err := msg.ValidateBasic(); err != nil {
+				return err
+			}
+
+			return broadcastCoordinatorProposal(clientCtx, cmd.Flags(), msg)
+		},
+	}
+
+	flags.AddTxFlagsToCmd(cmd)
+	return cmd
+}
+
+// CmdSetDelegateStatus proposes a MsgSetDelegateStatus coordinator action.
+func CmdSetDelegateStatus() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "set-delegate-status [suspend|lift|retire] --delegate <index> [--delegate ...] --reason <code>",
+		Short: "Suspend proxy delegates, lift their suspension, or retire them",
+		Long: `Propose a MsgSetDelegateStatus coordinator action.
+
+suspend bars the delegates from balloting until lifted, lift ends a
+suspension, and retire ends the entries for good and frees their handles to
+register again.
+
+Flags:
+  --delegate  Repeatable, 1 to 64 times: a delegate index.
+  --reason    The public reason code: 1 impersonation, 2 key lost or
+              compromised, 3 legal, 4 verifier review, 99 other.
+
+Every delegate is updated, or none is. The action executes only with at
+least two coordinator approvals. Until proxy delegation is enabled, the chain
+rejects it as unsupported.
+
+Example:
+  svoted tx vote set-delegate-status suspend --delegate 17 --reason 1 --from mykey`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			clientCtx, err := client.GetClientTxContext(cmd)
+			if err != nil {
+				return err
+			}
+			action, ok := map[string]uint32{
+				"suspend": types.DelegateStatusActionSuspend,
+				"lift":    types.DelegateStatusActionLift,
+				"retire":  types.DelegateStatusActionRetire,
+			}[args[0]]
+			if !ok {
+				return fmt.Errorf("action must be suspend, lift or retire, got %q", args[0])
+			}
+			delegates, err := cmd.Flags().GetUintSlice("delegate")
+			if err != nil {
+				return err
+			}
+			reason, err := cmd.Flags().GetUint32("reason")
+			if err != nil {
+				return err
+			}
+
+			msg := &types.MsgSetDelegateStatus{
+				Creator: clientCtx.GetFromAddress().String(),
+				Action:  action,
+				Reason:  reason,
+			}
+			for _, d := range delegates {
+				if uint64(d) > math.MaxUint32 {
+					return fmt.Errorf("delegate index %d is above 2^32 - 1", d)
+				}
+				msg.DelegateIndexes = append(msg.DelegateIndexes, uint32(d))
+			}
+			if err := msg.ValidateBasic(); err != nil {
+				return err
+			}
+
+			return broadcastCoordinatorProposal(clientCtx, cmd.Flags(), msg)
+		},
+	}
+
+	cmd.Flags().UintSlice("delegate", nil, "Delegate index (repeatable)")
+	cmd.Flags().Uint32("reason", 0, "Reason code: 1 impersonation, 2 key lost or compromised, 3 legal, 4 verifier review, 99 other")
+	_ = cmd.MarkFlagRequired("delegate")
+	_ = cmd.MarkFlagRequired("reason")
+	flags.AddTxFlagsToCmd(cmd)
+	return cmd
+}
+
+// parseProxyVerifier parses a --verifier value, <id>:<pubkey-hex>.
+func parseProxyVerifier(value string) (*types.ProxyVerifier, error) {
+	idText, pubkeyHex, ok := strings.Cut(value, ":")
+	if !ok {
+		return nil, fmt.Errorf("verifier %q must be <id>:<pubkey-hex>", value)
+	}
+	id, err := strconv.ParseUint(idText, 10, 32)
+	if err != nil {
+		return nil, fmt.Errorf("verifier %q: invalid id: %w", value, err)
+	}
+	pubkey, err := hex.DecodeString(pubkeyHex)
+	if err != nil {
+		return nil, fmt.Errorf("verifier %q: invalid pubkey hex: %w", value, err)
+	}
+	return &types.ProxyVerifier{VerifierId: uint32(id), Pubkey: pubkey}, nil
 }
 
 // CmdCreateVotingSession proposes a MsgCreateVotingSession coordinator action.

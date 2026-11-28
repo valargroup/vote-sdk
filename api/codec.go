@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"fmt"
 
+	errorsmod "cosmossdk.io/errors"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
@@ -14,8 +15,9 @@ import (
 
 // Vote transaction type tags. The first byte of the wire format identifies
 // the message type. Tags 0x02–0x07 are vote-round transactions that use
-// ZKP/RedPallas authentication. Tags 0x08, 0x0D, and 0x0E are ceremony/tally
-// tags auto-injected by PrepareProposal that also use the custom wire format.
+// ZKP/RedPallas authentication, and 0x09 and 0x0B carry proxy delegation once
+// it is enabled. Tags 0x08, 0x0D, and 0x0E are ceremony/tally tags
+// auto-injected by PrepareProposal that also use the custom wire format.
 //
 // Coordinator proposals/approvals, validator setup, and endorser actions use
 // the standard Cosmos SDK Tx envelope. Coordinator-owned payloads such as
@@ -32,6 +34,15 @@ const (
 	TagCastVoteBatch            byte = 0x06
 	TagDelegateAndCastVoteBatch byte = 0x07
 
+	// TagProxyDelegationBatch carries MsgProxyDelegationBatch
+	// (docs/proxy-delegation/contracts-v1.md §1). It is a vote tag only while
+	// types.ProxyDelegationEnabled is set.
+	TagProxyDelegationBatch byte = 0x09
+
+	// TagDelegateOp carries MsgDelegateOp (contracts-v1 §1), gated like
+	// TagProxyDelegationBatch. Tag 0x0C stays unassigned.
+	TagDelegateOp byte = 0x0B
+
 	// Auto-injected by PrepareProposal; never client-signed.
 	TagAckExecutiveAuthorityKey byte = 0x08
 
@@ -46,15 +57,20 @@ const (
 )
 
 // IsCustomTag returns true if b is a valid custom transaction type tag
-// (vote-round 0x02–0x07 or ceremony 0x08/0x0D/0x0E). Other ceremony
+// (a vote tag, see IsVoteTag, or ceremony 0x08/0x0D/0x0E). Other ceremony
 // messages use standard Cosmos SDK transactions.
 func IsCustomTag(b byte) bool {
 	return IsVoteTag(b) || IsCeremonyTag(b)
 }
 
-// IsVoteTag returns true if b is a vote-round transaction type tag (0x02–0x07).
+// IsVoteTag returns true if b is a vote-round transaction type tag: 0x02–0x07,
+// and 0x09 and 0x0B while proxy delegation is enabled.
 // MsgCreateVotingSession is submitted through coordinator action approval.
 func IsVoteTag(b byte) bool {
+	switch b {
+	case TagProxyDelegationBatch, TagDelegateOp:
+		return types.ProxyDelegationEnabled
+	}
 	return b >= TagDelegateVote && b <= TagDelegateAndCastVoteBatch
 }
 
@@ -68,7 +84,8 @@ func IsCeremonyTag(b byte) bool {
 		b == TagSubmitPartialDecryption
 }
 
-// TagForMessage returns the wire-format tag for a VoteMessage.
+// TagForMessage returns the wire-format tag for a VoteMessage. The proxy
+// delegation Msgs have no tag while proxy delegation is dormant.
 func TagForMessage(msg types.VoteMessage) (byte, error) {
 	switch msg.(type) {
 	case *types.MsgDelegateVote:
@@ -83,6 +100,16 @@ func TagForMessage(msg types.VoteMessage) (byte, error) {
 		return TagRevealShare, nil
 	case *types.MsgSubmitTally:
 		return TagSubmitTally, nil
+	case *types.MsgProxyDelegationBatch:
+		if types.ProxyDelegationEnabled {
+			return TagProxyDelegationBatch, nil
+		}
+		return 0, errorsmod.Wrapf(types.ErrProxyDelegationDisabled, "no wire tag for %T", msg)
+	case *types.MsgDelegateOp:
+		if types.ProxyDelegationEnabled {
+			return TagDelegateOp, nil
+		}
+		return 0, errorsmod.Wrapf(types.ErrProxyDelegationDisabled, "no wire tag for %T", msg)
 	default:
 		return 0, fmt.Errorf("unknown vote message type: %T", msg)
 	}
@@ -110,7 +137,9 @@ func EncodeVoteTx(msg types.VoteMessage) ([]byte, error) {
 
 // DecodeVoteTx decodes raw wire-format bytes into a tag and VoteMessage.
 // Returns an error if the bytes are too short, the tag is invalid, or
-// protobuf decoding fails.
+// protobuf decoding fails. Tags 0x06, 0x07, 0x09 and 0x0B also require the
+// canonical encoding (see requiresCanonicalEncoding); 0x09 and 0x0B are
+// invalid while proxy delegation is dormant.
 func DecodeVoteTx(raw []byte) (byte, types.VoteMessage, error) {
 	if len(raw) < 2 {
 		return 0, nil, fmt.Errorf("vote tx too short: %d bytes", len(raw))
@@ -133,14 +162,23 @@ func DecodeVoteTx(raw []byte) (byte, types.VoteMessage, error) {
 		msg = &types.MsgRevealShare{}
 	case TagSubmitTally:
 		msg = &types.MsgSubmitTally{}
-	default:
+	case TagProxyDelegationBatch:
+		if types.ProxyDelegationEnabled {
+			msg = &types.MsgProxyDelegationBatch{}
+		}
+	case TagDelegateOp:
+		if types.ProxyDelegationEnabled {
+			msg = &types.MsgDelegateOp{}
+		}
+	}
+	if msg == nil {
 		return 0, nil, fmt.Errorf("invalid vote tx tag: 0x%02x", tag)
 	}
 
 	if err := proto.Unmarshal(body, msg); err != nil {
 		return 0, nil, fmt.Errorf("protobuf unmarshal failed for tag 0x%02x: %w", tag, err)
 	}
-	if tag == TagCastVoteBatch || tag == TagDelegateAndCastVoteBatch {
+	if requiresCanonicalEncoding(tag) {
 		if err := rejectUnknownProtoFields(msg.ProtoReflect()); err != nil {
 			return 0, nil, fmt.Errorf("non-canonical atomic vote message: %w", err)
 		}
@@ -159,6 +197,17 @@ func DecodeVoteTx(raw []byte) (byte, types.VoteMessage, error) {
 	}
 
 	return tag, voteMsg, nil
+}
+
+// requiresCanonicalEncoding reports whether tag's body must have no unknown
+// fields at any depth and equal its deterministic re-encoding: the atomic
+// batch tags, and 0x09 and 0x0B, which contracts-v1 §1 treats like them.
+func requiresCanonicalEncoding(tag byte) bool {
+	switch tag {
+	case TagCastVoteBatch, TagDelegateAndCastVoteBatch, TagProxyDelegationBatch, TagDelegateOp:
+		return true
+	}
+	return false
 }
 
 func rejectUnknownProtoFields(msg protoreflect.Message) error {
