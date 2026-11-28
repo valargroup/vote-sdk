@@ -76,7 +76,7 @@ func (v vizorVector) allowedKey() string {
 // writeDraft writes the list without its signatures and returns the path.
 func (v vizorVector) writeDraft(t *testing.T, dir string) string {
 	t.Helper()
-	list, _, err := votingconfig.ParseWalletList([]byte(v.Document))
+	list, _, _, err := votingconfig.ParseWalletList([]byte(v.Document))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestWalletListPayloadAndSign(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, sigs, err := votingconfig.ParseWalletList([]byte(out))
+	_, sigs, _, err := votingconfig.ParseWalletList([]byte(out))
 	if err != nil || len(sigs) != 2 || sigs[0].KeyID != "valargroup" || sigs[1].KeyID != "other" {
 		t.Fatalf("co-signed list: %v, %+v", err, sigs)
 	}
@@ -247,7 +247,7 @@ func TestWalletListChainCheck(t *testing.T) {
 	if err := os.WriteFile(list, []byte(v.Document), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	rows, _, err := votingconfig.ParseWalletList([]byte(v.Document))
+	rows, _, _, err := votingconfig.ParseWalletList([]byte(v.Document))
 	if err != nil {
 		t.Fatal(err)
 	}

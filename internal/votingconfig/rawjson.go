@@ -6,8 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"reflect"
-	"strings"
+	"slices"
 )
 
 // RawMember is one member of a JSON object, with its value kept as raw JSON.
@@ -22,7 +21,7 @@ func isJSONNull(raw []byte) bool {
 }
 
 // decodeObjectMembers splits a JSON object into its members, in input order.
-// A repeated key is an error (see checkStrictJSON).
+// A repeated key is an error (see decodeStrictObject).
 func decodeObjectMembers(data []byte) ([]RawMember, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	if tok, err := dec.Token(); err != nil {
@@ -60,85 +59,33 @@ func decodeObjectMembers(data []byte) ([]RawMember, error) {
 	return members, nil
 }
 
-// encodeObjectMembers writes members as one JSON object, in order, copying
-// each value's raw bytes.
-func encodeObjectMembers(members []RawMember) []byte {
-	var buf bytes.Buffer
-	buf.WriteByte('{')
-	for i, m := range members {
-		if i > 0 {
-			buf.WriteByte(',')
-		}
-		key, _ := json.Marshal(m.Key) // marshaling a string cannot fail
-		buf.Write(key)
-		buf.WriteByte(':')
-		buf.Write(m.Value)
+// decodeStrictObject decodes the JSON object raw as wallets read it: each
+// member into the destination that fields maps its exact key to, refusing a
+// repeated, unknown or null member, then a missing required one.
+// encoding/json matches keys without regard to case, keeps the last repeated
+// key and reads null as a zero value; wallets do none of these, so an object
+// that passes reads the same in both.
+func decodeStrictObject(raw []byte, fields map[string]any, required ...string) error {
+	members, err := decodeObjectMembers(raw)
+	if err != nil {
+		return err
 	}
-	buf.WriteByte('}')
-	return buf.Bytes()
-}
-
-// checkStrictJSON reports, at any depth of raw, a repeated key or an object
-// key that does not exactly name a field of the struct type t describes
-// there. encoding/json matches names without regard to case and keeps the
-// last repeated key; wallets do neither, so a document that passes reads the
-// same in both. Type mismatches are left to the decoder.
-func checkStrictJSON(raw json.RawMessage, t reflect.Type) error {
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
+	for _, m := range members {
+		dst, ok := fields[m.Key]
+		switch {
+		case !ok:
+			return fmt.Errorf("unknown field %q", m.Key)
+		case isJSONNull(m.Value):
+			return fmt.Errorf("%s is null", m.Key)
+		}
+		if err := json.Unmarshal(m.Value, dst); err != nil {
+			return fmt.Errorf("%s: %w", m.Key, err)
+		}
 	}
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 {
-		return nil
-	}
-	switch {
-	case t.Kind() == reflect.Struct && trimmed[0] == '{':
-		fields := jsonFields(t)
-		members, err := decodeObjectMembers(trimmed)
-		if err != nil {
-			return err
-		}
-		for _, m := range members {
-			fieldType, ok := fields[m.Key]
-			if !ok {
-				return fmt.Errorf("unknown field %q", m.Key)
-			}
-			if err := checkStrictJSON(m.Value, fieldType); err != nil {
-				return fmt.Errorf("%s: %w", m.Key, err)
-			}
-		}
-	case t.Kind() == reflect.Map && trimmed[0] == '{':
-		members, err := decodeObjectMembers(trimmed)
-		if err != nil {
-			return err
-		}
-		for _, m := range members {
-			if err := checkStrictJSON(m.Value, t.Elem()); err != nil {
-				return fmt.Errorf("%s: %w", m.Key, err)
-			}
-		}
-	case t.Kind() == reflect.Slice && trimmed[0] == '[':
-		var items []json.RawMessage
-		if err := json.Unmarshal(trimmed, &items); err != nil {
-			return err
-		}
-		for i, item := range items {
-			if err := checkStrictJSON(item, t.Elem()); err != nil {
-				return fmt.Errorf("[%d]: %w", i, err)
-			}
+	for _, name := range required {
+		if !slices.ContainsFunc(members, func(m RawMember) bool { return m.Key == name }) {
+			return fmt.Errorf("no %s", name)
 		}
 	}
 	return nil
-}
-
-// jsonFields maps the JSON member name of each field of struct type t to the
-// field's type, skipping fields tagged "-".
-func jsonFields(t reflect.Type) map[string]reflect.Type {
-	fields := make(map[string]reflect.Type, t.NumField())
-	for i := range t.NumField() {
-		if name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ","); name != "" && name != "-" {
-			fields[name] = t.Field(i).Type
-		}
-	}
-	return fields
 }

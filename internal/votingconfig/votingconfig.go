@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"reflect"
 	"strings"
 )
 
@@ -48,67 +47,6 @@ type SignedConfig struct {
 	// or reorders an extension. ProxyDelegationV1 reads the proxy delegation
 	// extension inside it.
 	Extensions json.RawMessage `json:"extensions,omitempty"`
-	// Unknown holds every other top-level member as raw JSON, in input order.
-	Unknown []RawMember `json:"-"`
-}
-
-// signedConfigFields are the top-level members SignedConfig models; the rest
-// go to Unknown.
-var signedConfigFields = jsonFields(reflect.TypeOf(SignedConfig{}))
-
-// UnmarshalJSON decodes a dynamic config. Members are matched to fields by
-// exact key, as wallets match them (see checkStrictJSON); the rest are kept
-// in Unknown, in input order. A repeated top-level key is an error.
-func (c *SignedConfig) UnmarshalJSON(data []byte) error {
-	if isJSONNull(data) {
-		return nil
-	}
-	members, err := decodeObjectMembers(data)
-	if err != nil {
-		return err
-	}
-	var known, unknown []RawMember
-	for _, m := range members {
-		if _, ok := signedConfigFields[m.Key]; ok {
-			known = append(known, m)
-		} else {
-			unknown = append(unknown, m)
-		}
-	}
-	// plain has SignedConfig's fields but not its methods, so the modeled
-	// members decode with encoding/json's usual rules.
-	type plain SignedConfig
-	var out plain
-	if err := json.Unmarshal(encodeObjectMembers(known), &out); err != nil {
-		return err
-	}
-	out.Unknown = unknown
-	*c = SignedConfig(out)
-	return nil
-}
-
-// MarshalJSON encodes the modeled fields as encoding/json would, then the
-// Unknown members in their order.
-func (c SignedConfig) MarshalJSON() ([]byte, error) {
-	type plain SignedConfig
-	known, err := json.Marshal(plain(c))
-	if err != nil || len(c.Unknown) == 0 {
-		return known, err
-	}
-	seen := make(map[string]bool, len(c.Unknown))
-	for _, m := range c.Unknown {
-		if _, modeled := signedConfigFields[m.Key]; modeled || seen[m.Key] {
-			return nil, fmt.Errorf("unknown member %q repeats a top-level key", m.Key)
-		}
-		seen[m.Key] = true
-	}
-	unknown := encodeObjectMembers(c.Unknown)
-	// Splice the unknown members in before known's closing brace; known is
-	// never empty, since the modeled fields are not omitempty.
-	out := make([]byte, 0, len(known)+len(unknown))
-	out = append(out, known[:len(known)-1]...)
-	out = append(out, ',')
-	return append(out, unknown[1:]...), nil
 }
 
 // PIRLayout describes how the PIR circuit depth is split across the two data
@@ -416,17 +354,11 @@ func hasValidSignature(roundID string, entry RoundEntry, trusted []TrustedKey, e
 	if err != nil {
 		return false
 	}
-	return anyTrustedSignature(payload, entry.Signatures, trusted)
-}
-
-// anyTrustedSignature reports whether one of sigs is a valid ed25519
-// signature over payload by the trusted key its key_id names.
-func anyTrustedSignature(payload []byte, sigs []Signature, trusted []TrustedKey) bool {
 	keys := map[string]TrustedKey{}
 	for _, key := range trusted {
 		keys[key.KeyID] = key
 	}
-	for _, sigRef := range sigs {
+	for _, sigRef := range entry.Signatures {
 		key, ok := keys[sigRef.KeyID]
 		if !ok || sigRef.Alg != key.Alg || key.Alg != AlgEd25519 {
 			continue

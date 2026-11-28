@@ -49,13 +49,5 @@
         "https://rpc-b.example"
       ]
     }
-  },
-  "x_rollout": {
-    "stage": 2,
-    "flags": [
-      "b",
-      "a"
-    ]
-  },
-  "operator_note": "kept by every writer"
+  }
 }

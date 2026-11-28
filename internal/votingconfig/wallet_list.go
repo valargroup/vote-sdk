@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"image"
-	"reflect"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -262,114 +261,110 @@ func isDisplayText(s string, maxChars int, allowNewline bool) bool {
 
 // ParseWalletList reads a list as config tooling does before signing it: the
 // checks of VerifyWalletList up to and including the field rules, except
-// that "signatures" may be absent or empty. It returns the list and the
-// signatures it already carries.
-func ParseWalletList(document []byte) (WalletList, []Signature, error) {
+// that "signatures" may be absent or empty. It returns the list, the
+// signatures it already carries and its WalletListPayloadV1.
+func ParseWalletList(document []byte) (WalletList, []Signature, []byte, error) {
 	return decodeWalletList(document, false)
 }
 
 // decodeWalletList applies verification steps 1 to 5 (contracts-v1 §12.3)
-// and returns the list and its signatures. With signed false, "signatures"
-// may be absent or empty.
-func decodeWalletList(document []byte, signed bool) (WalletList, []Signature, error) {
+// and returns the list, its signatures and its payload. With signed false,
+// "signatures" may be absent or empty.
+func decodeWalletList(document []byte, signed bool) (WalletList, []Signature, []byte, error) {
 	var none WalletList
 	if len(document) > MaxWalletListBytes {
-		return none, nil, listError("TooLarge", "%d bytes", len(document))
+		return none, nil, nil, listError("TooLarge", "%d bytes", len(document))
 	}
 	// Go's decoder replaces invalid UTF-8 and lone surrogate escapes with
 	// U+FFFD where a wallet's parser refuses the document.
 	if !utf8.Valid(document) || hasLoneSurrogate(document) {
-		return none, nil, listError("Malformed", "not UTF-8 JSON")
+		return none, nil, nil, listError("Malformed", "not UTF-8 JSON")
 	}
 	members, err := decodeObjectMembers(document)
 	if err != nil {
-		return none, nil, listError("Malformed", "%v", err)
+		return none, nil, nil, listError("Malformed", "%v", err)
 	}
 	var format *string
 	for _, m := range members {
 		if m.Key == "format" {
 			var s string
 			if isJSONNull(m.Value) || json.Unmarshal(m.Value, &s) != nil {
-				return none, nil, listError("Malformed", "format is not a string")
+				return none, nil, nil, listError("Malformed", "format is not a string")
 			}
 			format = &s
 		}
 	}
 	if format == nil {
-		return none, nil, listError("Malformed", "no format")
+		return none, nil, nil, listError("Malformed", "no format")
 	}
 	if *format != WalletListFormatV1 {
-		return none, nil, listError("UnsupportedFormat", "format %q", *format)
+		return none, nil, nil, listError("UnsupportedFormat", "format %q", *format)
 	}
 
-	if err := checkStrictJSON(document, reflect.TypeOf(walletListWire{})); err != nil {
-		return none, nil, listError("Malformed", "%v", err)
-	}
-	var tree any
-	if err := json.Unmarshal(document, &tree); err != nil {
-		return none, nil, listError("Malformed", "%v", err)
-	}
-	if hasNull(tree) {
-		return none, nil, listError("Malformed", "null value")
-	}
-	top := tree.(map[string]any)
-	required := []string{"wallet_id", "chain_id", "version", "issued_at", "reserved_names", "delegates"}
+	var (
+		list                 WalletList
+		names, rows, rawSigs []json.RawMessage
+		required             = []string{"wallet_id", "chain_id", "version", "issued_at", "reserved_names", "delegates"}
+	)
 	if signed {
 		required = append(required, "signatures")
 	}
-	if missing := missingMember(top, required...); missing != "" {
-		return none, nil, listError("Malformed", "no %s", missing)
-	}
-	if rows, ok := top["delegates"].([]any); ok {
-		for i, row := range rows {
-			obj, ok := row.(map[string]any)
-			if !ok {
-				return none, nil, listError("Malformed", "delegates[%d] is not an object", i)
-			}
-			if missing := missingMember(obj, "index", "provider", "handle", "dk", "name"); missing != "" {
-				return none, nil, listError("Malformed", "delegates[%d] has no %s", i, missing)
-			}
-		}
-	}
-	var wire walletListWire
-	if err := json.Unmarshal(document, &wire); err != nil {
-		return none, nil, listError("Malformed", "%v", err)
+	if err := decodeStrictObject(document, map[string]any{
+		"format": new(string), "wallet_id": &list.WalletID, "chain_id": &list.ChainID,
+		"version": &list.Version, "issued_at": &list.IssuedAt,
+		"reserved_names": &names, "delegates": &rows, "signatures": &rawSigs,
+	}, required...); err != nil {
+		return none, nil, nil, listError("Malformed", "%v", err)
 	}
 
-	if n := len(wire.Signatures); n > maxWalletListSignatures || (signed && n < 1) {
-		return none, nil, listError("Malformed", "%d signatures; a list carries 1 to %d", n, maxWalletListSignatures)
+	if n := len(rawSigs); n > maxWalletListSignatures || (signed && n < 1) {
+		return none, nil, nil, listError("Malformed", "%d signatures; a list carries 1 to %d", n, maxWalletListSignatures)
 	}
-	for i, s := range wire.Signatures {
+	var sigs []Signature
+	for i, raw := range rawSigs {
+		var s Signature
+		if err := decodeStrictObject(raw, map[string]any{"key_id": &s.KeyID, "alg": &s.Alg, "sig": &s.Sig}, "key_id", "alg", "sig"); err != nil {
+			return none, nil, nil, listError("Malformed", "signatures[%d]: %v", i, err)
+		}
 		if len(s.KeyID) < 1 || len(s.KeyID) > 64 || s.Alg != AlgEd25519 {
-			return none, nil, listError("Malformed", "signatures[%d] needs a key_id of 1 to 64 bytes and alg %s", i, AlgEd25519)
+			return none, nil, nil, listError("Malformed", "signatures[%d] needs a key_id of 1 to 64 bytes and alg %s", i, AlgEd25519)
 		}
 		if sig, ok := canonicalBase64(s.Sig); !ok || len(sig) != ed25519.SignatureSize {
-			return none, nil, listError("Malformed", "signatures[%d].sig is not canonical base64 of %d bytes", i, ed25519.SignatureSize)
+			return none, nil, nil, listError("Malformed", "signatures[%d].sig is not canonical base64 of %d bytes", i, ed25519.SignatureSize)
 		}
+		sigs = append(sigs, s)
 	}
 
-	list := WalletList{
-		WalletID: wire.WalletID, ChainID: wire.ChainID, Version: wire.Version,
-		IssuedAt: wire.IssuedAt, ReservedNames: wire.ReservedNames,
-	}
-	for i, row := range wire.Delegates {
-		r := WalletListRow{
-			Index: row.Index, Provider: row.Provider, Handle: row.Handle, DK: row.DK, Name: row.Name,
-			Statement: row.Statement,
+	list.ReservedNames = make([]string, len(names))
+	for i, raw := range names {
+		if isJSONNull(raw) || json.Unmarshal(raw, &list.ReservedNames[i]) != nil {
+			return none, nil, nil, listError("Malformed", "reserved_names[%d] is not a string", i)
 		}
-		if row.Picture != nil {
-			picture, ok := canonicalBase64(*row.Picture)
-			if !ok {
-				return none, nil, listError("Malformed", "delegates[%d].picture is not canonical base64", i)
+	}
+	for i, raw := range rows {
+		var (
+			row     WalletListRow
+			picture *string
+		)
+		if err := decodeStrictObject(raw, map[string]any{
+			"index": &row.Index, "provider": &row.Provider, "handle": &row.Handle, "dk": &row.DK,
+			"name": &row.Name, "statement": &row.Statement, "picture": &picture,
+		}, "index", "provider", "handle", "dk", "name"); err != nil {
+			return none, nil, nil, listError("Malformed", "delegates[%d]: %v", i, err)
+		}
+		if picture != nil {
+			var ok bool
+			if row.Picture, ok = canonicalBase64(*picture); !ok {
+				return none, nil, nil, listError("Malformed", "delegates[%d].picture is not canonical base64", i)
 			}
-			r.Picture = picture
 		}
-		list.Delegates = append(list.Delegates, r)
+		list.Delegates = append(list.Delegates, row)
 	}
-	if _, err := list.Payload(); err != nil {
-		return none, nil, err
+	payload, err := list.Payload()
+	if err != nil {
+		return none, nil, nil, err
 	}
-	return list, wire.Signatures, nil
+	return list, sigs, payload, nil
 }
 
 // VerifiedWalletList is a list that passed VerifyWalletList.
@@ -377,8 +372,6 @@ type VerifiedWalletList struct {
 	List WalletList
 	// Payload is the list's WalletListPayloadV1.
 	Payload []byte
-	// Signatures are all of the document's signature objects.
-	Signatures []Signature
 	// SignedBy is the pinned key id whose signature verified.
 	SignedBy string
 }
@@ -388,7 +381,7 @@ type VerifiedWalletList struct {
 // in the contract's order. Only a signature whose key_id names a pinned key
 // and that verifies under it counts; every other signature is ignored.
 func VerifyWalletList(document []byte, walletID, chainID string, pinned []TrustedKey) (*VerifiedWalletList, error) {
-	list, sigs, err := decodeWalletList(document, true)
+	list, sigs, payload, err := decodeWalletList(document, true)
 	if err != nil {
 		return nil, err
 	}
@@ -398,7 +391,6 @@ func VerifyWalletList(document []byte, walletID, chainID string, pinned []Truste
 	if list.ChainID != chainID {
 		return nil, listError("WrongChain", "the list is for chain %q, not %q", list.ChainID, chainID)
 	}
-	payload, _ := list.Payload() // decodeWalletList checked the fields
 	for _, key := range pinned {
 		pub, err := DecodeBase64Fixed(key.Pubkey, ed25519.PublicKeySize, "pinned key "+key.KeyID)
 		if err != nil || (key.Alg != "" && key.Alg != AlgEd25519) {
@@ -407,7 +399,7 @@ func VerifyWalletList(document []byte, walletID, chainID string, pinned []Truste
 		for _, s := range sigs {
 			sig, _ := canonicalBase64(s.Sig)
 			if s.KeyID == key.KeyID && verifyZIP215(pub, payload, sig) {
-				return &VerifiedWalletList{List: list, Payload: payload, Signatures: sigs, SignedBy: key.KeyID}, nil
+				return &VerifiedWalletList{List: list, Payload: payload, SignedBy: key.KeyID}, nil
 			}
 		}
 	}
@@ -538,34 +530,24 @@ func webpDeclaredSizes(p []byte) ([]image.Point, error) {
 	}
 }
 
-// CheckWalletListVersion applies the version rule between a wallet's
-// previous list and its next one on the same chain: a list whose payload
-// changed must carry a higher version.
-func CheckWalletListVersion(previous, next WalletList) error {
-	before, err := previous.Payload()
+// CheckWalletListReplaces applies the version rule to next against
+// previous, the document it replaces on the same chain: a list whose payload
+// changed must carry a higher version. A previous document that does not
+// parse sets no version to rise above: no wallet adopted it, and it must not
+// hold back its fix.
+func CheckWalletListReplaces(previous []byte, next WalletList) error {
+	old, _, before, err := ParseWalletList(previous)
 	if err != nil {
-		return fmt.Errorf("previous list: %w", err)
+		return nil
 	}
 	after, err := next.Payload()
 	if err != nil {
 		return err
 	}
-	if !bytes.Equal(before, after) && next.Version <= previous.Version {
-		return fmt.Errorf("the list changed but its version %d is not above the previous version %d", next.Version, previous.Version)
+	if !bytes.Equal(before, after) && next.Version <= old.Version {
+		return fmt.Errorf("the list changed but its version %d is not above the previous version %d", next.Version, old.Version)
 	}
 	return nil
-}
-
-// CheckWalletListReplaces applies CheckWalletListVersion to next against
-// previous, the document it replaces. A previous document that does not
-// parse sets no version to rise above: no wallet adopted it, and it must not
-// hold back its fix.
-func CheckWalletListReplaces(previous []byte, next WalletList) error {
-	old, _, err := ParseWalletList(previous)
-	if err != nil {
-		return nil
-	}
-	return CheckWalletListVersion(old, next)
 }
 
 // canonicalBase64 decodes padded standard base64 that re-encodes to the same
@@ -576,38 +558,6 @@ func canonicalBase64(s string) ([]byte, bool) {
 		return nil, false
 	}
 	return b, true
-}
-
-// hasNull reports whether a decoded JSON value holds null at any depth.
-// encoding/json would read null as a zero value.
-func hasNull(v any) bool {
-	switch v := v.(type) {
-	case nil:
-		return true
-	case map[string]any:
-		for _, item := range v {
-			if hasNull(item) {
-				return true
-			}
-		}
-	case []any:
-		for _, item := range v {
-			if hasNull(item) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// missingMember returns the first of names that obj lacks, or "".
-func missingMember(obj map[string]any, names ...string) string {
-	for _, name := range names {
-		if _, ok := obj[name]; !ok {
-			return name
-		}
-	}
-	return ""
 }
 
 // hasLoneSurrogate reports whether a JSON text escapes a UTF-16 surrogate

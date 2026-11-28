@@ -230,7 +230,7 @@ func seedB64(priv ed25519.PrivateKey) string {
 }
 
 // TestSignMergeKeepsExtensions signs a round entry into the fixture with
-// --merge and checks that the extensions and unknown members keep every byte.
+// --merge and checks that the extensions keep every byte.
 func TestSignMergeKeepsExtensions(t *testing.T) {
 	const roundID = "c0ffee0000000000000000000000000000000000000000000000000000000002"
 	dir := t.TempDir()
@@ -250,16 +250,11 @@ func TestSignMergeKeepsExtensions(t *testing.T) {
 		t.Fatal(err)
 	}
 	in, out := topLevelMembers(t, before), topLevelMembers(t, after)
-	for _, key := range []string{"extensions", "x_rollout", "operator_note"} {
-		if !bytes.Equal(in[key], out[key]) {
-			t.Fatalf("%s changed\n got: %s\nwant: %s", key, out[key], in[key])
-		}
+	if !bytes.Equal(in["extensions"], out["extensions"]) {
+		t.Fatalf("extensions changed\n got: %s\nwant: %s", out["extensions"], in["extensions"])
 	}
 	if !strings.Contains(string(out["rounds"]), roundID) {
 		t.Fatalf("merged config misses the new round: %s", out["rounds"])
-	}
-	if !bytes.HasSuffix(after, []byte("  \"x_rollout\": {\n    \"stage\": 2,\n    \"flags\": [\n      \"b\",\n      \"a\"\n    ]\n  },\n  \"operator_note\": \"kept by every writer\"\n}\n")) {
-		t.Fatalf("unknown members moved:\n%s", after)
 	}
 }
 

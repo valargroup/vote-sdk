@@ -260,7 +260,7 @@ func TestWalletListDocumentVectors(t *testing.T) {
 // tells ZIP-215 apart from RFC 8032's cofactorless rule.
 func requireStdlibRefuses(t *testing.T, document string, pinned []TrustedKey) {
 	t.Helper()
-	list, sigs, err := ParseWalletList([]byte(document))
+	list, sigs, _, err := ParseWalletList([]byte(document))
 	if err != nil || len(sigs) == 0 {
 		t.Fatalf("ParseWalletList: %v, %d signatures", err, len(sigs))
 	}
@@ -319,7 +319,7 @@ func vizorVectorList(t *testing.T) ([]byte, ed25519.PrivateKey) {
 // re-signs it to the same payload, while a wallet refuses it as Malformed.
 func TestParseWalletListDraft(t *testing.T) {
 	document, signer := vizorVectorList(t)
-	signed, sigs, err := ParseWalletList(document)
+	signed, sigs, _, err := ParseWalletList(document)
 	if err != nil || len(sigs) != 1 {
 		t.Fatalf("ParseWalletList: %v, %d signatures", err, len(sigs))
 	}
@@ -330,7 +330,7 @@ func TestParseWalletListDraft(t *testing.T) {
 	if bytes.Contains(draft, []byte(`"signatures"`)) {
 		t.Fatalf("a draft must carry no signatures member:\n%s", draft)
 	}
-	list, sigs, err := ParseWalletList(draft)
+	list, sigs, _, err := ParseWalletList(draft)
 	if err != nil || len(sigs) != 0 {
 		t.Fatalf("ParseWalletList(draft): %v, %d signatures", err, len(sigs))
 	}
@@ -349,7 +349,7 @@ func TestParseWalletListDraft(t *testing.T) {
 	if !bytes.Equal(resigned, document) {
 		t.Fatalf("re-signing the draft changed the document:\n%s", resigned)
 	}
-	if _, _, err := ParseWalletList([]byte(strings.Replace(string(draft), `"version": 1`, `"version": 0`, 1))); errorName(t, err) != "InvalidVersion" {
+	if _, _, _, err := ParseWalletList([]byte(strings.Replace(string(draft), `"version": 1`, `"version": 0`, 1))); errorName(t, err) != "InvalidVersion" {
 		t.Fatalf("a draft with version 0: %v", err)
 	}
 }
@@ -368,13 +368,13 @@ func TestWalletListRefusesWhatReadersDisagreeOn(t *testing.T) {
 		"fractional index":    func(d string) string { return strings.Replace(d, `"index": 17`, `"index": 17.0`, 1) },
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, _, err := ParseWalletList([]byte(edit(string(document)))); errorName(t, err) != "Malformed" {
+			if _, _, _, err := ParseWalletList([]byte(edit(string(document)))); errorName(t, err) != "Malformed" {
 				t.Fatalf("err = %v, want Malformed", err)
 			}
 		})
 	}
 	paired := strings.Replace(string(document), "Alice Example", `Alice \ud83d\ude00`, 1)
-	if _, _, err := ParseWalletList([]byte(paired)); err != nil {
+	if _, _, _, err := ParseWalletList([]byte(paired)); err != nil {
 		t.Fatalf("a surrogate pair was refused: %v", err)
 	}
 }
@@ -382,7 +382,7 @@ func TestWalletListRefusesWhatReadersDisagreeOn(t *testing.T) {
 // TestCheckWalletListPictures checks the 128 x 128 rule config CI applies.
 func TestCheckWalletListPictures(t *testing.T) {
 	document, _ := vizorVectorList(t)
-	list, _, err := ParseWalletList(document)
+	list, _, _, err := ParseWalletList(document)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,7 +408,7 @@ func TestCheckWalletListPictures(t *testing.T) {
 // VP8X canvas claims 128 x 128.
 func TestCheckWalletListPicturesReadsDimensionsFirst(t *testing.T) {
 	document, _ := vizorVectorList(t)
-	list, _, err := ParseWalletList(document)
+	list, _, _, err := ParseWalletList(document)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -461,7 +461,7 @@ func TestCheckWalletListPicturesReadsDimensionsFirst(t *testing.T) {
 // its end.
 func TestCheckWalletListPicturesMissingPadding(t *testing.T) {
 	document, _ := vizorVectorList(t)
-	list, _, err := ParseWalletList(document)
+	list, _, _, err := ParseWalletList(document)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -478,30 +478,30 @@ func TestCheckWalletListPicturesMissingPadding(t *testing.T) {
 	}
 }
 
-// TestCheckWalletListVersion checks that a changed list needs a higher
-// version and an unchanged one does not.
-func TestCheckWalletListVersion(t *testing.T) {
+// TestCheckWalletListReplaces checks that a changed list needs a higher
+// version than the document it replaces and an unchanged one does not.
+func TestCheckWalletListReplaces(t *testing.T) {
 	document, _ := vizorVectorList(t)
-	previous, _, err := ParseWalletList(document)
+	previous, _, _, err := ParseWalletList(document)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := CheckWalletListVersion(previous, previous); err != nil {
+	if err := CheckWalletListReplaces(document, previous); err != nil {
 		t.Fatalf("an unchanged list: %v", err)
 	}
 	next := previous
 	next.Delegates = previous.Delegates[:1]
-	if err := CheckWalletListVersion(previous, next); err == nil {
+	if err := CheckWalletListReplaces(document, next); err == nil {
 		t.Fatal("a changed list kept its version")
 	}
 	next.Version = previous.Version + 1
-	if err := CheckWalletListVersion(previous, next); err != nil {
+	if err := CheckWalletListReplaces(document, next); err != nil {
 		t.Fatalf("a changed list with a higher version: %v", err)
 	}
 	next.Version = previous.Version
 	next.Delegates = previous.Delegates
 	next.IssuedAt++
-	if err := CheckWalletListVersion(previous, next); err == nil {
+	if err := CheckWalletListReplaces(document, next); err == nil {
 		t.Fatal("a re-signed list with a new issued_at kept its version")
 	}
 }

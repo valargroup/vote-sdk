@@ -878,8 +878,8 @@ func TestBatchBranchNameDeterministic(t *testing.T) {
 }
 
 // extensionsFixture is votingconfig's canonical dynamic config with an
-// "extensions" object and unknown top-level members that a typed rewrite
-// would change; its pir_layout matches testConfigPIRLayout.
+// "extensions" object that a typed rewrite would change; its pir_layout
+// matches testConfigPIRLayout.
 const extensionsFixture = "../votingconfig/testdata/dynamic-config-extensions.json"
 
 // assertSameMembers fails unless each named top-level member of got has
@@ -915,7 +915,7 @@ func TestMergeConfigPREntryKeepsExtensions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertSameMembers(t, fixture, merged, "extensions", "x_rollout", "operator_note")
+	assertSameMembers(t, fixture, merged, "extensions")
 	if !bytes.Contains(merged, []byte(body.RoundID)) {
 		t.Fatalf("merged config misses round %s", body.RoundID)
 	}

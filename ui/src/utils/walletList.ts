@@ -11,6 +11,7 @@
 // internal/votingconfig/wallet_list.go; both follow the contract's rule order.
 
 import { bech32m } from "bech32";
+import { bytesToBase64 } from "./attestEntry";
 
 export const WALLET_LIST_FORMAT = "zcash-vote-wallet-list/v1";
 export const WALLET_LIST_DOMAIN = "zcash-shielded-vote:wallet-list:v1";
@@ -178,13 +179,6 @@ export function walletListPayload(list: WalletList): Uint8Array {
   return new Uint8Array(parts);
 }
 
-/** Standard padded base64 of bytes. */
-function toBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary);
-}
-
 /** Decode canonical base64, or null when s is not the one encoding of its bytes. */
 function fromCanonicalBase64(s: string): Uint8Array | null {
   let binary: string;
@@ -194,7 +188,7 @@ function fromCanonicalBase64(s: string): Uint8Array | null {
     return null;
   }
   const bytes = Uint8Array.from(binary, (ch) => ch.charCodeAt(0));
-  return toBase64(bytes) === s ? bytes : null;
+  return bytesToBase64(bytes) === s ? bytes : null;
 }
 
 /**
@@ -365,7 +359,7 @@ export function walletListDocument(list: WalletList, signatures: WalletListSigna
       dk: row.dk,
       name: row.name,
       ...(row.statement !== undefined ? { statement: row.statement } : {}),
-      ...(row.picture !== undefined ? { picture: toBase64(row.picture) } : {}),
+      ...(row.picture !== undefined ? { picture: bytesToBase64(row.picture) } : {}),
     })),
     ...(signatures.length > 0 ? { signatures } : {}),
   };

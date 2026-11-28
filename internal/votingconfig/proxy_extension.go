@@ -2,11 +2,9 @@ package votingconfig
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
-	"reflect"
 	"slices"
 )
 
@@ -28,9 +26,9 @@ type ProxyDelegationV1 struct {
 }
 
 // ProxyDelegationV1 decodes extensions.proxy_delegation_v1, or returns nil
-// when the config has none. Decoding is strict (see checkStrictJSON), so an
-// unknown, miscased or repeated key anywhere in the extension is an error.
-// It does not check the URL lists; see ValidateProxyDelegationV1.
+// when the config has none. Decoding is strict (see decodeStrictObject), so
+// an unknown, miscased, repeated or null member of the extension is an
+// error. It does not check the URL lists; see ValidateProxyDelegationV1.
 func (c *SignedConfig) ProxyDelegationV1() (*ProxyDelegationV1, error) {
 	if len(c.Extensions) == 0 || isJSONNull(c.Extensions) {
 		return nil, nil
@@ -48,10 +46,10 @@ func (c *SignedConfig) ProxyDelegationV1() (*ProxyDelegationV1, error) {
 		return nil, errors.New("extensions.proxy_delegation_v1 must be an object")
 	}
 	var ext ProxyDelegationV1
-	if err := checkStrictJSON(raw, reflect.TypeOf(ext)); err != nil {
-		return nil, fmt.Errorf("extensions.proxy_delegation_v1: %w", err)
-	}
-	if err := json.Unmarshal(raw, &ext); err != nil {
+	if err := decodeStrictObject(raw, map[string]any{
+		"verifier_api_urls": &ext.VerifierAPIURLs,
+		"proof_rpc_urls":    &ext.ProofRPCURLs,
+	}); err != nil {
 		return nil, fmt.Errorf("extensions.proxy_delegation_v1: %w", err)
 	}
 	return &ext, nil

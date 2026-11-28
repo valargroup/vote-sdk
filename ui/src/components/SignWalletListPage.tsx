@@ -127,14 +127,11 @@ export function SignWalletListPage() {
     setError("");
     setSigning(true);
     try {
-      if (chainError) throw new Error(chainError);
-      if (!keplrConnected || !wallet.address || !wallet.chainId) throw new Error("Connect Keplr before signing.");
-      if (!list) throw new Error("Load a list first.");
-      if (!isSignatureKeyId(keyId)) throw new Error("The signing key id must be 1 to 64 bytes.");
-      const key = await votingKey.deriveEd25519FromKeplr(wallet.address, wallet.chainId, wallet.signKeplrPayload);
+      // The sign button is enabled only while canSign holds.
+      const key = await votingKey.deriveEd25519FromKeplr(wallet.address!, wallet.chainId!, wallet.signKeplrPayload);
       assertUnchanged(signingContext);
       // Earlier signatures covered the old issued_at, so they are dropped.
-      const toSign = { ...list, issued_at: BigInt(Math.floor(Date.now() / 1000)) };
+      const toSign = { ...list!, issued_at: BigInt(Math.floor(Date.now() / 1000)) };
       const payload = walletListPayload(toSign);
       const sig = await votingKey.signCanonicalPayload(bytesToBase64(payload), key);
       const signedDocument = walletListDocument(toSign, [{ key_id: keyId, alg: "ed25519", sig }]);

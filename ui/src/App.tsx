@@ -19,7 +19,6 @@ import { UpgradesPage } from "./components/UpgradesPage";
 import { QueueMonitorPage } from "./components/QueueMonitorPage";
 import { VoteManagerKeysPage } from "./components/VoteManagerKeysPage";
 import { PIRUpdatePage } from "./components/PIRUpdatePage";
-import { ProxyRoundOption } from "./components/ProxyRoundOption";
 import { useDetectedChainId, useSelectedChainUrl } from "./hooks/useDetectedChainId";
 import { useStore } from "./store/useStore";
 import { SAMPLE_ROUND_TEMPLATES, type SampleRoundTemplateId } from "./store/sampleRounds";
@@ -2483,12 +2482,23 @@ function PublishModal({
                 />
               </div>
 
-              {status !== "ok" && (
-                <ProxyRoundOption
-                  supported={proxySupported}
-                  checked={proxyDelegation}
-                  onChange={onProxyDelegationChange}
-                />
+              {status !== "ok" && proxySupported && (
+                <label className="flex items-start gap-2 rounded-lg bg-surface-2 border border-border-subtle p-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={proxyDelegation}
+                    onChange={(e) => onProxyDelegationChange(e.target.checked)}
+                    className="mt-0.5 shrink-0"
+                  />
+                  <span>
+                    <span className="block text-[11px] font-semibold text-text-primary">Proxy delegation round</span>
+                    <span className="block text-[10px] text-text-muted mt-0.5">
+                      Voters can delegate their weight to public delegates in this round. The chain creates it only
+                      after at least {PROXY_APPROVAL_FLOOR} coordinator approvals, or the threshold if that is higher, so
+                      proposing alone never creates it.
+                    </span>
+                  </span>
+                </label>
               )}
 
               {status === "ok" && (

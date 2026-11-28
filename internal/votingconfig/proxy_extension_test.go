@@ -4,18 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
-	"strings"
 	"testing"
 )
 
 // extensionsFixturePath is a canonical dynamic config whose "extensions"
-// object and unknown top-level members a typed rewrite would change: an
-// unsorted extensions object, an unmodeled extension with
-// non-canonical numbers and escapes, and members after "extensions".
+// object a typed rewrite would change: an unsorted extensions object and an
+// unmodeled extension with non-canonical numbers and escapes.
 const extensionsFixturePath = "testdata/dynamic-config-extensions.json"
-
-// fixtureRound is a round id for configs built in tests.
-const fixtureRound = "9c66c38026e3778ca449712ed1af5a6743ab6c5a11d71ff98d23a56f68f369f4"
 
 // readFixture returns the fixture's bytes and its decoded config.
 func readFixture(t *testing.T) ([]byte, *SignedConfig) {
@@ -42,54 +37,11 @@ func writeCanonical(t *testing.T, cfg *SignedConfig) []byte {
 }
 
 // TestSignedConfigRoundTripIsByteForByte reads and rewrites the fixture and
-// expects its exact bytes back: no extension byte or unknown member is lost
-// or reordered.
+// expects its exact bytes back: no extension byte is lost or reordered.
 func TestSignedConfigRoundTripIsByteForByte(t *testing.T) {
 	raw, cfg := readFixture(t)
 	if got := writeCanonical(t, cfg); !bytes.Equal(got, raw) {
 		t.Fatalf("round trip changed the config\n got: %s\nwant: %s", got, raw)
-	}
-	if len(cfg.Unknown) != 2 || cfg.Unknown[0].Key != "x_rollout" || cfg.Unknown[1].Key != "operator_note" {
-		t.Fatalf("unknown members = %+v", cfg.Unknown)
-	}
-}
-
-// TestSignedConfigWithoutExtrasEncodesAsBefore checks that a config with no
-// extensions or unknown members encodes exactly as the plain struct did.
-func TestSignedConfigWithoutExtrasEncodesAsBefore(t *testing.T) {
-	cfg := SignedConfig{
-		ConfigVersion: ConfigVersionV1,
-		VoteServers:   []Endpoint{{URL: "https://vote.example/?a=1&b=<2>", Label: "vote"}},
-		PIRLayout:     PIRLayout{PIRDepth: 19, Tier0Layers: 12, Tier1Layers: 7, PolyLen: PolyLen4096},
-		Rounds:        map[string]RoundEntry{fixtureRound: {AuthVersion: AuthVersionV2, EaPK: "AA=="}},
-	}
-	type plain SignedConfig
-	want, err := json.MarshalIndent(plain(cfg), "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := writeCanonical(t, &cfg); !bytes.Equal(got, append(want, '\n')) {
-		t.Fatalf("encoding changed\n got: %s\nwant: %s", got, want)
-	}
-}
-
-// TestSignedConfigTopLevelKeys checks exact-key matching and that a repeated
-// top-level key is rejected.
-func TestSignedConfigTopLevelKeys(t *testing.T) {
-	var cfg SignedConfig
-	if err := json.Unmarshal([]byte(`{"config_version":1,"Rounds":{}}`), &cfg); err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Rounds != nil || len(cfg.Unknown) != 1 || cfg.Unknown[0].Key != "Rounds" {
-		t.Fatalf("a miscased key must stay unknown: rounds=%v unknown=%+v", cfg.Rounds, cfg.Unknown)
-	}
-	err := json.Unmarshal([]byte(`{"config_version":1,"rounds":{},"rounds":{}}`), &cfg)
-	if err == nil || !strings.Contains(err.Error(), "repeated key") {
-		t.Fatalf("repeated top-level key: err = %v", err)
-	}
-	cfg = SignedConfig{Unknown: []RawMember{{Key: "rounds", Value: json.RawMessage(`{}`)}}}
-	if _, err := json.Marshal(cfg); err == nil {
-		t.Fatal("an unknown member named like a modeled field must not encode")
 	}
 }
 

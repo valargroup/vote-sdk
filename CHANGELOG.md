@@ -11,7 +11,7 @@ Instructions on coordinated upgrades can be found [here](https://setup.valargrou
 - Add proxy delegation's config tooling. `voting-config wallet-list`
   creates, signs and verifies a wallet's signed list of vetted delegates, and
   `voting-config verify` checks the dynamic config's proxy delegation
-  extension, keeping unknown fields byte for byte. The admin UI gains a Sign
+  extension, keeping every extension byte for byte. The admin UI gains a Sign
   Wallet List page that shows every signed field before signing, decodes the
   proxy coordinator payloads for approvers, and offers a proxy delegation
   round when the chain reports the capability. See

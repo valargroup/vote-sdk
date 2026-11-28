@@ -39,12 +39,11 @@ func readWalletListDraft(path string) (votingconfig.WalletList, []votingconfig.S
 	if err != nil {
 		return votingconfig.WalletList{}, nil, nil, fmt.Errorf("read wallet list: %w", err)
 	}
-	list, sigs, err := votingconfig.ParseWalletList(raw)
+	list, sigs, payload, err := votingconfig.ParseWalletList(raw)
 	if err != nil {
 		return list, nil, nil, fmt.Errorf("%s: %w", path, err)
 	}
-	payload, err := list.Payload()
-	return list, sigs, payload, err
+	return list, sigs, payload, nil
 }
 
 // newWalletListPayloadCmd builds `wallet-list payload`, which prints the
@@ -113,7 +112,7 @@ func newWalletListSignCmd() *cobra.Command {
 				return err
 			}
 			// Write only a document that tooling and wallets read back.
-			if _, _, err := votingconfig.ParseWalletList(doc); err != nil {
+			if _, _, _, err := votingconfig.ParseWalletList(doc); err != nil {
 				return fmt.Errorf("the signed list would not parse: %w", err)
 			}
 			if outPath != "" {
