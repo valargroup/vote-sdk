@@ -427,30 +427,25 @@ func VerifyProxyDelegationProof(proof []byte, inputs zkp.ProxyDelegationInputs) 
 	const numChunks = 9
 	buf := make([]byte, numChunks*chunkSize)
 
-	// Validate each 32-byte slot before the FFI call so the error names the
-	// field, instead of the opaque "-3" from Rust.
+	// The Rust decoder checks each slot's Fp element or point and names the
+	// slot in its error; only the lengths need checking here.
 	slots := []struct {
 		slot  int
 		name  string
 		value []byte
-		point bool // a compressed Pallas point rather than an Fp element
 	}{
-		{0, "van_nullifier", inputs.VanNullifier, false},
-		{1, "r_vpk", inputs.RVpk, true},
-		{2, "vote_authority_note_new", inputs.VoteAuthorityNoteNew, false},
-		{3, "delegation_commitment", inputs.ProxyDelegationCommitment, false},
-		{4, "vote_comm_tree_root", inputs.VoteCommTreeRoot, false},
-		{6, "voting_round_id", inputs.VoteRoundId, false},
-		{7, "ea_pk", inputs.EaPk, true},
-		{8, "dc_slot_nullifier", inputs.DcSlotNullifier, false},
+		{0, "van_nullifier", inputs.VanNullifier},
+		{1, "r_vpk", inputs.RVpk},
+		{2, "vote_authority_note_new", inputs.VoteAuthorityNoteNew},
+		{3, "delegation_commitment", inputs.ProxyDelegationCommitment},
+		{4, "vote_comm_tree_root", inputs.VoteCommTreeRoot},
+		{6, "voting_round_id", inputs.VoteRoundId},
+		{7, "ea_pk", inputs.EaPk},
+		{8, "dc_slot_nullifier", inputs.DcSlotNullifier},
 	}
 	for _, s := range slots {
-		if s.point {
-			if _, err := elgamal.UnmarshalPublicKey(s.value); err != nil {
-				return fmt.Errorf("%s: invalid compressed Pallas point: %w", s.name, err)
-			}
-		} else if err := validatePallasFp(s.name, s.value); err != nil {
-			return err
+		if len(s.value) != chunkSize {
+			return fmt.Errorf("%s: expected %d bytes, got %d", s.name, chunkSize, len(s.value))
 		}
 		copy(buf[s.slot*chunkSize:(s.slot+1)*chunkSize], s.value)
 	}

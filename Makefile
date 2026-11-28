@@ -18,7 +18,7 @@ LDFLAGS := -X $(VERSION_PKG).Name=shielded-vote \
            -X $(VERSION_PKG).Commit=$(COMMIT) \
            -X "$(VERSION_PKG).BuildTags=$(BUILD_TAGS_LIST)"
 
-.PHONY: install install-ffi init init-multi init-benchmark start start-multi clean clean-all build build-ffi build-create-val-tx install-create-val-tx build-voting-config install-voting-config test-voting-config fmt lint test test-unit test-integration test-helper test-svoted-cmd test-proxyenabled ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures proxy-chain-vectors test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi circuits-test-provers test-proxy-e2e caddy docker-build docker-testnet docker-testnet-down ui-build start-admin
+.PHONY: install install-ffi init init-multi init-benchmark start start-multi clean clean-all build build-ffi build-create-val-tx install-create-val-tx build-voting-config install-voting-config test-voting-config fmt lint test test-unit test-integration test-helper test-svoted-cmd test-proxyenabled ceremony test-api test-api-restart test-api-reinit test-e2e test-ceremony-e2e fixtures-ts circuits fixtures test-halo2 test-halo2-ante test-redpallas test-redpallas-ante test-all-ffi circuits-test-provers test-proxy-e2e caddy docker-build docker-testnet docker-testnet-down ui-build start-admin
 
 ## install: Build and install the svoted binary to $GOPATH/bin
 install:
@@ -177,10 +177,6 @@ circuits-test:
 ## fixtures: Regenerate all fixture files (Halo2 + RedPallas) (requires circuits build)
 fixtures: circuits
 	cargo test --release --manifest-path circuits/Cargo.toml $(CIRCUITS_CARGO_FLAGS) -- generate_fixtures --ignored --nocapture
-
-## proxy-chain-vectors: Rewrite the chain's proxy delegation vectors (docs/proxy-delegation/contracts-v1.md §13)
-proxy-chain-vectors:
-	go run ./scripts/proxy-chain-vectors -out testutil/testdata/proxy_delegation_chain_v1.json
 
 ## test-halo2: Run Go tests that use real Halo2 verification via CGo (requires circuits)
 test-halo2: circuits

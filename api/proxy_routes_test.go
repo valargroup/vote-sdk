@@ -127,9 +127,9 @@ func cometExpectingTx(t *testing.T, tag byte, want proto.Message, result string)
 func TestProxyDelegationBatchRoute(t *testing.T) {
 	proxytest.SkipUnlessEnabled(t)
 	batch := proxyBatchForRouteTest()
-	digest, err := types.ComputeProxyDelegationBatchDigest(proxyRouteTestChainID, batch.SighashFields())
+	digest, err := types.ComputeProxyDelegationBatchDigest(proxyRouteTestChainID, batch)
 	require.NoError(t, err)
-	d1, err := types.ComputeProxyDelegationBatchSighash(proxyRouteTestChainID, batch.SighashFields())
+	d1, err := types.ComputeProxyDelegationBatchSighash(proxyRouteTestChainID, batch)
 	require.NoError(t, err)
 	require.NotEqual(t, d1, digest, "the digest zeroes expiry_height")
 

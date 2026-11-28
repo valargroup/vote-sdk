@@ -181,7 +181,7 @@ func TestProxyDelegationEndToEnd(t *testing.T) {
 	var dcLeaves [][]uint64
 	for i, result := range resp.TxResults {
 		event := oneEvent(t, result.Events, types.EventTypeProxyDelegationBatch)
-		digest, err := types.ComputeProxyDelegationBatchDigest(e.ta.ChainID, batches[i].SighashFields())
+		digest, err := types.ComputeProxyDelegationBatchDigest(e.ta.ChainID, batches[i])
 		require.NoError(t, err)
 		require.Equal(t, hex.EncodeToString(e.roundID), attrOf(t, event, types.AttributeKeyRoundID))
 		require.Equal(t, hex.EncodeToString(digest), attrOf(t, event, types.AttributeKeyBatchDigest))
@@ -485,24 +485,19 @@ func (e *proxyE2E) registerDelegates(verifier ed25519.PrivateKey, n int) []ed255
 	var txs [][]byte
 	for i := range n {
 		dk := ed25519.NewKeyFromSeed(e2eSeed(fmt.Sprintf("delegate %d", i+1)))
-		fields := types.DelegateRegistrationFields{
-			DK:       dk.Public().(ed25519.PublicKey),
+		op := &types.DelegateRegister{
+			Dk:       dk.Public().(ed25519.PublicKey),
 			Provider: types.DelegateProviderX,
 			Handle:   fmt.Sprintf("delegate_%d", i+1),
-			ProofID:  strconv.Itoa(1_790_000_000 + i),
+			ProofId:  strconv.Itoa(1_790_000_000 + i),
 		}
-		register, err := types.ComputeDelegateRegisterDigest(e.ta.ChainID, fields)
+		register, err := types.ComputeDelegateRegisterDigest(e.ta.ChainID, op)
 		require.NoError(e.t, err)
-		attest, err := types.ComputeDelegateAttestDigest(e.ta.ChainID, fields, notBefore, expiresAt)
+		attest, err := types.ComputeDelegateAttestDigest(e.ta.ChainID, op, notBefore, expiresAt)
 		require.NoError(e.t, err)
-		txs = append(txs, testutil.MustEncodeVoteTx(&types.MsgDelegateOp{Register: &types.DelegateRegister{
-			Dk:           fields.DK,
-			Provider:     fields.Provider,
-			Handle:       fields.Handle,
-			ProofId:      fields.ProofID,
-			Attestations: []*types.DelegateAttestation{{VerifierId: 1, NotBefore: notBefore, ExpiresAt: expiresAt, Sig: ed25519.Sign(verifier, attest)}},
-			DkSig:        ed25519.Sign(dk, register),
-		}}))
+		op.Attestations = []*types.DelegateAttestation{{VerifierId: 1, NotBefore: notBefore, ExpiresAt: expiresAt, Sig: ed25519.Sign(verifier, attest)}}
+		op.DkSig = ed25519.Sign(dk, register)
+		txs = append(txs, testutil.MustEncodeVoteTx(&types.MsgDelegateOp{Register: op}))
 		keys = append(keys, dk)
 	}
 	for i, result := range e.block(txs...).TxResults {
@@ -644,7 +639,7 @@ func (e *proxyE2E) batch(anchor, expiry uint64, registration *types.MsgDelegateV
 			Proof:                     dc.Proof,
 		})
 	}
-	d1, err := types.ComputeProxyDelegationBatchSighash(e.ta.ChainID, msg.SighashFields())
+	d1, err := types.ComputeProxyDelegationBatchSighash(e.ta.ChainID, msg)
 	require.NoError(e.t, err)
 	for i, dc := range dcs {
 		_, sig, err := proxyprover.Sign(dc.Rsk, d1)

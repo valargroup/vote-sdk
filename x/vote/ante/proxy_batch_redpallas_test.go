@@ -187,7 +187,7 @@ func TestRedPallasProxyBatchD1(t *testing.T) {
 		}
 	}
 	d1 := func(msg *types.MsgProxyDelegationBatch) []byte {
-		digest, err := types.ComputeProxyDelegationBatchSighash(proxyAnteChainID, msg.SighashFields())
+		digest, err := types.ComputeProxyDelegationBatchSighash(proxyAnteChainID, msg)
 		require.NoError(t, err)
 		return digest
 	}
@@ -198,7 +198,7 @@ func TestRedPallasProxyBatchD1(t *testing.T) {
 
 	// A signature over the batch_digest, D1 without the expiry, is not one
 	// over D1.
-	batchDigest, err := types.ComputeProxyDelegationBatchDigest(proxyAnteChainID, msg.SighashFields())
+	batchDigest, err := types.ComputeProxyDelegationBatchDigest(proxyAnteChainID, msg)
 	require.NoError(t, err)
 	sign(msg, batchDigest, 0x21, 0x22)
 	s.requireVoteCode(validate(msg), types.ErrInvalidSignature)

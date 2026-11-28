@@ -1003,41 +1003,9 @@ fn decode_proxy_delegation_instance(
     ))
 }
 
-/// Verify a real proxy delegation circuit proof (ZKP #4).
-///
-/// The caller sends 9 × 32-byte chunks (288 bytes). This function
-/// decompresses the two compressed Pallas points and reads the anchor height
-/// as an integer, then builds the circuit's 11 public inputs through
-/// voting-circuits' `Instance::from_parts` (contracts-v1 §10):
-///
-/// | Wire slot | Field                     | Expansion                       |
-/// |-----------|---------------------------|---------------------------------|
-/// | 0         | van_nullifier             | Fp (1 element)                  |
-/// | 1         | r_vpk (compressed point)  | → r_vpk_x, r_vpk_y (2 elements) |
-/// | 2         | vote_authority_note_new   | Fp (1 element)                  |
-/// | 3         | delegation_commitment     | Fp (1 element)                  |
-/// | 4         | vote_comm_tree_root       | Fp (1 element)                  |
-/// | 5         | anchor_height (u64 LE)    | → Fp::from(u64) (1 element)     |
-/// | 6         | voting_round_id           | Fp (1 element)                  |
-/// | 7         | ea_pk (compressed point)  | → ea_pk_x, ea_pk_y (2 elements) |
-/// | 8         | dc_slot_nullifier         | Fp (1 element)                  |
-///
-/// Total: 9 wire chunks → 11 circuit public inputs. Bytes 8..32 of slot 5
-/// must be zero.
-///
-/// # Arguments
-/// * `proof_ptr`         - Pointer to the serialized Halo2 proof bytes.
-/// * `proof_len`         - Length of the proof byte slice.
-/// * `public_inputs_ptr` - Pointer to 288 bytes (9 × 32-byte chunks).
-/// * `public_inputs_len` - Length of the public inputs byte slice (must be 288).
-///
-/// # Returns
-/// * `0`  on successful verification.
-/// * `-1` if inputs are invalid (null pointers or wrong lengths).
-/// * `-2` if the proof does not verify.
-/// * `-3` if a slot does not decode (non-canonical Fp, invalid or identity
-///   point, or nonzero anchor-height padding).
-/// * `-6` if key generation fails or an internal panic is caught.
+/// Verify a real proxy delegation circuit proof (ZKP #4). The slot layout,
+/// arguments and return codes are on its declaration in
+/// `include/shielded_vote_circuits.h` (contracts-v1 §10).
 ///
 /// # Safety
 /// Caller must ensure the pointers are valid and the lengths are correct.
@@ -1100,17 +1068,9 @@ pub unsafe extern "C" fn sv_verify_proxy_delegation_proof(
 // Circuit fingerprints
 // ---------------------------------------------------------------------------
 
-/// Write the verifying-key fingerprints of ZKP #1, #2, #3 and #4 to `out_ptr`,
-/// 32 bytes each in that order (see [`fingerprints::circuit_fingerprints`]).
-///
-/// # Arguments
-/// * `out_ptr` - Pointer to a caller-owned 128-byte output buffer.
-/// * `out_len` - Length of the output buffer (must be 128).
-///
-/// # Returns
-/// * `0`  on success.
-/// * `-1` if `out_ptr` is null or `out_len` is not 128.
-/// * `-6` if key generation fails or an internal panic is caught.
+/// Write the verifying-key fingerprints of ZKP #1, #2, #3 and #4 to `out_ptr`
+/// (see [`fingerprints::circuit_fingerprints`]). The arguments and return
+/// codes are on its declaration in `include/shielded_vote_circuits.h`.
 ///
 /// # Safety
 /// `out_ptr` must be valid for writes of `out_len` bytes.

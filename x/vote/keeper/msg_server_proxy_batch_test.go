@@ -159,7 +159,7 @@ func (s *ProxyBatchTestSuite) TestProxyBatchAppendsFinalVANThenDCs() {
 
 	resp, err := s.msgServer.ProxyDelegationBatch(s.ctx, msg)
 	s.Require().NoError(err)
-	digest, err := types.ComputeProxyDelegationBatchDigest(proxyTestChainID, msg.SighashFields())
+	digest, err := types.ComputeProxyDelegationBatchDigest(proxyTestChainID, msg)
 	s.Require().NoError(err)
 	s.Require().Equal(digest, resp.BatchDigest)
 

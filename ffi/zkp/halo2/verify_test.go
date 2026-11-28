@@ -112,7 +112,7 @@ func TestVerifyDelegationProofMalformedRk(t *testing.T) {
 
 // TestVerifyProxyDelegationProofRejectsMalformedInputs checks that
 // VerifyProxyDelegationProof rejects a bad proof length or a malformed slot
-// before the Rust FFI, with an error naming the slot.
+// before verifying, with an error naming the slot.
 func TestVerifyProxyDelegationProofRejectsMalformedInputs(t *testing.T) {
 	point := elgamal.PallasGenerator().ToAffineCompressed()
 	valid := func() zkp.ProxyDelegationInputs {
@@ -147,7 +147,7 @@ func TestVerifyProxyDelegationProofRejectsMalformedInputs(t *testing.T) {
 			tc.mutate(&inputs)
 			err := VerifyProxyDelegationProof(dummyProof, inputs)
 			require.Error(t, err)
-			require.True(t, strings.HasPrefix(err.Error(), tc.field), "error should name %s, got: %v", tc.field, err)
+			require.True(t, strings.Contains(err.Error(), tc.field), "error should name %s, got: %v", tc.field, err)
 		})
 	}
 }

@@ -418,9 +418,9 @@ func (s *ValidateTestSuite) TestProxyBatchAnteSignsD1() {
 	m := s.proxyModes()[0]
 	s.Require().NoError(ante.ValidateVoteTx(m.ctx.WithChainID("zvote-test-7"), msg, s.keeper, proxyOpts(m, sig, zk)))
 
-	d1, err := types.ComputeProxyDelegationBatchSighash("zvote-test-7", msg.SighashFields())
+	d1, err := types.ComputeProxyDelegationBatchSighash("zvote-test-7", msg)
 	s.Require().NoError(err)
-	other, err := types.ComputeProxyDelegationBatchSighash(proxyAnteChainID, msg.SighashFields())
+	other, err := types.ComputeProxyDelegationBatchSighash(proxyAnteChainID, msg)
 	s.Require().NoError(err)
 	s.Require().NotEqual(other, d1, "D1 binds the chain id")
 	tx1Sighash, err := tx1.ComputeDelegationSighash(msg.Registration.Tx1Effects)

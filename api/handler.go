@@ -185,7 +185,7 @@ func (h *Handler) RegisterTxRoutes(router *mux.Router) {
 	router.Handle("/shielded-vote/v1/cast-vote-batch", trace(http.HandlerFunc(h.handleCastVoteBatch))).Methods("POST")
 	router.Handle("/shielded-vote/v1/delegate-and-cast-vote-batch", trace(http.HandlerFunc(h.handleDelegateAndCastVoteBatch))).Methods("POST")
 	router.Handle("/shielded-vote/v1/reveal-share", trace(http.HandlerFunc(h.handleRevealShare))).Methods("POST")
-	router.Handle("/shielded-vote/v1/proxy-delegation-batch", trace(http.HandlerFunc(h.handleProxyDelegationBatch))).Methods("POST")
+	router.Handle("/shielded-vote/v1/proxy-delegation-batch", trace(requireProxyEnabled(h.handleProxyDelegationBatch))).Methods("POST")
 	router.Handle("/shielded-vote/v1/delegate-op", trace(requireProxyEnabled(h.handleDelegateOp))).Methods("POST")
 
 	router.Handle("/shielded-vote/v1/snapshot-data/{height}", trace(http.HandlerFunc(h.handleSnapshotData))).Methods("GET")
@@ -262,7 +262,7 @@ func (h *Handler) handleRevealShare(w http.ResponseWriter, r *http.Request) {
 // handleProxyDelegationBatch submits a 0x09 batch (contracts-v1 §8). Its body
 // always carries codespace and batch_digest.
 func (h *Handler) handleProxyDelegationBatch(w http.ResponseWriter, r *http.Request) {
-	if !ensureProxyDelegationEnabled(w) || !h.ensureCryptoReady(w) {
+	if !h.ensureCryptoReady(w) {
 		return
 	}
 	msg := &types.MsgProxyDelegationBatch{}
@@ -586,14 +586,11 @@ func (h *Handler) broadcastVoteTx(ctx context.Context, w http.ResponseWriter, ms
 	// A batch's answers carry its batch_digest. A 0x09 digest is D1 with
 	// expiry_height = 0 under the node's chain id (contracts-v1 §4.1); it is
 	// computed first so a batch is never sent without one.
-	var batchDigest []byte
-	switch m := msg.(type) {
-	case *types.MsgCastVoteBatch:
-		batchDigest = types.ComputeCastVoteBatchSighash(m)
-	case *types.MsgDelegateAndCastVoteBatch:
-		batchDigest = types.ComputeDelegateAndCastVoteBatchSighash(m)
-	case *types.MsgProxyDelegationBatch:
-		batchDigest, err = types.ComputeProxyDelegationBatchDigest(h.chainID, m.SighashFields())
+	batchDigest := batchDigestHex(msg)
+	if m, ok := msg.(*types.MsgProxyDelegationBatch); ok {
+		var digest []byte
+		digest, err = types.ComputeProxyDelegationBatchDigest(h.chainID, m)
+		batchDigest = hex.EncodeToString(digest)
 	}
 	if err != nil {
 		sentry.CaptureErr(err, map[string]string{
@@ -621,7 +618,7 @@ func (h *Handler) broadcastVoteTx(ctx context.Context, w http.ResponseWriter, ms
 		writeError(w, http.StatusBadGateway, fmt.Sprintf("broadcast failed: %v", err))
 		return
 	}
-	result.BatchDigest = hex.EncodeToString(batchDigest)
+	result.BatchDigest = batchDigest
 
 	if result.Code != 0 {
 		log.Printf("[shielded-vote-api] CheckTx rejected (code %d): %s", result.Code, result.Log)

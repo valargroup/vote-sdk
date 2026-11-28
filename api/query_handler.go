@@ -84,9 +84,9 @@ func (h *Handler) RegisterQueryRoutes(router *mux.Router, clientCtx client.Conte
 	router.Handle("/shielded-vote/v1/delegates/by-key/{hex}", trace(requireProxyEnabled(qh.handleProxyDelegateByKey))).Methods("GET")
 	router.Handle("/shielded-vote/v1/delegates/by-handle/{provider}/{handle}", trace(requireProxyEnabled(qh.handleProxyDelegateByHandle))).Methods("GET")
 	router.Handle("/shielded-vote/v1/delegates/{index}", trace(requireProxyEnabled(qh.handleProxyDelegate))).Methods("GET")
-	router.Handle("/shielded-vote/v1/delegate-ballots/{round_id}", trace(http.HandlerFunc(qh.handleDelegateBallots))).Methods("GET")
+	router.Handle("/shielded-vote/v1/delegate-ballots/{round_id}", trace(requireProxyEnabled(qh.handleDelegateBallots))).Methods("GET")
 	router.Handle("/shielded-vote/v1/proxy-delegation-params", trace(requireProxyEnabled(qh.handleProxyDelegationParams))).Methods("GET")
-	router.Handle("/shielded-vote/v1/height", trace(http.HandlerFunc(qh.handleHeight))).Methods("GET")
+	router.Handle("/shielded-vote/v1/height", trace(requireProxyEnabled(qh.handleHeight))).Methods("GET")
 }
 
 // queryHandler handles query REST endpoints by delegating to the gRPC query
@@ -186,7 +186,7 @@ func (qh *queryHandler) handleLatestCommitmentTree(w http.ResponseWriter, r *htt
 		writeProtoJSON(w, resp)
 		return
 	}
-	writeMarshaledJSON(w, latestTreeWithHeight{QueryLatestTreeResponse: resp, BlockHeight: strconv.FormatInt(height, 10)})
+	writeProtoJSON(w, latestTreeWithHeight{QueryLatestTreeResponse: resp, BlockHeight: strconv.FormatInt(height, 10)})
 }
 
 // latestTreeWithHeight is the latest-tree body once proxy delegation is
@@ -201,9 +201,6 @@ type latestTreeWithHeight struct {
 // {"height":"<decimal>"}: ABCI Info's last_block_height, the version a
 // latest-state query reads (contracts-v1 §8).
 func (qh *queryHandler) handleHeight(w http.ResponseWriter, r *http.Request) {
-	if !ensureProxyDelegationEnabled(w) {
-		return
-	}
 	node, err := qh.clientCtx.GetNode()
 	if err != nil {
 		writeQueryError(w, err)
@@ -471,9 +468,6 @@ func (qh *queryHandler) handleProxyDelegateByHandle(w http.ResponseWriter, r *ht
 // handleDelegateBallots serves a page of a round's delegate ballots
 // (DelegateBallots, contracts-v1 §8).
 func (qh *queryHandler) handleDelegateBallots(w http.ResponseWriter, r *http.Request) {
-	if !ensureProxyDelegationEnabled(w) {
-		return
-	}
 	roundID := parseRoundID(w, r)
 	if roundID == nil {
 		return
@@ -486,14 +480,8 @@ func (qh *queryHandler) handleDelegateBallots(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
-
 	req := &types.QueryDelegateBallotsRequest{VoteRoundId: roundID, StartAfter: startAfter, Limit: limit}
-	resp := &types.QueryDelegateBallotsResponse{}
-	if err := qh.abciQuery("/svote.v1.Query/DelegateBallots", req, resp); err != nil {
-		writeQueryError(w, err)
-		return
-	}
-	writeProtoJSON(w, resp)
+	qh.serveQuery(w, "/svote.v1.Query/DelegateBallots", req, &types.QueryDelegateBallotsResponse{})
 }
 
 // handleProxyDelegationParams serves the registry params and the next
@@ -649,14 +637,8 @@ func abciQueryError(code uint32, log string) error {
 // writeProtoJSON marshals a protobuf message to JSON and writes it to the response.
 // Uses encoding/json which works with our protoc-gen-go generated types since
 // they have exported fields with json struct tags.
-func writeProtoJSON(w http.ResponseWriter, msg proto.Message) {
-	writeMarshaledJSON(w, msg)
-}
-
-// writeMarshaledJSON writes v as json.Marshal encodes it with status 200,
-// without the trailing newline writeJSON adds.
-func writeMarshaledJSON(w http.ResponseWriter, v any) {
-	bz, err := json.Marshal(v)
+func writeProtoJSON(w http.ResponseWriter, msg any) {
+	bz, err := json.Marshal(msg)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("marshal response: %v", err))
 		return

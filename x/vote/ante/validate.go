@@ -294,7 +294,7 @@ func validateProxyDelegationBatch(ctx context.Context, msg *types.MsgProxyDelega
 	var digest []byte
 	if err := observation.observe("proxy_sighash", func() error {
 		var err error
-		digest, err = types.ComputeProxyDelegationBatchSighash(sdk.UnwrapSDKContext(ctx).ChainID(), msg.SighashFields())
+		digest, err = types.ComputeProxyDelegationBatchSighash(sdk.UnwrapSDKContext(ctx).ChainID(), msg)
 		return err
 	}); err != nil {
 		return err

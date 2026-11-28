@@ -99,7 +99,6 @@ managers in the coordinator policy. Other actions keep their threshold.
 `max_delegates`, `MsgSetProxyDelegationPause` pauses new delegation batches,
 and `MsgSetDelegateStatus` suspends, lifts or retires delegates. Their fields,
 bounds, error codes and events are in contracts-v1 sections 2.4 and 5.5.
-| `MsgCreateVotingSession` with `proxy_delegation` | The session's fields, plus the flag | Creates a proxy delegation round, which records the registry's next delegate index at creation. |
 
 From the CLI:
 

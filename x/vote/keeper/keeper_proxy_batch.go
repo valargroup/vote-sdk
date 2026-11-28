@@ -90,7 +90,7 @@ func (k *Keeper) executeProxyDelegationBatch(ctx sdk.Context, msg *types.MsgProx
 			return nil, errorsmod.Wrapf(types.ErrInvalidAnchorHeight, "no commitment tree root at height %d", msg.VoteCommTreeAnchorHeight)
 		}
 	}
-	digest, err := types.ComputeProxyDelegationBatchDigest(ctx.ChainID(), msg.SighashFields())
+	digest, err := types.ComputeProxyDelegationBatchDigest(ctx.ChainID(), msg)
 	if err != nil {
 		return nil, err
 	}
