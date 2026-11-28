@@ -795,7 +795,7 @@ Vizor pins one key per chain and accepts no other:
 - stage (`svote-1`): `valar-test-keplr-derived`.
 
 **Verification.** A wallet reports the first problem, in this order:
-1. longer than 4 MiB: `TooLarge`;
+1. longer than 1 MiB: `TooLarge`. Written with a 2-space indent and only the escapes JSON requires, the largest list the field rules allow is 492,742 bytes, so re-indenting a valid list keeps it well under the limit;
 2. not JSON, a top level that is not an object, a repeated top-level key, or a `format` that is absent or not a string: `Malformed`;
 3. a `format` other than `zcash-vote-wallet-list/v1`: `UnsupportedFormat`;
 4. at any level: an unknown member, a repeated key, a required member absent, `null` anywhere, a wrong type, a signature that is not canonical base64, or a `signatures` member that breaks its rule: `Malformed`. Unknown members are refused because everything but `signatures` is signed, and a reader must never take unsigned content for part of the list;
@@ -924,7 +924,7 @@ zcash_voting's `wire` module defines the client types, and Vizor's bridge expose
 - **The delegate's ballot** shows as `NoBallotYet`, `Submitted`, `Counted` or `NotCounted`.
   - `Counted` describes the delegate's ballot: it means that ballot was accepted. Whether this delegation's shares reached helpers is its own stage, so a delegation can show ballot `Counted` with stage `NotCounted`, for example when its batch never landed.
   - Neither proves that every delayed share was revealed before close. The chain adds each reveal on its own, so if no helper reveals a share in time, that part of the weight never reaches the pool, and the wallet still shows `HandedOff` and `Counted`. The wallet tracks reveals after hand-off and resends a share no helper revealed (§11.8), but the status stays this lean by choice: it shows no reveal count.
-- **Document sizes.** A wallet reads a wallet list of at most 4 MiB (§12.3) and a proof answer of at most 8 MiB.
+- **Document sizes.** A wallet reads a wallet list of at most 1 MiB (§12.3) and a proof answer of at most 8 MiB.
 
 ### 15.2 Vocabulary
 
