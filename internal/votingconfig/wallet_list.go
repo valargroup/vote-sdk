@@ -23,7 +23,7 @@ const (
 	// WalletListDomainV1 prefixes every WalletListPayloadV1.
 	WalletListDomainV1 = "zcash-shielded-vote:wallet-list:v1"
 	// MaxWalletListBytes is the largest document a wallet reads.
-	MaxWalletListBytes = 4 << 20
+	MaxWalletListBytes = 1 << 20
 
 	maxWalletListRows          = 1000
 	maxWalletListReservedNames = 1000

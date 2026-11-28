@@ -16,7 +16,7 @@ import { bytesToBase64 } from "./attestEntry";
 export const WALLET_LIST_FORMAT = "zcash-vote-wallet-list/v1";
 export const WALLET_LIST_DOMAIN = "zcash-shielded-vote:wallet-list:v1";
 /** The largest document a wallet reads, in UTF-8 bytes. */
-export const MAX_WALLET_LIST_BYTES = 4 * 1024 * 1024;
+export const MAX_WALLET_LIST_BYTES = 1024 * 1024;
 
 export interface WalletListRow {
   index: number;

@@ -162,9 +162,9 @@ describe("parseWalletListDraft", () => {
     expect(walletListDocument(list, signatures)).toBe(document);
   });
 
-  it("refuses a document over 4 MiB", () => {
+  it("refuses a document over 1 MiB", () => {
     const document = vectors.wallet_list_payload[0].expected.document!;
-    const padding = 4 * 1024 * 1024 - new TextEncoder().encode(document).length;
+    const padding = 1024 * 1024 - new TextEncoder().encode(document).length;
     expect(errorCode(() => parseWalletListDraft(document + " ".repeat(padding)))).toBeNull();
     expect(errorCode(() => parseWalletListDraft(document + " ".repeat(padding + 1)))).toBe("TooLarge");
   });
